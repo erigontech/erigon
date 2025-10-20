@@ -45,7 +45,7 @@ state.unwindOrder = []*Stage{
 }
 ```
 
-## Preprocessing with [ETL](https://github.com/erigontech/erigon/tree/main/erigon-lib/etl)
+## Preprocessing with [ETL](https://github.com/erigontech/erigon/tree/main/db/etl)
 
 Some stages use our ETL framework to sort data by keys before inserting it into the database.
 
@@ -63,7 +63,7 @@ This optimization sometimes leads to dramatic (orders of magnitude) write speed 
 In the Proof-of-Stake world staged sync becomes somewhat more complicated, as the following diagram shows.
 ![Staged Sync in PoS](/docs/assets/pos_downloader.png)
 
-## Stages (for the up to date list see [`stages.go`](/execution/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go))
+## Stages (for the up to date list see [`stages.go`](/execution/stagedsync/stages/stages.go) and [`stagebuilder.go`](/execution/stagedsync/stagebuilder.go))
 
 Each stage consists of 2 functions `ExecFunc` that progresses the stage forward and `UnwindFunc` that unwinds the stage backwards.
 

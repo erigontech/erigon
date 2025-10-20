@@ -37,8 +37,10 @@ import (
 var (
 	// ErrNotificationsUnsupported is returned when the connection doesn't support notifications
 	ErrNotificationsUnsupported = errors.New("notifications not supported")
-	// ErrNotificationNotFound is returned when the notification for the given id is not found
+	// ErrSubscriptionNotFound is returned when the notification for the given id is not found
 	ErrSubscriptionNotFound = errors.New("subscription not found")
+	// ErrFilterNotFound is returned when the filter for the given id is not found
+	ErrFilterNotFound = errors.New("filter not found")
 )
 
 var globalGen = randomIDGenerator()
@@ -97,8 +99,8 @@ func ContextWithNotifier(ctx context.Context, n Notifier) context.Context {
 // Notifier is used by Server callbacks to send notifications.
 type Notifier interface {
 	CreateSubscription() *Subscription
-	Notify(id ID, data interface{}) error
-	Closed() <-chan interface{}
+	Notify(id ID, data any) error
+	Closed() <-chan any
 }
 
 type LocalNotifier struct {
@@ -132,7 +134,7 @@ func (n *LocalNotifier) CreateSubscription() *Subscription {
 	return n.sub
 }
 
-func (n *LocalNotifier) Notify(id ID, data interface{}) error {
+func (n *LocalNotifier) Notify(id ID, data any) error {
 	if n.sub == nil {
 		panic("can't Notify before subscription is created")
 	} else if n.sub.ID != id {
@@ -147,7 +149,7 @@ func (n *LocalNotifier) Notify(id ID, data interface{}) error {
 	}
 }
 
-func (n *LocalNotifier) Closed() <-chan interface{} {
+func (n *LocalNotifier) Closed() <-chan any {
 	return n.closec
 }
 
@@ -182,7 +184,7 @@ func (n *RemoteNotifier) CreateSubscription() *Subscription {
 
 // Notify sends a notification to the client with the given data as payload.
 // If an error occurs the RPC connection is closed and the error is returned.
-func (n *RemoteNotifier) Notify(id ID, data interface{}) error {
+func (n *RemoteNotifier) Notify(id ID, data any) error {
 	enc, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -205,7 +207,7 @@ func (n *RemoteNotifier) Notify(id ID, data interface{}) error {
 
 // Closed returns a channel that is closed when the RPC connection is closed.
 // Deprecated: use subscription error channel
-func (n *RemoteNotifier) Closed() <-chan interface{} {
+func (n *RemoteNotifier) Closed() <-chan any {
 	return n.h.conn.closed()
 }
 
@@ -380,13 +382,13 @@ func (sub *ClientSubscription) forward() (unsubscribeServer bool, err error) {
 	}
 }
 
-func (sub *ClientSubscription) unmarshal(result json.RawMessage) (interface{}, error) {
+func (sub *ClientSubscription) unmarshal(result json.RawMessage) (any, error) {
 	val := reflect.New(sub.etype)
 	err := json.Unmarshal(result, val.Interface())
 	return val.Elem().Interface(), err
 }
 
 func (sub *ClientSubscription) requestUnsubscribe() error {
-	var result interface{}
+	var result any
 	return sub.client.Call(&result, sub.namespace+unsubscribeMethodSuffix, sub.subid)
 }

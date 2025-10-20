@@ -26,9 +26,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common/hexutil"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // prepare converts an ethash cache or dataset from a byte stream into the internal
@@ -697,7 +697,7 @@ func TestHashimoto(t *testing.T) {
 
 // Benchmarks the cache generation performance.
 func BenchmarkCacheGeneration(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		cache := make([]uint32, cacheSize(1)/4)
 		generateCache(cache, 0, make([]byte, 32))
 	}
@@ -708,8 +708,7 @@ func BenchmarkSmallDatasetGeneration(b *testing.B) {
 	cache := make([]uint32, 65536/4)
 	generateCache(cache, 0, make([]byte, 32))
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		dataset := make([]uint32, 32*65536/4)
 		generateDataset(dataset, 0, cache)
 	}
@@ -722,8 +721,7 @@ func BenchmarkHashimotoLight(b *testing.B) {
 
 	hash := hexutil.MustDecode("0xc9149cc0386e689d789a1c2f3d5d169a61a6218ed30e74414dc736e442ef3d1f")
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		hashimotoLight(datasetSize(1), cache, hash, 0)
 	}
 }
@@ -738,8 +736,7 @@ func BenchmarkHashimotoFullSmall(b *testing.B) {
 
 	hash := hexutil.MustDecode("0xc9149cc0386e689d789a1c2f3d5d169a61a6218ed30e74414dc736e442ef3d1f")
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		hashimotoFull(dataset, hash, 0)
 	}
 }

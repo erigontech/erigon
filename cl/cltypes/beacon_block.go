@@ -21,16 +21,15 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var (
@@ -412,6 +411,10 @@ func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 	return append(branch, kzgCommitmentsProof...), nil
 }
 
+func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
+	return merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
+}
+
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	var (
 		maxAttSlashing = MaxAttesterSlashings
@@ -620,11 +623,11 @@ func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version cl
 		log.Warn("DenebSignedBeaconBlock: version is not after DenebVersion")
 		return nil
 	}
-	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlockByVersion(version))
+
 	b := &DenebSignedBeaconBlock{
 		SignedBlock: NewSignedBeaconBlock(beaconCfg, version),
-		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
-		Blobs:       solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](MaxBlobsCommittmentsPerBlock*int(beaconCfg.NumberOfColumns), BYTES_KZG_PROOF),
+		Blobs:       solid.NewStaticListSSZ[*Blob](MaxBlobsCommittmentsPerBlock, int(BYTES_PER_BLOB)),
 	}
 	return b
 }

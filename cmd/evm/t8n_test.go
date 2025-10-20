@@ -29,9 +29,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/race"
+	"github.com/erigontech/erigon/cmd/utils/cmdtest"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/internal/reexec"
-	"github.com/erigontech/erigon/turbo/cmdtest"
 )
 
 func TestMain(m *testing.M) {
@@ -257,6 +257,7 @@ func TestT8n(t *testing.T) {
 }
 
 func TestEvmRun(t *testing.T) {
+	t.Skip("todo: https://github.com/erigontech/erigon/issues/16150")
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}

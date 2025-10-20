@@ -25,14 +25,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	common "github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -67,7 +66,7 @@ type ChainHeaderReader interface {
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
-	FrozenBorBlocks() uint64
+	FrozenBorBlocks(align bool) uint64
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -76,14 +75,9 @@ type ChainHeaderReader interface {
 //go:generate mockgen -typed=true -destination=./chain_reader_mock.go -package=consensus . ChainReader
 type ChainReader interface {
 	ChainHeaderReader
-
 	// GetBlock retrieves a block from the database by hash and number.
 	GetBlock(hash common.Hash, number uint64) *types.Block
-
 	HasBlock(hash common.Hash, number uint64) bool
-
-	BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue
-	BorStartEventId(hash common.Hash, number uint64) uint64
 }
 
 type SystemCall func(contract common.Address, data []byte) ([]byte, error)
@@ -211,12 +205,12 @@ type PoW interface {
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
+func Transfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount uint256.Int, bailout bool) error {
 	if !bailout {
-		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 		if err != nil {
 			return err
 		}
 	}
-	return db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
+	return db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
 }

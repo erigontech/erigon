@@ -14,7 +14,7 @@
 ##   Using "make" (see Makefile for defaults)
 ##   4. make docker
 ##
-##   5. make docker DOCKER_BINARIES='erigon downloader evm'
+##   5. DOCKER_BINARIES='erigon downloader rpcdaemon' make docker
 
 ARG BUILDER_IMAGE="golang:1.24-bookworm" \
     TARGET_BASE_IMAGE="debian:12-slim" \
@@ -56,8 +56,6 @@ WORKDIR /erigon
 COPY --from=xx / /
 
 COPY go.mod go.sum /erigon/
-COPY ./erigon-lib/go.mod ./erigon-lib/go.sum /erigon/erigon-lib/
-COPY ./erigon-db/go.mod ./erigon-db/go.sum /erigon/erigon-db/
 
 ## Make sure required dependencies are installed (some packages required only for arm64):
 RUN xx-apt-get install -y libc6-dev g++ && \

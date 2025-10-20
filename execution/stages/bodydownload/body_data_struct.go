@@ -20,12 +20,12 @@ import (
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/google/btree"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // BodyHashes is to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header

@@ -20,26 +20,22 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {
@@ -225,7 +221,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, blockNumberOrHashRef, nil); err != nil {
+	}, blockNumberOrHashRef, nil, nil); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			/* Not sure. Here https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md it is not explicitly said that
 			   eth_call should only work with canonical blocks.
@@ -250,7 +246,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, blockNumberOrHashRef, nil); err != nil {
+	}, blockNumberOrHashRef, nil, nil); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -259,21 +255,11 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	}
 }
 
-func TestUseBridgeReader(t *testing.T) {
-	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
-	var br *mockBridgeReader
-	api := NewBaseApi(nil, nil, (*freezeblocks.BlockReader)(nil), false, time.Duration(0), nil, datadir.Dirs{}, br)
-	require.False(t, api.useBridgeReader)
-	br = &mockBridgeReader{}
-	api = NewBaseApi(nil, nil, (*freezeblocks.BlockReader)(nil), false, time.Duration(0), nil, datadir.Dirs{}, br)
-	require.True(t, api.useBridgeReader)
-}
-
 var _ bridgeReader = mockBridgeReader{}
 
 type mockBridgeReader struct{}
 
-func (m mockBridgeReader) Events(context.Context, uint64) ([]*types.Message, error) {
+func (m mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types.Message, error) {
 	panic("mock")
 }
 

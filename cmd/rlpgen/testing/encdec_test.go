@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type TRand struct {
@@ -243,8 +244,8 @@ func BenchmarkTestingStructRLP(b *testing.B) {
 	tr := NewTRand()
 	header := randTestingStruct(tr)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		header.EncodeRLP(&buf)
 	}

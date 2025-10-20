@@ -19,13 +19,14 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type MiningFinishCfg struct {
@@ -58,7 +59,7 @@ func StageMiningFinishCfg(
 	}
 }
 
-func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit <-chan struct{}, logger log.Logger) error {
+func SpawnMiningFinishStage(s *StageState, sd *dbstate.SharedDomains, tx kv.TemporalRwTx, cfg MiningFinishCfg, quit <-chan struct{}, logger log.Logger) error {
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 
@@ -93,12 +94,17 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 
 	if block.Transactions().Len() > 0 {
 		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
-			"block", block.NumberU64(),
-			"transactions", block.Transactions().Len(),
-			"gasUsed", block.GasUsed(),
+			"blockNum", block.NumberU64(),
+			"nonce", block.NonceU64(),
+			"hash", block.Hash(),
 			"gasLimit", block.GasLimit(),
-			"difficulty", block.Difficulty(),
-			"header", block.Header(),
+			"gasUsed", block.GasUsed(),
+			"blobGasUsed", block.Header().BlobGasUsed,
+			"transactionsCount", block.Transactions().Len(),
+			"coinbase", block.Coinbase(),
+			"stateRoot", block.Root(),
+			"withdrawalsHash", block.WithdrawalsHash(),
+			"requestsHash", block.RequestsHash(),
 		)
 	}
 	// interrupt aborts the in-flight sealing task.

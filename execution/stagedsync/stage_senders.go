@@ -27,30 +27,28 @@ import (
 
 	"github.com/erigontech/secp256k1"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type SendersCfg struct {
 	db              kv.RwDB
 	batchSize       int
-	blockSize       int
-	bufferSize      int
 	numOfGoroutines int
 	readChLen       int
 	badBlockHalt    bool
@@ -63,15 +61,12 @@ type SendersCfg struct {
 }
 
 func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
-	const sendersBatchSize = 10000
-	const sendersBlockSize = 4096
+	const sendersBatchSize = 1000
 
 	return SendersCfg{
 		db:              db,
 		batchSize:       sendersBatchSize,
-		blockSize:       sendersBlockSize,
-		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
-		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
+		numOfGoroutines: secp256k1.NumOfContexts(), // we can only be as parallels as our crypto library supports,
 		readChLen:       4,
 		badBlockHalt:    badBlockHalt,
 		tmpdir:          tmpdir,
@@ -129,7 +124,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer cancelWorkers()
 	for i := 0; i < cfg.numOfGoroutines; i++ {
 		go func(threadNo int) {
-			defer debug.LogPanic()
+			defer dbg.LogPanic()
 			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
 			recoverSenders(ctx, logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
@@ -143,7 +138,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 	errCh := make(chan senderRecoveryError)
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		defer close(errCh)
 		defer cancelWorkers()
 		var ok bool
@@ -244,7 +239,6 @@ Loop:
 
 		j := &senderRecoveryJob{
 			body:        body,
-			key:         k,
 			blockNumber: blockNumber,
 			blockTime:   header.Time,
 			blockHash:   blockHash,
@@ -288,7 +282,13 @@ Loop:
 		}
 
 		if to > s.BlockNumber {
-			if err := u.UnwindTo(minBlockNum-1, BadBlock(minBlockHash, minBlockErr), tx); err != nil {
+			var unwindReason UnwindReason
+			if errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
+				unwindReason = BadBlock(minBlockHash, minBlockErr)
+			} else {
+				unwindReason = OperationalErr(minBlockErr)
+			}
+			if err := u.UnwindTo(minBlockNum-1, unwindReason, tx); err != nil {
 				return err
 			}
 		}
@@ -322,7 +322,6 @@ type senderRecoveryError struct {
 
 type senderRecoveryJob struct {
 	body        *types.Body
-	key         []byte
 	senders     []byte
 	blockHash   common.Hash
 	blockNumber uint64
@@ -350,6 +349,7 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		}
 
 		body := job.body
+		job.body = nil // reduce ram usage and help GC
 		signer := types.MakeSigner(config, job.blockNumber, job.blockTime)
 		job.senders = make([]byte, len(body.Transactions)*length.Addr)
 		for i, txn := range body.Transactions {

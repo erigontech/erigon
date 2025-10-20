@@ -23,17 +23,16 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
@@ -59,7 +58,7 @@ func TestHeaderStep(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 	// Send all the headers
@@ -69,13 +68,13 @@ func TestHeaderStep(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -98,7 +97,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		})
 		require.NoError(err)
 		m.ReceiveWg.Add(1)
-		for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+		for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 			require.NoError(err)
 		}
 		// Send all the headers
@@ -108,13 +107,13 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		})
 		require.NoError(err)
 		m.ReceiveWg.Add(1)
-		for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+		for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 			require.NoError(err)
 		}
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-		if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, log.New(), m.BlockReader, nil); err != nil {
+		if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, log.New(), m.BlockReader, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -131,7 +130,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	b, err := rlp.EncodeToBytes(chain.TopBlock.Transactions())
 	require.NoError(err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_TRANSACTIONS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_TRANSACTIONS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
@@ -164,7 +163,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -177,13 +176,13 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -217,7 +216,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -230,12 +229,12 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -248,7 +247,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -261,7 +260,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -272,13 +271,13 @@ func TestReorg(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -298,7 +297,7 @@ func TestReorg(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -309,12 +308,12 @@ func TestReorg(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -356,7 +355,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -367,7 +366,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, err)
@@ -379,7 +378,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, err)
@@ -391,7 +390,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -404,14 +403,14 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -452,7 +451,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -463,7 +462,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -474,7 +473,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -485,7 +484,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -496,7 +495,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -509,7 +508,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -517,7 +516,7 @@ func TestAnchorReplace2(t *testing.T) {
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 }

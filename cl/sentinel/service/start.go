@@ -27,20 +27,20 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/direct"
-	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p/enode"
-
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 const AttestationSubnetSubscriptions = 2
@@ -89,6 +89,7 @@ func createSentinel(
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
 	dataColumnStorage blob_storage.DataColumnStorage,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		context.Background(),
@@ -100,6 +101,7 @@ func createSentinel(
 		logger,
 		forkChoiceReader,
 		dataColumnStorage,
+		peerDasStateReader,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -127,14 +129,6 @@ func createSentinel(
 			int(cfg.BeaconConfig.MaxBlobsPerBlockElectra),
 		)...)
 
-	gossipTopics = append(
-		gossipTopics,
-		generateSubnetsTopics(
-			// TODO: Try dynamically generating the topics based on custody_group_count
-			gossip.TopicNamePrefixDataColumnSidecar,
-			int(cfg.BeaconConfig.DataColumnSidecarSubnetCount),
-		)...)
-
 	attestationSubnetTopics := generateSubnetsTopics(
 		gossip.TopicNamePrefixBeaconAttestation,
 		int(cfg.NetworkConfig.AttestationSubnetCount),
@@ -150,6 +144,17 @@ func createSentinel(
 			gossip.TopicNamePrefixSyncCommittee,
 			int(cfg.BeaconConfig.SyncCommitteeSubnetCount),
 		)...)
+
+	for subnet := range cfg.BeaconConfig.DataColumnSidecarSubnetCount {
+		topic := sentinel.GossipTopic{
+			Name:     gossip.TopicNameDataColumnSidecar(subnet),
+			CodecStr: sentinel.SSZSnappyCodec,
+		}
+		// just subscribe but do not listen to the messages. This topic will be dynamically controlled in peerdas.
+		if _, err := sent.SubscribeGossip(topic, time.Unix(0, 0)); err != nil {
+			logger.Error("[Sentinel] failed to subscribe to data column sidecar", "err", err)
+		}
+	}
 
 	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
@@ -186,7 +191,8 @@ func StartSentinelService(
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
-	logger log.Logger) (sentinelrpc.SentinelClient, *enode.LocalNode, error) {
+	PeerDasStateReader peerdasstate.PeerDasStateReader,
+	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
 	ctx := context.Background()
 	sent, localNode, err := createSentinel(
 		cfg,
@@ -196,6 +202,7 @@ func StartSentinelService(
 		forkChoiceReader,
 		ethClock,
 		dataColumnStorage,
+		PeerDasStateReader,
 		logger,
 	)
 	if err != nil {
@@ -225,7 +232,7 @@ func StartServe(
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
 	go server.ListenToGossip()
 	// Regiser our server as a gRPC server
-	sentinelrpc.RegisterSentinelServer(gRPCserver, server)
+	sentinelproto.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}
