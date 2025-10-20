@@ -122,6 +122,46 @@ func TestDecodeEmptyTypedTx(t *testing.T) {
 	}
 }
 
+func TestDecodeRLPTransactionRejectsTrailingBytes(t *testing.T) {
+	t.Parallel()
+	input := []byte{248, 99, 128, 2, 1, 148, 9, 94, 123, 174, 166, 166, 199, 196, 194, 223, 235, 151, 126, 250, 195, 38, 175, 85, 45, 135, 128, 134, 97, 98, 99, 100, 101, 102, 37, 160, 142, 183, 96, 239, 234, 152, 124, 9, 98, 209, 245, 242, 175, 209, 122, 221, 51, 54, 23, 237, 233, 142, 83, 7, 50, 17, 119, 99, 15, 34, 57, 125, 160, 21, 141, 44, 195, 195, 220, 247, 64, 91, 79, 6, 37, 93, 226, 96, 69, 227, 240, 8, 168, 169, 112, 118, 124, 14, 250, 73, 19, 190, 7, 104, 57, 1}
+
+	stream := rlp.NewStream(bytes.NewReader(input), uint64(len(input)))
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeRLPTransaction, got %v", err)
+	}
+
+	if _, err := DecodeTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeTransaction, got %v", err)
+	}
+
+	if _, err := DecodeWrappedTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeWrappedTransaction, got %v", err)
+	}
+}
+
+func TestDecodeRLPTransactionRejectsTrailingBytesTyped(t *testing.T) {
+	t.Parallel()
+	encoded, err := rlp.EncodeToBytes(signedDynFeeTx)
+	if err != nil {
+		t.Fatalf("failed to encode typed tx: %v", err)
+	}
+	input := append(append([]byte{}, encoded...), 0x01)
+
+	stream := rlp.NewStream(bytes.NewReader(input), uint64(len(input)))
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeRLPTransaction, got %v", err)
+	}
+
+	if _, err := DecodeTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeTransaction, got %v", err)
+	}
+
+	if _, err := DecodeWrappedTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeWrappedTransaction, got %v", err)
+	}
+}
+
 func TestTransactionSigHash(t *testing.T) {
 	t.Parallel()
 	if emptyTx.SigningHash(nil) != common.HexToHash("c775b99e7ad12f50d819fcd602390467e28141316969f4b57f0626f74fe3b386") {
