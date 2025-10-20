@@ -46,7 +46,7 @@ type sd interface {
 type StateReader interface {
 	WithHistory() bool
 	CheckDataAvailable(d kv.Domain, step kv.Step) error
-	Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error)
+	Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error)
 }
 
 type LatestStateReader struct {
@@ -69,7 +69,7 @@ func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error 
 	return nil
 }
 
-func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
+func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	enc, step, err = r.getter.GetLatest(d, plainKey)
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
@@ -99,12 +99,12 @@ func (r *HistoryStateReader) CheckDataAvailable(kv.Domain, kv.Step) error {
 	return nil
 }
 
-func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
+func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	enc, _, err = r.roTx.GetAsOf(d, plainKey, r.limitReadAsOfTxNum)
 	if err != nil {
 		return enc, 0, fmt.Errorf("HistoryStateReader(GetAsOf) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
 	}
-	return enc, 0, nil
+	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
 }
 
 // LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) state at specified txNum, otherwise from *latest*.
@@ -131,16 +131,19 @@ func (r *LimitedHistoryStateReader) WithHistory() bool {
 // Reason why we have `kv.TemporalDebugTx.GetLatestFromFiles' call here: `state.RebuildCommitmentFiles` can build commitment.kv from account.kv.
 // Example: we have account.0-16.kv and account.16-18.kv, let's generate commitment.0-16.kv => it means we need to make account.16-18.kv invisible
 // and then read "latest state" like there is no account.16-18.kv
-func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
+func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	var ok bool
+	var endTxNum uint64
 	// reading from domain files this way will dereference domain key correctly,
 	// GetAsOf itself does not dereference keys in commitment domain values
-	enc, ok, _, _, err = r.roTx.Debug().GetLatestFromFiles(d, plainKey, r.limitReadAsOfTxNum)
-	if !ok {
-		enc = nil
-	}
+	enc, ok, _, endTxNum, err = r.roTx.Debug().GetLatestFromFiles(d, plainKey, r.limitReadAsOfTxNum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("LimitedHistoryStateReader(GetLatestFromFiles) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
+	}
+	if !ok {
+		enc = nil
+	} else {
+		step = kv.Step(endTxNum / stepSize)
 	}
 	if enc == nil {
 		enc, step, err = r.getter.GetLatest(d, plainKey)
@@ -589,7 +592,7 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
 	//}
-	return sdc.stateReader.Read(d, plainKey)
+	return sdc.stateReader.Read(d, plainKey, sdc.stepSize)
 }
 
 func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err error) {
