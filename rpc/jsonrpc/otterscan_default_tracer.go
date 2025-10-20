@@ -19,9 +19,8 @@ package jsonrpc
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // Helper implementation of vm.Tracer; since the interface is big and most
@@ -46,8 +45,8 @@ func (t *DefaultTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 func (t *DefaultTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
-func (t *DefaultTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (t *DefaultTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
 
-func (t *DefaultTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+func (t *DefaultTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 }

@@ -21,8 +21,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // BorConfig is the consensus engine configs for Matic bor based sealing.
@@ -37,15 +37,17 @@ type BorConfig struct {
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
 
-	JaipurBlock                *big.Int          `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on Jaipur)
-	DelhiBlock                 *big.Int          `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on Delhi)
-	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on Indore)
-	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
-	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
-	AhmedabadBlock             *big.Int          `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
-	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
-
-	sprints sprints
+	JaipurBlock                *big.Int                  `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on Jaipur)
+	DelhiBlock                 *big.Int                  `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on Delhi)
+	IndoreBlock                *big.Int                  `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on Indore)
+	AgraBlock                  *big.Int                  `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
+	NapoliBlock                *big.Int                  `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
+	AhmedabadBlock             *big.Int                  `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
+	BhilaiBlock                *big.Int                  `json:"bhilaiBlock"`                // Bhilai switch block (nil = no fork, 0 = already on Ahmedabad)
+	RioBlock                   *big.Int                  `json:"rioBlock"`                   // Rio switch block (nil = no fork, 0 = already on Rio)
+	StateSyncConfirmationDelay map[string]uint64         `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
+	Coinbase                   map[string]common.Address `json:"coinbase"`                   // coinbase address
+	sprints                    sprints
 }
 
 // String implements the stringer interface, returning the consensus engine details.
@@ -54,7 +56,7 @@ func (c *BorConfig) String() string {
 }
 
 func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
-	return chain.ConfigValueLookup(c.ProducerDelay, number)
+	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.ProducerDelay), number)
 }
 
 func (c *BorConfig) IsSprintStart(number uint64) bool {
@@ -112,11 +114,11 @@ func (c *BorConfig) CalculateSprintNumber(number uint64) uint64 {
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
-	return chain.ConfigValueLookup(c.BackupMultiplier, number)
+	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BackupMultiplier), number)
 }
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
-	return chain.ConfigValueLookup(c.Period, number)
+	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.Period), number)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
@@ -168,8 +170,32 @@ func (c *BorConfig) GetAhmedabadBlock() *big.Int {
 	return c.AhmedabadBlock
 }
 
+func (c *BorConfig) IsBhilai(number uint64) bool {
+	return isForked(c.BhilaiBlock, number)
+}
+
+func (c *BorConfig) GetBhilaiBlock() *big.Int {
+	return c.BhilaiBlock
+}
+
+func (c *BorConfig) IsRio(number uint64) bool {
+	return isForked(c.RioBlock, number)
+}
+
+func (c *BorConfig) GetRioBlock() *big.Int {
+	return c.RioBlock
+}
+
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
-	return chain.ConfigValueLookup(c.StateSyncConfirmationDelay, number)
+	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.StateSyncConfirmationDelay), number)
+}
+
+func (c *BorConfig) CalculateCoinbase(number uint64) common.Address {
+	if c.Coinbase != nil {
+		return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.Coinbase), number)
+	} else {
+		return common.Address{}
+	}
 }
 
 func (c *BorConfig) StateReceiverContractAddress() common.Address {

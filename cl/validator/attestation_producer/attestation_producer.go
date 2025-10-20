@@ -29,10 +29,9 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/transition"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 var (
@@ -119,7 +118,7 @@ func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *stat
 	}, nil
 }
 
-func (ap *attestationProducer) CachedAttestationData(slot uint64, committeeIndex uint64) (solid.AttestationData, bool, error) {
+func (ap *attestationProducer) CachedAttestationData(slot uint64) (solid.AttestationData, bool, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	ap.attCacheMutex.RLock()
 	defer ap.attCacheMutex.RUnlock()
@@ -130,7 +129,6 @@ func (ap *attestationProducer) CachedAttestationData(slot uint64, committeeIndex
 		}
 		return solid.AttestationData{
 			Slot:            slot,
-			CommitteeIndex:  committeeIndex,
 			BeaconBlockRoot: beaconBlockRoot,
 			Source:          baseAttestationData.Source,
 			Target:          baseAttestationData.Target,
@@ -139,7 +137,7 @@ func (ap *attestationProducer) CachedAttestationData(slot uint64, committeeIndex
 	return solid.AttestationData{}, false, nil
 }
 
-func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
+func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	var err error
 	ap.attCacheMutex.RLock()
@@ -156,7 +154,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		}
 		return solid.AttestationData{
 			Slot:            slot,
-			CommitteeIndex:  committeeIndex,
 			BeaconBlockRoot: beaconBlockRoot,
 			Source:          baseAttestationData.Source,
 			Target:          targetCheckpoint,
@@ -191,7 +188,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 	}
 	baseAttestationData := solid.AttestationData{
 		Slot:            0,             // slot will be filled in later
-		CommitteeIndex:  0,             // committee index will be filled in later
+		CommitteeIndex:  0,             // committee index is deprecated after Electra
 		BeaconBlockRoot: common.Hash{}, // beacon block root will be filled in later
 		Source:          baseState.CurrentJustifiedCheckpoint(),
 		Target:          targetCheckpoint,
@@ -201,7 +198,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 
 	return solid.AttestationData{
 		Slot:            slot,
-		CommitteeIndex:  committeeIndex,
 		BeaconBlockRoot: baseStateBlockRoot,
 		Source:          baseAttestationData.Source,
 		Target:          targetCheckpoint,

@@ -22,7 +22,6 @@ import (
 	"slices"
 	"sync"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 type seenSyncCommitteeMessage struct {
@@ -53,7 +53,7 @@ type syncCommitteeMessagesService struct {
 
 type SyncCommitteeMessageForGossip struct {
 	SyncCommitteeMessage  *cltypes.SyncCommitteeMessage
-	Receiver              *sentinel.Peer
+	Receiver              *sentinelproto.Peer
 	ImmediateVerification bool
 }
 
@@ -133,10 +133,10 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 
 		if msg.ImmediateVerification {
 			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		} else {
+			// push the signatures to verify asynchronously and run final functions after that.
+			s.batchSignatureVerifier.AsyncVerifySyncCommitteeMessage(aggregateVerificationData)
 		}
-
-		// push the signatures to verify asynchronously and run final functions after that.
-		s.batchSignatureVerifier.AsyncVerifySyncCommitteeMessage(aggregateVerificationData)
 
 		// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
 		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves

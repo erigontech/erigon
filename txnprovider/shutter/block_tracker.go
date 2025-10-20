@@ -21,7 +21,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type currentBlockNumReader func(ctx context.Context) (*uint64, error)
@@ -57,6 +57,17 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		bt.blockChangeCond.L.Unlock()
 	}()
 
+	ctx, cancel := context.WithCancel(ctx)
+	blockEventC := make(chan BlockEvent)
+	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
+		select {
+		case <-ctx.Done(): // no-op
+		case blockEventC <- blockEvent:
+		}
+	})
+	defer unregisterBlockEventObserver()
+	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
+
 	bn, err := bt.currentBlockNumReader(ctx)
 	if err != nil {
 		return err
@@ -69,15 +80,6 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		bt.blockChangeCond.L.Unlock()
 	}
 
-	blockEventC := make(chan BlockEvent)
-	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
-		select {
-		case <-ctx.Done(): // no-op
-		case blockEventC <- blockEvent:
-		}
-	})
-
-	defer unregisterBlockEventObserver()
 	for {
 		select {
 		case <-ctx.Done():

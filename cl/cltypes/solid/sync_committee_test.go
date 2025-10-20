@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestSyncCommittee(t *testing.T) {
@@ -70,7 +70,7 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test Clone
 	clone := syncCommittee.Clone().(*SyncCommittee)
-	assert.NotEqual(t, nil, clone)
+	assert.NotNil(t, clone)
 
 	// Test Copy
 	copy := syncCommittee.Copy()

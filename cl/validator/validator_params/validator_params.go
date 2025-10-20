@@ -19,7 +19,7 @@ package validator_params
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 type ValidatorParams struct {
@@ -40,4 +40,13 @@ func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Addres
 		return common.Address{}, false
 	}
 	return val.(common.Address), true
+}
+
+func (vp *ValidatorParams) GetValidators() []uint64 {
+	validators := []uint64{}
+	vp.feeRecipients.Range(func(key, value interface{}) bool {
+		validators = append(validators, key.(uint64))
+		return true
+	})
+	return validators
 }

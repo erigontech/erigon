@@ -1,10 +1,10 @@
 package beaconevents
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 type EventStream struct {
@@ -23,17 +23,20 @@ const (
 	OpBlsToExecution    EventTopic = "bls_to_execution_change"
 	OpContributionProof EventTopic = "contribution_and_proof"
 	OpBlobSidecar       EventTopic = "blob_sidecar"
+	OpDataColumnSidecar EventTopic = "data_column_sidecar"
 )
 
 type (
 	// Operation event data types
 	AttestationData           = solid.Attestation
+	SingleAttestationData     = solid.SingleAttestation
 	VoluntaryExitData         = cltypes.SignedVoluntaryExit
 	ProposerSlashingData      = cltypes.ProposerSlashing
 	AttesterSlashingData      = cltypes.AttesterSlashing
 	BlsToExecutionChangesData = cltypes.SignedBLSToExecutionChange
 	ContributionAndProofData  = cltypes.SignedContributionAndProof
 	BlobSidecarData           = cltypes.BlobSidecar
+	DataColumnSidecarData     = cltypes.DataColumnSidecar
 )
 
 // State event topics

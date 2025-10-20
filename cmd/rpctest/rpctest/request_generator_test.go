@@ -19,7 +19,7 @@ package rpctest
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +42,7 @@ func TestRequestGenerator_blockNumber(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.blockNumber()
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestRequestGenerator_getBlockByNumber(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.getBlockByNumber(testCase.blockNum, testCase.withTxs)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestRequestGenerator_storageRangeAt(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.storageRangeAt(testCase.hash, testCase.i, &testCase.to, testCase.nextKey)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestRequestGenerator_traceBlockByHash(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.traceBlockByHash(testCase.hash)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -183,8 +183,8 @@ func TestRequestGenerator_traceTransaction(t *testing.T) {
 
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		got := reqGen.debugTraceTransaction(testCase.hash)
-		require.EqualValues(t, testCase.expected, got)
+		got := reqGen.debugTraceTransaction(testCase.hash, "")
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -214,7 +214,7 @@ func TestRequestGenerator_getTransactionReceipt(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.getTransactionReceipt(testCase.hash)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -248,7 +248,7 @@ func TestRequestGenerator_getBalance(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.getBalance(testCase.miner, testCase.blockNum)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -282,7 +282,7 @@ func TestRequestGenerator_getModifiedAccountsByNumber(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.getModifiedAccountsByNumber(testCase.prevBlockNum, testCase.blockNum)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -320,7 +320,7 @@ func TestRequestGenerator_getLogs(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.getLogs(testCase.prevBlockNum, testCase.blockNum, testCase.account)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -362,7 +362,7 @@ func TestRequestGenerator_getLogs1(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.getLogs1(testCase.prevBlockNum, testCase.blockNum, testCase.account, testCase.topic)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -408,7 +408,7 @@ func TestRequestGenerator_getLogs2(t *testing.T) {
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.getLogs2(testCase.prevBlockNum, testCase.blockNum, testCase.account, testCase.topic1, testCase.topic2)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -425,28 +425,28 @@ func TestRequestGenerator_accountRange(t *testing.T) {
 			4756370,
 			common.HexToHash("0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca").Bytes(),
 			1,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x489392", "b540wAgSqA+offJiCLvmlBHjbWqfALNURO9BgfbEg8o=", 1, false, false, false], "id":1}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x489392", "b540wAgSqA+offJiCLvmlBHjbWqfALNURO9BgfbEg8o=", 1, false, false], "id":1}`,
 		},
 		{
 			2,
 			0,
 			common.HexToHash("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de").Bytes(),
 			2,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x0", "HP586VoWlNiWk2XLRyzkoNPu2BLFQP13CLvmlB40xN4=", 2, false, false, false], "id":2}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x0", "HP586VoWlNiWk2XLRyzkoNPu2BLFQP13CLvmlB40xN4=", 2, false, false], "id":2}`,
 		},
 		{
 			3,
 			1234567,
 			common.HexToHash("0x1cd73c7adf5b31f3cf94c67b9e251e699559d91c27664463fb5978b97f8b2d1b").Bytes(),
 			3,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x12d687", "HNc8et9bMfPPlMZ7niUeaZVZ2RwnZkRj+1l4uX+LLRs=", 3, false, false, false], "id":3}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x12d687", "HNc8et9bMfPPlMZ7niUeaZVZ2RwnZkRj+1l4uX+LLRs=", 3, false, false], "id":3}`,
 		},
 	}
 
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.accountRange(testCase.blockNum, testCase.page, testCase.num)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -466,7 +466,7 @@ func TestRequestGenerator_getProof(t *testing.T) {
 				common.HexToHash("0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca"),
 				common.HexToHash("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de"),
 			},
-			`{ "jsonrpc": "2.0", "method": "eth_getProof", "params": ["0x71562b71999873db5b286df957af199ec94617f7", ["x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca","x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de"], "0x344649"], "id":1}`,
+			`{ "jsonrpc": "2.0", "method": "eth_getProof", "params": ["0x71562b71999873db5b286df957af199ec94617f7", ["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca","0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de"], "0x344649"], "id":1}`,
 		},
 		{
 			2,
@@ -476,13 +476,13 @@ func TestRequestGenerator_getProof(t *testing.T) {
 				common.HexToHash("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de"),
 				common.HexToHash("0x2599b236b455dd0081516c7f2f82dab3af89a68d5ea5e7601181cbd2a7fdf13c"),
 			},
-			`{ "jsonrpc": "2.0", "method": "eth_getProof", "params": ["0x67b1d87101671b127f5f8714789c7192f7ad340e", ["x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de","x2599b236b455dd0081516c7f2f82dab3af89a68d5ea5e7601181cbd2a7fdf13c"], "0x67"], "id":2}`,
+			`{ "jsonrpc": "2.0", "method": "eth_getProof", "params": ["0x67b1d87101671b127f5f8714789c7192f7ad340e", ["0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de","0x2599b236b455dd0081516c7f2f82dab3af89a68d5ea5e7601181cbd2a7fdf13c"], "0x67"], "id":2}`,
 		},
 	}
 
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
 		got := reqGen.getProof(testCase.blockNum, testCase.account, testCase.storageList)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }

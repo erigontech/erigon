@@ -21,13 +21,13 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 const (
@@ -206,11 +206,14 @@ func (s *SingleAttestation) Static() bool {
 	return true
 }
 
-func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestation {
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int) *Attestation {
 	committeeBits := NewBitVector(maxCommitteesPerSlot)
 	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
-	aggregationBits := NewBitList(0, aggregationBitsSizeElectra)
-	aggregationBits.SetOnBit(maxValidatorsPerCommittee*int(s.CommitteeIndex) + memberIndexInCommittee)
+	// flip the bit for the validator and also mark the last bit
+	bytes := make([]byte, committeeLen/8+1)
+	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)
+	bytes[committeeLen/8] |= 1 << (committeeLen % 8)
+	aggregationBits := BitlistFromBytes(bytes, aggregationBitsSizeElectra)
 	return &Attestation{
 		AggregationBits: aggregationBits,
 		Data:            s.Data,

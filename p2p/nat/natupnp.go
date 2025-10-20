@@ -31,7 +31,7 @@ import (
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 const (
@@ -186,7 +186,7 @@ func discoverUPnP() Interface {
 // advertised services of each device. The first non-nil service found
 // is sent into out. If no service matched, nil is sent.
 func discover(out chan<- *upnp, target string, matcher func(goupnp.ServiceClient) *upnp) {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	devs, err := goupnp.DiscoverDevices(target)
 	if err != nil {
 		out <- nil
@@ -213,7 +213,7 @@ func discover(out chan<- *upnp, target string, matcher func(goupnp.ServiceClient
 			if upnp == nil {
 				return
 			}
-			upnp.dev = devs[i].Root //nolint:scopelint
+			upnp.dev = devs[i].Root
 
 			// check whether port mapping is enabled
 			if upnp.natEnabled() {

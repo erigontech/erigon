@@ -14,8 +14,8 @@ on:
         required: true
 
 jobs:
-  bisect:
-    runs-on: [self-hosted, qa, Erigon3]
+  rpc-test-bisect:
+    runs-on: [self-hosted, qa, RpcSpecific]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Fetch all history for git bisect
 
@@ -39,7 +39,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf $GITHUB_WORKSPACE/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.0.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.61.0 https://github.com/erigontech/rpc-tests $GITHUB_WORKSPACE/rpc-tests
           cd $GITHUB_WORKSPACE/rpc-tests
           pip3 install -r requirements.txt
 
@@ -114,16 +114,21 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
       - name: Start Git Bisect
+        env:
+          STARTING_COMMIT: ${{ inputs.starting_commit }}
+          ENDING_COMMIT: ${{ inputs.ending_commit }}
         run: |
           git bisect start
-          git bisect bad ${{ inputs.ending_commit }}
-          git bisect good ${{ inputs.starting_commit }}
+          git bisect bad $ENDING_COMMIT
+          git bisect good $STARTING_COMMIT
 
       - name: Run Git Bisect with Test Script
         id: bisect_run
+        env:
+          TEST_NAME: ${{ inputs.test_name }}
         run: |
           set -o pipefail
-          git bisect run $GITHUB_WORKSPACE/.github/scripts/test_script.sh ${{ inputs.test_name }}
+          git bisect run $GITHUB_WORKSPACE/.github/scripts/test_script.sh $TEST_NAME
 
       - name: Get Bisect Result
         if: success()

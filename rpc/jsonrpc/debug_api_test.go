@@ -28,23 +28,24 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -56,9 +57,9 @@ var debugTraceTransactionTests = []struct {
 	failed      bool
 	returnValue string
 }{
-	{"3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea", 21000, false, ""},
-	{"f588c6426861d9ad25d5ccc12324a8d213f35ef1ed4153193f0c13eb81ca7f4a", 49189, false, "0000000000000000000000000000000000000000000000000000000000000001"},
-	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 38899, false, ""},
+	{"3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea", 21000, false, "0x"},
+	{"f588c6426861d9ad25d5ccc12324a8d213f35ef1ed4153193f0c13eb81ca7f4a", 49189, false, "0x0000000000000000000000000000000000000000000000000000000000000001"},
+	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 38899, false, "0x"},
 }
 
 var debugTraceTransactionNoRefundTests = []struct {
@@ -67,9 +68,9 @@ var debugTraceTransactionNoRefundTests = []struct {
 	failed      bool
 	returnValue string
 }{
-	{"3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea", 21000, false, ""},
-	{"f588c6426861d9ad25d5ccc12324a8d213f35ef1ed4153193f0c13eb81ca7f4a", 49189, false, "0000000000000000000000000000000000000000000000000000000000000001"},
-	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 62899, false, ""},
+	{"3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea", 21000, false, "0x"},
+	{"f588c6426861d9ad25d5ccc12324a8d213f35ef1ed4153193f0c13eb81ca7f4a", 49189, false, "0x0000000000000000000000000000000000000000000000000000000000000001"},
+	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 62899, false, "0x"},
 }
 
 func TestTraceBlockByNumber(t *testing.T) {
@@ -80,7 +81,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -95,11 +96,11 @@ func TestTraceBlockByNumber(t *testing.T) {
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		err = api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracersConfig.TraceConfig{}, stream)
+		err = api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		if err = stream.Flush(); err != nil {
+		if err = s.Flush(); err != nil {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er []ethapi.ExecutionResult
@@ -111,12 +112,12 @@ func TestTraceBlockByNumber(t *testing.T) {
 		}
 	}
 	var buf bytes.Buffer
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracersConfig.TraceConfig{}, stream)
+	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracersConfig.TraceConfig{}, s)
 	if err != nil {
 		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
 	}
-	if err = stream.Flush(); err != nil {
+	if err = s.Flush(); err != nil {
 		t.Fatalf("error flusing: %v", err)
 	}
 	var er []ethapi.ExecutionResult
@@ -131,7 +132,7 @@ func TestTraceBlockByHash(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -140,11 +141,11 @@ func TestTraceBlockByHash(t *testing.T) {
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		err = api.TraceBlockByHash(m.Ctx, *tx.BlockHash, &tracersConfig.TraceConfig{}, stream)
+		err = api.TraceBlockByHash(m.Ctx, *tx.BlockHash, &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		if err = stream.Flush(); err != nil {
+		if err = s.Flush(); err != nil {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er []ethapi.ExecutionResult
@@ -162,12 +163,12 @@ func TestTraceTransaction(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{}, stream)
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
-		if err = stream.Flush(); err != nil {
+		if err = s.Flush(); err != nil {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er ethapi.ExecutionResult
@@ -191,13 +192,13 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		var norefunds = true
-		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{NoRefunds: &norefunds}, stream)
+		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{NoRefunds: &norefunds}, s)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
-		if err = stream.Flush(); err != nil {
+		if err = s.Flush(); err != nil {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er ethapi.ExecutionResult
@@ -317,50 +318,50 @@ func TestAccountRange(t *testing.T) {
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
 		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(result.Accounts))
+		require.Len(t, result.Accounts, 2)
 
 		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(result.Accounts))
+		require.Len(t, result.Accounts, 3)
 	})
 	t.Run("valid contract", func(t *testing.T) {
 		addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(result.Accounts))
+		require.Len(t, result.Accounts, 1)
 
 		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(result.Accounts))
+		require.Len(t, result.Accounts, 2)
 
 		n = rpc.BlockNumber(10)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(result.Accounts))
+		require.Len(t, result.Accounts, 2)
 	})
 	t.Run("with storage", func(t *testing.T) {
 		addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 
 		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false, nil)
 		require.NoError(t, err)
-		require.Equal(t, 0, len(result.Accounts))
+		require.Empty(t, result.Accounts)
 
 		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false, nil)
 		require.NoError(t, err)
-		require.Equal(t, 35, len(result.Accounts[addr].Storage))
+		require.Len(t, result.Accounts[addr].Storage, 35)
 
 		n = rpc.BlockNumber(10)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false, nil)
 		require.NoError(t, err)
-		require.Equal(t, 35, len(result.Accounts[addr].Storage))
+		require.Len(t, result.Accounts[addr].Storage, 35)
 		require.Equal(t, 1, int(result.Accounts[addr].Nonce))
 		for _, v := range result.Accounts {
 			hashedCode, _ := common.HashData(v.Code)
@@ -377,23 +378,23 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
 		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(result))
+		require.Len(t, result, 3)
 
 		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(7)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Equal(t, 38, len(result))
+		require.Len(t, result, 38)
 
 		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(9)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Equal(t, 40, len(result))
+		require.Len(t, result, 40)
 
 		//nil value means: to = from + 1
 		n = rpc.BlockNumber(0)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(result))
+		require.Len(t, result, 3)
 	})
 	t.Run("invalid input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(11)
@@ -407,7 +408,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		n = rpc.BlockNumber(0)
 		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(result))
+		require.Len(t, result, 3)
 
 		n = rpc.BlockNumber(1_000_000)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
@@ -553,7 +554,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
-		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		signer1 := types.MakeSigner(chainspec.Mainnet.Config, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
 				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),

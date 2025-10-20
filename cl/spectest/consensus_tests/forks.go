@@ -50,6 +50,8 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 		err = preState.UpgradeToDeneb()
 	case clparams.DenebVersion:
 		err = preState.UpgradeToElectra()
+	case clparams.ElectraVersion:
+		err = preState.UpgradeToFulu()
 	default:
 		err = spectest.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
 	}
@@ -62,7 +64,7 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
-	assert.EqualValues(t, haveRoot, expectedRoot, "state root")
+	assert.EqualValues(t, expectedRoot, haveRoot, "state root")
 
 	return nil
 })

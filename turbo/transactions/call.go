@@ -20,24 +20,89 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/turbo/services"
 )
+
+type BlockOverrides struct {
+	BlockNumber *hexutil.Uint64         `json:"number"`
+	Coinbase    *common.Address         `json:"feeRecipient"`
+	Timestamp   *hexutil.Uint64         `json:"time"`
+	GasLimit    *hexutil.Uint           `json:"gasLimit"`
+	Difficulty  *hexutil.Uint           `json:"difficulty"`
+	BaseFee     *uint256.Int            `json:"baseFeePerGas"`
+	BlobBaseFee *hexutil.Big            `json:"blobBaseFee"`
+	BlockHash   *map[uint64]common.Hash `json:"blockHash"`
+	BeaconRoot  *common.Hash            `json:"beaconRoot"`
+	Withdrawals *types.Withdrawals      `json:"withdrawals"`
+}
+
+type BlockHashOverrides map[uint64]common.Hash
+
+func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
+	h := types.CopyHeader(header)
+	if o.BlockNumber != nil {
+		h.Number = new(big.Int).SetUint64(uint64(*o.BlockNumber))
+	}
+	if o.Difficulty != nil {
+		h.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
+	}
+	if o.Timestamp != nil {
+		h.Time = o.Timestamp.Uint64()
+	}
+	if o.GasLimit != nil {
+		h.GasLimit = uint64(*o.GasLimit)
+	}
+	if o.Coinbase != nil {
+		h.Coinbase = *o.Coinbase
+	}
+	if o.BaseFee != nil {
+		h.BaseFee = o.BaseFee.ToBig()
+	}
+	return h
+}
+
+func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, overrideBlockHash BlockHashOverrides) {
+	if o.BlockNumber != nil {
+		blockCtx.BlockNumber = uint64(*o.BlockNumber)
+	}
+	if o.BaseFee != nil {
+		blockCtx.BaseFee = o.BaseFee
+	}
+	if o.Coinbase != nil {
+		blockCtx.Coinbase = *o.Coinbase
+	}
+	if o.Difficulty != nil {
+		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
+	}
+	if o.Timestamp != nil {
+		blockCtx.Time = uint64(*o.Timestamp)
+	}
+	if o.GasLimit != nil {
+		blockCtx.GasLimit = uint64(*o.GasLimit)
+	}
+	if o.BlockHash != nil {
+		maps.Copy(overrideBlockHash, *o.BlockHash)
+	}
+}
 
 func DoCall(
 	ctx context.Context,
@@ -47,6 +112,7 @@ func DoCall(
 	blockNrOrHash rpc.BlockNumberOrHash,
 	header *types.Header,
 	overrides *ethapi2.StateOverrides,
+	blockOverrides *ethapi2.BlockOverrides,
 	gasCap uint64,
 	chainConfig *chain.Config,
 	stateReader state.StateReader,
@@ -89,7 +155,7 @@ func DoCall(
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
-			return nil, errors.New("header.BaseFee uint256 overflow")
+			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
 		}
 	}
 	msg, err := args.ToMessage(gasCap, baseFee)
@@ -97,6 +163,10 @@ func DoCall(
 		return nil, err
 	}
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	if blockOverrides != nil {
+		blockOverrides.Override(&blockCtx)
+	}
+
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
@@ -121,24 +191,49 @@ func DoCall(
 	return result, nil
 }
 
+func NewEVMBlockContextWithOverrides(ctx context.Context, engine consensus.EngineReader, header *types.Header, tx kv.Getter,
+	reader services.CanonicalReader, config *chain.Config, blockOverrides *BlockOverrides, blockHashOverrides BlockHashOverrides) evmtypes.BlockContext {
+	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
+	blockContext := core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
+	if blockOverrides != nil {
+		blockOverrides.OverrideBlockContext(&blockContext, blockHashOverrides)
+	}
+	return blockContext
+}
+
 func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
 	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
 	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 }
 
-func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) func(uint64) common.Hash {
-	return func(n uint64) common.Hash {
+type BlockHashProvider func(blockNum uint64) (common.Hash, error)
+
+func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader services.CanonicalReader, overrides BlockHashOverrides) BlockHashProvider {
+	return func(blockNum uint64) (common.Hash, error) {
+		if blockHash, ok := overrides[blockNum]; ok {
+			return blockHash, nil
+		}
+		blockHash, ok, err := reader.CanonicalHash(ctx, tx, blockNum)
+		if err != nil || !ok {
+			log.Error("[evm] canonical hash not found", "blockNum", blockNum, "ok", ok, "err", err)
+		}
+		return blockHash, err
+	}
+}
+
+func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) BlockHashProvider {
+	return func(n uint64) (common.Hash, error) {
 		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
 		if err != nil {
 			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
-			return common.Hash{}
+			return common.Hash{}, err
 		}
 		if h == nil {
 			log.Warn("[evm] header is nil", "blockNum", n)
-			return common.Hash{}
+			return common.Hash{}, nil
 		}
-		return h.Hash()
+		return h.Hash(), nil
 	}
 }
 
@@ -204,6 +299,7 @@ func NewReusableCaller(
 	engine consensus.EngineReader,
 	stateReader state.StateReader,
 	overrides *ethapi2.StateOverrides,
+	blockOverrides *ethapi2.BlockOverrides,
 	header *types.Header,
 	initialArgs ethapi2.CallArgs,
 	gasCap uint64,
@@ -236,6 +332,9 @@ func NewReusableCaller(
 	}
 
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	if blockOverrides != nil {
+		blockOverrides.Override(&blockCtx)
+	}
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})

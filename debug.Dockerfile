@@ -47,7 +47,6 @@ RUN mkdir -p ~/.local/share/erigon
 # copy compiled artifacts from builder
 
 ## then give each binary its own layer
-COPY --from=builder /app/build/bin/devnet /usr/local/bin/devnet
 COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
 COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
 COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
@@ -55,7 +54,6 @@ COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
 COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
 COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
 COPY --from=builder /app/build/bin/lightclient /usr/local/bin/lightclient
-COPY --from=builder /app/build/bin/observer /usr/local/bin/observer
 COPY --from=builder /app/build/bin/pics /usr/local/bin/pics
 COPY --from=builder /app/build/bin/rpcdaemon /usr/local/bin/rpcdaemon
 COPY --from=builder /app/build/bin/rpctest /usr/local/bin/rpctest
@@ -63,7 +61,6 @@ COPY --from=builder /app/build/bin/sentinel /usr/local/bin/sentinel
 COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
 COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
-COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
 
 
 EXPOSE 8545 \

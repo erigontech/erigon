@@ -27,11 +27,12 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 type mockRoundTripper func(req *http.Request) (*http.Response, error)
@@ -42,7 +43,9 @@ func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 
 var (
 	mockUrl, _       = url.Parse("https://anywhere.io")
-	mockBeaconConfig = &clparams.BeaconChainConfig{}
+	mockBeaconConfig = &clparams.BeaconChainConfig{
+		SlotsPerEpoch: 32,
+	}
 
 	//go:embed test_data/mock_blinded_block.json
 	mockBlindedBlockBytes []byte
@@ -76,7 +79,7 @@ func TestGetStatus(t *testing.T) {
 		}
 		builderClient.httpClient = mockHttpClient
 		err := builderClient.GetStatus(ctx)
-		require.ErrorIs(t, err, nil)
+		require.NoError(t, err)
 	})
 
 	t.Run("200 OK", func(t *testing.T) {
@@ -216,6 +219,7 @@ func TestGetHeader(t *testing.T) {
 			beaconConfig: mockBeaconConfig,
 		}
 		header, err := builderClient.GetHeader(ctx, mockSlot, mockParentHash, mockPubKey)
+		header.Data.Message.ExecutionRequests = nil
 		require.NoError(t, err)
 		require.NotNil(t, header)
 		// marshal and unmarshal to compare
@@ -278,19 +282,19 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 			url:          mockUrl,
 			beaconConfig: mockBeaconConfig,
 		}
-		block, bundle, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
+		block, bundle, _, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
 		require.NoError(t, err)
 		result := struct {
 			Version string `json:"version"`
 			Data    struct {
-				ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
-				BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+				ExecutionPayload *cltypes.Eth1Block        `json:"execution_payload"`
+				BlobsBundle      *engine_types.BlobsBundle `json:"blobs_bundle"`
 			} `json:"data"`
 		}{
 			Version: "deneb",
 			Data: struct {
-				ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
-				BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+				ExecutionPayload *cltypes.Eth1Block        `json:"execution_payload"`
+				BlobsBundle      *engine_types.BlobsBundle `json:"blobs_bundle"`
 			}{
 				ExecutionPayload: block,
 				BlobsBundle:      bundle,
@@ -319,7 +323,7 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 			url:          mockUrl,
 			beaconConfig: mockBeaconConfig,
 		}
-		block, bundle, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
+		block, bundle, _, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
 		require.Error(t, err)
 		require.Nil(t, block)
 		require.Nil(t, bundle)

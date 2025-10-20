@@ -25,8 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -34,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {
@@ -84,7 +84,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(out.Data))
+	require.Len(t, out.Data, 1)
 	require.Equal(t, attesterSlashing, out.Data[0])
 }
 
@@ -138,7 +138,7 @@ func TestPoolProposerSlashings(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(out.Data))
+	require.Len(t, out.Data, 1)
 	require.Equal(t, proposerSlashing, out.Data[0])
 }
 
@@ -183,7 +183,7 @@ func TestPoolVoluntaryExits(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(out.Data))
+	require.Len(t, out.Data, 1)
 	require.Equal(t, voluntaryExit, out.Data[0])
 }
 
@@ -236,7 +236,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 2, len(out.Data))
+	require.Len(t, out.Data, 2)
 	require.Equal(t, msg[0], out.Data[0])
 	require.Equal(t, msg[1], out.Data[1])
 }
@@ -300,7 +300,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, 2, len(out.Data))
+	require.Len(t, out.Data, 2)
 	require.Equal(t, msg[0].Message.Aggregate, out.Data[0])
 	require.Equal(t, msg[1].Message.Aggregate, out.Data[1])
 }
@@ -340,12 +340,12 @@ func TestPoolSyncCommittees(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, out.Data, &cltypes.Contribution{
+	require.Equal(t, &cltypes.Contribution{
 		Slot:              1,
 		BeaconBlockRoot:   common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 		SubcommitteeIndex: 0,
 		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
-	})
+	}, out.Data)
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {
@@ -389,10 +389,10 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	require.NoError(t, err)
 
-	require.Equal(t, out.Data, &cltypes.Contribution{
+	require.Equal(t, &cltypes.Contribution{
 		Slot:              1,
 		BeaconBlockRoot:   common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 		SubcommitteeIndex: 0,
 		AggregationBits:   aggrBits,
-	})
+	}, out.Data)
 }

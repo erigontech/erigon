@@ -30,17 +30,17 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -56,7 +56,7 @@ type httpConn struct {
 	client    *http.Client
 	url       string
 	closeOnce sync.Once
-	closeCh   chan interface{}
+	closeCh   chan any
 	mu        sync.Mutex // protects headers
 	headers   http.Header
 }
@@ -65,7 +65,7 @@ type httpConn struct {
 // and some methods don't work. The panic() stubs here exist to ensure
 // this special treatment is correct.
 
-func (hc *httpConn) WriteJSON(context.Context, interface{}) error {
+func (hc *httpConn) WriteJSON(context.Context, any) error {
 	panic("writeJSON called on httpConn")
 }
 
@@ -86,7 +86,7 @@ func (hc *httpConn) Close() {
 	hc.closeOnce.Do(func() { close(hc.closeCh) })
 }
 
-func (hc *httpConn) closed() <-chan interface{} {
+func (hc *httpConn) closed() <-chan any {
 	return hc.closeCh
 }
 
@@ -108,7 +108,7 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 			client:  client,
 			headers: headers,
 			url:     endpoint,
-			closeCh: make(chan interface{}),
+			closeCh: make(chan any),
 		}
 		return hc, nil
 	}, logger)
@@ -119,7 +119,7 @@ func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
 	return DialHTTPWithClient(endpoint, new(http.Client), logger)
 }
 
-func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg interface{}) error {
+func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
 	hc := c.writeConn.(*httpConn)
 	respBody, err := hc.doRequest(ctx, msg)
 	if err != nil {
@@ -149,7 +149,7 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 	return nil
 }
 
-func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, error) {
+func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return nil, err
@@ -278,11 +278,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
-	var stream *jsoniter.Stream
+	var stream jsonstream.Stream
 	if !s.disableStreaming {
-		stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+		stream = jsonstream.New(w)
 	}
-	s.serveSingleRequest(ctx, codec, stream)
+
+	errorMsg := s.serveSingleRequest(ctx, codec, stream)
+	if errorMsg != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		codec.WriteJSON(ctx, errorMsg)
+	}
+
+	if !s.disableStreaming {
+		stream.Flush()
+	}
 }
 
 // validateRequest returns a non-zero response code and error message if the
@@ -301,10 +310,8 @@ func validateRequest(r *http.Request) (int, error) {
 	}
 	// Check content-type
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("content-type")); err == nil {
-		for _, accepted := range acceptedContentTypes {
-			if accepted == mt {
-				return 0, nil
-			}
+		if slices.Contains(acceptedContentTypes, mt) {
+			return 0, nil
 		}
 	}
 	// Invalid content-type
@@ -324,7 +331,7 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 		return false
 	}
 
-	keyFunc := func(token *jwt.Token) (interface{}, error) {
+	keyFunc := func(token *jwt.Token) (any, error) {
 		return jwtSecret, nil
 	}
 	claims := jwt.RegisteredClaims{}

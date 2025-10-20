@@ -19,7 +19,7 @@ package utils_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
@@ -48,7 +48,7 @@ func TestPlainSnappy(t *testing.T) {
 }
 
 func TestLiteralConverters(t *testing.T) {
-	require.Equal(t, utils.Uint32ToBytes4(600), [4]byte{0x0, 0x0, 0x2, 0x58})
-	require.Equal(t, utils.BytesToBytes4([]byte{10, 23, 56, 7, 8, 5}), [4]byte{10, 23, 56, 7})
-	require.Equal(t, utils.Uint64ToLE(600), []byte{0x58, 0x2, 0x0, 0x0, 0x0, 0x0, 0x00, 0x00})
+	require.Equal(t, [4]byte{0x0, 0x0, 0x2, 0x58}, utils.Uint32ToBytes4(600))
+	require.Equal(t, [4]byte{10, 23, 56, 7}, utils.BytesToBytes4([]byte{10, 23, 56, 7, 8, 5}))
+	require.Equal(t, []byte{0x58, 0x2, 0x0, 0x0, 0x0, 0x0, 0x00, 0x00}, utils.Uint64ToLE(600))
 }

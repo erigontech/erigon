@@ -65,7 +65,7 @@ func TestForkEncodeSSZ(t *testing.T) {
 	expected, err := ssz2.MarshalSSZ([]byte{}, fork.PreviousVersion[:], fork.CurrentVersion[:], fork.Epoch)
 	require.NoError(err, "Error calculating expected encoded value")
 
-	require.Equal(encoded, expected, "Fork EncodeSSZ did not produce the expected result")
+	require.Equal(expected, encoded, "Fork EncodeSSZ did not produce the expected result")
 }
 
 func TestForkDecodeSSZ(t *testing.T) {
@@ -87,7 +87,7 @@ func TestForkDecodeSSZ(t *testing.T) {
 		CurrentVersion:  [4]byte{5, 6, 7, 8},
 		Epoch:           123,
 	}
-	require.Equal(fork, expected, "Fork DecodeSSZ did not produce the expected result")
+	require.Equal(expected, fork, "Fork DecodeSSZ did not produce the expected result")
 }
 
 func TestForkEncodingSizeSSZ(t *testing.T) {
@@ -96,7 +96,7 @@ func TestForkEncodingSizeSSZ(t *testing.T) {
 	fork := cltypes.Fork{}
 	encodingSize := fork.EncodingSizeSSZ()
 
-	require.Equal(encodingSize, 16, "Fork EncodingSizeSSZ did not return the expected size")
+	require.Equal(16, encodingSize, "Fork EncodingSizeSSZ did not return the expected size")
 }
 
 func TestForkHashSSZ(t *testing.T) {
@@ -114,5 +114,5 @@ func TestForkHashSSZ(t *testing.T) {
 	expected, err := merkle_tree.HashTreeRoot(fork.PreviousVersion[:], fork.CurrentVersion[:], fork.Epoch)
 	require.NoError(err, "Error calculating expected hash")
 
-	require.Equal(hash, expected, "Fork HashSSZ did not produce the expected result")
+	require.Equal(expected, hash, "Fork HashSSZ did not produce the expected result")
 }

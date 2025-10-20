@@ -22,15 +22,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -39,12 +35,14 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 var (
 	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
-	computeSigningRoot           = fork.ComputeSigningRoot
 )
 
 type attestationService struct {
@@ -67,7 +65,7 @@ type attestationService struct {
 type AttestationForGossip struct {
 	Attestation       *solid.Attestation
 	SingleAttestation *solid.SingleAttestation // New container after Electra
-	Receiver          *sentinel.Peer
+	Receiver          *sentinelproto.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
 }
@@ -233,7 +231,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				return fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
-			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee)
+			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee))
 		}
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		// mark the validator as seen
@@ -289,16 +287,18 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
-			err = s.committeeSubscribe.AggregateAttestation(attestation)
-			if errors.Is(err, aggregation.ErrIsSuperset) {
+			if err = s.committeeSubscribe.AggregateAttestation(attestation); errors.Is(err, aggregation.ErrIsSuperset) {
 				return
-			}
-
-			if err != nil {
+			} else if err != nil {
 				log.Warn("could not check aggregate attestation", "err", err)
 				return
 			}
-			s.emitters.Operation().SendAttestation(attestation)
+			// send to subscribers
+			if att.Attestation != nil {
+				s.emitters.Operation().SendAttestation(att.Attestation)
+			} else if att.SingleAttestation != nil {
+				s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
+			}
 		},
 	}
 

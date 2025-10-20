@@ -64,7 +64,7 @@ func TestNewPolynomial(t *testing.T) {
 
 	for _, cs := range invalidCoefficients {
 		_, err := NewPolynomial(cs)
-		assert.True(t, err != nil)
+		assert.NotEqual(t, err, nil)
 	}
 }
 
@@ -94,7 +94,7 @@ func TestEvalForKeyper(t *testing.T) {
 	v1 := p.EvalForKeyper(1)
 	assert.Equal(t, v0, p.Eval(KeyperX(0)))
 	assert.Equal(t, v1, p.Eval(KeyperX(1)))
-	assert.True(t, v0.Cmp(v1) != 0)
+	assert.NotEqual(t, v0.Cmp(v1), 0)
 }
 
 func TestValidEval(t *testing.T) {
@@ -115,14 +115,14 @@ func TestValidEval(t *testing.T) {
 		assert.True(t, ValidEval(v))
 	}
 	for _, v := range invalid {
-		assert.True(t, !ValidEval(v))
+		assert.False(t, ValidEval(v))
 	}
 }
 
 func TestRandomPolynomial(t *testing.T) {
 	p, err := RandomPolynomial(rand.Reader, uint64(5))
 	require.NoError(t, err)
-	assert.Equal(t, p.Degree(), uint64(5))
+	assert.Equal(t, uint64(5), p.Degree())
 }
 
 func TestGammas(t *testing.T) {
@@ -141,7 +141,7 @@ func TestGammas(t *testing.T) {
 		makeTestG2(10),
 		makeTestG2(20),
 	})
-	assert.Equal(t, len(*gammas), len(expected))
+	assert.Equal(t, len(expected), len(*gammas))
 	for i := range *gammas {
 		assert.True(t, ([]*blst.P2Affine)(*gammas)[i].Equals(expected[i]))
 	}
@@ -149,7 +149,7 @@ func TestGammas(t *testing.T) {
 
 func TestZeroGammas(t *testing.T) {
 	g := ZeroGammas(uint64(3))
-	assert.Equal(t, 4, len(*g))
+	assert.Len(t, *g, 4)
 	for _, p := range *g {
 		assert.True(t, p.Equals(new(blst.P2Affine)))
 	}
@@ -172,10 +172,10 @@ func TestVerifyPolyEval(t *testing.T) {
 		vi2 := p2.Eval(xi)
 		assert.True(t, VerifyPolyEval(i, vi1, p1.Gammas(), threshold))
 		assert.True(t, VerifyPolyEval(i, vi2, p2.Gammas(), threshold))
-		assert.True(t, !VerifyPolyEval(i, vi1, p2.Gammas(), threshold))
-		assert.True(t, !VerifyPolyEval(i, vi2, p1.Gammas(), threshold))
-		assert.True(t, !VerifyPolyEval(i+1, vi1, p1.Gammas(), threshold))
-		assert.True(t, !VerifyPolyEval(i+1, vi2, p2.Gammas(), threshold))
+		assert.False(t, VerifyPolyEval(i, vi1, p2.Gammas(), threshold))
+		assert.False(t, VerifyPolyEval(i, vi2, p1.Gammas(), threshold))
+		assert.False(t, VerifyPolyEval(i+1, vi1, p1.Gammas(), threshold))
+		assert.False(t, VerifyPolyEval(i+1, vi2, p2.Gammas(), threshold))
 	}
 }
 

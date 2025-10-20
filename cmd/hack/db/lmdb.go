@@ -30,10 +30,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 var logger = log.New()
@@ -517,7 +520,7 @@ func generate2(tx kv.RwTx, entries int) error {
 func generate3(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 61; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.CreateBucket(k); err != nil {
+		if err := tx.CreateTable(k); err != nil {
 			return false, err
 		}
 	}
@@ -594,7 +597,7 @@ func generate6(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 }
 
 func dropT(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.ClearBucket("t"); err != nil {
+	if err := tx.ClearTable("t"); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -624,14 +627,14 @@ func generate7(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 }
 
 func dropT1(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.ClearBucket("t1"); err != nil {
+	if err := tx.ClearTable("t1"); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 func dropT2(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.ClearBucket("t2"); err != nil {
+	if err := tx.ClearTable("t2"); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -641,7 +644,7 @@ func dropT2(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 func generate8(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.CreateBucket(k); err != nil {
+		if err := tx.CreateTable(k); err != nil {
 			return false, err
 		}
 	}
@@ -673,7 +676,7 @@ func generate9(tx kv.RwTx, entries int) error {
 func dropAll(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.DropBucket(k); err != nil {
+		if err := tx.DropTable(k); err != nil {
 			return false, err
 		}
 	}
@@ -686,7 +689,7 @@ func dropGradually(db kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i += 2 {
 		k := fmt.Sprintf("table_%05d", i)
 		if err := db.Update(context.Background(), func(tx1 kv.RwTx) error {
-			return tx1.DropBucket(k)
+			return tx1.DropTable(k)
 		}); err != nil {
 			return false, err
 		}
@@ -747,7 +750,7 @@ func launchReader(kv kv.RwDB, tx kv.Tx, expectVal string, startCh chan struct{},
 	}
 	// Wait for the signal to start reading
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		defer tx1.Rollback()
 		<-startCh
 		c, err := tx1.Cursor("t")
@@ -792,9 +795,9 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer dir2.RemoveAll(dir)
 	var db kv.RwDB
-	db, err = kv2.New(kv.ChainDB, logger).Path(dir).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+	db, err = kv2.New(dbcfg.ChainDB, logger).Path(dir).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
 		return bucketsCfg
 	}).Open(context.Background())
 	if err != nil {
@@ -805,7 +808,6 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 		var display bool
 		if err = db.Update(context.Background(), func(tx kv.RwTx) error {
 			var err1 error
-			//nolint:scopelint
 			display, err1 = generateF(db, tx)
 			return err1
 		}); err != nil {
@@ -829,7 +831,7 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 				return fmt.Errorf("close %s_%d: %w", filename, gi, err)
 			}
 			// nolint:gosec
-			cmd := exec.Command("dot", "-Tpng:gd", "-o", fmt.Sprintf("%s_%d.png", filename, gi), fmt.Sprintf("%s_%d.dot", filename, gi))
+			cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o", fmt.Sprintf("%s_%d.png", filename, gi), fmt.Sprintf("%s_%d.dot", filename, gi))
 			var output []byte
 			if output, err = cmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("dot generation error: %w, output: %s", err, output)

@@ -20,8 +20,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -174,8 +174,8 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.NoError(err)
 		require.False(results.FirstPage)
 		require.False(results.LastPage)
-		require.Equal(2, len(results.Txs))
-		require.Equal(2, len(results.Receipts))
+		require.Len(results.Txs, 2)
+		require.Len(results.Receipts, 2)
 	})
 	t.Run("big page size", func(t *testing.T) {
 		require := require.New(t)
@@ -183,8 +183,8 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.NoError(err)
 		require.False(results.FirstPage)
 		require.True(results.LastPage)
-		require.Equal(3, len(results.Txs))
-		require.Equal(3, len(results.Receipts))
+		require.Len(results.Txs, 3)
+		require.Len(results.Receipts, 3)
 	})
 	t.Run("filter last block", func(t *testing.T) {
 		require := require.New(t)
@@ -193,8 +193,8 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.NoError(err)
 		require.False(results.FirstPage)
 		require.True(results.LastPage)
-		require.Equal(2, len(results.Txs))
-		require.Equal(2, len(results.Receipts))
+		require.Len(results.Txs, 2)
+		require.Len(results.Receipts, 2)
 
 		require.Equal(4, int(results.Txs[0].BlockNumber.ToInt().Uint64()))
 		require.Equal(0, int(results.Txs[0].Nonce))

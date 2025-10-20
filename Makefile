@@ -1,9 +1,11 @@
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
-GOBINREL = build/bin
-GOBIN = $(CURDIR)/$(GOBINREL)
-UNAME = $(shell uname) # Supported: Darwin, Linux
+GOBINREL := build/bin
+GOBIN := $(CURDIR)/$(GOBINREL)
+GOARCH ?= $(shell go env GOHOSTARCH)
+UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
+DOCKER_BINARIES ?= "erigon"
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
@@ -45,23 +47,53 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
-BUILD_TAGS = nosqlite,noboltdb
+CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
+ifeq ($(CGO_CXXFLAGS),)
+	CGO_CXXFLAGS += -g
+	CGO_CXXFLAGS += -O2
+endif
+
+BUILD_TAGS =
 
 ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
+override BUILD_TAGS := $(BUILD_TAGS),$(EXTRA_BUILD_TAGS)
+
 GOPRIVATE = github.com/erigontech/silkworm-go
 
 PACKAGE = github.com/erigontech/erigon
 
-GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
-GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+# Add to user provided GO_FLAGS. Insert it after a bunch of other stuff to allow overrides, and before tags to maintain BUILD_TAGS (set that instead if you want to modify it).
 
-GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
+GO_RELEASE_FLAGS := -trimpath -buildvcs=false \
+	-ldflags "-X ${PACKAGE}/db/version.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/db/version.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/db/version.GitTag=${GIT_TAG}"
+GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)"
+
+# Basic release build. Pass EXTRA_BUILD_TAGS if you want to modify the tags set.
+GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
+DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
+GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
+GOTEST = $(GO_BUILD_ENV) CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GODEBUG=cgocheck=0 GOTRACEBACK=1 GOEXPERIMENT=synctest $(GO) test $(GO_FLAGS) ./...
+
+GOINSTALL = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go install -trimpath
+
+OS = $(shell uname -s)
+ARCH = $(shell uname -m)
+
+ifeq ($(OS),Darwin)
+PROTOC_OS := osx
+ifeq ($(ARCH),arm64)
+ARCH = aarch_64
+endif
+endif
+ifeq ($(OS),Linux)
+PROTOC_OS = linux
+endif
+
+PROTOC_INCLUDE = build/include/google
+PROTO_PATH = node/interfaces
 
 default: all
 
@@ -86,13 +118,11 @@ validate_docker_build_args:
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
 ## docker:                            validate, update submodules and build with docker
-docker: validate_docker_build_args git-submodules
+docker: 
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
-		--build-arg VERSION=${GIT_TAG} \
-		--build-arg UID=${DOCKER_UID} \
-		--build-arg GID=${DOCKER_GID} \
+		--build-arg BINARIES="${DOCKER_BINARIES}" \
 		${DOCKER_FLAGS} \
 		.
 
@@ -115,12 +145,14 @@ docker-compose: validate_docker_build_args setup_xdg_data_home
 
 ## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
-	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
+	$(GO_BUILD_DEBUG) -o $(GOBIN)/ ./cmd/...
 
+.PHONY: %.cmd
+# Deferred (=) because $* isn't defined until the rule is executed.
+%.cmd: override OUTPUT = $(GOBIN)/$*$(CMD_BUILD_SUFFIX)
 %.cmd:
-	@# Note: $* is replaced by the command name
-	@echo "Building $*"
-	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
+	@echo Building '$(OUTPUT)'
+	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
@@ -130,19 +162,16 @@ geth: erigon
 erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
-COMMANDS += devnet
 COMMANDS += capcli
 COMMANDS += downloader
 COMMANDS += hack
 COMMANDS += integration
-COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest
 COMMANDS += sentry
 COMMANDS += state
 COMMANDS += txpool
-COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
@@ -166,25 +195,38 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-lib:
-	@cd erigon-lib && $(MAKE) test
-
-test-erigon-lib-all:
-	@cd erigon-lib && $(MAKE) test-all
-
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
-## test:                      run short tests with a 10m timeout
-test: test-erigon-lib
-	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
+## test-short:                run short tests with a 10m timeout
+test-short:
+	@{ \
+		$(GOTEST) -short > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all
-	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
+test-all:
+	@{ \
+		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
+
+## test-all-race:             run all tests with the race flag
+test-all-race:
+	@{ \
+		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
+		STATUS=$$?; \
+		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
+		exit $$STATUS; \
+	}
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
-test-hive:	
+test-hive:
 	@if ! command -v act >/dev/null 2>&1; then \
 		echo "act command not found in PATH, please source it in PATH. If nektosact is not installed, install it by visiting https://nektosact.com/installation/index.html"; \
 	elif [ -z "$(GITHUB_TOKEN)"]; then \
@@ -201,7 +243,7 @@ define run_suite
     printf "\n\n============================================================"; \
     echo "Running test: $1-$2"; \
     printf "\n"; \
-    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
+    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --docker.nocache=true --client erigon $3 2>&1 | tee output.log; \
     if [ $$? -gt 0 ]; then \
         echo "Exitcode gt 0"; \
     fi; \
@@ -216,45 +258,53 @@ define run_suite
     printf "\n"; \
     echo "-----------   Results for $1-$2    -----------"; \
     echo "Tests: $$tests, Failed: $$failed"; \
-    printf "\n\n============================================================"
+    printf "\n\n============================================================\n"
 endef
 
 hive-local:
+	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
-	rm -rf "hive-local-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
-	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	rm -rf "temp/hive-local-$(SHORT_COMMIT)" && mkdir "temp/hive-local-$(SHORT_COMMIT)"
+	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
-	cd "hive-local-$(SHORT_COMMIT)/hive" && \
-	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
-	cd "hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
-	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && \
+	$(if $(filter Darwin,$(UNAME)), \
+		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
+		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
+	)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
+	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
 eest-hive:
-	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
-	rm -rf "eest-hive-$(SHORT_COMMIT)" && mkdir "eest-hive-$(SHORT_COMMIT)"
-	cd "eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
-
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && \
-	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz)
-
+	@if [ ! -d "temp" ]; then mkdir temp; fi
+	docker build -t "test/erigon:$(SHORT_COMMIT)" .
+	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
+	$(if $(filter Darwin,$(UNAME)), \
+		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
+		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
+	)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
 	docker build -t test/erigon:current . ; \
 	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
 	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
-	printf "\nTo view logs: \nkurtosis service logs my-testnet el-1-erigon-lighthouse\n"
+	printf "\nTo view logs: \nkurtosis service logs makefile-kurtosis-testnet el-1-erigon-lighthouse\n"
 endef
 
 check-kurtosis:
@@ -266,8 +316,11 @@ check-kurtosis:
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
 
-kurtosis-reguler-assertoor:	check-kurtosis 
+kurtosis-regular-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
+
+kurtosis-fusaka-assertoor: check-kurtosis
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/fusaka.io")
 
 kurtosis-cleanup:
 	@echo "Currently Running Enclaves: "
@@ -277,23 +330,54 @@ kurtosis-cleanup:
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
-	@cd erigon-lib && $(MAKE) lint-deps
+	@./tools/golangci_lint.sh --install-deps
 
 ## lintci:                            run golangci-lint linters
 lintci:
-	@cd erigon-lib && $(MAKE) lintci
-	@./erigon-lib/tools/golangci_lint.sh
+	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
 ## lint:                              run all linters
-lint:
-	@cd erigon-lib && $(MAKE) lint
-	@./erigon-lib/tools/golangci_lint.sh
-	@./erigon-lib/tools/mod_tidy_check.sh
+lint: 
+	@./tools/golangci_lint.sh
+	@./tools/mod_tidy_check.sh
+
+## tidy:                              `go mod tidy`
+tidy:
+	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache
 	rm -fr build/*
+
+$(GOBINREL):
+	mkdir -p "$(GOBIN)"
+
+$(GOBINREL)/protoc: | $(GOBINREL)
+	$(eval PROTOC_TMP := $(shell mktemp -d))
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v32.0/protoc-32.0-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	cd "$(PROTOC_TMP)" && unzip protoc.zip
+	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
+	mkdir -p "$(PROTOC_INCLUDE)"
+	cp -R "$(PROTOC_TMP)/include/google/" "$(PROTOC_INCLUDE)"
+	rm -rf "$(PROTOC_TMP)"
+
+# 'protoc-gen-go' tool generates proto messages
+$(GOBINREL)/protoc-gen-go: | $(GOBINREL)
+	$(GOINSTALL) google.golang.org/protobuf/cmd/protoc-gen-go
+
+# 'protoc-gen-go-grpc' tool generates grpc services
+$(GOBINREL)/protoc-gen-go-grpc: | $(GOBINREL)
+	$(GOINSTALL) google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+$(PROTO_PATH):
+	git submodule update --init $@
+
+protoc-all: $(GOBINREL)/protoc $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
+
+protoc-clean:
+	rm -f "$(GOBIN)/protoc"*
+	rm -rf "$(PROTOC_INCLUDE)"
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
@@ -309,15 +393,16 @@ devtools:
 
 ## mocks:                             generate test mocks
 mocks:
-	@cd erigon-lib && $(MAKE) mocks
 	rm -f $(GOBIN)/mockgen
+	$(GOINSTALL) go.uber.org/mock/mockgen@latest
 	$(GOBUILD) -o "$(GOBIN)/mockgen" go.uber.org/mock/mockgen
-	grep -r -l --exclude-dir="erigon-lib" --exclude-dir="tests" --exclude-dir="*$(GOBINREL)*" "^// Code generated by MockGen. DO NOT EDIT.$$" . | xargs rm -r
+	grep -r -l --exclude-dir="execution/tests" --exclude-dir="*$(GOBINREL)*" "^// Code generated by MockGen. DO NOT EDIT.$$" . | xargs rm -r
 	PATH="$(GOBIN):$(PATH)" go generate -run "mockgen" ./...
 
 ## solc:                              generate all solidity contracts
 solc:
-	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
+	PATH="$(GOBIN):$(PATH)" go generate -run "solc" -skip "txnprovider/shutter" ./...
+	@cd txnprovider/shutter && $(MAKE) solc
 
 ## abigen:                            generate abis using abigen
 abigen:
@@ -334,8 +419,36 @@ graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
 ## grpc:                              generate grpc and protobuf code
-grpc:
-	@cd erigon-lib && $(MAKE) grpc
+grpc: protoc-all $(PROTO_PATH)
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=node/gointerfaces -I=$(PROTOC_INCLUDE) \
+		--go_opt=Mtypes/types.proto=./typesproto \
+		types/types.proto
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=node/gointerfaces --go-grpc_out=node/gointerfaces -I=$(PROTOC_INCLUDE) \
+		--go_opt=Mtypes/types.proto=github.com/erigontech/erigon/node/gointerfaces/typesproto \
+		--go-grpc_opt=Mtypes/types.proto=github.com/erigontech/erigon/node/gointerfaces/typesproto \
+		--go_opt=Mp2psentry/sentry.proto=./sentryproto \
+		--go-grpc_opt=Mp2psentry/sentry.proto=./sentryproto \
+		--go_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
+		--go-grpc_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
+		--go_opt=Mremote/kv.proto=./remoteproto \
+		--go-grpc_opt=Mremote/kv.proto=./remoteproto \
+		--go_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go-grpc_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go_opt=Mremote/bor.proto=./remoteproto \
+		--go-grpc_opt=Mremote/bor.proto=./remoteproto \
+		--go_opt=Mdownloader/downloader.proto=./downloaderproto \
+		--go-grpc_opt=Mdownloader/downloader.proto=./downloaderproto \
+		--go_opt=Mexecution/execution.proto=./executionproto \
+		--go-grpc_opt=Mexecution/execution.proto=./executionproto \
+		--go_opt=Mtxpool/txpool.proto=./txpoolproto \
+		--go-grpc_opt=Mtxpool/txpool.proto=./txpoolproto \
+		--go_opt=Mtxpool/mining.proto=./txpoolproto \
+		--go-grpc_opt=Mtxpool/mining.proto=./txpoolproto \
+		p2psentry/sentry.proto p2psentinel/sentinel.proto \
+		remote/bor.proto remote/kv.proto remote/ethbackend.proto \
+		downloader/downloader.proto execution/execution.proto \
+		txpool/txpool.proto txpool/mining.proto
+
 	@cd txnprovider/shutter && $(MAKE) proto
 
 ## stringer:                          generate stringer code
@@ -344,13 +457,13 @@ stringer:
 	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
 
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc stringer
-	@cd erigon-lib && $(MAKE) gen
+gen:
+	mocks solc abigen gencodec graphql grpc stringer
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
-	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
-	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/tests/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/state/contracts/
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
@@ -380,23 +493,7 @@ install:
 	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/erigontech/erigon
-GOLANG_CROSS_VERSION  ?= v1.21.5
 
-
-.PHONY: release-dry-run
-release-dry-run: git-submodules
-	@docker run \
-		--rm \
-		--privileged \
-		-e CGO_ENABLED=1 \
-		-e GITHUB_TOKEN \
-		-e DOCKER_USERNAME \
-		-e DOCKER_PASSWORD \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/go/src/$(PACKAGE_NAME) \
-		-w /go/src/$(PACKAGE_NAME) \
-		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip=validate --skip=publish
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
@@ -425,11 +522,6 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
 	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
-
-## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
-.PHONY: automated-tests
-automated-tests:
-	./tests/automated-testing/run.sh
 
 ## help:                              print commands help
 help	:	Makefile

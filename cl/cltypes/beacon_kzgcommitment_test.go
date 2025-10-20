@@ -33,7 +33,7 @@ func TestKZGCommitmentCopy(t *testing.T) {
 	// Modify the original commitment
 	commitment[0] = 2
 
-	require.EqualValues(commitmentCopy[0], 1, "KZGCommitment Copy did not create a separate copy")
+	require.EqualValues(1, commitmentCopy[0], "KZGCommitment Copy did not create a separate copy")
 }
 
 func TestKZGCommitmentEncodeSSZ(t *testing.T) {
@@ -46,7 +46,7 @@ func TestKZGCommitmentEncodeSSZ(t *testing.T) {
 	require.NoError(err, "Error encoding KZGCommitment")
 
 	expected := append([]byte{}, commitment[:]...)
-	require.Equal(encoded, expected, "KZGCommitment EncodeSSZ did not produce the expected result")
+	require.Equal(expected, encoded, "KZGCommitment EncodeSSZ did not produce the expected result")
 }
 
 func TestKZGCommitmentDecodeSSZ(t *testing.T) {
@@ -61,7 +61,7 @@ func TestKZGCommitmentDecodeSSZ(t *testing.T) {
 
 	expected := KZGCommitment{}
 	expected[0] = 1
-	require.Equal(commitment, expected, "KZGCommitment DecodeSSZ did not produce the expected result")
+	require.Equal(expected, commitment, "KZGCommitment DecodeSSZ did not produce the expected result")
 }
 
 func TestKZGCommitmentEncodingSizeSSZ(t *testing.T) {
@@ -70,7 +70,7 @@ func TestKZGCommitmentEncodingSizeSSZ(t *testing.T) {
 	commitment := KZGCommitment{}
 	encodingSize := commitment.EncodingSizeSSZ()
 
-	require.Equal(encodingSize, 48, "KZGCommitment EncodingSizeSSZ did not return the expected size")
+	require.Equal(48, encodingSize, "KZGCommitment EncodingSizeSSZ did not return the expected size")
 }
 
 func TestKZGCommitmentHashSSZ(t *testing.T) {
@@ -86,5 +86,5 @@ func TestKZGCommitmentHashSSZ(t *testing.T) {
 	expected, err := merkle_tree.BytesRoot(commitment[:])
 	require.NoError(err, "Error calculating expected hash")
 
-	require.Equal(hash, expected, "KZGCommitment HashSSZ did not produce the expected result")
+	require.Equal(expected, hash, "KZGCommitment HashSSZ did not produce the expected result")
 }

@@ -20,11 +20,11 @@ import (
 	"context"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -90,8 +90,8 @@ func (api *APIImpl) UninstallFilter(_ context.Context, index string) (isDeleted 
 }
 
 // GetFilterChanges implements eth_getFilterChanges.
-// Polling method for a previously-created filter
-// returns an array of logs, block headers, or pending transactions which occurred since last poll.
+// Polling method for a previously created filter
+// returns an array of logs, block headers, or pending transactions which have occurred since the last poll.
 func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
@@ -99,6 +99,9 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	stub := make([]any, 0)
 	// remove 0x
 	cutIndex := strings.TrimPrefix(index, "0x")
+	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+		return nil, rpc.ErrFilterNotFound
+	}
 	if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
 		for _, v := range blocks {
 			stub = append(stub, v.Hash())
@@ -120,22 +123,24 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		}
 		return stub, nil
 	}
-	return stub, nil
+	return []any{}, nil
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
-// Polling method for a previously-created filter
-// returns an array of logs which occurred since last poll.
+// Polling method for a previously created filter
+// returns an array of logs which have occurred since the last poll.
 func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex))
-	if len(logs) == 0 || !ok {
-		return []*types.Log{}, nil
+	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+		return nil, rpc.ErrFilterNotFound
 	}
-	return logs, nil
+	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
+		return logs, nil
+	}
+	return []*types.Log{}, nil
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
@@ -151,7 +156,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		headers, id := api.filters.SubscribeNewHeads(32)
 		defer api.filters.UnsubscribeHeads(id)
 		for {
@@ -189,7 +194,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context, fullTx *bool) (*
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		txsCh, id := api.filters.SubscribePendingTxs(256)
 		defer api.filters.UnsubscribePendingTxs(id)
 
@@ -236,7 +241,7 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		txsCh, id := api.filters.SubscribePendingTxs(512)
 		defer api.filters.UnsubscribePendingTxs(id)
 
@@ -277,7 +282,7 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		logs, id := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit)
 		defer api.filters.UnsubscribeLogs(id)
 

@@ -22,21 +22,19 @@ import (
 	"io/fs"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
-	"github.com/erigontech/erigon/spectest"
-
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v2"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/spectest"
 )
 
 type unmarshalerMarshalerHashable interface {
@@ -85,7 +83,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		}
 		haveEncoded, err := object.EncodeSSZ(nil)
 		require.NoError(t, err)
-		require.EqualValues(t, haveEncoded, encoded)
+		require.Equal(t, haveEncoded, encoded)
 		// Now let it do the encoding in snapshot format
 		if blk, ok := object.(*cltypes.SignedBeaconBlock); ok {
 			var b bytes.Buffer
@@ -181,7 +179,7 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 		// 2. check ssz bytes
 		sszBytes, err := object.EncodeSSZ(nil)
 		require.NoError(t, err)
-		require.EqualValues(t, encoded, sszBytes, "ssz bytes not equal")
+		require.Equal(t, encoded, sszBytes, "ssz bytes not equal")
 
 		if testOptions.testJson {
 			jsonObject := newObjFunc(c.Version())

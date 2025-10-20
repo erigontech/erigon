@@ -26,14 +26,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/erigon-db/migrations"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/migrations"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 func expandHomeDir(dirpath string) string {
@@ -86,8 +88,14 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
-	if opts.GetLabel() != kv.ChainDB {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+	migrationDBs := map[kv.Label]bool{
+		dbcfg.ChainDB:         true,
+		dbcfg.ConsensusDB:     true,
+		dbcfg.HeimdallDB:      true,
+		dbcfg.PolygonBridgeDB: true,
+	}
+	if _, ok := migrationDBs[opts.GetLabel()]; !ok {
 		panic(opts.GetLabel())
 	}
 
@@ -110,9 +118,15 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 		}
 	}
 
+	dirs := datadir.New(datadirCli)
+	if err := CheckSaltFilesExist(dirs); err != nil {
+		return nil, err
+	}
+
 	_, _, agg, _, _, _, err := allSnapshots(context.Background(), rawDB, logger)
 	if err != nil {
 		return nil, err
 	}
+
 	return temporal.New(rawDB, agg)
 }

@@ -66,7 +66,7 @@ func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (er
 	expectedRoot, err := expectedState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, expectedRoot, haveRoot)
+	assert.Equal(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -131,5 +131,10 @@ var pendingDepositTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 
 var PendingConsolidationTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessPendingConsolidations(s)
+	return nil
+})
+
+var ProposerLookaheadTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessProposerLookahead(s)
 	return nil
 })

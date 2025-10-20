@@ -23,11 +23,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
@@ -108,9 +108,9 @@ func TestBlockRpcConversion(t *testing.T) {
 		panic(err)
 	}
 	testBlockRaw := testBlock.RawBody()
-	require.Greater(len(testBlockRaw.Transactions), 0)
-	require.Greater(len(testBlockRaw.Uncles), 0)
-	require.Greater(len(testBlockRaw.Withdrawals), 0)
+	require.NotEmpty(testBlockRaw.Transactions)
+	require.NotEmpty(testBlockRaw.Uncles)
+	require.NotEmpty(testBlockRaw.Withdrawals)
 	require.Nil(deep.Equal(testBlockRaw, roundTripBody))
 }
 

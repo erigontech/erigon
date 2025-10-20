@@ -26,9 +26,10 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type fuzzer struct {
@@ -97,7 +98,7 @@ func (f *fuzzer) fuzz() int {
 	// A parent header
 	header := &types.Header{}
 	if f.readBool() {
-		header.UncleHash = types.EmptyUncleHash
+		header.UncleHash = empty.UncleHash
 	}
 	// Difficulty can range between 0x2000 (2 bytes) and up to 32 bytes
 	{

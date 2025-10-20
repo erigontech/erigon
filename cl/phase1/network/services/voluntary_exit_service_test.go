@@ -20,9 +20,10 @@ import (
 	"context"
 	"log"
 	"testing"
-	"time"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -31,8 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/mock/gomock"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type voluntaryExitTestSuite struct {
@@ -63,8 +63,7 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{}
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
-	batchCheckInterval = 1 * time.Millisecond
-	go batchSignatureVerifier.Start()
+	batchSignatureVerifier.Start()
 	t.voluntaryExitService = NewVoluntaryExitService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.ethClock, batchSignatureVerifier)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{
@@ -252,5 +251,6 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 }
 
 func TestVoluntaryExit(t *testing.T) {
+	//t.Skip("issue #14997")
 	suite.Run(t, new(voluntaryExitTestSuite))
 }

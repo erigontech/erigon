@@ -24,17 +24,15 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/rpc"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 // Whether the reverse downloader arrived at expected height or condition.
@@ -61,7 +59,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 		ctx:         ctx,
 		rpc:         rpc,
 		db:          db,
-		reqInterval: time.NewTicker(300 * time.Millisecond),
+		reqInterval: time.NewTicker(600 * time.Millisecond),
 		neverSkip:   true,
 		engine:      engine,
 		sn:          sn,
@@ -125,7 +123,7 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
-	count := uint64(64)
+	count := uint64(16)
 	start := b.slotToDownload.Load() - count + 1
 	// Overflow? round to 0.
 	if start > b.slotToDownload.Load() {
@@ -144,9 +142,11 @@ Loop:
 				}
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
+					b.rpc.BanPeer(peerId)
 					return
 				}
 				if responses == nil {
+					b.rpc.BanPeer(peerId)
 					return
 				}
 				if len(responses) == 0 {

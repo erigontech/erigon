@@ -20,10 +20,10 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -131,8 +131,8 @@ func TestValidatorNonSlashed(t *testing.T) {
 	decodedValidator := solid.NewValidator()
 	require.NoError(t, decodedValidator.DecodeSSZ(encoded, 0))
 	encoded2, _ := decodedValidator.EncodeSSZ(nil)
-	require.EqualValues(t, encoded2, encoded)
-	require.EqualValues(t, decodedValidator, testValidator2)
+	require.Equal(t, encoded2, encoded)
+	require.Equal(t, decodedValidator, testValidator2)
 	root, err := decodedValidator.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(root), testValidatorRoot2)

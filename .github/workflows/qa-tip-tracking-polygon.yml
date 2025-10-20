@@ -3,14 +3,16 @@ name: QA - Tip tracking (Polygon)
 on:
   push:
     branches:
-      - 'release/3.*'
-  schedule:
-    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
-  workflow_dispatch:     # Run manually
+      - 'release/3.1'
+  workflow_dispatch:      # Run manually
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  tip-tracking-test:
-    runs-on: [self-hosted, qa, Polygon]
+  bor-mainnet-tip-tracking-test:
+    runs-on: [self-hosted, qa, Polygon, tip-tracking]
     timeout-minutes: 800
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
@@ -22,7 +24,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Clean Erigon Build Directory
       run: |
@@ -57,7 +59,7 @@ jobs:
         test_exit_status=$?
         
         # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
+        echo "test_executed=true" >> "$GITHUB_OUTPUT"
     
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then
@@ -74,6 +76,13 @@ jobs:
           echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Upload Downloader Torrent Client Status
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: torrent-client-status-${{ env.CHAIN }}
+        path: torrent-client-status.txt
 
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'
@@ -103,12 +112,12 @@ jobs:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
-    - name: Upload erigon log
+    - name: Upload erigon logs
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: erigon-log
-        path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/erigon.log
+        name: erigon-logs
+        path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'

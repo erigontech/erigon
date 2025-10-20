@@ -25,10 +25,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/node/paths"
 )
 
 func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
@@ -161,7 +162,7 @@ func writeDbTables(w http.ResponseWriter, r *http.Request, dataDir string, dbnam
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var e error
-		buckets, e := tx.ListBuckets()
+		buckets, e := tx.ListTables()
 		if e != nil {
 			return e
 		}

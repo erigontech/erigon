@@ -24,10 +24,6 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/erigontech/erigon/cl/utils/bls"
-
-	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -36,8 +32,11 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 type seenSyncCommitteeContribution struct {
@@ -62,7 +61,7 @@ type syncContributionService struct {
 // SignedContributionAndProofWithGossipData type represents SignedContributionAndProof with the gossip data where it's coming from.
 type SignedContributionAndProofForGossip struct {
 	SignedContributionAndProof *cltypes.SignedContributionAndProof
-	Receiver                   *sentinel.Peer
+	Receiver                   *sentinelproto.Peer
 	ImmediateVerification      bool
 }
 
@@ -174,7 +173,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 		// in BatchVerification function. After validating signatures, if they are valid we will publish the
 		// gossip ourselves or ban the peer which sent that particular invalid signature.
-		return ErrIgnore
+		return nil
 	})
 }
 

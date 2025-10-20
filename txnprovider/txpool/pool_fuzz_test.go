@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !nofuzz
-
 package txpool
 
 import (
@@ -28,17 +26,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -328,7 +327,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
 
 		err = pool.start(ctx)
@@ -416,14 +415,14 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 			// all txns in side data structures must be in some queue
 			for _, txn := range pool.byHash {
-				require.True(txn.bestIndex >= 0, msg)
-				assert.True(txn.worstIndex >= 0, msg)
+				require.GreaterOrEqual(txn.bestIndex, 0, msg)
+				assert.GreaterOrEqual(txn.worstIndex, 0, msg)
 			}
 			for id := range senders {
 				//assert.True(senders[i].all.Len() > 0)
 				pool.all.ascend(id, func(mt *metaTxn) bool {
-					require.True(mt.worstIndex >= 0, msg)
-					assert.True(mt.bestIndex >= 0, msg)
+					require.GreaterOrEqual(mt.worstIndex, 0, msg)
+					assert.GreaterOrEqual(mt.bestIndex, 0, msg)
 					return true
 				})
 			}
@@ -446,7 +445,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify := func(unwindTxns, minedTxns TxnSlots, msg string) {
 			select {
 			case newAnnouncements := <-ch:
-				assert.Greater(newAnnouncements.Len(), 0)
+				assert.Positive(newAnnouncements.Len())
 				for i := 0; i < newAnnouncements.Len(); i++ {
 					_, _, newHash := newAnnouncements.At(i)
 					for j := range unwindTxns.Txns {
@@ -480,10 +479,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 			txID = tx.ViewID()
 			return nil
 		})
-		change := &remote.StateChangeBatch{
+		change := &remoteproto.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remote.StateChange{
+			ChangeBatch: []*remoteproto.StateChange{
 				{BlockHeight: 0, BlockHash: h0},
 			},
 		}
@@ -491,8 +490,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 			addr := pool.senders.senderID2Addr[id]
 			v := make([]byte, EncodeSenderLengthForStorage(sender.nonce, sender.balance))
 			EncodeSender(sender.nonce, sender.balance, v)
-			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-				Action:  remote.Action_UPSERT,
+			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+				Action:  remoteproto.Action_UPSERT,
 				Address: gointerfaces.ConvertAddressToH160(addr),
 				Data:    v,
 			})
@@ -505,10 +504,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(txns1, TxnSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txns2, txns3
-		change = &remote.StateChangeBatch{
+		change = &remoteproto.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remote.StateChange{
+			ChangeBatch: []*remoteproto.StateChange{
 				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
@@ -518,11 +517,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(TxnSlots{}, txns2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		change = &remote.StateChangeBatch{
+		change = &remoteproto.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
+			ChangeBatch: []*remoteproto.StateChange{
+				{BlockHeight: 0, BlockHash: h0, Direction: remoteproto.Direction_UNWIND},
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, txns2, TxnSlots{}, TxnSlots{})
@@ -530,10 +529,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(txns2, TxnSlots{}, "fork2")
 		checkNotify(txns2, TxnSlots{}, "fork2")
 
-		change = &remote.StateChangeBatch{
+		change = &remoteproto.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remote.StateChange{
+			ChangeBatch: []*remoteproto.StateChange{
 				{BlockHeight: 1, BlockHash: h22},
 			},
 		}
@@ -554,11 +553,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxnSlots{}, "after_flush")
 		checkNotify(p2pReceived, TxnSlots{}, "after_flush")
 
-		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted
-		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })
+		err = coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error { return p2.fromDB(ctx, tx, coreTx) })
 		require.NoError(err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.TxnSlot.Rlp)

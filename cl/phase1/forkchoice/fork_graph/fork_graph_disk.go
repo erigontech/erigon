@@ -25,8 +25,6 @@ import (
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -37,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const dumpSlotFrequency = 4
@@ -70,7 +70,7 @@ func (r ChainSegmentInsertionResult) String() string {
 	case BelowAnchor:
 		return "block below anchor slot"
 	case LogisticError:
-		return "error occured"
+		return "error occurred"
 	case PreValidated:
 		return "already validated"
 	default:
@@ -210,7 +210,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	}
 
 	if newState == nil {
-		log.Trace("AddChainSegment: missing segment", "block", common.Hash(blockRoot))
+		log.Debug("AddChainSegment: missing segment", "block", common.Hash(blockRoot), "slot", block.Slot, "parentRoot", block.ParentRoot)
 		return nil, MissingSegment, nil
 	}
 	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().Root)

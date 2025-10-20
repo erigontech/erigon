@@ -21,13 +21,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 func NewBorStateSyncTxnTracer(
@@ -159,7 +159,7 @@ func (bsstt *borStateSyncTxnTracer) OnGenesisBlock(b *types.Block, alloc types.G
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnBalanceChange(a common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (bsstt *borStateSyncTxnTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	if bsstt.Tracer.OnBalanceChange != nil {
 		bsstt.Tracer.OnBalanceChange(a, prev, new, reason)
 	}
@@ -177,7 +177,7 @@ func (bsstt *borStateSyncTxnTracer) OnCodeChange(a common.Address, prevCodeHash 
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnStorageChange(a common.Address, k *common.Hash, prev, new uint256.Int) {
+func (bsstt *borStateSyncTxnTracer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {
 	if bsstt.Tracer.OnStorageChange != nil {
 		bsstt.Tracer.OnStorageChange(a, k, prev, new)
 	}

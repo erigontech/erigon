@@ -19,14 +19,15 @@ package db
 import (
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/diag/flags"
 	"github.com/erigontech/erigon/cmd/diag/util"
+	"github.com/erigontech/erigon/common"
 )
 
 type DBInfo struct {
@@ -170,7 +171,7 @@ func DBsInfo(cliCtx *cli.Context) ([]DBInfo, error) {
 			tables := data[i].tables
 			for j := 0; j < len(tables); j++ {
 				if tables[j].Count == 0 {
-					tables = append(tables[:j], tables[j+1:]...)
+					tables = slices.Delete(tables, j, j+1)
 					j--
 				}
 			}
@@ -180,7 +181,7 @@ func DBsInfo(cliCtx *cli.Context) ([]DBInfo, error) {
 		//filter out empty dbs
 		for i := 0; i < len(data); i++ {
 			if len(data[i].tables) == 0 {
-				data = append(data[:i], data[i+1:]...)
+				data = slices.Delete(data, i, i+1)
 				i--
 			}
 		}
