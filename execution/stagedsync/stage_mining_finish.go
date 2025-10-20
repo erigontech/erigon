@@ -21,12 +21,12 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type MiningFinishCfg struct {
@@ -95,7 +95,7 @@ func SpawnMiningFinishStage(s *StageState, sd *dbstate.SharedDomains, tx kv.Temp
 	if block.Transactions().Len() > 0 {
 		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
 			"blockNum", block.NumberU64(),
-			"nonce", block.Nonce(),
+			"nonce", block.NonceU64(),
 			"hash", block.Hash(),
 			"gasLimit", block.GasLimit(),
 			"gasUsed", block.GasUsed(),

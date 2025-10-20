@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
@@ -126,7 +126,11 @@ func SpawnMiningExecStage(s *StageState, sd *dbstate.SharedDomains, tx kv.Tempor
 	}
 	defer simSd.Close()
 
-	txNum := simSd.TxNum()
+	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}
+
+	txNum := sd.TxNum()
+
+	core.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
 
 	if len(preparedTxns) > 0 {
 		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
@@ -194,7 +198,6 @@ func SpawnMiningExecStage(s *StageState, sd *dbstate.SharedDomains, tx kv.Tempor
 	if current.Receipts == nil {
 		current.Receipts = types.Receipts{}
 	}
-	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}
 
 	if err := cfg.engine.Prepare(chainReader, current.Header, ibs); err != nil {
 		return err

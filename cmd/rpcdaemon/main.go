@@ -26,9 +26,9 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
-	"github.com/erigontech/erigon/turbo/debug"
 
 	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
