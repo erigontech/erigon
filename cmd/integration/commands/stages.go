@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	arbchain "github.com/erigontech/erigon/arb/chain"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1215,7 +1216,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	events := shards.NewEvents()
 
 	genesis := readGenesis(chain)
-	var chainConfig *chain2.ChainConfig
+	var chainConfig *chain2.Config
 	var genesisBlock *types.Block
 	if chain == "arb1" {
 		chainConfig = chainspec.ChainConfigByChainName("arb1")
