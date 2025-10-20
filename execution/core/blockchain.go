@@ -284,9 +284,11 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 		SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true, // isFree
-		nil,  // maxFeePerBlobGas
+		data, nil,
+		false, // checkNonce
+		false, // checkGas
+		true,  // isFree
+		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
 	vmConfig.NoReceipts = true
@@ -325,9 +327,11 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 		SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true, // isFree
-		nil,  // maxFeePerBlobGas
+		data, nil,
+		false, // checkNonce
+		false, // checkGas
+		true,  // isFree
+		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
