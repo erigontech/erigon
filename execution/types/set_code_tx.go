@@ -126,6 +126,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+		checkTransaction: true,
 		checkGas:   true,
 	}
 	if !rules.IsPrague {

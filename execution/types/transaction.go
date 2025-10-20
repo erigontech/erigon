@@ -374,6 +374,7 @@ type Message struct {
 	data             []byte
 	accessList       AccessList
 	checkNonce       bool
+	checkTransaction bool
 	checkGas         bool
 	isFree           bool
 	blobHashes       []common.Hash
@@ -382,7 +383,7 @@ type Message struct {
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
-	checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
+	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
 	m := Message{
 		from:       from,
@@ -393,6 +394,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		data:       data,
 		accessList: accessList,
 		checkNonce: checkNonce,
+		checkTransaction: checkTransaction,
 		checkGas:   checkGas,
 		isFree:     isFree,
 	}
@@ -431,6 +433,10 @@ func (m *Message) SetAuthorizations(authorizations []Authorization) {
 func (m *Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
+}
+func (m *Message) CheckTransaction() bool { return m.checkTransaction }
+func (m *Message) SetCheckTransaction(checkTransaction bool) {
+	m.checkTransaction = checkTransaction
 }
 func (m *Message) CheckGas() bool { return m.checkGas }
 func (m *Message) SetCheckGas(checkGas bool) {
