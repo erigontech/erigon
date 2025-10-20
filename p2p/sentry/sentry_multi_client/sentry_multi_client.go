@@ -80,6 +80,10 @@ func (t *blockRangeTracker) decide(next eth.BlockRangeUpdatePacket) bool {
 		return true
 	}
 
+	if next.Latest == prev.Latest && next.LatestHash != prev.LatestHash {
+		return true
+	}
+
 	if next.Latest-prev.Latest >= blockRangeEpochBlocks {
 		return true
 	}

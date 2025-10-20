@@ -251,6 +251,17 @@ func TestBlockRangeTrackerAccept(t *testing.T) {
 		t.Fatal("expected regression to trigger immediate announcement")
 	}
 	tracker.record(regression)
+
+	sameHeightReorg := regression
+	sameHeightReorg.LatestHash = common.HexToHash("0x3")
+	if send := tracker.decide(sameHeightReorg); !send {
+		t.Fatal("expected equal-height hash change to trigger announcement")
+	}
+	tracker.record(sameHeightReorg)
+
+	if send := tracker.decide(sameHeightReorg); send {
+		t.Fatal("expected identical announcement after reorg to be skipped")
+	}
 }
 
 func TestMultiClient_DoAnnounceBlockRangeSkipsUntilThreshold(t *testing.T) {
