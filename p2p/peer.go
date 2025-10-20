@@ -30,10 +30,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -169,6 +169,13 @@ func (p *Peer) Fullname() string {
 func (p *Peer) Caps() []Cap {
 	// TODO: maybe return copy
 	return p.rw.caps
+}
+
+// RunningProtocol returns true if the peer is actively connected using the
+// specified protocol, regardless of version.
+func (p *Peer) RunningProtocol(protocol string) bool {
+	_, ok := p.running[protocol]
+	return ok
 }
 
 // RunningCap returns true if the peer is actively connected using any of the

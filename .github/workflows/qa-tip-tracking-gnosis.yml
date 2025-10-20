@@ -1,10 +1,16 @@
-name: QA - Tip tracking (Gnosis)
+name: QA - Tip tracking & migration (Gnosis)
 
 on:
   push:
     branches:
       - 'release/3.1'
-  workflow_dispatch:     # Run manually
+  workflow_dispatch: # Run manually
+    inputs:
+      explicit_upgrade:
+        description: 'If true, perform explicit upgrade steps (by default they happen automatically)'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,12 +19,12 @@ concurrency:
 jobs:
   gnosis-tip-tracking-test:
     runs-on: [self-hosted, qa, Gnosis, tip-tracking]
-    timeout-minutes: 600
+    timeout-minutes: 1200
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version/datadir
-      ERIGON_TESTBED_AREA: /opt/erigon-testbed
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version-3.0/datadir
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 14400 # 4 hours
+      TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 28800 # 8 hours
       CHAIN: gnosis
 
@@ -39,21 +45,74 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Save Erigon Chaindata Directory
+    - name: Run previous Erigon version and wait for sync (stabilization step)
+      id: pre_test_step
+      run: |
+        set +e # Disable exit on error
+        
+        # Launch the testbed Erigon instance & test its ability to maintain sync for 2 minutes
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/../ $ERIGON_REFERENCE_DATA_DIR 120 $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+        
+        # Capture monitoring script exit status
+        test_exit_status=$?
+        
+        # Save the subsection reached status
+        echo "test_executed=true" >> $GITHUB_OUTPUT
+        
+        # Clean up Erigon process if it's still running
+        if kill -0 $ERIGON_PID 2> /dev/null; then
+          echo "Terminating Erigon"
+          kill $ERIGON_PID
+          wait $ERIGON_PID
+        fi
+        # Check test runner script exit status
+        if [ $test_exit_status -eq 0 ]; then
+          echo "Pre-sync step completed successfully"
+          echo "::notice::Pre-sync step completed successfully"
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "Pre-sync step encountered an error"
+          echo "::error::Pre-sync step encountered an error"
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+    - name: Restore Erigon Testbed Data Directory & Erigon binary
       id: save_chaindata_step
       run: |
-        mv $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+        cp $ERIGON_REFERENCE_DATA_DIR/../erigon $ERIGON_TESTBED_DATA_DIR/../
+
+    # Upgrade + tip-tracking test
+
+    - name: Print datadir contents before upgrade (for debugging)
+      working-directory: ${{ github.workspace }}
+      run: |
+        find $ERIGON_TESTBED_DATA_DIR
+
+    # The following task runs the datadir upgrade procedure explicitly.
+    # It is unnecessary and is executed automatically by erigon when it detects the old format.
+    - name: Run the datadir upgrade procedure
+      if: ${{ inputs.explicit_upgrade }}
+      working-directory: ${{ github.workspace }}
+      run: |
+        ./build/bin/erigon snapshots update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+
+    - name: Print datadir contents after upgrade (for debugging)
+      if: ${{ inputs.explicit_upgrade }}
+      working-directory: ${{ github.workspace }}
+      run: |
+        find $ERIGON_TESTBED_DATA_DIR
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
       run: |
         set +e # Disable exit on error
         
-        # 1. Launch the testbed Erigon instance
-        # 2. Allow time for the Erigon to achieve synchronization
-        # 3. Begin timing the duration that Erigon maintains synchronization
+        # Launch the testbed Erigon instance & test its ability to maintain sync
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -70,10 +129,12 @@ jobs:
 
         # Check test runner script exit status
         if [ $test_exit_status -eq 0 ]; then
-          echo "Tests completed successfully"
+          echo "Upgrade & tip-tracking test completed successfully"
+          echo "::notice::Upgrade & tip-tracking test completed successfully"
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
         else
-          echo "Error detected during tests"
+          echo "Upgrade & tip-tracking test encountered an error"
+          echo "::error::Upgrade & tip-tracking test encountered an error"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
@@ -117,7 +178,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: erigon-logs
-        path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
+        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'
@@ -126,12 +187,75 @@ jobs:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
-    - name: Restore Erigon Chaindata Directory
+    # Downgrade + tip-tracking test
+
+    - name: Print datadir contents before downgrade (for debugging)
+      working-directory: ${{ github.workspace }}
+      run: |
+        find $ERIGON_TESTBED_DATA_DIR
+
+    - name: Run the datadir downgrade procedure
+      working-directory: ${{ github.workspace }}
+      run: |
+        ./build/bin/erigon seg reset-to-old-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+
+    - name: Print datadir contents after downgrade (for debugging)
+      working-directory: ${{ github.workspace }}
+      run: |
+        find $ERIGON_TESTBED_DATA_DIR
+
+    - name: Run previous Erigon version, wait sync and check ability to maintain sync
+      id: downgrade_test_step
+      run: |
+        set +e # Disable exit on error
+        
+        # Launch the testbed Erigon instance & test its ability to maintain sync
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+          ${{ env.ERIGON_TESTBED_DATA_DIR }}/../ $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+        
+        # Capture monitoring script exit status
+        test_exit_status=$?
+        
+        # Save the subsection reached status
+        echo "test_executed=true" >> $GITHUB_OUTPUT
+        
+        # Clean up Erigon process if it's still running
+        if kill -0 $ERIGON_PID 2> /dev/null; then
+          echo "Terminating Erigon"
+          kill $ERIGON_PID
+          wait $ERIGON_PID
+        fi
+
+        # Check test runner script exit status
+        if [ $test_exit_status -eq 0 ]; then
+          echo "Downgrade & tip-tracking test completed successfully"
+          echo "::notice::Downgrade & tip-tracking test completed successfully"
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "Downgrade tests encountered an error"
+          echo "::error::Downgrade & tip-tracking test encountered an error"
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Upload Downloader Torrent Client Status of the downgrade test
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: torrent-client-status-downgrade-test
+        path: torrent-client-status.txt
+
+    - name: Upload erigon log of the downgrade test
+      if: steps.downgrade_test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: erigon-log-downgrade-test
+        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+
+    - name: Delete Erigon Testbed Data Directory
       if: ${{ always() }}
       run: |
-        if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ]; then
-          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
-          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+        if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
+          rm -rf $ERIGON_TESTBED_DATA_DIR
         fi
 
     - name: Resume the Erigon instance dedicated to db maintenance
@@ -139,12 +263,16 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
-    - name: Action for Success
-      if: steps.test_step.outputs.TEST_RESULT == 'success'
-      run: echo "::notice::Tests completed successfully"
-
     - name: Action for Not Success
-      if: steps.test_step.outputs.TEST_RESULT != 'success'
+      if: ${{ always() }}
       run: |
-        echo "::error::Error detected during tests"
-        exit 1
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during upgrade & tip-tracking test"
+        fi
+        if [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during downgrade & tip-tracking test"
+        fi
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]] || \
+           [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          exit 1
+        fi

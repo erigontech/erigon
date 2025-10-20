@@ -22,7 +22,6 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 type seenSyncCommitteeMessage struct {

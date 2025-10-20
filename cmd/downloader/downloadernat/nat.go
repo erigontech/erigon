@@ -19,7 +19,7 @@ package downloadernat
 import (
 	"github.com/anacrolix/torrent"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/nat"
 )
 

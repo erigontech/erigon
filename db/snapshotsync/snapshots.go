@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -32,21 +33,22 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type SortedRange interface {
@@ -429,7 +431,7 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 }
 
 func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
+	if len(s.Type().IdxFileNames(s.from, s.to)) == 0 {
 		return nil
 	}
 
@@ -459,11 +461,23 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 		s.indexes = append(s.indexes, nil)
 	}
 
-	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+	for i, fileName := range s.Type().IdxFileNames(s.from, s.to) {
 		if s.indexes[i] != nil {
 			continue
 		}
-		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
+		fPathMask, err := version.ReplaceVersionWithMask(filepath.Join(dir, fileName))
+		if err != nil {
+			return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
+		}
+		fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+		if err != nil {
+			return fmt.Errorf("%w, fileName: %s", err, fileName)
+		}
+		if !ok {
+			_, fName := filepath.Split(fPath)
+			return fmt.Errorf("[open index] find files by pattern err %w fname %s", os.ErrNotExist, fName)
+		}
+		index, err := recsplit.OpenIndex(fPath)
 
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
@@ -544,11 +558,12 @@ type RoSnapshots struct {
 	visibleLock sync.RWMutex                   // guards  `visible` field
 	visible     []VisibleSegments              // ordered map `type.Enum()` -> VisbileSegments
 
-	dir         string
-	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
-	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.BlocksFreezing
-	logger      log.Logger
+	dir               string
+	segmentsMax       atomic.Uint64                    // all types of .seg files are available - up to this number
+	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
+	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
+	cfg               ethconfig.BlocksFreezing
+	logger            log.Logger
 
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
@@ -574,12 +589,19 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 	s := &RoSnapshots{dir: snapDir, cfg: cfg, logger: logger,
 		types: types, enums: enums,
-		dirty:     make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
-		alignMin:  alignMin,
-		operators: map[snaptype.Enum]*retireOperators{},
+		dirty:             make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
+		alignMin:          alignMin,
+		operators:         map[snaptype.Enum]*retireOperators{},
+		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
 	}
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
+	}
+
+	for _, t := range s.enums {
+		u := &atomic.Uint64{}
+		u.Store(math.MaxUint64)
+		s.segmentsMinByType[t] = u
 	}
 
 	s.recalcVisibleFiles(s.alignMin)
@@ -592,6 +614,23 @@ func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Lo
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *RoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
+	if s == nil {
+		return 0, false
+	}
+
+	minStore, exists := s.segmentsMinByType[t]
+	if !exists {
+		return 0, false
+	}
+
+	min = minStore.Load()
+	if min == math.MaxUint64 {
+		return 0, false
+	}
+
+	return min, true
+}
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
@@ -853,6 +892,16 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 					}
 				}
 			}
+		}
+	}
+
+	for _, t := range s.enums {
+		minBlock := uint64(math.MaxUint64)
+		if len(visible[t]) > 0 {
+			minBlock = visible[t][0].from
+		}
+		if u, ok := s.segmentsMinByType[t]; ok {
+			u.Store(minBlock)
 		}
 	}
 
@@ -1127,6 +1176,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
+
 	if err := wg.Wait(); err != nil {
 		return err
 	}
@@ -1134,10 +1184,10 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	return nil
 }
 
-func (s *RoSnapshots) Ranges() []Range {
+func (s *RoSnapshots) Ranges(align bool) []Range {
 	view := s.View()
 	defer view.Close()
-	return view.Ranges()
+	return view.Ranges(align)
 }
 
 func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
@@ -1571,8 +1621,41 @@ func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool)
 	return nil, false
 }
 
-func (v *View) Ranges() (ranges []Range) {
+func (v *View) Ranges(align bool) (ranges []Range) {
+	if !align {
+		for _, sn := range v.Segments(v.baseSegType) {
+			ranges = append(ranges, sn.Range)
+		}
+
+		return ranges
+	}
+
+	var alignedRangeTo *uint64
+
+	for _, t := range v.s.types {
+		maxRangeTo := uint64(0)
+
+		for _, sn := range v.Segments(t) {
+			if sn.Range.to > maxRangeTo {
+				maxRangeTo = sn.Range.to
+			}
+		}
+
+		if alignedRangeTo == nil {
+			alignedRangeTo = &maxRangeTo
+			continue
+		}
+
+		if maxRangeTo < *alignedRangeTo {
+			alignedRangeTo = &maxRangeTo
+		}
+	}
+
 	for _, sn := range v.Segments(v.baseSegType) {
+		if alignedRangeTo != nil && sn.Range.to > *alignedRangeTo {
+			continue
+		}
+
 		ranges = append(ranges, sn.Range)
 	}
 

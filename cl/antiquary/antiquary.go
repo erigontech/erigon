@@ -26,19 +26,19 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 const safetyMargin = 20_000 // We retire snapshots 10k blocks after the finalized head
@@ -126,20 +126,25 @@ func (a *Antiquary) Loop() error {
 		return nil
 	}
 	if a.downloader != nil {
-		completedReply, err := a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
-		if err != nil {
-			return err
-		}
 		reCheckTicker := time.NewTicker(3 * time.Second)
 		defer reCheckTicker.Stop()
 
+		// We need to make sure we 100% finish the download process.
+		// 1) Define some time completionEpoch window
+		completionEpoch := 2 * time.Minute
+		// 2) Define a progress counter
+		progress := time.Now()
+
 		// Fist part of the antiquate is to download caplin snapshots
-		for (!completedReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
+		for !time.Now().Add(completionEpoch).Before(progress) && !a.backfilled.Load() {
 			select {
 			case <-reCheckTicker.C:
-				completedReply, err = a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
+				completedReply, err := a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
 				if err != nil {
 					return err
+				}
+				if !completedReply.Completed {
+					progress = time.Now() // reset the progress if we are not completed
 				}
 			case <-a.ctx.Done():
 			}

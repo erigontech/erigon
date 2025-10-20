@@ -25,8 +25,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/execution/testutil"
+	"github.com/erigontech/erigon/execution/tests/testforks"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var (
@@ -100,7 +100,7 @@ var (
 			"\n\tAvailable extra eips:"+
 			"\n\t    %v"+
 			"\n\tSyntax <forkname>(+ExtraEip)",
-			strings.Join(testutil.AvailableForks(), "\n\t    "),
+			strings.Join(testforks.AvailableForks(), "\n\t    "),
 			strings.Join(vm.ActivateableEips(), ", ")),
 		Value: "Merge",
 	}
