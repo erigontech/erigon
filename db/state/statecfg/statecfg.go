@@ -114,7 +114,7 @@ type ForkableCfg struct {
 	updateCanonical        bool
 	pruneFrom              kv.Num
 	Accessors              Accessors
-	Compression            seg.FileCompression
+	Compression            seg.Cfg
 	ValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 	Enabled                bool
 }
