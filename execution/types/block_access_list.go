@@ -59,6 +59,17 @@ type CodeChange struct {
 	Data  []byte
 }
 
+// indexedChange interface for generic validation of change types with indices
+type indexedChange interface {
+	*BalanceChange | *NonceChange | *CodeChange
+	GetIndex() uint16
+}
+
+// GetIndex methods for indexedChange interface
+func (bc *BalanceChange) GetIndex() uint16 { return bc.Index }
+func (nc *NonceChange) GetIndex() uint16   { return nc.Index }
+func (cc *CodeChange) GetIndex() uint16    { return cc.Index }
+
 func (ac *AccountChanges) EncodingSize() int {
 	size := 21 // address (1 prefix + 20 bytes)
 	storageChangesLen := EncodingSizeGenericList(ac.StorageChanges)
@@ -739,28 +750,6 @@ func (ac *AccountChanges) validate() error {
 	return nil
 }
 
-func validateSlotChangeList(slots []*SlotChanges) error {
-	if len(slots) == 0 {
-		return nil
-	}
-	if len(slots) > maxSlotChangesPerAccount {
-		return fmt.Errorf("too many storage slot entries (%d > %d)", len(slots), maxSlotChangesPerAccount)
-	}
-	var prev common.Hash
-	var hasPrev bool
-	for i, slot := range slots {
-		if slot == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
-		if hasPrev && bytes.Compare(prev[:], slot.Slot[:]) >= 0 {
-			return fmt.Errorf("slots must be strictly increasing (index %d)", i)
-		}
-		prev = slot.Slot
-		hasPrev = true
-	}
-	return nil
-}
-
 func (sc *SlotChanges) validate() error {
 	if sc == nil {
 		return errors.New("nil slot change entry")
@@ -794,22 +783,7 @@ func validateStorageChangeEntries(changes []*StorageChange) error {
 }
 
 func validateStorageReads(reads []common.Hash) error {
-	if len(reads) == 0 {
-		return nil
-	}
-	if len(reads) > maxStorageReadsPerAccount {
-		return fmt.Errorf("too many storage reads (%d > %d)", len(reads), maxStorageReadsPerAccount)
-	}
-	var prev common.Hash
-	var hasPrev bool
-	for i := range reads {
-		if hasPrev && bytes.Compare(prev[:], reads[i][:]) >= 0 {
-			return fmt.Errorf("reads must be strictly increasing (index %d)", i)
-		}
-		prev = reads[i]
-		hasPrev = true
-	}
-	return nil
+	return validateHashOrdering(reads, maxStorageReadsPerAccount, "storage reads")
 }
 
 func (bc *BalanceChange) validate() error {
@@ -829,69 +803,15 @@ func (bc *BalanceChange) validate() error {
 }
 
 func validateBalanceChangeList(changes []*BalanceChange) error {
-	if len(changes) == 0 {
-		return nil
-	}
-	if len(changes) > maxIndexedChangesPerAccount {
-		return fmt.Errorf("too many balance changes (%d > %d)", len(changes), maxIndexedChangesPerAccount)
-	}
-	var lastIdx uint16
-	var hasLast bool
-	for i, change := range changes {
-		if change == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
-		if hasLast && change.Index <= lastIdx {
-			return fmt.Errorf("indices must be strictly increasing (index %d)", i)
-		}
-		lastIdx = change.Index
-		hasLast = true
-	}
-	return nil
+	return validateIndexedChanges(changes, maxIndexedChangesPerAccount, "balance")
 }
 
 func validateNonceChangeList(changes []*NonceChange) error {
-	if len(changes) == 0 {
-		return nil
-	}
-	if len(changes) > maxIndexedChangesPerAccount {
-		return fmt.Errorf("too many nonce changes (%d > %d)", len(changes), maxIndexedChangesPerAccount)
-	}
-	var lastIdx uint16
-	var hasLast bool
-	for i, change := range changes {
-		if change == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
-		if hasLast && change.Index <= lastIdx {
-			return fmt.Errorf("indices must be strictly increasing (index %d)", i)
-		}
-		lastIdx = change.Index
-		hasLast = true
-	}
-	return nil
+	return validateIndexedChanges(changes, maxIndexedChangesPerAccount, "nonce")
 }
 
 func validateCodeChangeList(changes []*CodeChange) error {
-	if len(changes) == 0 {
-		return nil
-	}
-	if len(changes) > maxIndexedChangesPerAccount {
-		return fmt.Errorf("too many code changes (%d > %d)", len(changes), maxIndexedChangesPerAccount)
-	}
-	var lastIdx uint16
-	var hasLast bool
-	for i, change := range changes {
-		if change == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
-		if hasLast && change.Index <= lastIdx {
-			return fmt.Errorf("indices must be strictly increasing (index %d)", i)
-		}
-		lastIdx = change.Index
-		hasLast = true
-	}
-	return nil
+	return validateIndexedChanges(changes, maxIndexedChangesPerAccount, "code")
 }
 
 func normaliseBigInt(v *big.Int) (*big.Int, error) {
@@ -906,4 +826,62 @@ func normaliseBigInt(v *big.Int) (*big.Int, error) {
 		return nil, fmt.Errorf("block access balance change exceeds 256 bits")
 	}
 	return v, nil
+}
+
+// validateIndexedChanges validates that indices are strictly increasing
+func validateIndexedChanges[T indexedChange](changes []T, maxCount int, typeName string) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	if len(changes) > maxCount {
+		return fmt.Errorf("too many %s changes (%d > %d)", typeName, len(changes), maxCount)
+	}
+	for i, change := range changes {
+		if change == nil {
+			return fmt.Errorf("entry %d is nil", i)
+		}
+	}
+	for i := 1; i < len(changes); i++ {
+		if changes[i].GetIndex() <= changes[i-1].GetIndex() {
+			return fmt.Errorf("indices must be strictly increasing (index %d)", i)
+		}
+	}
+	return nil
+}
+
+// validateHashOrdering validates that a slice of hashes is strictly increasing
+func validateHashOrdering(hashes []common.Hash, maxCount int, typeName string) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	if len(hashes) > maxCount {
+		return fmt.Errorf("too many %s (%d > %d)", typeName, len(hashes), maxCount)
+	}
+	for i := 1; i < len(hashes); i++ {
+		if bytes.Compare(hashes[i-1][:], hashes[i][:]) >= 0 {
+			return fmt.Errorf("%s must be strictly increasing (index %d)", typeName, i)
+		}
+	}
+	return nil
+}
+
+// validateSlotChangeList validates a slice of SlotChanges with hash ordering and nil checks
+func validateSlotChangeList(slots []*SlotChanges) error {
+	if len(slots) == 0 {
+		return nil
+	}
+	if len(slots) > maxSlotChangesPerAccount {
+		return fmt.Errorf("too many storage slot entries (%d > %d)", len(slots), maxSlotChangesPerAccount)
+	}
+	for i, slot := range slots {
+		if slot == nil {
+			return fmt.Errorf("entry %d is nil", i)
+		}
+	}
+	for i := 1; i < len(slots); i++ {
+		if bytes.Compare(slots[i-1].Slot[:], slots[i].Slot[:]) >= 0 {
+			return fmt.Errorf("slots must be strictly increasing (index %d)", i)
+		}
+	}
+	return nil
 }
