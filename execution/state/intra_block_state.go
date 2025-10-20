@@ -101,17 +101,21 @@ type IntraBlockState struct {
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
 	// at the block level
-	versionMap          *VersionMap
-	versionedWrites     WriteSet
-	versionedReads      ReadSet
-	accountReadDuration time.Duration
-	accountReadCount    int64
-	storageReadDuration time.Duration
-	storageReadCount    int64
-	codeReadDuration    time.Duration
-	codeReadCount       int64
-	version             int
-	dep                 int
+	versionMap               *VersionMap
+	versionedWrites          WriteSet
+	versionedReads           ReadSet
+	accountReadDuration      time.Duration
+	accountReadCount         int64
+	storageReadDuration      time.Duration
+	storageReadCount         int64
+	codeReadDuration         time.Duration
+	codeReadCount            int64
+	version                  int
+	dep                      int
+	blockAccessEnabled       bool
+	blockAccessIgnorePreload bool
+	blockAccessTxTouches     map[common.Address]*blockAccessTouch
+	blockAccessSnapshots     []*blockAccessSnapshot
 }
 
 // Create a new state from a given trie
@@ -301,6 +305,10 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.codeReadDuration = 0
 	sdb.codeReadCount = 0
 	sdb.dep = UnknownDep
+	sdb.blockAccessEnabled = false
+	sdb.blockAccessIgnorePreload = false
+	sdb.blockAccessTxTouches = nil
+	sdb.blockAccessSnapshots = nil
 }
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
@@ -1737,6 +1745,18 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.
 	if sdb.trace || dbg.TraceAccount(sender) || dst != nil && dbg.TraceAccount(*dst) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
+	var restorePreload bool
+	var previousPreload bool
+	if sdb.blockAccessEnabled {
+		restorePreload = true
+		previousPreload = sdb.blockAccessIgnorePreload
+		sdb.blockAccessIgnorePreload = true
+	}
+	defer func() {
+		if restorePreload {
+			sdb.blockAccessIgnorePreload = previousPreload
+		}
+	}()
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
@@ -1788,6 +1808,10 @@ func (sdb *IntraBlockState) AddAddressToAccessList(addr common.Address) (addrMod
 	if addrMod {
 		sdb.journal.append(accessListAddAccountChange{addr})
 	}
+	if sdb.blockAccessEnabled && !sdb.blockAccessIgnorePreload {
+		touch := sdb.ensureBlockAccessTouch(addr)
+		touch.address = true
+	}
 	return addrMod
 }
 
@@ -1806,6 +1830,14 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr common.Address, slot common
 			address: addr,
 			slot:    slot,
 		})
+	}
+	if sdb.blockAccessEnabled && !sdb.blockAccessIgnorePreload {
+		touch := sdb.ensureBlockAccessTouch(addr)
+		touch.address = true
+		if touch.slots == nil {
+			touch.slots = make(map[common.Hash]struct{})
+		}
+		touch.slots[slot] = struct{}{}
 	}
 	return addrMod, slotMod
 }
