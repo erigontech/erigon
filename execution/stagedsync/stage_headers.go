@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -146,6 +147,17 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Warn("Error connecting to RPC", "err", err)
 		return err
 	}
+
+	urlReciept := dbg.EnvString("ERIGON_ARB_RECEIPT_URL", "")
+	var receiptClient *rpc.Client
+	if urlReciept != "" {
+		receiptClient, err = rpc.Dial(urlReciept, log.Root())
+		if err != nil {
+			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
+			return err
+		}
+	}
+
 	var curBlock uint64
 	curBlock, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
@@ -174,62 +186,91 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
 
-	var blockNumber big.Int
-	// Process blocks from the starting block up to the latest.
+	const concurrentBlocks = 1
+
 	prev := curBlock
 	timer := time.NewTicker(40 * time.Second)
 	latestProcessedBlock := uint64(0)
-	// latestBlock.SetUint64(curBlock + 6000)
-	for blockNum := curBlock; blockNum < latestBlock.Uint64(); blockNum++ {
-		blockNumber.SetUint64(blockNum)
-		blk, err := snapshots.GetBlockByNumber(client, &blockNumber, false, cfg.chainConfig.IsArbitrum())
-		if err != nil {
-			return fmt.Errorf("error fetching block %d: %w", blockNum, err)
-		}
-		if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
-			return fmt.Errorf("error writing header %d: %w", blockNum, err)
-		}
-		if err := rawdb.WriteBlock(tx, blk); err != nil {
-			return fmt.Errorf("error writing block %d: %w", blockNum, err)
+
+	for blockNum := curBlock; blockNum < latestBlock.Uint64(); {
+		batchEnd := min(blockNum+concurrentBlocks, latestBlock.Uint64())
+		batchSize := int(batchEnd - blockNum)
+
+		// Fetch blocks concurrently
+		blocks := make([]*types.Block, batchSize)
+		var fetchWg errgroup.Group
+
+		for i := 0; i < batchSize; i++ {
+			idx := i
+			currentBlockNum := blockNum + uint64(i)
+			fetchWg.Go(func() error {
+				var blockNumber big.Int
+				blockNumber.SetUint64(currentBlockNum)
+				blk, err := snapshots.GetBlockByNumber(client, receiptClient, &blockNumber, false, cfg.chainConfig.IsArbitrum())
+				if err != nil {
+					return fmt.Errorf("error fetching block %d: %w", currentBlockNum, err)
+				}
+				blocks[idx] = blk
+				return nil
+			})
 		}
 
-		err = rawdb.WriteBody(tx, blk.Header().Hash(), blockNum, blk.Body())
-		if err != nil {
-			return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
-		}
-		if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-			return err
-		}
-		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
-		}
-		if err = cfg.blockWriter.MakeBodiesCanonical(tx, blockNum); err != nil {
-			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
-		}
-		rawdb.WriteHeadBlockHash(tx, blk.Hash())
-		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+		if err := fetchWg.Wait(); err != nil {
 			return err
 		}
 
-		latestProcessedBlock = blockNum
+		// Write blocks to database in order
+		for i, blk := range blocks {
+			currentBlockNum := blockNum + uint64(i)
+
+			// Async database writes (can be done concurrently)
+			if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
+				return fmt.Errorf("error writing header %d: %w", currentBlockNum, err)
+			}
+			if err := rawdb.WriteBlock(tx, blk); err != nil {
+				return fmt.Errorf("error writing block %d: %w", currentBlockNum, err)
+			}
+			if err := rawdb.WriteBody(tx, blk.Header().Hash(), currentBlockNum, blk.Body()); err != nil {
+				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+			}
+
+			// Sequential database operations (must be in order)
+			if err := rawdb.AppendCanonicalTxNums(tx, currentBlockNum); err != nil {
+				return err
+			}
+			if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), currentBlockNum); err != nil {
+				return fmt.Errorf("error writing canonical hash %d: %w", currentBlockNum, err)
+			}
+			if err = cfg.blockWriter.MakeBodiesCanonical(tx, currentBlockNum); err != nil {
+				return fmt.Errorf("failed to append canonical txnum %d: %w", currentBlockNum, err)
+			}
+			rawdb.WriteHeadBlockHash(tx, blk.Hash())
+			if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+				return err
+			}
+
+			latestProcessedBlock = currentBlockNum
+		}
+
+		blockNum = batchEnd
 
 		select {
 		case <-timer.C:
 			for _, stage := range syncStages {
-				if err := stages.SaveStageProgress(tx, stage, blockNum); err != nil {
+				if err := stages.SaveStageProgress(tx, stage, latestProcessedBlock); err != nil {
 					return err
 				}
 			}
 
-			blkSec := float64(blockNum-prev) / 40.0
-			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec), "withCommit", !useExternalTx)
+			blkSec := float64(latestProcessedBlock-prev) / 40.0
+			log.Info(fmt.Sprintf("[%s] Header and Block processed", s.LogPrefix()), "block", latestProcessedBlock, "hash", blocks[len(blocks)-1].Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec), "withCommit", !useExternalTx)
 
 			if !useExternalTx {
 				if err := tx.Commit(); err != nil {
 					log.Warn("Error committing transaction", "err", err)
 					return err
 				}
-				log.Info("Committed", "block", blockNum, "hash", blk.Hash())
+				log.Info("Committed", "block", latestProcessedBlock, "hash", blocks[len(blocks)-1].Hash())
 				tx, err = cfg.db.BeginRw(ctx)
 				if err != nil {
 					return err
@@ -237,9 +278,8 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 				defer tx.Rollback()
 				cfg.hd.ReadProgressFromDb(tx)
 			}
-			prev = blockNum
+			prev = latestProcessedBlock
 		default:
-			// continue processing without waiting
 		}
 	}
 	timer.Stop()
