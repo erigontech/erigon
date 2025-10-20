@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/common/dir"
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"

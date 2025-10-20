@@ -26,9 +26,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
@@ -41,21 +41,21 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 		row[i].hashLen = 32
 		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.Equal(tb, row[i].hashLen, n)
+		require.Equal(tb, int(row[i].hashLen), n)
 
 		th := rand.Intn(120)
 		switch {
 		case th > 70:
 			n, err = rand.Read(row[i].accountAddr[:])
 			require.NoError(tb, err)
-			row[i].accountAddrLen = n
+			row[i].accountAddrLen = int16(n)
 		case th > 20 && th <= 70:
 			n, err = rand.Read(row[i].storageAddr[:])
 			require.NoError(tb, err)
-			row[i].storageAddrLen = n
+			row[i].storageAddrLen = int16(n)
 		case th <= 20:
 			n, err = rand.Read(row[i].extension[:th])
-			row[i].extLen = n
+			row[i].extLen = int16(n)
 			require.NoError(tb, err)
 			require.Equal(tb, th, n)
 		}

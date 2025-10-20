@@ -26,9 +26,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -203,7 +203,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
-				_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
+				_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, txNum, "", nil)
 				require.NoError(t, err)
 			}
 
