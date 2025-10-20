@@ -71,7 +71,7 @@ type History struct {
 	_visibleFiles []visibleFile
 }
 
-func NewHistory(cfg statecfg.HistCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
+func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.Accessors == 0 {
 		cfg.Accessors = statecfg.AccessorHashMap
@@ -84,15 +84,15 @@ func NewHistory(cfg statecfg.HistCfg, stepSize uint64, dirs datadir.Dirs, logger
 	}
 
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.IiCfg, stepSize, dirs, logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.IiCfg, stepSize, stepsInFrozenFile, dirs, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.IiCfg.FilenameBase, err)
 	}
 
-	if h.Version.DataV.IsZero() {
+	if h.FileVersion.DataV.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", h.Name))
 	}
-	if h.Version.AccessorVI.IsZero() {
+	if h.FileVersion.AccessorVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", h.Name))
 	}
 	h.InvertedIndex.Name = h.HistoryIdx
@@ -101,13 +101,13 @@ func NewHistory(cfg statecfg.HistCfg, stepSize uint64, dirs datadir.Dirs, logger
 }
 
 func (h *History) vFileName(fromStep, toStep kv.Step) string {
-	return fmt.Sprintf("%s-%s.%d-%d.v", h.Version.DataV.String(), h.FilenameBase, fromStep, toStep)
+	return fmt.Sprintf("%s-%s.%d-%d.v", h.FileVersion.DataV.String(), h.FilenameBase, fromStep, toStep)
 }
 func (h *History) vNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
 func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.Version.AccessorVI.String(), h.FilenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.FileVersion.AccessorVI.String(), h.FilenameBase, fromStep, toStep))
 }
 
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
@@ -156,7 +156,7 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	if h.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.FilenameBase, "v", h.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.stepsInFrozenFile, h.FilenameBase, "v", h.logger) {
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}
@@ -224,7 +224,8 @@ func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 
 func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
 	if item.decompressor == nil {
-		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.FilenameBase, item.startTxNum/h.stepSize, item.endTxNum/h.stepSize)
+		fromStep, toStep := item.StepRange(h.stepSize)
+		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.FilenameBase, fromStep, toStep)
 	}
 
 	search := &FilesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
@@ -234,10 +235,10 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 	}
 
 	if iiItem.decompressor == nil {
-		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.FilenameBase, item.startTxNum/h.stepSize, item.endTxNum/h.stepSize)
+		fromStep, toStep := item.StepRange(h.stepSize)
+		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.FilenameBase, fromStep, toStep)
 	}
-	fromStep, toStep := kv.Step(item.startTxNum/h.stepSize), kv.Step(item.endTxNum/h.stepSize)
-	idxPath := h.vAccessorNewFilePath(fromStep, toStep)
+	idxPath := h.vAccessorNewFilePath(item.StepRange(h.stepSize))
 
 	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
 	if err != nil {
@@ -841,7 +842,7 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 		existence: sf.efExistence,
 	}, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, h.stepSize)
+	fi := newFilesItem(txNumFrom, txNumTo, h.stepSize, h.stepsInFrozenFile)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.dirtyFiles.Set(fi)
@@ -884,10 +885,11 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files    visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
-	getters  []*seg.PagedReader
-	readers  []*recsplit.IndexReader
-	stepSize uint64
+	files             visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
+	getters           []*seg.PagedReader
+	readers           []*recsplit.IndexReader
+	stepSize          uint64
+	stepsInFrozenFile uint64
 
 	trace bool
 
@@ -906,11 +908,12 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 	}
 
 	return &HistoryRoTx{
-		h:        h,
-		iit:      h.InvertedIndex.BeginFilesRo(),
-		files:    files,
-		stepSize: h.stepSize,
-		trace:    false,
+		h:                 h,
+		iit:               h.InvertedIndex.BeginFilesRo(),
+		files:             files,
+		stepSize:          h.stepSize,
+		stepsInFrozenFile: h.stepsInFrozenFile,
+		trace:             false,
 	}
 }
 

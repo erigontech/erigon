@@ -33,10 +33,9 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	getter.Reset(0)
 
-	t.ResetTimer()
 	t.ReportAllocs()
 	//r := rand.New(rand.NewSource(0))
-	for i := 0; i < t.N; i++ {
+	for t.Loop() {
 		if !getter.HasNext() {
 			getter.Reset(0)
 		}

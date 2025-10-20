@@ -46,10 +46,12 @@ func TestPagedReader(t *testing.T) {
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]
-		var word []byte
-		_, word, buf, _ = g.Next2ForHistory(buf[:0])
+		var key, word []byte
+		key, word, buf, _ = g.Next2ForHistory(buf[:0])
 		expected := fmt.Sprintf("%s %d", w, i)
+		expectedK := fmt.Sprintf("key %d", i)
 		require.Equal(expected, string(word))
+		require.Equal(expectedK, string(key))
 		i++
 	}
 
@@ -75,13 +77,14 @@ func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
 }
 func (w *multyBytesWriter) Bytes() [][]byte { return w.buffer }
 func (w *multyBytesWriter) Reset()          { w.buffer = nil }
-func (w *multyBytesWriter) Compress() error { return nil }
+func (w *multyBytesWriter) Compress() error   { return nil }
 func (w *multyBytesWriter) Count() int      { return 0 }
 func (w *multyBytesWriter) Close()          {}
 func (w *multyBytesWriter) CompressWithCustomMetadata(countMetaField, emptyWordsCountMetaField uint64) error {
 	return nil
 }
 func (w *multyBytesWriter) FileName() string { return "" }
+func (w *multyBytesWriter) SetMetadata([]byte) {}
 
 func TestPage(t *testing.T) {
 	pageLvlCfg := PageLvlCfg{PageSize: 2, Compress: false}

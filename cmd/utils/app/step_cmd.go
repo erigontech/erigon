@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/urfave/cli/v2"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 func stepRebase(cliCtx *cli.Context) error {
@@ -140,14 +142,11 @@ func stepRebase(cliCtx *cli.Context) error {
 
 	// warn about manual changes required
 	fmt.Printf("\nMANUAL CHANGES REQUIRED:\n\n")
-	fmt.Printf("On db/config3/config3.go, change the following constants:\n\n")
-	fmt.Printf("const DefaultStepSize = %d\n", newStepSize)
-	newFrozenSteps := config3.StepsInFrozenFile / factor
+	newFrozenSteps := config3.DefaultStepsInFrozenFile / factor
 	if decr {
-		newFrozenSteps = config3.StepsInFrozenFile * factor
+		newFrozenSteps = config3.DefaultStepsInFrozenFile * factor
 	}
-	fmt.Printf("const StepsInFrozenFile = %d\n", newFrozenSteps)
-	fmt.Printf("\nCompile erigon binary with those settings before running the rebased datadir.\n")
+	fmt.Printf("When starting erigon against this datadir, use the: --%s %d --%s %d flags.\n", utils.ErigonDBStepSizeFlag.Name, newStepSize, utils.ErigonDBStepsInFrozenFileFlag.Name, newFrozenSteps)
 
 	return nil
 }

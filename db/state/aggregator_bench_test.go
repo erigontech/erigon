@@ -70,10 +70,10 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	defer domains.Close()
 
 	b.ReportAllocs()
-	b.ResetTimer()
+
 	var blockNum uint64
 	var prev []byte
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
@@ -127,7 +127,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	keys, err := pivotKeysFromKV(getter)
 	require.NoError(b, err)
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		p := rnd.IntN(len(keys))
 		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
@@ -137,19 +137,26 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	}
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64, compressCfg seg.Cfg) (*seg.Decompressor, *state.BtIndex, [][]byte, string) {
+type bTreeParameters struct {
+	M         uint64
+	KeySize   int // bytes
+	ValueSize int // bytes
+	KeyCount  int
+}
+
+func benchInitBtreeIndex(b *testing.B, params bTreeParameters, compressCfg seg.Cfg) (*seg.Decompressor, *state.BtIndex, [][]byte, string) {
 	b.Helper()
 
 	logger := log.New()
 	tmp := b.TempDir()
 	b.Cleanup(func() { dir.RemoveAll(tmp) })
 
-	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, compressCfg)
+	dataPath := generateKV(b, tmp, params.KeySize, params.ValueSize, params.KeyCount, logger, compression)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
 	buildBtreeIndex(b, dataPath, indexPath, compressCfg, 1, logger, true)
 
-	kv, bt, err := state.OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compressCfg, false)
+	kv, bt, err := state.OpenBtreeIndexAndDataFile(indexPath, dataPath, params.M, compressCfg, false)
 	require.NoError(b, err)
 	b.Cleanup(func() { bt.Close() })
 	b.Cleanup(func() { kv.Close() })
@@ -160,10 +167,146 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compressCfg seg.Cfg) (*seg.Deco
 	return kv, bt, keys, dataPath
 }
 
-func Benchmark_BTree_Seek(b *testing.B) {
-	M := uint64(1024)
-	compressCfg := seg.Cfg{WordLvl: seg.CompressNone}
-	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compressCfg)
+func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
+	compress := seg.CompressVals
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		M:         1024,
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  1000000, // .kv file size about 550 MB
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_only", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			p := rnd.IntN(len(keys))
+
+			cur, err := bt.Seek(getter, keys[p])
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+
+			cur.Close()
+		}
+	})
+
+	b.Run("get_only", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			p := rnd.IntN(len(keys))
+
+			k, _, _, _, err := bt.Get(keys[p], getter)
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], k) {
+				panic("mistmatch")
+			}
+		}
+	})
+}
+
+func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
+	compress := seg.CompressKeys
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		M:         1024,
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  1000000, // .kv file size about 550 MB
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_only", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			p := rnd.IntN(len(keys))
+
+			cur, err := bt.Seek(getter, keys[p])
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+
+			cur.Close()
+		}
+	})
+
+	b.Run("get_only", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			p := rnd.IntN(len(keys))
+
+			k, _, _, _, err := bt.Get(keys[p], getter)
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], k) {
+				panic("mistmatch")
+			}
+		}
+	})
+}
+
+func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
+	compress := seg.CompressKeys | seg.CompressVals
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		M:         1024,
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  1000000, // .kv file size about 550 MB
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_only", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			p := rnd.IntN(len(keys))
+
+			cur, err := bt.Seek(getter, keys[p])
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+
+			cur.Close()
+		}
+	})
+
+	b.Run("get_only", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			p := rnd.IntN(len(keys))
+
+			k, _, _, _, err := bt.Get(keys[p], getter)
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], k) {
+				panic("mistmatch")
+			}
+		}
+	})
+}
+
+func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
+	compress := seg.CompressNone
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		M:         1024,
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  1000000, // .kv file size about 550 MB
+	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 
@@ -172,21 +315,57 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
-			require.NoError(b, err)
+			if err != nil {
+				panic(err)
+			}
 
-			require.Equal(b, keys[p], cur.Key())
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+
 			cur.Close()
 		}
 	})
+
+	b.Run("get_only", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			p := rnd.IntN(len(keys))
+
+			k, _, _, _, err := bt.Get(keys[p], getter)
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], k) {
+				panic("mistmatch")
+			}
+		}
+	})
+}
+
+func Benchmark_BTree_SeekThenNext(b *testing.B) {
+	compress := seg.CompressNone
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		M:         1024,
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  1000000, // .kv file size about 550 MB
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_then_next", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
-			require.NoError(b, err)
+			if err != nil {
+				panic(err)
+			}
 
-			require.Equal(b, keys[p], cur.Key())
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
 
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
@@ -240,7 +419,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	keys, err := pivotKeysFromKV(getter)
 	require.NoError(b, err)
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		p := rnd.IntN(len(keys))
 
 		offset, _ := idxr.Lookup(keys[p])

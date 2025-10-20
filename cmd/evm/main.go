@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/version"
-	cli2 "github.com/erigontech/erigon/turbo/cli"
+	cli2 "github.com/erigontech/erigon/node/cli"
 )
 
 var (

@@ -182,7 +182,7 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 		if !fileVer.Less(i.Version.MinSupported) {
 			i.Version.Current = fileVer
 		} else {
-			panic("Version is too low, try to rm idx files")
+			panic("FileVersion is too low, try to rm idx files")
 			//return false
 		}
 	}

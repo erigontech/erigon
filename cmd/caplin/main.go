@@ -27,18 +27,18 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
-	execution_client2 "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/cmd/caplin/caplincli"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/mem"
-	"github.com/erigontech/erigon/turbo/app"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 func main() {
@@ -86,9 +86,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	ctx, cn := context.WithCancel(cliCtx.Context)
 	defer cn()
 
-	var executionEngine execution_client2.ExecutionEngine
+	var executionEngine execution_client.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client2.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
 		}

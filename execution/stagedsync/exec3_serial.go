@@ -55,6 +55,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
 
+	var lastFrozenTxNum uint64
+	if lastFrozenStep > 0 {
+		lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(se.doms.StepSize())) - 1
+	}
+
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
 			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit, "initialTxNum", initialTxNum,
@@ -114,9 +119,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				Txs:             txs,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
-
 				// use history reader instead of state reader to catch up to the tx where we left off
-				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+				HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 				Trace:            dbg.TraceTx(blockNum, txIndex),
 				Hooks:            se.hooks,
 				Logger:           se.logger,
@@ -248,7 +252,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			pruneDuration = time.Since(timeStart)
 
-			stepsInDb := rawdbhelpers.IdxStepsCountV3(se.applyTx)
+			stepsInDb := rawdbhelpers.IdxStepsCountV3(se.applyTx, se.agg.StepSize())
 
 			var commitDuration time.Duration
 			rwTx, commitDuration, err = se.commit(ctx, execStage, rwTx, nil, useExternalTx)

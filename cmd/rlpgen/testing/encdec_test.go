@@ -244,8 +244,8 @@ func BenchmarkTestingStructRLP(b *testing.B) {
 	tr := NewTRand()
 	header := randTestingStruct(tr)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		header.EncodeRLP(&buf)
 	}

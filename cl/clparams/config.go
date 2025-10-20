@@ -675,13 +675,14 @@ type BeaconChainConfig struct {
 
 // GetBlobParameters returns the blob parameters at a given epoch
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
-	// Iterate through schedule in desceding order
-	for i := range b.BlobSchedule {
+	// Iterate through schedule in desc order
+	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
 		entry := b.BlobSchedule[i]
 		if epoch >= entry.Epoch {
 			return entry
 		}
 	}
+
 	// Default to Electra parameters if no matching schedule entry
 	return BlobParameters{
 		Epoch:            b.ElectraForkEpoch,
@@ -729,9 +730,9 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
-	// sort blob schedule by epoch in descending order
+	// sort blob schedule by epoch in ascending order
 	sort.Slice(b.BlobSchedule, func(i, j int) bool {
-		return b.BlobSchedule[i].Epoch > b.BlobSchedule[j].Epoch
+		return b.BlobSchedule[i].Epoch < b.BlobSchedule[j].Epoch
 	})
 }
 
@@ -1197,6 +1198,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
 	cfg.InitializeForkSchedule()
 	return cfg
 }

@@ -48,10 +48,10 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
+	erigoncli "github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
-	"github.com/erigontech/erigon/turbo/debug"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -132,7 +132,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -172,7 +172,7 @@ var compactDomains = &cobra.Command{
 			panic("can't build index when replace-in-datadir=false (consider removing --build-idx)")
 		}
 
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
