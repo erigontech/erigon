@@ -182,7 +182,7 @@ func NewPagedReader(r ReaderI, cfg PageLvlCfg) *PagedReader {
 }
 
 func (g *PagedReader) Reset(offset uint64) {
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		g.file.Reset(offset)
 		return
 	}
@@ -199,7 +199,7 @@ func (g *PagedReader) Reset(offset uint64) {
 	}
 }
 func (g *PagedReader) PrintPages() {
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		return
 	}
 	g.Reset(0)
@@ -226,8 +226,8 @@ func (g *PagedReader) DisableReadAhead()   { g.file.DisableReadAhead() }
 func (g *PagedReader) FileName() string    { return g.file.FileName() }
 func (g *PagedReader) Count() int          { return g.file.Count() }
 func (g *PagedReader) Size() int           { return g.file.Size() }
-func (g *PagedReader) PageSize() int       { return g.pageSize }
-func (g *PagedReader) HasNextOnPage() bool { return g.PageSize > 1 && g.page.HasNext() }
+func (g *PagedReader) PageSize() int       { return g.PageLvlCfg.PageSize }
+func (g *PagedReader) HasNextOnPage() bool { return g.PageLvlCfg.PageSize > 1 && g.page.HasNext() }
 func (g *PagedReader) HasNextPage() bool   { return g.file.HasNext() }
 func (g *PagedReader) HasNext() bool       { return g.HasNextOnPage() || g.HasNextPage() }
 
@@ -258,7 +258,7 @@ func (g *PagedReader) NextPage() {
 
 func (g *PagedReader) ResetAndSeekForward(seekKey []byte, offset uint64) (k, v []byte) {
 	g.Reset(offset)
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		k, _ = g.file.Next(nil)
 		v, _ = g.file.Next(nil)
 		return k, v
@@ -277,7 +277,7 @@ func (g *PagedReader) ResetAndSeekForward(seekKey []byte, offset uint64) (k, v [
 }
 func (g *PagedReader) ResetAndGetOnPage(getKey []byte, offset uint64) (v []byte) {
 	g.Reset(offset)
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		_, _ = g.file.Skip()
 		v, _ = g.file.Next(nil)
 		return v
@@ -286,14 +286,14 @@ func (g *PagedReader) ResetAndGetOnPage(getKey []byte, offset uint64) (v []byte)
 }
 
 func (g *PagedReader) FindOnPageForHistory(key []byte, offset uint64) (v []byte) {
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		g.Reset(offset)
 		v, _ = g.file.Next(nil)
 		return v
 	}
 
 	g.Reset(offset)
-	for i := 0; i < g.PageSize && g.HasNext(); i++ {
+	for i := 0; i < g.PageSize() && g.HasNext(); i++ {
 		k, v, _, _ := g.Next2ForHistory(nil)
 		if bytes.Equal(key, k) {
 			return v
@@ -302,7 +302,7 @@ func (g *PagedReader) FindOnPageForHistory(key []byte, offset uint64) (v []byte)
 	return
 }
 func (g *PagedReader) Next2ForHistory(buf []byte) (k, v, bufOut []byte, pageOffset uint64) {
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		buf, pageOffset = g.file.Next(buf)
 		return nil, buf, buf, pageOffset
 	}
@@ -320,7 +320,7 @@ func (g *PagedReader) Next2Copy(kBuf, vBuf []byte) (k, v, kBufOut, vBufOut []byt
 	return bytes.Clone(k), bytes.Clone(v), kBuf, vBuf, nextKeyOffset
 }
 func (g *PagedReader) Next2(kBuf, vBuf []byte) (k, v, kBufOut, vBufOut []byte, nextKeyOffset uint64) {
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		if g.NoKeysMode {
 			vBuf, nextKeyOffset = g.file.Next(vBuf[:0])
 			return nil, vBuf, kBuf, vBuf, nextKeyOffset
@@ -347,7 +347,7 @@ func (g *PagedReader) Next2(kBuf, vBuf []byte) (k, v, kBufOut, vBufOut []byte, n
 }
 func (g *PagedReader) Cmp(k []byte, offset uint64) (cmp int, key []byte) {
 	g.Reset(offset)
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 		key, _ = g.file.Next(nil)
 		if k == nil {
@@ -387,7 +387,7 @@ func (g *PagedReader) Cmp(k []byte, offset uint64) (cmp int, key []byte) {
 }
 
 func (g *PagedReader) NextKey(kBuf []byte) (k, kBufOut []byte, nextKeyOffset uint64) {
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		kBuf, _ = g.file.Next(kBuf[:0])
 		nextKeyOffset, _ = g.file.Skip()
 		return kBuf, kBuf, nextKeyOffset
@@ -412,7 +412,7 @@ func (g *PagedReader) NextKey(kBuf []byte) (k, kBufOut []byte, nextKeyOffset uin
 }
 
 func (g *PagedReader) Skip() (uint64, int) {
-	if g.PageSize <= 1 {
+	if g.PageSize() <= 1 {
 		return g.file.Skip()
 	}
 
