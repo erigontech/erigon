@@ -48,7 +48,7 @@ import (
 // go test -bench=BenchmarkSyncPeriodDefault/10mb_2sec -run=BenchmarkSyncPeriodDefault -cpu=1 -count=1 -benchtime=10s ./db/kv/mdbx > new.txt
 // benchstat old.txt new.txt
 func BenchmarkSyncPeriodDefault(b *testing.B) {
-	keys, vals := make([][]byte, 1_000_000), make([][]byte, 1_000_000)
+	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
 	for i := range keys {
 		keys[i] = []byte(fmt.Sprintf("key %d", i))
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
