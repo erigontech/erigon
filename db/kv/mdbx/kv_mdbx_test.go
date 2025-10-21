@@ -42,10 +42,10 @@ import (
 // BenchmarkSyncPeriodDefault for `dbSyncBytesThreshold` constant
 //   - must use `-cpu=` because even 1-core overloading disk write IO. Multi-core bench is unreliable here (degradating with time).
 //   - same about `-benchtime=30s` and -benchtime can't be smaller than SyncPeriod
+//   - target is: to improve throughput without big ms_worst
 //
 // go test -bench=BenchmarkSyncPeriodDefault/20kb      -run=BenchmarkSyncPeriodDefault -cpu=1 -count=1 -benchtime=10s ./db/kv/mdbx > old.txt
 // go test -bench=BenchmarkSyncPeriodDefault/10mb_1sec -run=BenchmarkSyncPeriodDefault -cpu=1 -count=1 -benchtime=10s ./db/kv/mdbx > new.txt
-// go test -bench=BenchmarkSyncPeriodDefault/10mb_2sec -run=BenchmarkSyncPeriodDefault -cpu=1 -count=1 -benchtime=10s ./db/kv/mdbx > new.txt
 // benchstat old.txt new.txt
 func BenchmarkSyncPeriodDefault(b *testing.B) {
 	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
@@ -54,7 +54,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
 	}
 	cfg := New(dbcfg.ChainDB, log.New()).
-		PageSize(16 * datasize.KB).
+		PageSize(4 * datasize.KB).
 		MapSize(8 * datasize.GB).
 		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint {
