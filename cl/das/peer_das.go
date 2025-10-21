@@ -818,10 +818,16 @@ func (d *downloadRequest) removeBlock(slot uint64, blockRoot common.Hash) {
 
 func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier] {
 	d.mutex.RLock()
-	defer d.mutex.RUnlock()
 	if d.cacheRequest != nil {
-		return d.cacheRequest
+		retRequest := d.cacheRequest
+		d.mutex.RUnlock()
+		return retRequest
 	}
+	d.mutex.RUnlock()
+
+	// acquire write lock and build the request
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
 	payload := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
 	for entry, columns := range d.downloadTable {
 		id := &cltypes.DataColumnsByRootIdentifier{
