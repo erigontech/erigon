@@ -606,7 +606,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.Tempor
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.mem, nil)
+	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.mem.(*TemporalMemBatch), nil)
 	if err != nil {
 		return nil, err
 	}
