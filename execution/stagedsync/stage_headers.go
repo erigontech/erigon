@@ -223,15 +223,8 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		for i, blk := range blocks {
 			currentBlockNum := blockNum + uint64(i)
 
-			// Async database writes (can be done concurrently)
-			if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
-				return fmt.Errorf("error writing header %d: %w", currentBlockNum, err)
-			}
 			if err := rawdb.WriteBlock(tx, blk); err != nil {
 				return fmt.Errorf("error writing block %d: %w", currentBlockNum, err)
-			}
-			if err := rawdb.WriteBody(tx, blk.Header().Hash(), currentBlockNum, blk.Body()); err != nil {
-				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 
 			// Sequential database operations (must be in order)
