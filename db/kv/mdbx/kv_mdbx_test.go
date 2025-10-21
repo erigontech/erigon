@@ -58,7 +58,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		MapSize(8 * datasize.GB).
 		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint {
-			return f&^mdbxgo.Durable | mdbxgo.SafeNoSync | mdbxgo.WriteMap
+			return mdbxgo.SafeNoSync | mdbxgo.WriteMap
 		}).
 		SyncBytes(20 * datasize.MB).
 		SyncPeriod(2 * time.Second).
