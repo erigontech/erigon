@@ -50,18 +50,18 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
-		nonce:      stx.Nonce,
-		gasLimit:   stx.GasLimit,
-		gasPrice:   *stx.FeeCap,
-		tipCap:     *stx.TipCap,
-		feeCap:     *stx.FeeCap,
-		to:         stx.To,
-		amount:     *stx.Value,
-		data:       stx.Data,
-		accessList: stx.AccessList,
-		checkNonce: true,
+		nonce:            stx.Nonce,
+		gasLimit:         stx.GasLimit,
+		gasPrice:         *stx.FeeCap,
+		tipCap:           *stx.TipCap,
+		feeCap:           *stx.FeeCap,
+		to:               stx.To,
+		amount:           *stx.Value,
+		data:             stx.Data,
+		accessList:       stx.AccessList,
+		checkNonce:       true,
 		checkTransaction: true,
-		checkGas:   true,
+		checkGas:         true,
 	}
 	if !rules.IsCancun {
 		return nil, errors.New("BlobTx transactions require Cancun")
