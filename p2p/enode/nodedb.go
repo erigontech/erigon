@@ -107,6 +107,7 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		InMem(nil, tmpDir).
 		WithTableCfg(bucketsConfig).
+		PageSize(4 * datasize.KB).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
 	if err != nil {
