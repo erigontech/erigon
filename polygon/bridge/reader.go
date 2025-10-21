@@ -259,7 +259,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			event,
 			nil,   // accessList
 			false, // checkNonce
-		        false, // checkTransaction
+			false, // checkTransaction
 			false, // checkGas
 			true,  // isFree
 			nil,   // maxFeePerBlobGas
