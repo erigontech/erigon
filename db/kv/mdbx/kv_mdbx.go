@@ -527,14 +527,15 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 }
 
 func (db *MdbxKV) trackTxBegin() bool {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
+	return true
+	//db.txsCountMutex.Lock()
+	//defer db.txsCountMutex.Unlock()
 
-	isOpen := !db.closed.Load()
-	if isOpen {
-		db.txsCount++
-	}
-	return isOpen
+	//isOpen := !db.closed.Load()
+	//if isOpen {
+	//	db.txsCount++
+	//}
+	//return isOpen
 }
 
 func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
@@ -542,27 +543,27 @@ func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
 }
 
 func (db *MdbxKV) trackTxEnd() {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
+	//db.txsCountMutex.Lock()
+	//defer db.txsCountMutex.Unlock()
 
-	if db.txsCount > 0 {
-		db.txsCount--
-	} else {
-		panic("MdbxKV: unmatched trackTxEnd")
-	}
+	//if db.txsCount > 0 {
+	//	db.txsCount--
+	//} else {
+	//	panic("MdbxKV: unmatched trackTxEnd")
+	//}
 
-	if db.hasTxsAllDoneAndClosed() {
-		db.txsAllDoneOnCloseCond.Signal()
-	}
+	//if db.hasTxsAllDoneAndClosed() {
+	//	db.txsAllDoneOnCloseCond.Signal()
+	//}
 }
 
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
-	for !db.hasTxsAllDoneAndClosed() {
-		db.txsAllDoneOnCloseCond.Wait()
-	}
+	//db.txsCountMutex.Lock()
+	//defer db.txsCountMutex.Unlock()
+	//
+	//for !db.hasTxsAllDoneAndClosed() {
+	//	db.txsAllDoneOnCloseCond.Wait()
+	//}
 }
 
 // Close closes db
@@ -644,19 +645,19 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		return nil, errors.New("db closed")
 	}
 
-	runtime.LockOSThread()
+	//runtime.LockOSThread()
 	tx, err := db.env.BeginTxn(nil, flags)
 	if err != nil {
-		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		db.trackTxEnd()
+		//runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		//db.trackTxEnd()
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
 	return &MdbxTx{
-		db:      db,
-		tx:      tx,
-		ctx:     ctx,
-		traceID: db.leakDetector.Add(),
+		db:  db,
+		tx:  tx,
+		ctx: ctx,
+		//traceID: db.leakDetector.Add(),
 	}, nil
 }
 
