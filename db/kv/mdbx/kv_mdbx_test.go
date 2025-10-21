@@ -64,7 +64,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 
 	doBench := func(b *testing.B, db kv.RwDB) {
 		//b.ReportAllocs()
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) // give for OS a bit time between bench runs - to reduce cumulative effect
 		b.ResetTimer()
 		var worst time.Duration
 		var i int
