@@ -150,16 +150,6 @@ func (c *Contract) isCode(udest uint64) bool {
 	return c.analysis.codeSegment(udest)
 }
 
-// AsDelegate sets the contract to be a delegate call and returns the current
-// contract (for chaining calls)
-func (c *Contract) AsDelegate() *Contract {
-	// For delegate calls, we need to use the caller's caller address
-	// and inherit the value from the parent call
-	// Since we removed ContractRef, the caller address should be set by the caller
-	// of this method before calling AsDelegate()
-	return c
-}
-
 // GetOp returns the n'th element in the contract's byte array
 func (c *Contract) GetOp(n uint64) OpCode {
 	if n < uint64(len(c.Code)) {

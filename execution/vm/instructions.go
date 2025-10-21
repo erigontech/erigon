@@ -399,6 +399,9 @@ func opCaller(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 }
 
 func opCallValue(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if scope == nil || scope.Contract == nil || scope.Contract.value == nil {
+		fmt.Println("a")
+	}
 	scope.Stack.push(scope.Contract.value)
 	return nil, nil
 }
@@ -1145,7 +1148,8 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := interpreter.evm.DelegateCall(scope.Contract.Address(), toAddr, args, gas)
+	//ret, returnGas, err := evm.DelegateCall(scope.Contract.Caller(), scope.Contract.Address(), toAddr, args, gas, scope.Contract.value)
+	ret, returnGas, err := interpreter.evm.DelegateCall(scope.Contract.Caller(), scope.Contract.Address(), toAddr, args, gas, scope.Contract.value)
 	if err != nil {
 		temp.Clear()
 	} else {
