@@ -60,6 +60,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 
 	doBench := func(b *testing.B, db kv.RwDB) {
 		//b.ReportAllocs()
+		time.Sleep(100 * time.Millisecond) //give time for OS between runs
 		b.ResetTimer()
 		var worst time.Duration
 		var i int
@@ -67,7 +68,6 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 			i++
 			tx, _ := db.BeginRw(context.Background())
 			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-
 			t := time.Now()
 			_ = tx.Commit()
 			worst = max(worst, time.Since(t))
