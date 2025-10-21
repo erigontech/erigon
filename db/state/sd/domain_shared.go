@@ -185,6 +185,12 @@ func (sd *SharedDomains) CommitmentCapture() bool {
 	return sd.commitmentCapture
 }
 
+func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
+func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
+	return sd.sdCtx
+}
+func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
+
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	if resetCommitment {
 		sd.sdCtx.ClearRam()

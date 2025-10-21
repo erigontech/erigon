@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"time"
 	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
@@ -275,7 +274,6 @@ func (sd *TemporalMemBatch) Close() {
 	}
 }
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
-	defer mxFlushTook.ObserveDuration(time.Now())
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}

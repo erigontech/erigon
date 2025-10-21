@@ -29,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/db/state/sd"
+	"github.com/erigontech/erigon/db/state/changeset"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1676,7 +1676,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 	return dt.getLatest(key, roTx, nil, time.Time{})
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *sd.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}
@@ -1699,14 +1699,14 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *sd.DomainMetric
 	}
 	if found {
 		if metrics != nil {
-			metrics.updateDbReads(dt.name, start)
+			metrics.UpdateDbReads(dt.name, start)
 		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
 	if metrics != nil {
-		metrics.updateFileReads(dt.name, start)
+		metrics.UpdateFileReads(dt.name, start)
 	}
 
 	if err != nil {

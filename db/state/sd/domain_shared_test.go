@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package sd_test
+package sd
 
 import (
 	"context"
@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/sd"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -147,7 +147,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 
 	stepSize := uint64(4)
-	db, agg := state.testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
 	ctx := context.Background()

@@ -831,7 +831,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *sd.SharedDomains, 
 				ri--
 			}
 		} else {
-			return []byte(sd.generateRandomKey(rnd, keyMaxLen)), false
+			return []byte(generateRandomKey(rnd, keyMaxLen)), false
 		}
 		panic("unreachable")
 	}
@@ -911,7 +911,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *sd.SharedDomains, 
 			copy(sk, key)
 
 			for i := 0; i < maxStorageKeys; i++ {
-				loc := sd.generateRandomKeyBytes(rnd, 32)
+				loc := generateRandomKeyBytes(rnd, 32)
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}
 

@@ -324,7 +324,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	if err != nil {
 		return "", err
 	}
-	rootHash, err := domains.sdCtx.Trie().RootHash()
+	rootHash, err := domains.GetCommitmentCtx().Trie().RootHash()
 	if err != nil {
 		return "", err
 	}
@@ -481,7 +481,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			domains.SetBlockNum(blockNum)
 			domains.SetTxNum(lastTxnumInShard - 1)
-			domains.sdCtx.SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
@@ -582,7 +582,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *sd.SharedDomains, tx kv.Tem
 	sd.DiscardWrites(kv.StorageDomain)
 	sd.DiscardWrites(kv.CodeDomain)
 
-	logger := sd.logger
+	logger := sd.Logger()
 
 	visComFiles := tx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info(cfg.LogPrefix+" started", "totalKeys", common.PrettyCounter(cfg.Keys), "block", cfg.BlockNumber, "txn", cfg.TxnNumber,
@@ -591,7 +591,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *sd.SharedDomains, tx kv.Tem
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		sd.sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
+		sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
 		processed++
 		if !ok {
 			break
@@ -599,7 +599,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *sd.SharedDomains, tx kv.Tem
 	}
 
 	collectionSpent := time.Since(sf)
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+	rh, err := sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -607,7 +607,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *sd.SharedDomains, tx kv.Tem
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.mem.(*TemporalMemBatch), nil)
+	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil)
 	if err != nil {
 		return nil, err
 	}
