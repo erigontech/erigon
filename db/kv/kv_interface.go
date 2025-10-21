@@ -125,6 +125,7 @@ type RoDB interface {
 
 	// CHandle pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
 	CHandle() unsafe.Pointer
+	Path() string
 }
 
 type RwDB interface {
