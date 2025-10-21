@@ -123,6 +123,7 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
+	// see `BenchmarkSyncPeriodDefault`
 	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		Path(path).
 		WithTableCfg(bucketsConfig).
