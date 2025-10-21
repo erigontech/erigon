@@ -551,13 +551,8 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
 	}
 
-	if packet.LatestHash == (common.Hash{}) {
-		h.logger.Warn("[hook] block range update skipped due to zero latest hash", "latest", packet.Latest)
-		return
-	}
-
-	if packet.Earliest > packet.Latest {
-		h.logger.Warn("[hook] block range update skipped due to invalid range", "earliest", packet.Earliest, "latest", packet.Latest)
+	if err := packet.Validate(); err != nil {
+		h.logger.Warn("[hook] block range update skipped", "err", err)
 		return
 	}
 
