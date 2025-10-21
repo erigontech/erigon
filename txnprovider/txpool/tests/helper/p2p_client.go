@@ -10,12 +10,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/nat"
@@ -53,13 +53,13 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	cfg := &p2p.Config{
 		ListenAddr:      ":30307",
 		AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307},
-		ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
+		ProtocolVersion: []uint{direct.ETH69, direct.ETH68},
 		MaxPeers:        32,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),
 		NoDiscovery:     true,
 		Name:            "p2p-mock",
-		NodeDatabase:    "dev/nodes/eth67",
+		NodeDatabase:    "dev/nodes/eth68",
 		PrivateKey:      privateKey,
 	}
 
@@ -98,9 +98,12 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	}
 
 	grpcServer := sentry.NewGrpcServer(context.TODO(), nil, func() *eth.NodeInfo { return nil }, cfg, direct.ETH68, log.New())
-	sentry := direct.NewSentryClientDirect(direct.ETH68, grpcServer)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH69, grpcServer, nil)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	_, err = sentry.SetStatus(context.TODO(), &sentryproto.StatusData{
+	_, err = sentryClient.SetStatus(context.TODO(), &sentryproto.StatusData{
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromDecimal(strconv.Itoa(resp.Result.Protocols.Eth.Difficulty))),
 		BestHash: gointerfaces.ConvertHashToH256(
@@ -116,7 +119,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		return nil, nil, err
 	}
 
-	conn, err := sentry.Messages(context.TODO(), &sentryproto.MessagesRequest{
+	conn, err := sentryClient.Messages(context.TODO(), &sentryproto.MessagesRequest{
 		Ids: []sentryproto.MessageId{
 			sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 			sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,

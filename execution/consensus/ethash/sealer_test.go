@@ -20,6 +20,7 @@
 package ethash
 
 import (
+	"encoding/json"
 	"io"
 	"math/big"
 	"net/http"
@@ -28,11 +29,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goccy/go-json"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 )

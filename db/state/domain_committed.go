@@ -25,9 +25,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -49,9 +49,8 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	return nil
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
-	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
-	return
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, sd.txNum, logPrefix, commitProgress)
 }
 
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
@@ -229,7 +228,7 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesIt
 	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
 		return dirty, nil
 	}
-	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.Version.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
 }
 
 func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
@@ -249,7 +248,8 @@ func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *Fil
 	if item == nil || item.bindex == nil {
 		fileStepsss := "" + dt.d.Name.String() + ": "
 		for _, item := range dt.d.dirtyFiles.Items() {
-			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.stepSize, item.endTxNum/dt.d.stepSize)
+			fromStep, toStep := item.StepRange(dt.d.stepSize)
+			fileStepsss += fmt.Sprintf("%d-%d;", fromStep, toStep)
 		}
 		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.stepSize, "stepTo", txTo/dt.d.stepSize,

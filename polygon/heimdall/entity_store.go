@@ -23,11 +23,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
 var databaseTablesCfg = kv.TableCfg{
@@ -63,7 +63,7 @@ type EntityStore[TEntity Entity] interface {
 }
 
 type mdbxEntityStore[TEntity Entity] struct {
-	db                *polygoncommon.Database
+	db                *polygondb.Database
 	table             string
 	snapType          snaptype.Type
 	makeEntity        func() TEntity
@@ -72,7 +72,7 @@ type mdbxEntityStore[TEntity Entity] struct {
 }
 
 func newMdbxEntityStore[TEntity Entity](
-	db *polygoncommon.Database,
+	db *polygondb.Database,
 	table string,
 	snapType snaptype.Type,
 	makeEntity func() TEntity,
