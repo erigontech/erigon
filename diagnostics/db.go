@@ -28,7 +28,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/node/paths"
 )
 
@@ -136,7 +135,8 @@ func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 
 func writeDbList(w http.ResponseWriter, dataDir string) {
 	w.Header().Set("Content-Type", "application/json")
-	m := mdbx.PathDbMap()
+	//m := mdbx.PathDbMap()
+	m := map[string]kv.RoDB{}
 	dbs := make([]string, 0, len(m))
 	for path := range m {
 		dbs = append(dbs, strings.ReplaceAll(strings.TrimPrefix(path, dataDir)[1:], "\\", "/"))
@@ -146,7 +146,8 @@ func writeDbList(w http.ResponseWriter, dataDir string) {
 }
 
 func writeDbTables(w http.ResponseWriter, r *http.Request, dataDir string, dbname string) {
-	m := mdbx.PathDbMap()
+	//m := mdbx.PathDbMap()
+	m := map[string]kv.RoDB{}
 	db, ok := m[filepath.Join(dataDir, dbname)]
 	if !ok {
 		http.Error(w, fmt.Sprintf(`"%s" is not in the list of allowed dbs`, dbname), http.StatusNotFound)
@@ -199,7 +200,8 @@ func writeDbTables(w http.ResponseWriter, r *http.Request, dataDir string, dbnam
 }
 
 func writeDbRead(w http.ResponseWriter, r *http.Request, dataDir string, dbname string, table string, key []byte, offset int64, limit int64) {
-	m := mdbx.PathDbMap()
+	//m := mdbx.PathDbMap()
+	m := map[string]kv.RoDB{}
 	db, ok := m[filepath.Join(dataDir, dbname)]
 	if !ok {
 		fmt.Fprintf(w, "ERROR: path %s is not in the list of allowed paths", dbname)
