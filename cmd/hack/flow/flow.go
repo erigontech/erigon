@@ -31,11 +31,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-
-	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 const (
@@ -92,7 +90,7 @@ func worker(code []byte) {
 	start := time.Now()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		cfg, _ := vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
 		if cfg.Metrics.Valid {
 			proof := cfg.GenerateProof()
@@ -109,7 +107,7 @@ func worker(code []byte) {
 	oom := make(chan int, 1)
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		for {
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
@@ -199,7 +197,7 @@ func batchServer() {
 
 	for i := 0; i < numWorkers; i++ {
 		go func(id int) {
-			defer debug.LogPanic()
+			defer dbg.LogPanic()
 			for job := range jobs {
 				enc := hex.EncodeToString(job.code)
 				cmd := exec.CommandContext(context.Background(), "./build/bin/hack",

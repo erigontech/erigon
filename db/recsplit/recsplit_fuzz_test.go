@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !nofuzz
-
 package recsplit
 
 import (
@@ -23,7 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // go test -trimpath -v -fuzz=FuzzRecSplit -fuzztime=10s ./recsplit

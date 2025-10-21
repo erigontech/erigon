@@ -27,26 +27,25 @@ import (
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -77,8 +76,8 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 	const prefix = "block hash: "
 	for _, subErr := range uw.Unwrap() {
 		msg := subErr.Error()
-		if strings.HasPrefix(msg, prefix) {
-			hashStr = strings.TrimPrefix(msg, prefix)
+		if after, ok := strings.CutPrefix(msg, prefix); ok {
+			hashStr = after
 			break
 		}
 	}
@@ -127,7 +126,7 @@ type EthereumExecutionModule struct {
 	// metrics for average mgas/sec
 	avgMgasSec float64
 
-	execution.UnimplementedExecutionServer
+	executionproto.UnimplementedExecutionServer
 }
 
 func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.TemporalRwDB,
@@ -203,7 +202,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return canonical, nil
 }
 
-func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *types.Header) error {
+func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
@@ -222,18 +221,18 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.RunUnwind(nil, wrap.NewTxContainer(tx, nil)); err != nil {
+	if err := e.executionPipeline.RunUnwind(nil, nil, tx); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
+func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *executionproto.ValidationRequest) (*executionproto.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
-		return &execution.ValidationReceipt{
+		return &executionproto.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
-			ValidationStatus: execution.ExecutionStatus_Busy,
+			ValidationStatus: executionproto.ExecutionStatus_Busy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
@@ -264,30 +263,29 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	if header == nil || body == nil {
-		return &execution.ValidationReceipt{
+		return &executionproto.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
-			ValidationStatus: execution.ExecutionStatus_MissingSegment,
+			ValidationStatus: executionproto.ExecutionStatus_MissingSegment,
 		}, nil
 	}
 
 	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
-		return &execution.ValidationReceipt{
-			ValidationStatus: execution.ExecutionStatus_TooFarAway,
+		return &executionproto.ValidationReceipt{
+			ValidationStatus: executionproto.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
 		}, nil
 	}
 
-	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-		return e.unwindToCommonCanonical(tx, header)
-	}); err != nil {
-		return nil, err
-	}
-
-	tx, err := e.db.BeginRwNosync(ctx)
+	tx, err := e.db.BeginTemporalRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	err = e.unwindToCommonCanonical(tx, header)
+	if err != nil {
+		return nil, err
+	}
 
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
@@ -295,16 +293,16 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
 	tx.Rollback()
-	tx, err = e.db.BeginRwNosync(ctx)
+	tx, err = e.db.BeginTemporalRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
-	validationStatus := execution.ExecutionStatus_Success
+	validationStatus := executionproto.ExecutionStatus_Success
 	if status == engine_types.AcceptedStatus {
-		validationStatus = execution.ExecutionStatus_MissingSegment
+		validationStatus = executionproto.ExecutionStatus_MissingSegment
 	}
 	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
 	if isInvalidChain && (lvh != common.Hash{}) && lvh != blockHash {
@@ -314,9 +312,9 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	if isInvalidChain {
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", common.Hash(blockHash))
-		validationStatus = execution.ExecutionStatus_BadBlock
+		validationStatus = executionproto.ExecutionStatus_BadBlock
 	}
-	validationReceipt := &execution.ValidationReceipt{
+	validationReceipt := &executionproto.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
 	}
@@ -355,7 +353,7 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 	return nil
 }
 
-func (e *EthereumExecutionModule) Start(ctx context.Context) {
+func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stages.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
@@ -364,14 +362,14 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, nil); err != nil {
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
 	}
 }
 
-func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
+func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionproto.ReadyResponse, error) {
 
 	// setup a timeout for the context to avoid waiting indefinitely
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second)
@@ -380,20 +378,20 @@ func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (
 	if err := <-e.blockReader.Ready(ctxWithTimeout); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			e.logger.Trace("ethereumExecutionModule.Ready: context deadline exceeded")
-			return &execution.ReadyResponse{Ready: false}, nil
+			return &executionproto.ReadyResponse{Ready: false}, nil
 		}
-		return &execution.ReadyResponse{Ready: false}, err
+		return &executionproto.ReadyResponse{Ready: false}, err
 	}
 
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
-		return &execution.ReadyResponse{Ready: false}, nil
+		return &executionproto.ReadyResponse{Ready: false}, nil
 	}
 	defer e.semaphore.Release(1)
-	return &execution.ReadyResponse{Ready: true}, nil
+	return &executionproto.ReadyResponse{Ready: true}, nil
 }
 
-func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.GetSegmentRequest) (*execution.HasBlockResponse, error) {
+func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.HasBlockResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -406,21 +404,21 @@ func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.Ge
 
 	num, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 	if num == nil {
-		return &execution.HasBlockResponse{HasBlock: false}, nil
+		return &executionproto.HasBlockResponse{HasBlock: false}, nil
 	}
 	if *num <= e.blockReader.FrozenBlocks() {
-		return &execution.HasBlockResponse{HasBlock: true}, nil
+		return &executionproto.HasBlockResponse{HasBlock: true}, nil
 	}
 	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, blockHash))
 	if err != nil {
 		return nil, err
 	}
 	if !has {
-		return &execution.HasBlockResponse{HasBlock: false}, nil
+		return &executionproto.HasBlockResponse{HasBlock: false}, nil
 	}
 	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, blockHash))
 	if err != nil {
 		return nil, err
 	}
-	return &execution.HasBlockResponse{HasBlock: has}, nil
+	return &executionproto.HasBlockResponse{HasBlock: has}, nil
 }

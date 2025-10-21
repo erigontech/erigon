@@ -43,27 +43,27 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
@@ -255,7 +255,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		_, err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
+		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
 		if err != nil {
 			return err
 		}
@@ -315,8 +315,11 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
 	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles); err != nil {
+		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
+		}
+		if verifyFailfast {
+			return nil
 		}
 	}
 
@@ -333,15 +336,15 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	// I'm kinda curious... but it was false before.
 	d.MainLoopInBackground(true)
 	if seedbox {
-		var downloadItems []*proto_downloader.AddItem
+		var downloadItems []*downloaderproto.AddItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)
 		for _, it := range snapCfg.Preverified.Items {
-			downloadItems = append(downloadItems, &proto_downloader.AddItem{
+			downloadItems = append(downloadItems, &downloaderproto.AddItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
 			})
 		}
-		if _, err := bittorrentServer.Add(ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+		if _, err := bittorrentServer.Add(ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
 			return err
 		}
 	}
@@ -693,7 +696,7 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 	grpcServer := grpc.NewServer(opts...)
 	reflection.Register(grpcServer) // Register reflection service on gRPC server.
 	if snServer != nil {
-		proto_downloader.RegisterDownloaderServer(grpcServer, snServer)
+		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}
 
 	//if metrics.Enabled {
@@ -721,7 +724,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	if !exists {
 		return nil
 	}
-	db, err := mdbx.New(kv.ChainDB, log.New()).
+	db, err := mdbx.New(dbcfg.ChainDB, log.New()).
 		Path(dirs.Chaindata).
 		Accede(true).
 		Open(ctx)
@@ -731,12 +734,13 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	defer db.Close()
 
 	if cc := tool.ChainConfigFromDB(db); cc != nil {
-		chainConfig := chainspec.ChainConfigByChainName(chainName)
-		if chainConfig == nil {
+		spc, err := chainspec.ChainSpecByName(chainName)
+		if err != nil {
 			return fmt.Errorf("unknown chain: %s", chainName)
 		}
-		if chainConfig.ChainID.Uint64() != cc.ChainID.Uint64() {
-			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
+		if spc.Config.ChainID.Uint64() != cc.ChainID.Uint64() {
+			advice := fmt.Sprintf("\nTo change to '%s', remove %s %s\nAnd then start over with --chain=%s", chainName, dirs.Chaindata, filepath.Join(dirs.Snap, "preverified.toml"), chainName)
+			return fmt.Errorf("datadir already was configured with --chain=%s"+advice, cc.ChainName)
 		}
 	}
 	return nil

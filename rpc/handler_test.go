@@ -20,13 +20,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	jsoniter "github.com/json-iterator/go"
 	"reflect"
 	"testing"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
@@ -118,6 +118,8 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 
 			h := handler{}
 			h.runMethod(context.Background(), &msg, cb, args, stream)
+
+			stream.Flush()
 
 			output := buf.String()
 			assert.Equal(t, testParams.expected, output, "expected output should match")

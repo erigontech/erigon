@@ -21,17 +21,16 @@ package ethash
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"math/big"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/goccy/go-json"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/types"

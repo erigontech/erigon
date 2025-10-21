@@ -20,9 +20,9 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 //go:generate mockgen -typed=true -source=./p2p_service.go -destination=./p2p_service_mock.go -package=sync . p2pservice
@@ -32,7 +32,7 @@ type p2pService interface {
 	ListPeersMayHaveBlockNum(blockNum uint64) []*p2p.PeerId
 	FetchHeaders(ctx context.Context, start, end uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error)
 	FetchBodies(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error)
-	FetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, amount uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Block], error)
+	FetchBlocksBackwards(ctx context.Context, h common.Hash, hr p2p.BbdHeaderReader, opts ...p2p.BbdOption) (p2p.BbdResultFeed, error)
 	PublishNewBlock(block *types.Block, td *big.Int)
 	PublishNewBlockHashes(block *types.Block)
 	Penalize(ctx context.Context, peerId *p2p.PeerId) error

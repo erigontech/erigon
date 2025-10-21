@@ -1099,9 +1099,8 @@ func BenchmarkDecode(b *testing.B) {
 	enc := encodeTestSlice(90000)
 	b.SetBytes(int64(len(enc)))
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var s []uint
 		if err := DecodeBytes(enc, &s); err != nil {
 			b.Fatalf("Decode error: %v", err)
@@ -1113,10 +1112,9 @@ func BenchmarkDecodeIntSliceReuse(b *testing.B) {
 	enc := encodeTestSlice(100000)
 	b.SetBytes(int64(len(enc)))
 	b.ReportAllocs()
-	b.ResetTimer()
 
 	var s []uint
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if err := DecodeBytes(enc, &s); err != nil {
 			b.Fatalf("Decode error: %v", err)
 		}

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"runtime"
 	"unsafe"
 
@@ -29,19 +30,20 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // generate the messages and services
 type remoteOpts struct {
-	remoteKV    remote.KVClient
+	remoteKV    remoteproto.KVClient
 	log         log.Logger
 	bucketsCfg  kv.TableCfg
 	DialAddress string
@@ -49,9 +51,10 @@ type remoteOpts struct {
 }
 
 var _ kv.TemporalTx = (*tx)(nil)
+var _ kv.TemporalRoDB = (*DB)(nil)
 
 type DB struct {
-	remoteKV     remote.KVClient
+	remoteKV     remoteproto.KVClient
 	log          log.Logger
 	buckets      kv.TableCfg
 	roTxsLimiter *semaphore.Weighted
@@ -59,7 +62,7 @@ type DB struct {
 }
 
 type tx struct {
-	stream             remote.KV_TxClient
+	stream             remoteproto.KV_TxClient
 	ctx                context.Context
 	streamCancelFn     context.CancelFunc
 	db                 *DB
@@ -72,7 +75,7 @@ type tx struct {
 
 type remoteCursor struct {
 	ctx        context.Context
-	stream     remote.KV_TxClient
+	stream     remoteproto.KV_TxClient
 	tx         *tx
 	bucketName string
 	bucketCfg  kv.TableCfgItem
@@ -106,9 +109,8 @@ func (opts remoteOpts) Open() (*DB, error) {
 		roTxsLimiter: semaphore.NewWeighted(targetSemCount), // 1 less than max to allow unlocking
 	}
 	customBuckets := opts.bucketsCfg
-	for name, cfg := range customBuckets { // copy map to avoid changing global variable
-		db.buckets[name] = cfg
-	}
+	// copy map to avoid changing global variable
+	maps.Copy(db.buckets, customBuckets)
 
 	return db, nil
 }
@@ -124,11 +126,12 @@ func (opts remoteOpts) MustOpen() kv.RwDB {
 // NewRemote defines new remove KV connection (without actually opening it)
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
-func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remote.KVClient) remoteOpts {
+func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remoteproto.KVClient) remoteOpts {
 	return remoteOpts{bucketsCfg: kv.ChaindataTablesCfg, version: v, log: logger, remoteKV: remoteKV}
 }
 
 func (db *DB) PageSize() datasize.ByteSize { panic("not implemented") }
+func (db *DB) Path() string                { panic("not implemented") }
 func (db *DB) ReadOnly() bool              { return true }
 func (db *DB) AllTables() kv.TableCfg      { return db.buckets }
 
@@ -188,6 +191,7 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+func (db *DB) ForkableTables(domain ...kv.ForkableId) []string     { panic("not implemented") }
 func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
 func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }
@@ -238,16 +242,13 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                           { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx            { return kv.TemporalDebugTx(tx) }
-func (tx *tx) FreezeInfo() kv.FreezeInfo            { panic("not implemented") }
-func (tx *tx) CanUnwindToBlockNum() (uint64, error) { panic("not implemented") }
-func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
-	panic("not implemented")
-}
-func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
-func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }
-func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }
+func (tx *tx) AggTx() any                                      { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx                       { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo                       { panic("not implemented") }
+func (tx *tx) AllForkableIds() (ids []kv.ForkableId)           { panic("not implemented") }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step     { panic("not implemented") }
+func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
+func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }
@@ -258,7 +259,7 @@ func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented"
 func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	panic("not implemented")
 }
-func (tx *tx) StepSize() uint64                                     { panic("not implemented") }
+func (tx *tx) Dirs() datadir.Dirs                                   { panic("not implemented") }
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { panic("not implemented") }
@@ -269,7 +270,7 @@ func (tx *tx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	panic("not implemented yet")
 }
 func (tx *tx) ReadSequence(table string) (uint64, error) {
-	reply, err := tx.db.remoteKV.Sequence(tx.ctx, &remote.SequenceReq{TxId: tx.id, Table: table})
+	reply, err := tx.db.remoteKV.Sequence(tx.ctx, &remoteproto.SequenceReq{TxId: tx.id, Table: table})
 	if err != nil {
 		return 0, err
 	}
@@ -393,7 +394,7 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 	b := tx.db.buckets[bucket]
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
 	tx.cursors = append(tx.cursors, c)
-	if err := c.stream.Send(&remote.Cursor{Op: remote.Op_OPEN, BucketName: c.bucketName}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Op: remoteproto.Op_OPEN, BucketName: c.bucketName}); err != nil {
 		return nil, err
 	}
 	msg, err := c.stream.Recv()
@@ -423,7 +424,7 @@ func (tx *tx) AggForkablesTx(id kv.ForkableId) any {
 // func (c *remoteCursor) DeleteCurrent() error                    { panic("not supported") }
 
 func (c *remoteCursor) first() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_FIRST}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -434,7 +435,7 @@ func (c *remoteCursor) first() ([]byte, []byte, error) {
 }
 
 func (c *remoteCursor) next() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_NEXT}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_NEXT}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -444,7 +445,7 @@ func (c *remoteCursor) next() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) nextDup() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_NEXT_DUP}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_NEXT_DUP}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -454,7 +455,7 @@ func (c *remoteCursor) nextDup() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) nextNoDup() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_NEXT_NO_DUP}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_NEXT_NO_DUP}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -464,7 +465,7 @@ func (c *remoteCursor) nextNoDup() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) prev() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_PREV}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_PREV}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -474,7 +475,7 @@ func (c *remoteCursor) prev() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) prevDup() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_PREV_DUP}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_PREV_DUP}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -484,7 +485,7 @@ func (c *remoteCursor) prevDup() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) prevNoDup() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_PREV_NO_DUP}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_PREV_NO_DUP}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -494,7 +495,7 @@ func (c *remoteCursor) prevNoDup() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) last() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_LAST}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -504,7 +505,7 @@ func (c *remoteCursor) last() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) setRange(k []byte) ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK, K: k}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_SEEK, K: k}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -514,7 +515,7 @@ func (c *remoteCursor) setRange(k []byte) ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) seekExact(k []byte) ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_EXACT, K: k}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_SEEK_EXACT, K: k}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -524,7 +525,7 @@ func (c *remoteCursor) seekExact(k []byte) ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH, K: k, V: v}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_SEEK_BOTH, K: k, V: v}); err != nil {
 		return nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -534,7 +535,7 @@ func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, error) {
 	return pair.V, nil
 }
 func (c *remoteCursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH_EXACT, K: k, V: v}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_SEEK_BOTH_EXACT, K: k, V: v}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -544,7 +545,7 @@ func (c *remoteCursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) firstDup() ([]byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST_DUP}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_FIRST_DUP}); err != nil {
 		return nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -554,7 +555,7 @@ func (c *remoteCursor) firstDup() ([]byte, error) {
 	return pair.V, nil
 }
 func (c *remoteCursor) lastDup() ([]byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST_DUP}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_LAST_DUP}); err != nil {
 		return nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -564,7 +565,7 @@ func (c *remoteCursor) lastDup() ([]byte, error) {
 	return pair.V, nil
 }
 func (c *remoteCursor) getCurrent() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CURRENT}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_CURRENT}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -636,7 +637,7 @@ func (c *remoteCursor) Close() {
 	}
 	st := c.stream
 	c.stream = nil
-	if err := st.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err == nil {
+	if err := st.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_CLOSE}); err == nil {
 		_, _ = st.Recv()
 	}
 }
@@ -645,7 +646,7 @@ func (tx *tx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 	b := tx.db.buckets[bucket]
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
 	tx.cursors = append(tx.cursors, c)
-	if err := c.stream.Send(&remote.Cursor{Op: remote.Op_OPEN_DUP_SORT, BucketName: c.bucketName}); err != nil {
+	if err := c.stream.Send(&remoteproto.Cursor{Op: remoteproto.Op_OPEN_DUP_SORT, BucketName: c.bucketName}); err != nil {
 		return nil, err
 	}
 	msg, err := c.stream.Recv()
@@ -680,15 +681,34 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 // Temporal Methods
 
 func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
-	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remote.HistoryStartFromReq{TxId: tx.id, Domain: uint32(name)})
+	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remoteproto.HistoryStartFromReq{TxId: tx.id, Domain: uint32(name)})
 	if err != nil {
 		return 0
 	}
 	return reply.StartFrom
 }
 
+func (tx *tx) StepSize() uint64 {
+	reply, err := tx.db.remoteKV.StepSize(tx.ctx, &remoteproto.StepSizeReq{TxId: tx.id})
+	if err != nil {
+		return 0
+	}
+	return reply.Step
+}
+
+func (tx *tx) CurrentDomainVersion(name kv.Domain) version.Version {
+	reply, err := tx.db.remoteKV.CurrentDomainVersion(tx.ctx, &remoteproto.CurrentDomainVersionReq{TxId: tx.id, Domain: uint32(name)})
+	if err != nil {
+		return version.Version{}
+	}
+	var v version.Version
+	v.Major = reply.Major
+	v.Minor = reply.Minor
+	return v
+}
+
 func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remoteproto.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
@@ -696,7 +716,7 @@ func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, e
 }
 
 func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Latest: true})
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remoteproto.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Latest: true})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -704,7 +724,7 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err e
 }
 
 func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	req := &remote.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
+	req := &remoteproto.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
 	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)
 	if err != nil {
 		return nil, nil, false, err
@@ -714,7 +734,7 @@ func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, er
 
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
-		reply, err := tx.db.remoteKV.RangeAsOf(tx.ctx, &remote.RangeAsOfReq{TxId: tx.id, Table: name.String(), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
+		reply, err := tx.db.remoteKV.RangeAsOf(tx.ctx, &remoteproto.RangeAsOfReq{TxId: tx.id, Table: name.String(), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
 		if err != nil {
 			return nil, nil, "", err
 		}
@@ -722,7 +742,7 @@ func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc or
 	}), nil
 }
 func (tx *tx) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.HistorySeek(tx.ctx, &remote.HistorySeekReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
+	reply, err := tx.db.remoteKV.HistorySeek(tx.ctx, &remoteproto.HistorySeekReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
@@ -730,7 +750,7 @@ func (tx *tx) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok boo
 }
 func (tx *tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
 	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
-		reply, err := tx.db.remoteKV.HistoryRange(tx.ctx, &remote.HistoryRangeReq{TxId: tx.id, Table: name.String(), FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
+		reply, err := tx.db.remoteKV.HistoryRange(tx.ctx, &remoteproto.HistoryRangeReq{TxId: tx.id, Table: name.String(), FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
 		if err != nil {
 			return nil, nil, "", err
 		}
@@ -740,7 +760,7 @@ func (tx *tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 
 func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	return stream.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
-		req := &remote.IndexRangeReq{TxId: tx.id, Table: name.String(), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken}
+		req := &remoteproto.IndexRangeReq{TxId: tx.id, Table: name.String(), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken}
 		reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
 		if err != nil {
 			return nil, "", err
@@ -759,7 +779,7 @@ func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {
 
 func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	return stream.PaginateKV(func(pageToken string) (keys [][]byte, values [][]byte, nextPageToken string, err error) {
-		req := &remote.RangeReq{TxId: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix, OrderAscend: bool(asc), Limit: int64(limit)}
+		req := &remoteproto.RangeReq{TxId: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix, OrderAscend: bool(asc), Limit: int64(limit)}
 		reply, err := tx.db.remoteKV.Range(tx.ctx, req)
 		if err != nil {
 			return nil, nil, "", err

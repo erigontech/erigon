@@ -34,10 +34,10 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -50,7 +50,7 @@ func TestServiceWithAmoyData(t *testing.T) {
 
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/amoy",
-		chainConfig:                    polychain.AmoyChainConfig,
+		chainConfig:                    polychain.Amoy.Config,
 		expectedLastSpan:               1280,
 		expectedFirstCheckpoint:        1,
 		expectedLastCheckpoint:         150,
@@ -92,7 +92,7 @@ func TestServiceWithMainnetData(t *testing.T) {
 
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/mainnet",
-		chainConfig:                    polychain.BorMainnetChainConfig,
+		chainConfig:                    polychain.BorMainnet.Config,
 		expectedLastSpan:               2344,
 		expectedFirstCheckpoint:        1,
 		expectedLastCheckpoint:         1,
@@ -175,10 +175,11 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupCheckpoints()
 	suite.setupMilestones()
 	suite.service = NewService(ServiceConfig{
-		Store:     store,
-		BorConfig: borConfig,
-		Client:    suite.client,
-		Logger:    suite.logger,
+		Store:       store,
+		ChainConfig: suite.chainConfig,
+		BorConfig:   borConfig,
+		Client:      suite.client,
+		Logger:      suite.logger,
 	})
 
 	err := suite.service.store.Prepare(suite.ctx)

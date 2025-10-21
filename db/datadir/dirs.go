@@ -19,6 +19,7 @@ package datadir
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -29,9 +30,8 @@ import (
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/gofrs/flock"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // Dirs is the file system folder the node should use for any data storage
@@ -49,6 +49,7 @@ type Dirs struct {
 	SnapDomain       string
 	SnapAccessors    string
 	SnapCaplin       string
+	SnapForkable     string
 	Downloader       string
 	TxPool           string
 	Nodes            string
@@ -70,6 +71,7 @@ func New(datadir string) Dirs {
 		dirs.SnapDomain,
 		dirs.SnapAccessors,
 		dirs.SnapCaplin,
+		//dirs.SnapForkable,
 		dirs.Downloader,
 		dirs.TxPool,
 		dirs.Nodes,
@@ -106,6 +108,7 @@ func Open(datadir string) Dirs {
 		SnapDomain:       filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:    filepath.Join(datadir, "snapshots", "accessor"),
 		SnapCaplin:       filepath.Join(datadir, "snapshots", "caplin"),
+		SnapForkable:     filepath.Join(datadir, "snapshots", "forkable"),
 		Downloader:       filepath.Join(datadir, "downloader"),
 		TxPool:           filepath.Join(datadir, "txpool"),
 		Nodes:            filepath.Join(datadir, "nodes"),
@@ -318,8 +321,12 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	} else {
 		log.Debug(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
 	}
+	if renamed > 0 || removed > 0 {
+		log.Warn("Your snapshots are compatible but old. We recommend you (for better experience) " +
+			"upgrade them by `./build/bin/erigon --datadir /your/datadir snapshots reset ` command, after this command: next Erigon start - will download latest files (but re-use unchanged files) - likely will take many hours")
+	}
 	if d.Downloader != "" && (renamed > 0 || removed > 0) {
-		if err := dir.RemoveAll(d.Downloader); err != nil {
+		if err := dir.RemoveAll(d.Downloader); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		log.Info(fmt.Sprintf("Removed Downloader directory: %s", d.Downloader))
@@ -355,6 +362,7 @@ func (d *Dirs) RenameNewVersions() error {
 					if err := dir.RemoveFile(path); err != nil {
 						return fmt.Errorf("failed to remove file %s: %w", path, err)
 					}
+					removed++
 					return nil
 				}
 				newName := strings.Replace(dirEntry.Name(), "v1.0-", "v1-", 1)
@@ -364,6 +372,7 @@ func (d *Dirs) RenameNewVersions() error {
 				if err := os.Rename(oldPath, newPath); err != nil {
 					return err
 				}
+				renamed++
 			}
 			return nil
 		})
@@ -372,19 +381,13 @@ func (d *Dirs) RenameNewVersions() error {
 			return err
 		}
 
-		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc., unsupported in 3.0)
-		err = filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
+		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc, unsupported in 3.0)
+		if err = filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
-					return nil
-				}
 				return err
 			}
-			if dirEntry.IsDir() {
-				return nil
-			}
 
-			if IsVersionedName(dirEntry.Name()) {
+			if !dirEntry.IsDir() && IsVersionedName(dirEntry.Name()) {
 				err = dir.RemoveFile(path)
 				if err != nil {
 					return fmt.Errorf("failed to remove file %s: %w", path, err)
@@ -393,8 +396,7 @@ func (d *Dirs) RenameNewVersions() error {
 			}
 
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
 	}
@@ -403,16 +405,16 @@ func (d *Dirs) RenameNewVersions() error {
 
 	//eliminate polygon-bridge && heimdall && chaindata just in case
 	if d.DataDir != "" {
-		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.PolygonBridgeDB)); err != nil {
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, kv.PolygonBridgeDB)))
-		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.HeimdallDB)); err != nil {
+		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)))
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.HeimdallDB)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, kv.HeimdallDB)))
+		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, dbcfg.HeimdallDB)))
 		if d.Chaindata != "" {
-			if err := dir.RemoveAll(d.Chaindata); err != nil {
+			if err := dir.RemoveAll(d.Chaindata); err != nil && !os.IsNotExist(err) {
 				return err
 			}
 			log.Info(fmt.Sprintf("Removed chaindata directory: %s", d.Chaindata))
@@ -421,7 +423,6 @@ func (d *Dirs) RenameNewVersions() error {
 
 	return nil
 }
-
 func (d *Dirs) PreverifiedPath() string {
 	return filepath.Join(d.Snap, PreverifiedFileName)
 }

@@ -21,8 +21,10 @@ import (
 
 	"github.com/google/btree"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
+
+type SpanId uint64
 
 type Span struct {
 	Id                SpanId       `json:"span_id" yaml:"span_id"`
