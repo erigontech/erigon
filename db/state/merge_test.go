@@ -131,14 +131,28 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Parallel()
 
-	newTestDomain := func() (*InvertedIndex, *History) {
+	newTestDomain := func(withDependency bool) (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
+
+		if withDependency {
+			checker := NewDependencyIntegrityChecker(log.New())
+			universalEntity := FromII(d.InvertedIndex.InvIdxCfg.Name)
+			checker.AddDependency(universalEntity, &DependentInfo{
+				entity: universalEntity,
+				filesGetter: func() *btree2.BTreeG[*FilesItem] {
+					return d.History.dirtyFiles
+				},
+				accessors: d.History.Accessors,
+			})
+			d.History.InvertedIndex.SetChecker(checker)
+		}
+
 		return d.History.InvertedIndex, d.History
 	}
 	t.Run("ii: > 2 unmerged files", func(t *testing.T) {
-		ii, _ := newTestDomain()
+		ii, _ := newTestDomain(false)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-2.ef",
 			"v1.0-accounts.2-3.ef",
@@ -163,7 +177,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Len(t, idxF, 3)
 	})
 	t.Run("hist: > 2 unmerged files", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
@@ -196,7 +210,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.index.to))
 	})
 	t.Run("not equal amount of files", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
@@ -230,7 +244,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.index.to))
 	})
 	t.Run("idx merged, history not yet", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-2.ef",
 			"v1.0-accounts.2-3.ef",
@@ -262,7 +276,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.history.to))
 	})
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
@@ -292,7 +306,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index.needMerge)
+		assert.True(t, r.index.needMerge)
 		assert.True(t, r.history.needMerge)
 		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
@@ -301,7 +315,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Len(t, histFiles, 2)
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-4.ef",
 		})
@@ -335,7 +349,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 
 	t.Run("history merged, but index not and history garbage left", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
@@ -371,7 +385,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Empty(t, histFiles)
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
@@ -411,7 +425,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Len(t, histFiles, 3)
 	})
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
@@ -439,7 +453,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index.needMerge)
+		assert.True(t, r.index.needMerge)
 		assert.True(t, r.history.needMerge)
 		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
@@ -448,7 +462,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Len(t, histFiles, 2)
 	})
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
-		ii, h := newTestDomain()
+		ii, h := newTestDomain(true)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
@@ -479,7 +493,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.False(t, r.history.needMerge)
 	})
 	t.Run("idx merged, but garbage left2", func(t *testing.T) {
-		ii, _ := newTestDomain()
+		ii, _ := newTestDomain(false)
 		ii.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.ef",
 			"v1.0-accounts.1-2.ef",
@@ -638,7 +652,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 
 	setup := func() (account, storage, commitment *Domain) {
 		account, storage, commitment = newTestDomain(0), newTestDomain(1), newTestDomain(3)
-		checker := NewDependencyIntegrityChecker(account.dirs, log.New())
+		checker := NewDependencyIntegrityChecker(log.New())
 		info := &DependentInfo{
 			entity: FromDomain(commitment.Name),
 			filesGetter: func() *btree2.BTreeG[*FilesItem] {
