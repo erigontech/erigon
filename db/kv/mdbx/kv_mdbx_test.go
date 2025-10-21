@@ -54,15 +54,15 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
 	}
 	cfg := New(dbcfg.ChainDB, log.New()).
-		MapSize(18 * datasize.GB).
-		GrowthStep(1 * datasize.MB).
+		PageSize(4 * datasize.KB).
+		MapSize(8 * datasize.GB).
+		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint {
-			return f&^mdbxgo.Durable | mdbxgo.SafeNoSync | mdbxgo.WriteMap | mdbxgo.NoReadahead | mdbxgo.NoMemInit | mdbxgo.Exclusive
+			return f&^mdbxgo.Durable | mdbxgo.SafeNoSync | mdbxgo.WriteMap
 		}).
 		SyncBytes(20 * datasize.MB).
 		SyncPeriod(2 * time.Second).
-		DirtySpace(uint64(32 * datasize.MB)).
-		PageSize(4 * datasize.KB)
+		DirtySpace(uint64(32 * datasize.MB))
 
 	doBench := func(b *testing.B, db kv.RwDB) {
 		//b.ReportAllocs()
