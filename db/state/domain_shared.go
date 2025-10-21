@@ -163,6 +163,7 @@ type inMem interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 	Close()
 	PutForkable(id ForkableId, num kv.Num, v []byte) error
+	DiscardWrites(domain kv.Domain)
 }
 
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
