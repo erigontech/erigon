@@ -118,7 +118,6 @@ type ForkChoiceStore struct {
 	preverifiedSizes    *lru.Cache[common.Hash, preverifiedAppendListsSizes]
 	finalityCheckpoints *lru.Cache[common.Hash, finalityCheckpoints]
 	totalActiveBalances *lru.Cache[common.Hash, uint64]
-	nextBlockProposers  *lru.Cache[common.Hash, []uint64]
 	// Randao mixes
 	randaoMixesLists *lru.Cache[common.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
 	randaoDeltas     *lru.Cache[common.Hash, randaoDelta]       // small entry can be lots of elements.
@@ -228,11 +227,6 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
-	nextBlockProposers, err := lru.New[common.Hash, []uint64](checkpointsPerCache * 10)
-	if err != nil {
-		return nil, err
-	}
-
 	partialWithdrawals, err := lru.New[common.Hash, *solid.ListSSZ[*solid.PendingPartialWithdrawal]](queueCacheSize)
 	if err != nil {
 		return nil, err
@@ -280,7 +274,6 @@ func NewForkChoiceStore(
 		emitters:                 emitters,
 		genesisTime:              anchorState.GenesisTime(),
 		syncedDataManager:        syncedDataManager,
-		nextBlockProposers:       nextBlockProposers,
 		genesisValidatorsRoot:    anchorState.GenesisValidatorsRoot(),
 		hotSidecars:              make(map[common.Hash][]*cltypes.BlobSidecar),
 		blobStorage:              blobStorage,
