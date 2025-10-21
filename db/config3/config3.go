@@ -16,7 +16,7 @@
 
 package config3
 
-// Default number of transactions (txNums) in one "step". One static file can have [1, 64] steps.
+// Default number of transactions (txNums) in one "step". One static file can have [1, DefaultStepsInFrozenFile] steps.
 const DefaultStepSize = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
 
 // DefaultStepsInFrozenFile - files of this size are completely frozen/immutable.
