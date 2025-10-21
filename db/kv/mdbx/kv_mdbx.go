@@ -176,15 +176,15 @@ var pathDbMap = map[string]kv.RoDB{}
 var pathDbMapLock sync.Mutex
 
 func addToPathDbMap(path string, db kv.RoDB) {
-	pathDbMapLock.Lock()
-	defer pathDbMapLock.Unlock()
-	pathDbMap[path] = db
+	//pathDbMapLock.Lock()
+	//defer pathDbMapLock.Unlock()
+	//pathDbMap[path] = db
 }
 
 func removeFromPathDbMap(path string) {
-	pathDbMapLock.Lock()
-	defer pathDbMapLock.Unlock()
-	delete(pathDbMap, path)
+	//pathDbMapLock.Lock()
+	//defer pathDbMapLock.Unlock()
+	//delete(pathDbMap, path)
 }
 
 func PathDbMap() map[string]kv.RoDB {
@@ -527,15 +527,14 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 }
 
 func (db *MdbxKV) trackTxBegin() bool {
-	return true
 	//db.txsCountMutex.Lock()
 	//defer db.txsCountMutex.Unlock()
 
-	//isOpen := !db.closed.Load()
-	//if isOpen {
-	//	db.txsCount++
-	//}
-	//return isOpen
+	isOpen := !db.closed.Load()
+	if isOpen {
+		db.txsCount++
+	}
+	return isOpen
 }
 
 func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
@@ -546,24 +545,24 @@ func (db *MdbxKV) trackTxEnd() {
 	//db.txsCountMutex.Lock()
 	//defer db.txsCountMutex.Unlock()
 
-	//if db.txsCount > 0 {
-	//	db.txsCount--
-	//} else {
-	//	panic("MdbxKV: unmatched trackTxEnd")
-	//}
+	if db.txsCount > 0 {
+		db.txsCount--
+	} else {
+		panic("MdbxKV: unmatched trackTxEnd")
+	}
 
-	//if db.hasTxsAllDoneAndClosed() {
-	//	db.txsAllDoneOnCloseCond.Signal()
-	//}
+	if db.hasTxsAllDoneAndClosed() {
+		db.txsAllDoneOnCloseCond.Signal()
+	}
 }
 
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
-	//db.txsCountMutex.Lock()
-	//defer db.txsCountMutex.Unlock()
-	//
-	//for !db.hasTxsAllDoneAndClosed() {
-	//	db.txsAllDoneOnCloseCond.Wait()
-	//}
+	db.txsCountMutex.Lock()
+	defer db.txsCountMutex.Unlock()
+
+	for !db.hasTxsAllDoneAndClosed() {
+		db.txsAllDoneOnCloseCond.Wait()
+	}
 }
 
 // Close closes db
