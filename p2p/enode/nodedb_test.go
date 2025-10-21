@@ -59,7 +59,7 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 		MapSize(8 * datasize.GB).
 		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint {
-			return mdbxgo.SafeNoSync | mdbxgo.WriteMap
+			return mdbxgo.SafeNoSync | mdbxgo.WriteMap | mdbxgo.NoReadahead
 		}).
 		SyncBytes(20 * datasize.MB).
 		SyncPeriod(2 * time.Second).
