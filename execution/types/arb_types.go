@@ -1390,7 +1390,7 @@ type ArbitrumSubmitRetryableTx struct {
 
 	DepositValue     *big.Int
 	GasFeeCap        *big.Int        // wei per gas
-	Gas              uint64          // gas limit
+	Gas              uint64          // gas limit for the retryable tx, actual gas spending is EffectiveGasUsed
 	RetryTo          *common.Address `rlp:"nil"` // nil means contract creation
 	RetryValue       *big.Int        // wei amount
 	Beneficiary      common.Address

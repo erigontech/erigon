@@ -414,9 +414,9 @@ type Message struct {
 }
 
 // Arbitrum
-func (msg *Message) SetGasPrice(f *uint256.Int) { msg.gasPrice.Set(f) }
-func (msg *Message) SetFeeCap(f *uint256.Int)   { msg.feeCap.Set(f) }
-func (msg *Message) SetTip(f *uint256.Int)      { msg.tipCap.Set(f) }
+func (m *Message) SetGasPrice(f *uint256.Int) { m.gasPrice.Set(f) }
+func (m *Message) SetFeeCap(f *uint256.Int)   { m.feeCap.Set(f) }
+func (m *Message) SetTip(f *uint256.Int)      { m.tipCap.Set(f) }
 
 type MessageRunMode uint8
 
