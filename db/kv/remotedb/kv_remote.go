@@ -131,6 +131,7 @@ func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remoteproto.K
 }
 
 func (db *DB) PageSize() datasize.ByteSize { panic("not implemented") }
+func (db *DB) Path() string                { panic("not implemented") }
 func (db *DB) ReadOnly() bool              { return true }
 func (db *DB) AllTables() kv.TableCfg      { return db.buckets }
 
