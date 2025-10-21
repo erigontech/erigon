@@ -56,7 +56,9 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 	cfg := New(dbcfg.ChainDB, log.New()).
 		MapSize(18 * datasize.GB).
 		GrowthStep(1 * datasize.MB).
-		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync | mdbxgo.WriteMap }).
+		Flags(func(f uint) uint {
+			return f&^mdbxgo.Durable | mdbxgo.SafeNoSync | mdbxgo.WriteMap | mdbxgo.NoReadahead | mdbxgo.NoMemInit
+		}).
 		SyncBytes(20 * datasize.MB).
 		SyncPeriod(2 * time.Second).
 		DirtySpace(uint64(32 * datasize.MB)).
