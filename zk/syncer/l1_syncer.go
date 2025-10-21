@@ -27,7 +27,7 @@ const (
 	batchWorkers      = 4
 	getLogsMaxRetry   = 20
 	logsChannelSize   = 100
-	filterLogsTimeout = 180 * time.Second
+	filterLogsTimeout = 60 * time.Second
 	// max workers used when halving and querying subranges
 	subrangeWorkers    = 4
 	headerFetchTimeout = 10 * time.Second
@@ -368,6 +368,10 @@ func (s *L1Syncer) l1QueryHeaders(logs []ethTypes.Log) error {
 		return err
 	}
 
+	if len(remaining) == 0 {
+		return nil
+	}
+
 	// Fallback: per-header concurrent fetch with retries
 	logQueue := make(chan uint64, len(remaining))
 	defer close(logQueue)
@@ -380,6 +384,7 @@ func (s *L1Syncer) l1QueryHeaders(logs []ethTypes.Log) error {
 
 	backoffStrategy := backoff.NewExponentialBackOff()
 	backoffStrategy.Multiplier = GetHeaderBackoffMultiplier // Just need randomization
+	backoffStrategy.MaxInterval = 20 * time.Second
 
 	process := func(em IEtherman) {
 		for {
@@ -394,13 +399,7 @@ func (s *L1Syncer) l1QueryHeaders(logs []ethTypes.Log) error {
 			}
 			header, err := s.getHeader(em, bn)
 			if err != nil {
-				var d time.Duration
-				if d = backoffStrategy.NextBackOff(); d <= 0 {
-					// backoff.Stop or invalid duration; reset and sleep a sane default
-					backoffStrategy.Reset()
-					d = DefaultBackoffSleep
-				}
-				time.Sleep(d)
+				time.Sleep(backoffStrategy.NextBackOff())
 				logQueue <- bn
 				continue
 			}
@@ -412,8 +411,9 @@ func (s *L1Syncer) l1QueryHeaders(logs []ethTypes.Log) error {
 	// launch the workers - some endpoints might be faster than others so will consume more of the queue
 	// but, we really don't care about that.  We want the data as fast as possible
 	mans := s.etherMans
-	for i := 0; i < len(mans); i++ {
-		go process(mans[i])
+	workers := max(len(mans), batchWorkers)
+	for i := 0; i < workers; i++ {
+		go process(mans[i%len(mans)])
 	}
 
 	wg.Wait()
@@ -422,88 +422,143 @@ func (s *L1Syncer) l1QueryHeaders(logs []ethTypes.Log) error {
 }
 
 func (s *L1Syncer) l1QueryHeadersBatch(bns []uint64) ([]uint64, error) {
-
-	// Try batch path if supported by the client
-	if em, ok := s.getNextEtherman().(headerBatcher); ok {
-		// backoff for 429 while batching
-		batchBackoff := backoff.NewExponentialBackOff()
-		batchBackoff.Multiplier = GetLogsBackoffMultiplier
-		batchBackoff.MaxInterval = 10 * time.Second
-
-		// collect those still missing after batch attempts
-		fallbackMissing := make([]uint64, 0)
-		for i := 0; i < len(bns); i += maxBatch {
-			end := i + maxBatch
-			if end > len(bns) {
-				end = len(bns)
-			}
-			chunk := bns[i:end]
-			nums := make([]*big.Int, len(chunk))
-			for j, bn := range chunk {
-				nums[j] = new(big.Int).SetUint64(bn)
-			}
-			log.Debug("Batch header fetch", "count", len(nums))
-			var heads []*ethTypes.Header
-			var err error
-			// Retry on 429 with backoff similar to logs path
-			for {
-				ctx, cancel := context.WithTimeout(s.ctx, headerFetchTimeout)
-				heads, err = em.HeadersByNumbers(ctx, nums)
-				cancel()
-				if err != nil {
-					lower := strings.ToLower(err.Error())
-					is429 := strings.Contains(lower, "429") || strings.Contains(lower, "too many") || strings.Contains(lower, "rate limit")
-					if is429 {
-						var d time.Duration
-						if d = batchBackoff.NextBackOff(); d <= 0 {
-							// backoff.Stop or invalid duration; reset and sleep a sane default
-							batchBackoff.Reset()
-							d = DefaultBackoffSleep
-						}
-						time.Sleep(d)
-						continue
-					}
-				}
-				break
-			}
-			if err != nil {
-				log.Info("Batch header fetch chunk failed, will fallback per-header for this chunk", "err", err, "count", len(nums))
-				fallbackMissing = append(fallbackMissing, chunk...)
-			} else {
-				if len(heads) != len(nums) {
-					log.Info("Batch header fetch returned mismatched lengths, will fallback missing ones", "want", len(nums), "got", len(heads))
-				}
-				// heads may contain nil entries for per-element errors; cache non-nil and fallback others
-				for idx := range nums {
-					var h *ethTypes.Header
-					if idx < len(heads) {
-						h = heads[idx]
-					}
-					if h != nil {
-						s.headersCache.Add(chunk[idx], h)
-					} else {
-						fallbackMissing = append(fallbackMissing, chunk[idx])
-					}
-				}
-			}
-		}
-		// If everything succeeded via batch, return empty slice
-		if len(fallbackMissing) == 0 {
-			return []uint64{}, nil
-		}
-		// Narrow the fallback set to those still missing in cache (in case of duplicates)
-		newMissing := make([]uint64, 0, len(fallbackMissing))
-		for _, bn := range fallbackMissing {
-			if _, ok := s.headersCache.Get(bn); !ok {
-				newMissing = append(newMissing, bn)
-			}
-		}
-		if len(newMissing) == 0 {
-			return []uint64{}, nil
-		}
-		return newMissing, nil
+	if len(bns) == 0 {
+		return nil, nil
 	}
-	return bns, nil
+
+	// Gather batch-capable ethermans
+	batchers := make([]headerBatcher, 0, len(s.etherMans))
+	for _, em := range s.etherMans {
+		if b, ok := em.(headerBatcher); ok {
+			batchers = append(batchers, b)
+		}
+	}
+	if len(batchers) == 0 {
+		// No batch support: let caller fallback to per-header
+		return bns, nil
+	}
+
+	// Build chunked jobs of up to maxBatch
+	type chunkJob struct{ nums []uint64 }
+	jobs := make(chan chunkJob, (len(bns)/maxBatch)+1)
+
+	for i := 0; i < len(bns); i += maxBatch {
+		end := i + maxBatch
+		if end > len(bns) {
+			end = len(bns)
+		}
+		jobs <- chunkJob{nums: bns[i:end]}
+	}
+	close(jobs)
+
+	// We will signal abort if any worker's backoff reaches Stop (e.g., provider ratelimits batches endlessly)
+	abortCh := make(chan struct{})
+	var abortOnce sync.Once
+
+	// Worker function processing chunked jobs using specific batcher
+	worker := func(b headerBatcher) {
+		// Backoff strategy for 429/ratelimit on this worker
+		bo := backoff.NewExponentialBackOff()
+		bo.Multiplier = GetLogsBackoffMultiplier
+		bo.MaxInterval = 10 * time.Second
+		bo.MaxElapsedTime = 30 * time.Second
+
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-abortCh:
+				return
+			case cj, ok := <-jobs:
+				if !ok {
+					return
+				}
+				// If we were asked to stop externally, just drop work
+				if s.flagStop.Load() {
+					continue
+				}
+
+				// Convert to big.Ints per call
+				req := make([]*big.Int, len(cj.nums))
+				for i, bn := range cj.nums {
+					req[i] = new(big.Int).SetUint64(bn)
+				}
+
+				// Try to fetch; on 429-like errors, backoff and retry the same job
+				for {
+					// Quit promptly if another worker already aborted
+					select {
+					case <-abortCh:
+						return
+					default:
+					}
+
+					ctx, cancel := context.WithTimeout(s.ctx, headerFetchTimeout)
+					heads, err := b.HeadersByNumbers(ctx, req)
+					cancel()
+
+					if err != nil {
+						lower := strings.ToLower(err.Error())
+						is429 := strings.Contains(lower, "429") || strings.Contains(lower, "too many") || strings.Contains(lower, "rate limit")
+						if is429 {
+							// backoff for 429; abort globally if we've reached Stop
+							d := bo.NextBackOff()
+							if d == backoff.Stop {
+								log.Info("Batch header fetch aborting due to repeated rate limits")
+								abortOnce.Do(func() { close(abortCh) })
+								return
+							}
+							// Sleep, but bail out early on abort
+							select {
+							case <-time.After(d):
+							case <-abortCh:
+								return
+							}
+							// retry same job
+							continue
+						}
+						// For non-429 errors, just give up this chunk; missing will be filled per-header
+						bo.Reset()
+						break
+					}
+
+					// Success path: cache headers we received
+					if len(heads) != len(req) {
+						log.Debug("Batch header fetch length mismatch", "want", len(req), "got", len(heads))
+					}
+					for i := range req {
+						if i < len(heads) && heads[i] != nil {
+							s.headersCache.Add(cj.nums[i], heads[i])
+						}
+					}
+					// Success resets backoff and marks job done
+					bo.Reset()
+					break
+				}
+			}
+		}
+	}
+
+	// Start workers on all batch-capable ethermans
+	var wg sync.WaitGroup
+	workers := max(len(batchers), batchWorkers)
+	for i := 0; i < workers; i++ {
+		b := batchers[i%len(batchers)]
+		wg.Add(1)
+		go func(bb headerBatcher) { defer wg.Done(); worker(bb) }(b)
+	}
+
+	// Wait for workers to drain jobs or abort
+	wg.Wait()
+
+	// After worker loop, compute which headers are still missing and return them
+	missing := make([]uint64, 0)
+	for _, bn := range bns {
+		if _, ok := s.headersCache.Get(bn); !ok {
+			missing = append(missing, bn)
+		}
+	}
+	return missing, nil
 }
 
 func (s *L1Syncer) getLatestL1Block() (uint64, error) {
@@ -644,6 +699,7 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 	backoffStrategy := backoff.NewExponentialBackOff()
 	backoffStrategy.Multiplier = GetLogsBackoffMultiplier
 	backoffStrategy.MaxInterval = 10 * time.Second
+	backoffStrategy.MaxElapsedTime = 2 * time.Minute
 
 	for j := range jobs {
 		query := ethereum.FilterQuery{
@@ -678,7 +734,7 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 					if is429 {
 						// Rate limited: backoff and retry the same range (do NOT split)
 						var d time.Duration
-						if d = backoffStrategy.NextBackOff(); d <= 0 {
+						if d = backoffStrategy.NextBackOff(); d == backoff.Stop {
 							// backoff.Stop or invalid duration; reset and sleep a sane default
 							backoffStrategy.Reset()
 							d = DefaultBackoffSleep
@@ -687,7 +743,7 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 						continue
 					}
 					// Non-rate-limit error: split the range using halving worker pool
-					log.Info("getSequencedLogs timed out or errored; splitting range", "err", err, "from", j.From, "to", j.To)
+					log.Debug("getSequencedLogs timed out or errored; splitting range", "err", err, "from", j.From, "to", j.To)
 					// Fall back to halving the range with a bounded worker pool
 					logs, err = s.fetchLogsWithHalving(s.ctx, query, j.From, j.To)
 					break LOOP
@@ -739,6 +795,7 @@ func (s *L1Syncer) fetchLogsWithHalving(ctx context.Context, baseQuery ethereum.
 		bo := backoff.NewExponentialBackOff()
 		bo.Multiplier = GetLogsBackoffMultiplier
 		bo.MaxInterval = 10 * time.Second
+
 		for job := range jobs {
 			// Use a local stack to avoid blocking on jobs channel when it's full.
 			// We process left halves inline and enqueue right halves opportunistically.
@@ -755,16 +812,11 @@ func (s *L1Syncer) fetchLogsWithHalving(ctx context.Context, baseQuery ethereum.
 					is429 := strings.Contains(lower, "429") || strings.Contains(lower, "too many") || strings.Contains(lower, "rate limit")
 					if is429 {
 						// Rate limited: backoff and retry the same range (do NOT split)
-						var d time.Duration
-						if d = bo.NextBackOff(); d <= 0 {
-							// backoff.Stop or invalid duration; reset and sleep a sane default
-							bo.Reset()
-							d = time.Second
-						}
-						time.Sleep(d)
+						time.Sleep(bo.NextBackOff())
 						stack = append(stack, cur) // retry this range
 						continue
 					}
+
 					span := cur.To - cur.From
 					if span <= MinFilterBlockSpan || cur.From > cur.To {
 						// Below minimum span or invalid range: mark failure and continue

@@ -83,7 +83,7 @@ func newStageEnv(t *testing.T) *stageEnv {
 	em.EXPECT().BlockByNumber(gomock.Any(), gomock.Any()).Return(block, nil).AnyTimes()
 
 	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 1, "latest", latest)
-	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1, L1NoActivityTimeout: 1 * time.Millisecond}, l1, nil)
+	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1, L1NoActivityTimeout: 100 * time.Millisecond}, l1, nil)
 	cfg := StageL1InfoTreeCfg(db1, &ethconfig.Zk{}, &chain.Config{}, updater)
 
 	return &stageEnv{
