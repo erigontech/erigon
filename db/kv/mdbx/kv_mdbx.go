@@ -172,11 +172,6 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	return opts
 }
 
-// Deprecated
-func PathDbMap() map[string]kv.RoDB {
-	return nil
-}
-
 var ErrDBDoesNotExists = errors.New("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
 
 func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
