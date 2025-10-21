@@ -17,7 +17,7 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v5
         with:
-          repository: ethereum/hive
+          repository: erigontech/hive
           # ref: master
           path: hive
 
