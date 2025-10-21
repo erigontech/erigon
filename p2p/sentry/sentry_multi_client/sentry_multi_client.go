@@ -81,7 +81,7 @@ func validateBlockRange(packet eth.BlockRangeUpdatePacket) error {
 // AnnounceBlockRangeLoop - announces available block range to all peers every epoch
 func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 	sentries := cs.Sentries()
-	go cs.AnnounceBlockRangeLoop(ctx)
+	//go cs.AnnounceBlockRangeLoop(ctx)
 	for i := range sentries {
 		sentry := sentries[i]
 		go cs.RecvMessageLoop(ctx, sentry, nil)

@@ -30,9 +30,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -169,6 +171,42 @@ func TestPublisher(t *testing.T) {
 
 		// all 8 peers must now know about the hash according to our knowledge
 		require.Eventually(t, waitPeersMayMissHash(0), time.Second, 5*time.Millisecond)
+	})
+}
+
+func TestPublisher_PublishBlockRangeUpdate(t *testing.T) {
+	newPublisherTest(t).run(func(ctx context.Context, t *testing.T, pt publisherTest) {
+		for i := uint64(1); i <= 3; i++ {
+			pt.peerEvent(&sentryproto.PeerEvent{
+				PeerId:  PeerIdFromUint64(i).H512(),
+				EventId: sentryproto.PeerEvent_Connect,
+			})
+		}
+
+		pt.sentryClient.EXPECT().
+			HandShake(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(&sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil).
+			Times(1)
+
+		packet := eth.BlockRangeUpdatePacket{
+			Earliest:   10,
+			Latest:     42,
+			LatestHash: common.HexToHash("0xabcdef"),
+		}
+
+		pt.publisher.PublishBlockRangeUpdate(packet)
+
+		require.Eventually(t, func() bool {
+			return len(pt.capturedSends()) == 3
+		}, time.Second, 5*time.Millisecond)
+
+		for _, send := range pt.capturedSends() {
+			require.Equal(t, sentryproto.MessageId_BLOCK_RANGE_UPDATE_69, send.Data.Id)
+
+			var decoded eth.BlockRangeUpdatePacket
+			require.NoError(t, rlp.DecodeBytes(send.Data.Data, &decoded))
+			require.Equal(t, packet, decoded)
+		}
 	})
 }
 

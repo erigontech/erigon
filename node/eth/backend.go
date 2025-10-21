@@ -95,6 +95,7 @@ import (
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/genesiswrite"
+	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	stages2 "github.com/erigontech/erigon/execution/stages"
@@ -186,6 +187,11 @@ type Ethereum struct {
 	sentryCancel   context.CancelFunc
 	sentriesClient *sentry_multi_client.MultiClient
 	sentryServers  []*sentry.GrpcServer
+
+	statusDataProvider          *sentry.StatusDataProvider
+	executionP2PMessageListener *execp2p.MessageListener
+	executionP2PPeerTracker     *execp2p.PeerTracker
+	executionP2PPublisher       *execp2p.Publisher
 
 	stagedSync         *stagedsync.Sync
 	pipelineStagedSync *stagedsync.Sync
@@ -696,6 +702,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger,
 		blockReader,
 	)
+	backend.statusDataProvider = statusDataProvider
+
+	executionSentryClient := sentryMux(sentries)
+	executionPeerPenalizer := execp2p.NewPeerPenalizer(executionSentryClient)
+	executionMessageListener := execp2p.NewMessageListener(logger, executionSentryClient, statusDataProvider.GetStatusData, executionPeerPenalizer)
+	executionPeerTracker := execp2p.NewPeerTracker(logger, executionMessageListener)
+	executionMessageSender := execp2p.NewMessageSender(executionSentryClient)
+	executionPublisher := execp2p.NewPublisher(logger, executionMessageSender, executionPeerTracker)
+
+	backend.executionP2PMessageListener = executionMessageListener
+	backend.executionP2PPeerTracker = executionPeerTracker
+	backend.executionP2PPublisher = executionPublisher
 
 	// limit "new block" broadcasts to at most 10 random peers at time
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
@@ -1019,7 +1037,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
+	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus, statusDataProvider, executionPublisher)
 
 	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
@@ -1676,7 +1694,34 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
-	hook := stages2.NewHook(s.sentryCtx, s.chainDB, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.SetStatus)
+	if s.executionP2PMessageListener != nil && s.executionP2PPeerTracker != nil && s.executionP2PPublisher != nil {
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("[execution-p2p] message listener goroutine terminated")
+			err := s.executionP2PMessageListener.Run(s.sentryCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("[execution-p2p] message listener failed", "err", err)
+			}
+			return err
+		})
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("[execution-p2p] peer tracker goroutine terminated")
+			err := s.executionP2PPeerTracker.Run(s.sentryCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("[execution-p2p] peer tracker failed", "err", err)
+			}
+			return err
+		})
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("[execution-p2p] publisher goroutine terminated")
+			err := s.executionP2PPublisher.Run(s.sentryCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("[execution-p2p] publisher failed", "err", err)
+			}
+			return err
+		})
+	}
+
+	hook := stages2.NewHook(s.sentryCtx, s.chainDB, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.SetStatus, s.statusDataProvider, s.executionP2PPublisher)
 
 	currentTDProvider := func() *big.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)

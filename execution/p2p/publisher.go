@@ -72,6 +72,14 @@ func (p Publisher) PublishNewBlockHashes(block *types.Block) {
 	})
 }
 
+func (p Publisher) PublishBlockRangeUpdate(packet eth.BlockRangeUpdatePacket) {
+	packetCopy := packet
+	p.enqueueTask(publishTask{
+		taskType:         blockRangeUpdatePublishTask,
+		blockRangeUpdate: &packetCopy,
+	})
+}
+
 func (p Publisher) Run(ctx context.Context) error {
 	p.logger.Info("[p2p-publisher] running publisher component")
 
@@ -107,6 +115,8 @@ func (p Publisher) processPublishTask(ctx context.Context, t publishTask) {
 		p.processNewBlocksPublishTask(ctx, t)
 	case newBlockHashesPublishTask:
 		p.processNewBlockHashesPublishTask(ctx, t)
+	case blockRangeUpdatePublishTask:
+		p.processBlockRangeUpdatePublishTask(ctx, t)
 	default:
 		panic(fmt.Sprintf("unknown task type: %v", t.taskType))
 	}
@@ -185,9 +195,10 @@ func (p Publisher) processNewBlockHashesPublishTask(ctx context.Context, t publi
 }
 
 type publishTask struct {
-	taskType publishTaskType
-	block    *types.Block
-	td       *big.Int
+	taskType         publishTaskType
+	block            *types.Block
+	td               *big.Int
+	blockRangeUpdate *eth.BlockRangeUpdatePacket
 }
 
 type publishTaskType int
@@ -195,4 +206,33 @@ type publishTaskType int
 const (
 	newBlockHashesPublishTask publishTaskType = iota
 	newBlockPublishTask
+	blockRangeUpdatePublishTask
 )
+
+func (p Publisher) processBlockRangeUpdatePublishTask(ctx context.Context, t publishTask) {
+	if t.blockRangeUpdate == nil {
+		return
+	}
+
+	supported, err := p.messageSender.SupportsBlockRangeUpdate(ctx)
+	if err != nil {
+		p.logger.Warn(
+			"[p2p-publisher] could not determine block range support",
+			"err", err,
+		)
+		return
+	}
+	if !supported {
+		return
+	}
+
+	packet := *t.blockRangeUpdate
+	if err := p.messageSender.SendBlockRangeUpdate(ctx, packet); err != nil {
+		p.logger.Warn(
+			"[p2p-publisher] could not publish block range update to peer",
+			"earliest", packet.Earliest,
+			"latest", packet.Latest,
+			"err", err,
+		)
+	}
+}

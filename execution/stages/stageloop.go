@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -49,8 +50,10 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -366,18 +369,43 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, gasUsed uin
 }
 
 type Hook struct {
-	ctx           context.Context
-	notifications *shards.Notifications
-	sync          *stagedsync.Sync
-	chainConfig   *chain.Config
-	logger        log.Logger
-	blockReader   services.FullBlockReader
-	updateHead    func(ctx context.Context)
-	db            kv.RoDB
+	ctx                           context.Context
+	notifications                 *shards.Notifications
+	sync                          *stagedsync.Sync
+	chainConfig                   *chain.Config
+	logger                        log.Logger
+	blockReader                   services.FullBlockReader
+	updateHead                    func(ctx context.Context)
+	db                            kv.RoDB
+	statusDataGetter              sentry_multi_client.StatusGetter
+	blockRangePublisher           *execp2p.Publisher
+	lastAnnouncedBlockRangeLatest uint64
 }
 
-func NewHook(ctx context.Context, db kv.RoDB, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context)) *Hook {
-	return &Hook{ctx: ctx, db: db, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
+func NewHook(
+	ctx context.Context,
+	db kv.RoDB,
+	notifications *shards.Notifications,
+	sync *stagedsync.Sync,
+	blockReader services.FullBlockReader,
+	chainConfig *chain.Config,
+	logger log.Logger,
+	updateHead func(ctx context.Context),
+	statusDataGetter sentry_multi_client.StatusGetter,
+	blockRangePublisher *execp2p.Publisher,
+) *Hook {
+	return &Hook{
+		ctx:                 ctx,
+		db:                  db,
+		notifications:       notifications,
+		sync:                sync,
+		blockReader:         blockReader,
+		chainConfig:         chainConfig,
+		logger:              logger,
+		updateHead:          updateHead,
+		statusDataGetter:    statusDataGetter,
+		blockRangePublisher: blockRangePublisher,
+	}
 }
 func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	notifications := h.notifications
@@ -419,13 +447,21 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	if h.updateHead != nil {
 		h.updateHead(h.ctx)
 	}
-	return h.sendNotifications(tx, finishProgressBefore)
+	finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return err
+	}
+
+	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync)
+	return h.sendNotifications(tx, finishProgressBefore, finishStageAfterSync)
 
 }
-func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
+func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAfterSync uint64) error {
 	if h.notifications == nil {
 		return nil
 	}
+
+	var err error
 
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
@@ -439,11 +475,6 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 	}
 
 	if h.notifications.Events != nil {
-		finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
-		if err != nil {
-			return err
-		}
-
 		unwindTo := h.sync.PrevUnwindPoint()
 
 		var notifyFrom uint64
@@ -494,6 +525,45 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 		h.notifications.Accumulator.SendAndReset(h.ctx, h.notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil
+}
+
+func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64) {
+	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
+		return
+	}
+
+	rollback := finishStageAfterSync < finishStageBeforeSync
+	initialAnnouncement := h.lastAnnouncedBlockRangeLatest == 0 && finishStageAfterSync > 0
+	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatest+32
+	if !rollback && !initialAnnouncement && !progressed {
+		return
+	}
+
+	status, err := h.statusDataGetter.GetStatusData(h.ctx)
+	if err != nil {
+		h.logger.Warn("[hook] block range update skipped; status data unavailable", "err", err)
+		return
+	}
+
+	packet := eth.BlockRangeUpdatePacket{
+		Earliest:   status.MinimumBlockHeight,
+		Latest:     status.MaxBlockHeight,
+		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
+	}
+
+	if packet.LatestHash == (common.Hash{}) {
+		h.logger.Warn("[hook] block range update skipped due to zero latest hash", "latest", packet.Latest)
+		return
+	}
+
+	if packet.Earliest > packet.Latest {
+		h.logger.Warn("[hook] block range update skipped due to invalid range", "earliest", packet.Earliest, "latest", packet.Latest)
+		return
+	}
+
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "rollback", rollback)
+	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
+	h.lastAnnouncedBlockRangeLatest = packet.Latest
 }
 
 func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
