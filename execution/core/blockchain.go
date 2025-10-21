@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
@@ -375,7 +376,28 @@ func FinalizeBlockExecution(
 	}
 
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
-	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
+	rules := blockContext.Rules(cc)
+
+	if rules.IsGlamsterdam {
+		if err := ibs.SnapshotSystemAccess(uint16(len(txs) + 1)); err != nil {
+			return nil, nil, err
+		}
+		blockAccessList, err := ibs.BuildBlockAccessList()
+		if err != nil {
+			return nil, nil, err
+		}
+		hash := empty.BlockAccessListHash
+		if len(blockAccessList) > 0 {
+			hash = blockAccessList.Hash()
+		}
+		hashCopy := hash
+		header.BlockAccessListHash = &hashCopy
+		if newBlock != nil {
+			newBlock.SetBlockAccessList(blockAccessList)
+		}
+	}
+
+	if err := ibs.CommitBlock(rules, stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
@@ -385,6 +407,9 @@ func FinalizeBlockExecution(
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
+	ruleCtx := evmtypes.BlockContext{BlockNumber: header.Number.Uint64(), Time: header.Time}
+	rules := ruleCtx.Rules(cc)
+	ibs.EnableBlockAccessList(rules)
 	engine.Initialize(cc, chain, header, ibs, func(contract common.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
 		return ret, err
@@ -392,9 +417,12 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
-	ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
-	return nil
+	if rules.IsGlamsterdam {
+		if err := ibs.SnapshotSystemAccess(0); err != nil {
+			return err
+		}
+	}
+	return ibs.FinalizeTx(rules, stateWriter)
 }
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)

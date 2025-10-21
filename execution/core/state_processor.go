@@ -20,6 +20,8 @@
 package core
 
 import (
+	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
@@ -74,8 +76,20 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		return nil, nil, err
 	}
 	// Update the state with pending changes
+	if rules.IsGlamsterdam {
+		txAccessIndex := ibs.TxIndex() + 1
+		if txAccessIndex > math.MaxUint16 {
+			return nil, nil, fmt.Errorf("block access index overflow (tx %d)", txAccessIndex)
+		}
+		if err := ibs.SnapshotTxAccess(uint16(txAccessIndex)); err != nil {
+			return nil, nil, err
+		}
+	}
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
+	}
+	if rules.IsGlamsterdam {
+		ibs.ResetTxTracking()
 	}
 	*gasUsed += result.GasUsed
 	if usedBlobGas != nil {
