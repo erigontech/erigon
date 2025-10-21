@@ -176,13 +176,11 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 				return err
 			}
 
+			mu.Lock()
 			if reply.Protocol > protocol {
-				mu.Lock()
-				if reply.Protocol > protocol {
-					protocol = reply.Protocol
-				}
-				mu.Unlock()
+				protocol = reply.Protocol
 			}
+			mu.Unlock()
 
 			client.Lock()
 			client.protocol = reply.Protocol
