@@ -4,8 +4,8 @@ description: How to run a Polygon node
 
 # How to run a Polygon node
 
-{% hint style="info" %}
-The final release series of Erigon that supports Polygon is 3.1.\*. For the officially supported software by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
+{% hint style="success" %}
+The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
 {% endhint %}
 
 ### Prerequisites

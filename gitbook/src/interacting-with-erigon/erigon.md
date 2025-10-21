@@ -1,29 +1,30 @@
-# `erigon` RPC Namespace
+# erigon
 
-## Introduction
+Erigon provides several specialized RPC namespaces that extend beyond the standard Ethereum JSON-RPC API. These namespaces offer optimized access to blockchain data and expose Erigon-specific functionality that takes advantage of the node's unique architecture and data structures. The primary Erigon-specific namespace is **`erigon_`** which offer extended blockchain data access methods.
 
-Erigon provides several specialized RPC namespaces that extend beyond the standard Ethereum JSON-RPC API. These namespaces offer optimized access to blockchain data and expose Erigon-specific functionality that takes advantage of the node's unique architecture and data structures. The primary Erigon-specific namespace is **`erigon_`**  which offer extended blockchain data access methods.
-
-These methods must be explicitly enabled using the `--http.api` flag when starting the RPC daemon. 
+These methods must be explicitly enabled using the `--http.api` flag when starting the RPC daemon.
 
 ### Namespace Availability
-- The `erigon_` namespace is enabled by default in the RPC daemon and must be explicitly included in the `--http.api` flag if customizing enabled namespaces.
+
+* The `erigon_` namespace is enabled by default in the RPC daemon and must be explicitly included in the `--http.api` flag if customizing enabled namespaces.
 
 ### Performance Considerations
-- Erigon-specific methods are optimized for Erigon's architecture and often provide better performance than standard equivalents
-- Methods like `erigon_getHeaderByNumber` and `erigon_getHeaderByHash` can be faster as they skip transaction and uncle data
-- The `erigon_getLatestLogs` method includes advanced pagination to handle large result sets efficiently
+
+* Erigon-specific methods are optimized for Erigon's architecture and often provide better performance than standard equivalents
+* Methods like `erigon_getHeaderByNumber` and `erigon_getHeaderByHash` can be faster as they skip transaction and uncle data
+* The `erigon_getLatestLogs` method includes advanced pagination to handle large result sets efficiently
 
 ### Enhanced Features
-- `erigon_getLatestLogs` supports `ignoreTopicsOrder` for flexible topic matching
-- `erigon_getLogs` returns enhanced ErigonLog objects with additional metadata like timestamps
-- `erigon_getBlockByTimestamp` uses binary search for efficient timestamp-based block lookup
+
+* `erigon_getLatestLogs` supports `ignoreTopicsOrder` for flexible topic matching
+* `erigon_getLogs` returns enhanced ErigonLog objects with additional metadata like timestamps
+* `erigon_getBlockByTimestamp` uses binary search for efficient timestamp-based block lookup
 
 See more details [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#rpc-implementation-status) about implementation status.
 
----
+***
 
-## **erigon_forks**
+## **erigon\_forks**
 
 Returns the genesis block hash and a sorted list of all fork block numbers for the current chain configuration.
 
@@ -39,23 +40,23 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_forks","params":[],"id":"1"}' 
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
-| Object | Contains genesis hash and fork information |
-| genesis | DATA, 32 BYTES - The genesis block hash |
+| Type        | Description                                                   |
+| ----------- | ------------------------------------------------------------- |
+| Object      | Contains genesis hash and fork information                    |
+| genesis     | DATA, 32 BYTES - The genesis block hash                       |
 | heightForks | ARRAY - Array of block numbers where height-based forks occur |
-| timeForks | ARRAY - Array of timestamps where time-based forks occur | 
+| timeForks   | ARRAY - Array of timestamps where time-based forks occur      |
 
----
+***
 
-## **erigon_blockNumber**
+## **erigon\_blockNumber**
 
 Returns the latest executed block number. Unlike `eth_blockNumber`, this method can accept a specific block number parameter and returns the latest executed block rather than the fork choice head after the merge.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
+| Parameter   | Type                | Description                                                             |
+| ----------- | ------------------- | ----------------------------------------------------------------------- |
 | blockNumber | QUANTITY (optional) | Block number to query. If omitted, returns latest executed block number |
 
 **Example**
@@ -66,20 +67,20 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_blockNumber","params":[],"id":
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type     | Description                     |
+| -------- | ------------------------------- |
 | QUANTITY | The block number as hexadecimal |
 
----
+***
 
-## **erigon_getHeaderByNumber**
+## **erigon\_getHeaderByNumber**
 
 Returns a block header by block number, ignoring transaction and uncle data for potentially faster response times.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
+| Parameter   | Type          | Description                                     |
+| ----------- | ------------- | ----------------------------------------------- |
 | blockNumber | QUANTITY\|TAG | Block number or "latest", "earliest", "pending" |
 
 **Example**
@@ -90,20 +91,20 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getHeaderByNumber","params":["
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                |
+| ------ | ------------------------------------------ |
 | Object | Block header object with all header fields |
 
----
+***
 
-## **erigon_getHeaderByHash**
+## **erigon\_getHeaderByHash**
 
 Returns a block header by block hash, ignoring transaction and uncle data for potentially faster response times.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
+| Parameter | Type           | Description       |
+| --------- | -------------- | ----------------- |
 | blockHash | DATA, 32 BYTES | Hash of the block |
 
 **Example**
@@ -114,22 +115,22 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getHeaderByHash","params":["0x
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                |
+| ------ | ------------------------------------------ |
 | Object | Block header object with all header fields |
 
----
+***
 
-## **erigon_getBlockByTimestamp**
+## **erigon\_getBlockByTimestamp**
 
 Returns a block by timestamp using binary search to find the closest block to the specified timestamp.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| timestamp | QUANTITY | Unix timestamp |
-| fullTx | Boolean | If true, include full transaction objects; if false, only transaction hashes |
+| Parameter | Type     | Description                                                                  |
+| --------- | -------- | ---------------------------------------------------------------------------- |
+| timestamp | QUANTITY | Unix timestamp                                                               |
+| fullTx    | Boolean  | If true, include full transaction objects; if false, only transaction hashes |
 
 **Example**
 
@@ -139,20 +140,20 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getBlockByTimestamp","params":
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                    |
+| ------ | ---------------------------------------------- |
 | Object | Block object matching closest to the timestamp |
 
----
+***
 
-## **erigon_getBalanceChangesInBlock**
+## **erigon\_getBalanceChangesInBlock**
 
 Returns all account balance changes that occurred within a specific block.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
+| Parameter     | Type                | Description                      |
+| ------------- | ------------------- | -------------------------------- |
 | blockNrOrHash | QUANTITY\|TAG\|HASH | Block number, tag, or block hash |
 
 **Example**
@@ -163,20 +164,20 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getBalanceChangesInBlock","par
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                      |
+| ------ | ------------------------------------------------ |
 | Object | Mapping of addresses to their new balance values |
 
----
+***
 
-## **erigon_getLogsByHash**
+## **erigon\_getLogsByHash**
 
 Returns an array of arrays of logs generated by transactions in a block given by block hash.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
+| Parameter | Type           | Description       |
+| --------- | -------------- | ----------------- |
 | blockHash | DATA, 32 BYTES | Hash of the block |
 
 **Example**
@@ -187,21 +188,21 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogsByHash","params":["0x1d
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                               |
+| ----- | --------------------------------------------------------- |
 | Array | Array of arrays of log objects, one array per transaction |
 
----
+***
 
-## **erigon_getLogs**
+## **erigon\_getLogs**
 
 Returns an array of logs matching a given filter object with enhanced filtering capabilities.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| filter | Object | Filter criteria including fromBlock, toBlock, address, topics, and blockHash |
+| Parameter | Type   | Description                                                                  |
+| --------- | ------ | ---------------------------------------------------------------------------- |
+| filter    | Object | Filter criteria including fromBlock, toBlock, address, topics, and blockHash |
 
 **Example**
 
@@ -211,21 +212,21 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogs","params":[{"fromBlock
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                       |
+| ----- | ------------------------------------------------- |
 | Array | Array of ErigonLog objects with enhanced metadata |
 
----
+***
 
-## **erigon_getLatestLogs**
+## **erigon\_getLatestLogs**
 
 Returns the latest logs matching a filter criteria in descending order with advanced pagination and topic matching options.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| filter | Object | Filter criteria object |
+| Parameter  | Type   | Description                                                   |
+| ---------- | ------ | ------------------------------------------------------------- |
+| filter     | Object | Filter criteria object                                        |
 | logOptions | Object | Options including logCount, blockCount, and ignoreTopicsOrder |
 
 **Example**
@@ -236,19 +237,20 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLatestLogs","params":[{"add
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                                  |
+| ----- | ------------------------------------------------------------ |
 | Array | Array of ErigonLog objects in descending chronological order |
----
 
-## **erigon_getBlockReceiptsByBlockHash**
+***
+
+## **erigon\_getBlockReceiptsByBlockHash**
 
 Returns all transaction receipts for a canonical block by block hash.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
+| Parameter | Type           | Description                 |
+| --------- | -------------- | --------------------------- |
 | blockHash | DATA, 32 BYTES | Hash of the canonical block |
 
 **Example**
@@ -259,13 +261,13 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getBlockReceiptsByBlockHash","
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                                |
+| ----- | ---------------------------------------------------------- |
 | Array | Array of receipt objects for all transactions in the block |
 
----
+***
 
-## **erigon_nodeInfo**
+## **erigon\_nodeInfo**
 
 Returns a collection of metadata known about the host node and connected peers.
 
@@ -281,9 +283,8 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_nodeInfo","params":[],"id":"1"
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                                 |
+| ----- | ----------------------------------------------------------- |
 | Array | Array of NodeInfo objects containing peer and node metadata |
 
----
-
+***

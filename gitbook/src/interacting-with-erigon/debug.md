@@ -1,46 +1,48 @@
-# `debug` RPC Namespace
-
-## Introduction
+# debug
 
 The `debug` namespace provides debugging and diagnostic methods for Erigon node operators and developers. These methods offer deep introspection into blockchain state, transaction execution, and node performance. The debug namespace is implemented through the `PrivateDebugAPI` interface and `DebugAPIImpl` struct.
 
 The debug namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon. For security reasons, these methods are considered private and should not be exposed on public RPC endpoints.
 
 ### Security and Access Control
-- Debug methods are considered private and should not be exposed on public RPC endpoints
-- These methods can consume significant resources and should be used carefully in production environments
-- Access should be restricted to trusted operators and developers only
+
+* Debug methods are considered private and should not be exposed on public RPC endpoints
+* These methods can consume significant resources and should be used carefully in production environments
+* Access should be restricted to trusted operators and developers only
 
 ### Performance Considerations
-- Tracing methods (`debug_traceTransaction`, `debug_traceBlockByHash`, etc.) support streaming to handle large results efficiently
-- The `AccountRangeMaxResults` constant limits account range queries to 8192 results, or 256 when storage is included
-- Memory and GC control methods allow fine-tuning of node performance
+
+* Tracing methods (`debug_traceTransaction`, `debug_traceBlockByHash`, etc.) support streaming to handle large results efficiently
+* The `AccountRangeMaxResults` constant limits account range queries to 8192 results, or 256 when storage is included
+* Memory and GC control methods allow fine-tuning of node performance
 
 ### Integration with Erigon Architecture
-- Debug methods leverage Erigon's temporal database for historical state access
-- The implementation uses `kv.TemporalRoDB` for efficient historical queries
-- Tracing functionality integrates with Erigon's execution engine and EVM implementation
+
+* Debug methods leverage Erigon's temporal database for historical state access
+* The implementation uses `kv.TemporalRoDB` for efficient historical queries
+* Tracing functionality integrates with Erigon's execution engine and EVM implementation
 
 ### Usage in Development and Testing
-- These methods are essential for debugging transaction execution issues
-- Storage range methods help analyze contract state changes
-- Memory management methods assist in performance optimization and resource monitoring
 
----
+* These methods are essential for debugging transaction execution issues
+* Storage range methods help analyze contract state changes
+* Memory management methods assist in performance optimization and resource monitoring
 
-## **debug_storageRangeAt**
+***
+
+## **debug\_storageRangeAt**
 
 Returns information about a range of storage locations for a given address at a specific block and transaction index.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| blockHash | DATA, 32 BYTES | Hash of block at which to retrieve data |
-| txIndex | QUANTITY | Transaction index in the given block |
+| Parameter       | Type           | Description                                          |
+| --------------- | -------------- | ---------------------------------------------------- |
+| blockHash       | DATA, 32 BYTES | Hash of block at which to retrieve data              |
+| txIndex         | QUANTITY       | Transaction index in the given block                 |
 | contractAddress | DATA, 20 BYTES | Contract address from which to retrieve storage data |
-| keyStart | DATA, 32 BYTES | Storage key to start retrieval from |
-| maxResult | QUANTITY | The maximum number of storage entries to retrieve |
+| keyStart        | DATA, 32 BYTES | Storage key to start retrieval from                  |
+| maxResult       | QUANTITY       | The maximum number of storage entries to retrieve    |
 
 **Example**
 
@@ -50,26 +52,26 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0xd3
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                                              |
+| ------ | ------------------------------------------------------------------------ |
 | Object | StorageRangeResult object containing storage key-value pairs and nextKey |
 
----
+***
 
-## **debug_accountRange**
+## **debug\_accountRange**
 
 Returns a range of accounts involved in the given block range with optional filtering and data inclusion controls.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| blockNrOrHash | QUANTITY\|TAG\|HASH | Block number, tag, or block hash |
-| start | DATA | Starting point for account iteration |
-| maxResults | QUANTITY | Maximum number of accounts to retrieve |
-| nocode | Boolean | If true, exclude contract bytecode from results |
-| nostorage | Boolean | If true, exclude account storage from results |
-| nopreimages | Boolean | If true, exclude missing preimages from results |
+| Parameter     | Type                | Description                                     |
+| ------------- | ------------------- | ----------------------------------------------- |
+| blockNrOrHash | QUANTITY\|TAG\|HASH | Block number, tag, or block hash                |
+| start         | DATA                | Starting point for account iteration            |
+| maxResults    | QUANTITY            | Maximum number of accounts to retrieve          |
+| nocode        | Boolean             | If true, exclude contract bytecode from results |
+| nostorage     | Boolean             | If true, exclude account storage from results   |
+| nopreimages   | Boolean             | If true, exclude missing preimages from results |
 
 **Example**
 
@@ -79,22 +81,22 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_accountRange","params":["latest
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                                            |
+| ------ | ---------------------------------------------------------------------- |
 | Object | IteratorDump object containing account information and iteration state |
 
----
+***
 
-## **debug_getModifiedAccountsByNumber**
+## **debug\_getModifiedAccountsByNumber**
 
 Returns a list of accounts modified in the given block range specified by block numbers.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| startNum | QUANTITY\|TAG | Starting block number or tag |
-| endNum | QUANTITY\|TAG | Ending block number or tag (optional, defaults to startNum) |
+| Parameter | Type          | Description                                                 |
+| --------- | ------------- | ----------------------------------------------------------- |
+| startNum  | QUANTITY\|TAG | Starting block number or tag                                |
+| endNum    | QUANTITY\|TAG | Ending block number or tag (optional, defaults to startNum) |
 
 **Example**
 
@@ -104,22 +106,22 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","p
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                          |
+| ----- | ---------------------------------------------------- |
 | Array | Array of addresses modified in the given block range |
 
----
+***
 
-## **debug_getModifiedAccountsByHash**
+## **debug\_getModifiedAccountsByHash**
 
 Returns a list of accounts modified in the given block range specified by block hashes.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| startHash | DATA, 32 BYTES | Starting block hash |
-| endHash | DATA, 32 BYTES | Ending block hash (optional, defaults to startHash) |
+| Parameter | Type           | Description                                         |
+| --------- | -------------- | --------------------------------------------------- |
+| startHash | DATA, 32 BYTES | Starting block hash                                 |
+| endHash   | DATA, 32 BYTES | Ending block hash (optional, defaults to startHash) |
 
 **Example**
 
@@ -129,22 +131,22 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByHash","par
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                          |
+| ----- | ---------------------------------------------------- |
 | Array | Array of addresses modified in the given block range |
 
----
+***
 
-## **debug_traceTransaction**
+## **debug\_traceTransaction**
 
 Returns Geth-style transaction traces for detailed execution analysis of a specific transaction.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| hash | DATA, 32 BYTES | Hash of transaction to trace |
-| config | Object | (optional) Tracer configuration options |
+| Parameter | Type           | Description                             |
+| --------- | -------------- | --------------------------------------- |
+| hash      | DATA, 32 BYTES | Hash of transaction to trace            |
+| config    | Object         | (optional) Tracer configuration options |
 
 **Example**
 
@@ -154,22 +156,22 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                     |
+| ------ | ----------------------------------------------- |
 | Object | Stack trace array with detailed execution steps |
 
----
+***
 
-## **debug_traceBlockByHash**
+## **debug\_traceBlockByHash**
 
 Returns transaction traces for all transactions in a block specified by block hash.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| hash | DATA, 32 BYTES | Hash of the block to trace |
-| config | Object | (optional) Tracer configuration options |
+| Parameter | Type           | Description                             |
+| --------- | -------------- | --------------------------------------- |
+| hash      | DATA, 32 BYTES | Hash of the block to trace              |
+| config    | Object         | (optional) Tracer configuration options |
 
 **Example**
 
@@ -179,22 +181,22 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByHash","params":["0x
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                                          |
+| ----- | -------------------------------------------------------------------- |
 | Array | Array of transaction trace objects for all transactions in the block |
 
----
+***
 
-## **debug_traceBlockByNumber**
+## **debug\_traceBlockByNumber**
 
 Returns transaction traces for all transactions in a block specified by block number.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| number | QUANTITY\|TAG | Block number or "latest", "earliest", "pending" |
-| config | Object | (optional) Tracer configuration options |
+| Parameter | Type          | Description                                     |
+| --------- | ------------- | ----------------------------------------------- |
+| number    | QUANTITY\|TAG | Block number or "latest", "earliest", "pending" |
+| config    | Object        | (optional) Tracer configuration options         |
 
 **Example**
 
@@ -204,23 +206,23 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                                          |
+| ----- | -------------------------------------------------------------------- |
 | Array | Array of transaction trace objects for all transactions in the block |
 
----
+***
 
-## **debug_traceCall**
+## **debug\_traceCall**
 
 Executes a call and returns detailed execution traces without modifying the blockchain state.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| call | Object | Call arguments (similar to eth_call) |
+| Parameter     | Type                | Description                                      |
+| ------------- | ------------------- | ------------------------------------------------ |
+| call          | Object              | Call arguments (similar to eth\_call)            |
 | blockNrOrHash | QUANTITY\|TAG\|HASH | Block number, tag, or hash for execution context |
-| config | Object | (optional) Tracer configuration options |
+| config        | Object              | (optional) Tracer configuration options          |
 
 **Example**
 
@@ -230,20 +232,20 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCall","params":[{"to":"0xd
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                           |
+| ------ | ----------------------------------------------------- |
 | Object | Execution trace object with detailed call information |
 
----
+***
 
-## **debug_getRawReceipts**
+## **debug\_getRawReceipts**
 
 Returns the raw receipt data for all transactions in a block.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
+| Parameter     | Type                | Description                      |
+| ------------- | ------------------- | -------------------------------- |
 | blockNrOrHash | QUANTITY\|TAG\|HASH | Block number, tag, or block hash |
 
 **Example**
@@ -254,13 +256,13 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawReceipts","params":["0x1b
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type  | Description                                    |
+| ----- | ---------------------------------------------- |
 | Array | Array of raw receipt data as hexadecimal bytes |
 
----
+***
 
-## **debug_memStats**
+## **debug\_memStats**
 
 Returns detailed runtime memory statistics for the Erigon process.
 
@@ -276,13 +278,13 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_memStats","params":[],"id":"1"}
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                                                             |
+| ------ | ----------------------------------------------------------------------- |
 | Object | Runtime memory statistics object with detailed memory usage information |
 
----
+***
 
-## **debug_gcStats**
+## **debug\_gcStats**
 
 Returns garbage collection statistics for the Erigon process.
 
@@ -298,13 +300,13 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_gcStats","params":[],"id":"1"}'
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type   | Description                          |
+| ------ | ------------------------------------ |
 | Object | Garbage collection statistics object |
 
----
+***
 
-## **debug_freeOSMemory**
+## **debug\_freeOSMemory**
 
 Forces a garbage collection to free OS memory.
 
@@ -320,21 +322,21 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_freeOSMemory","params":[],"id":
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type | Description     |
+| ---- | --------------- |
 | null | No return value |
 
----
+***
 
-## **debug_setGCPercent**
+## **debug\_setGCPercent**
 
 Sets the garbage collection target percentage and returns the previous setting.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| percent | QUANTITY | GC target percentage (negative value disables GC) |
+| Parameter | Type     | Description                                       |
+| --------- | -------- | ------------------------------------------------- |
+| percent   | QUANTITY | GC target percentage (negative value disables GC) |
 
 **Example**
 
@@ -344,21 +346,21 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_setGCPercent","params":[100],"i
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type     | Description                        |
+| -------- | ---------------------------------- |
 | QUANTITY | The previous GC percentage setting |
 
----
+***
 
-## **debug_setMemoryLimit**
+## **debug\_setMemoryLimit**
 
 Sets the GOMEMLIMIT for the process and returns the previous limit.
 
 **Parameters**
 
-| Parameter | Type | Description |
-| :---- | :---- | :---- |
-| limit | QUANTITY | Memory limit in bytes |
+| Parameter | Type     | Description           |
+| --------- | -------- | --------------------- |
+| limit     | QUANTITY | Memory limit in bytes |
 
 **Example**
 
@@ -368,8 +370,8 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_setMemoryLimit","params":[10737
 
 **Returns**
 
-| Type | Description |
-| :---- | :---- |
+| Type     | Description                       |
+| -------- | --------------------------------- |
 | QUANTITY | The previous memory limit setting |
 
----
+***

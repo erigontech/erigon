@@ -545,18 +545,19 @@ USAGE:
    erigon [command] [flags]
 
 VERSION:
-   3.1.0-816f2232
+   3.2.1-0b0fde3a
 
 COMMANDS:
    init                                         Bootstrap and initialize a new genesis block
    import                                       Import a blockchain file
    snapshots, seg, snapshot, segments, segment  Managing historical data segments (partitions)
    support                                      Connect Erigon instance to a diagnostics system for support
+   shutter-validator-reg-check                  check if the provided validators are registered with shutter
    help, h                                      Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --datadir value                                                                     Data directory for the databases (default: /home/usr/.local/share/erigon)
-   --ethash.dagdir value                                                               Directory to store the ethash mining DAGs (default: /home/usr/.local/share/erigon-ethash)
+   --datadir value                                                                     Data directory for the databases (default: /home/user/.local/share/erigon)
+   --ethash.dagdir value                                                               Directory to store the ethash mining DAGs (default: /home/user/.local/share/erigon-ethash)
    --externalcl                                                                        Enables the external consensus layer (default: false)
    --txpool.disable                                                                    External pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer. (default: false)
    --txpool.pricelimit value                                                           Minimum gas price (fee cap) limit to enforce for acceptance into the pool (default: 1)
@@ -608,7 +609,7 @@ GLOBAL OPTIONS:
    --ws                                                                                Enable the WS-RPC server (default: false)
    --ws.compression                                                                    Enable compression over WebSocket (enabled by default in case WS-RPC is enabled). Use --ws.enabled=false to disable it (default: true)
    --http.trace                                                                        Print all HTTP requests to logs with INFO level (default: false)
-   --http.dbg.single                                                                   Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed (default: false)
+   --http.dbg.single, --rpc.dbg.single                                                 Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed (default: false)
    --state.cache value                                                                 Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB (default: "0MB")
    --rpc.batch.concurrency value                                                       Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request (default: 2)
    --rpc.streaming.disable                                                             Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format) (default: false)
@@ -640,6 +641,7 @@ GLOBAL OPTIONS:
    --snap.stop                                                                         Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug. It will stop move historical data from DB to new immutable snapshots. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce). (default: false)
    --snap.state.stop                                                                   Workaround to stop producing new state files, if you meet some state-related critical bug. It will stop aggregate DB history in a state files. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce). (default: false)
    --snap.skip-state-snapshot-download                                                 Skip state download and start from genesis block (default: false)
+   --snap.download.to.block value, --shadow.fork.block value                           Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks. (default: 0)
    --db.pagesize value                                                                 DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb (default: "16KB")
    --db.size.limit value                                                               Runtime limit of chaindata db size (can change at any time) (default: "1TB")
    --db.writemap                                                                       Enable WRITE_MAP feature for fast database writes and fast commit times (default: true)
@@ -647,12 +649,12 @@ GLOBAL OPTIONS:
    --torrent.maxpeers value                                                            Unused parameter (reserved for future use) (default: 100)
    --torrent.conns.perfile value                                                       Number of connections per file (default: 10)
    --torrent.trackers.disable                                                          Disable conventional BitTorrent trackers (default: false)
-   --torrent.upload.rate value                                                         Bytes per second, example: 32mb (default: "32mb")
-   --torrent.download.rate value                                                       Bytes per second, example: 32mb. Shared with webseeds unless that rate is set separately.
-   --torrent.webseed.download.rate value                                               Bytes per second for webseeds, example: 32mb. If not set, rate limit is shared with torrent.download.rate
-   --torrent.verbosity value                                                           0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2) (default: 1)
+   --torrent.upload.rate value                                                         Bytes per second, example: 32mb. Set Inf for no limit. (default: "16mb")
+   --torrent.download.rate value                                                       Bytes per second, example: 32mb. Set Inf for no limit. Shared with webseeds unless that rate is set separately. (default: "512mb")
+   --torrent.webseed.download.rate value                                               Bytes per second for webseeds, example: 32mb. Set Inf for no limit. If not set, rate limit is shared with torrent.download.rate
+   --torrent.verbosity value                                                           0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level) (default: 1)
    --port value                                                                        Network listening port (default: 30303)
-   --p2p.protocol value [ --p2p.protocol value ]                                       Version of eth p2p protocol (default: 68, 67)
+   --p2p.protocol value [ --p2p.protocol value ]                                       Version of eth p2p protocol (default: 68, 69)
    --p2p.allowed-ports value [ --p2p.allowed-ports value ]                             Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti> (default: 30303, 30304, 30305, 30306, 30307)
    --nat value                                                                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
                                                                                             "" or "none"         Default - do not nat
@@ -677,7 +679,7 @@ GLOBAL OPTIONS:
    --dev.period value                                                                  Block period to use in developer mode (0 = mine only if transaction pending) (default: 0)
    --vmdebug                                                                           Record information useful for VM and contract debugging (default: false)
    --networkid value                                                                   Explicitly set network id (integer)(For testnets: use --chain <testnet_name> instead) (default: 1)
-   --persist.receipts, --experiment.persist.receipts.v2                                Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency) (default: true)
+   --persist.receipts, --experiment.persist.receipts.v2                                Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency) (default: false)
    --fakepow                                                                           Disables proof-of-work verification (default: false)
    --gpo.blocks value                                                                  Number of recent blocks to check for gas prices (default: 20)
    --gpo.percentile value                                                              Suggested gas price is the given percentile of a set of recent transaction gas prices (default: 60)
@@ -713,6 +715,7 @@ GLOBAL OPTIONS:
    --aa                                                                                Enable AA transactions (default: false)
    --ethstats value                                                                    Reporting URL of a ethstats service (nodename:secret@host:port)
    --override.osaka value                                                              Manually specify the Osaka fork time, overriding the bundled setting (default: 0)
+   --keep.stored.chain.config                                                          Avoid overriding chain config already stored in the DB (default: false)
    --caplin.discovery.addr value                                                       Address for Caplin DISCV5 protocol (default: "0.0.0.0")
    --caplin.discovery.port value                                                       Port for Caplin DISCV5 protocol (default: 4000)
    --caplin.discovery.tcpport value                                                    TCP Port for Caplin DISCV5 protocol (default: 4001)
@@ -773,8 +776,10 @@ GLOBAL OPTIONS:
    --shutter.p2p.listen.port value                                                     Use to override the default p2p listen port (defaults to 23102) (default: 0)
    --polygon.pos.ssf                                                                   Enabling Polygon PoS Single Slot Finality (default: false)
    --polygon.pos.ssf.block value                                                       Enabling Polygon PoS Single Slot Finality since block (default: 0)
+   --polygon.wit-protocol                                                              Enable WIT protocol for stateless witness data exchange (auto-enabled for Bor chains) (default: false)
    --gdbme                                                                             restart erigon under gdb for debug purposes (default: false)
    --experimental.concurrent-commitment                                                EXPERIMENTAL: enables concurrent trie for commitment (default: false)
+   --el.block.downloader.v2                                                            Enables the EL engine v2 block downloader (default: true)
    --pprof                                                                             Enable the pprof HTTP server (default: false)
    --pprof.addr value                                                                  pprof HTTP server listening interface (default: "127.0.0.1")
    --pprof.port value                                                                  pprof HTTP server listening port (default: 6060)
@@ -802,4 +807,5 @@ GLOBAL OPTIONS:
    --config value                                                                      Sets erigon flags from YAML/TOML file
    --help, -h                                                                          show help
    --version, -v                                                                       print the version
+
 ```
