@@ -428,14 +428,14 @@ func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
 
 func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
 	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
-		return c.GetBlobConfig(time).Target
+		return blobConfig.Target
 	}
 	return 0
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
 	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
-		return c.GetBlobConfig(time).BaseFeeUpdateFraction
+		return blobConfig.BaseFeeUpdateFraction
 	}
 	return 0
 }
