@@ -635,10 +635,10 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 	}
 
 	return &MdbxTx{
-		db:  db,
-		tx:  tx,
-		ctx: ctx,
-		//traceID: db.leakDetector.Add(),
+		db:      db,
+		tx:      tx,
+		ctx:     ctx,
+		traceID: db.leakDetector.Add(),
 	}, nil
 }
 
