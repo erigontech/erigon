@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
@@ -31,12 +31,12 @@ import (
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(badBlockUnwind bool, s *StageState, unwinder Unwinder, doms *state.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error
+type ExecFunc func(badBlockUnwind bool, s *StageState, unwinder Unwinder, doms *sd.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
 // * stageState - represents the state of this stage at the beginning of unwind.
-type UnwindFunc func(u *UnwindState, s *StageState, doms *state.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error
+type UnwindFunc func(u *UnwindState, s *StageState, doms *sd.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.

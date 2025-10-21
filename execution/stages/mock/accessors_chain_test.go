@@ -27,6 +27,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
@@ -531,7 +532,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	var txNum uint64
 	{
 		blockNum := header.Number.Uint64()
-		sd, err := state.NewSharedDomains(tx, log.New())
+		sd, err := sd.NewSharedDomains(tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
 		base, err := txNumReader.Min(tx, 1)

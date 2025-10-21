@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -45,7 +46,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := sd.NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -161,7 +162,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := sd.NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 

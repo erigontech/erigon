@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon/db/state/sd"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon/common"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -211,7 +211,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	return nil
 }
 
-func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *state.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *sd.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	// avoid crash because Erigon's core does many things
 	defer dbg.RecoverPanicIntoError(logger, &err)
 
@@ -225,7 +225,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *state.Share
 	return nil
 }
 
-func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *state.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
+func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *sd.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
 	externalTx := tx != nil
 	finishProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, tx)
 	if err != nil {
@@ -511,7 +511,7 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Close()
 
-	sd, err := state.NewSharedDomains(mb, logger)
+	sd, err := sd.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
 	}
@@ -590,7 +590,7 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, sd *state.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
+func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, sd *sd.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())

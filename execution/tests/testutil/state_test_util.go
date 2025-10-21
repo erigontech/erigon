@@ -31,6 +31,7 @@ import (
 	"strings"
 	"testing"
 
+	dbstate "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
@@ -43,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/core"

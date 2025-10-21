@@ -56,17 +56,17 @@ type TemporalMemBatch struct {
 
 	domainWriters   [kv.DomainLen]*DomainBufferedWriter
 	iiWriters       []*InvertedIndexBufferedWriter
-	forkableWriters map[ForkableId]kv.BufferedWriter
+	forkableWriters map[kv.ForkableId]kv.BufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
-	metrics                   *DomainMetrics
+	metrics                   *changeset.DomainMetrics
 }
 
-func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
-		metrics: metrics,
+		metrics: ioMetrics.(*changeset.DomainMetrics),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -82,7 +82,7 @@ func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemB
 		sd.domainWriters[id] = d.NewWriter()
 	}
 
-	sd.forkableWriters = make(map[ForkableId]kv.BufferedWriter)
+	sd.forkableWriters = make(map[kv.ForkableId]kv.BufferedWriter)
 	for _, id := range tx.Debug().AllForkableIds() {
 		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter()
 	}
@@ -126,7 +126,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			dm.CachePutCount++
 			dm.CachePutSize += putSize
 		} else {
-			sd.metrics.Domains[domain] = &DomainIOMetrics{
+			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
 				CachePutCount: 1,
 				CachePutSize:  putSize,
 			}
@@ -146,7 +146,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		dm.CachePutCount++
 		dm.CachePutSize += putSize
 	} else {
-		sd.metrics.Domains[domain] = &DomainIOMetrics{
+		sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
 			CachePutCount: 1,
 			CachePutSize:  putSize,
 		}
@@ -255,7 +255,7 @@ func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uin
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
-func (sd *TemporalMemBatch) PutForkable(id ForkableId, num kv.Num, v []byte) error {
+func (sd *TemporalMemBatch) PutForkable(id kv.ForkableId, num kv.Num, v []byte) error {
 	f, ok := sd.forkableWriters[id]
 	if !ok {
 		return fmt.Errorf("forkable not found: %s", Registry.Name(id))

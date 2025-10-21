@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -606,7 +607,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
-	domains, err := dbstate.NewSharedDomains(tx, logger)
+	domains, err := sd.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
@@ -929,7 +930,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		if execProgress == 0 {
-			doms, err := dbstate.NewSharedDomains(tx, log.New())
+			doms, err := sd.NewSharedDomains(tx, log.New())
 			if err != nil {
 				panic(err)
 			}

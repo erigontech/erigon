@@ -188,16 +188,17 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
-func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
-func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
-func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
-func (db *DB) ForkableTables(domain ...kv.ForkableId) []string     { panic("not implemented") }
-func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
-func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
-func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }
-func (db *DB) DisableReadAhead()                                   { panic("not implemented") }
-func (db *DB) Files() []string                                     { panic("not implemented") }
-func (db *DB) MergeLoop(ctx context.Context) error                 { panic("not implemented") }
+func (db *DB) Debug() kv.TemporalDebugDB                             { return kv.TemporalDebugDB(db) }
+func (db *DB) NewMemBatch(ioMetrics interface{}) kv.TemporalMemBatch { panic("not implemented") }
+func (db *DB) DomainTables(domain ...kv.Domain) []string             { panic("not implemented") }
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string   { panic("not implemented") }
+func (db *DB) ForkableTables(domain ...kv.ForkableId) []string       { panic("not implemented") }
+func (db *DB) ReloadFiles() error                                    { panic("not implemented") }
+func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error   { panic("not implemented") }
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB                   { panic("not implemented") }
+func (db *DB) DisableReadAhead()                                     { panic("not implemented") }
+func (db *DB) Files() []string                                       { panic("not implemented") }
+func (db *DB) MergeLoop(ctx context.Context) error                   { panic("not implemented") }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {

@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"time"
 
+	dbstate "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"

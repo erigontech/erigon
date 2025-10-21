@@ -30,6 +30,7 @@ import (
 	"path"
 	"path/filepath"
 
+	dbstate "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"

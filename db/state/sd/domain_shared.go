@@ -14,14 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package sd
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,10 +28,16 @@ import (
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+)
+
+var (
+	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 )
 
 // KvList sort.Interface to sort write list by keys
@@ -59,74 +64,9 @@ func (l *KvList) Swap(i, j int) {
 	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
-type DomainMetrics struct {
-	sync.RWMutex
-	DomainIOMetrics
-	Domains map[kv.Domain]*DomainIOMetrics
-}
-
-func (dm *DomainMetrics) updateCacheReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.CacheReadCount++
-	readDuration := time.Since(start)
-	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.CacheReadCount++
-		d.CacheReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CacheReadCount:    1,
-			CacheReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) updateDbReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.DbReadCount++
-	readDuration := time.Since(start)
-	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.DbReadCount++
-		d.DbReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) updateFileReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
-	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-	}
-}
-
-type DomainIOMetrics struct {
-	CacheReadCount    int64
-	CacheReadDuration time.Duration
-	CacheGetCount     int64
-	CachePutCount     int64
-	CacheGetSize      int
-	CachePutSize      int
-	DbReadCount       int64
-	DbReadDuration    time.Duration
-	FileReadCount     int64
-	FileReadDuration  time.Duration
+type accHolder interface {
+	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
+	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
 type SharedDomains struct {
@@ -140,35 +80,19 @@ type SharedDomains struct {
 	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
-	mem               inMem
-	metrics           DomainMetrics
-}
-
-type inMem interface {
-	DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error
-	DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte, prevStep kv.Step) error
-	GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool)
-	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
-	SetChangesetAccumulator(acc *changeset.StateChangeSet)
-	GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error)
-	ClearRam()
-	IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error)
-	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error
-	SizeEstimate() uint64
-	Flush(ctx context.Context, tx kv.RwTx) error
-	Close()
-	PutForkable(id ForkableId, num kv.Num, v []byte) error
-	DiscardWrites(domain kv.Domain)
+	mem               kv.TemporalMemBatch
+	metrics           changeset.DomainMetrics
 }
 
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics:  DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}},
+		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
 		stepSize: tx.Debug().StepSize(),
 	}
-	sd.mem = newTemporalMemBatch(tx, &sd.metrics)
+
+	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
 
 	tv := commitment.VariantHexPatriciaTrie
 	if statecfg.ExperimentalConcurrentCommitment {
@@ -227,10 +151,10 @@ func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 
 type unmarkedPutter struct {
 	sd         *SharedDomains
-	forkableId ForkableId
+	forkableId kv.ForkableId
 }
 
-func (sd *SharedDomains) AsUnmarkedPutter(id ForkableId) kv.UnmarkedPutter {
+func (sd *SharedDomains) AsUnmarkedPutter(id kv.ForkableId) kv.UnmarkedPutter {
 	return &unmarkedPutter{sd, id}
 }
 
@@ -243,11 +167,11 @@ func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 }
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
-	sd.mem.SetChangesetAccumulator(acc)
+	sd.mem.(accHolder).SetChangesetAccumulator(acc)
 }
 
 func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
-	sd.mem.SavePastChangesetAccumulator(blockHash, blockNumber, acc)
+	sd.mem.(accHolder).SavePastChangesetAccumulator(blockHash, blockNumber, acc)
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
@@ -346,10 +270,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	start := time.Now()
 	if v, prevStep, ok := sd.mem.GetLatest(domain, k); ok {
-		sd.metrics.updateCacheReads(domain, start)
+		sd.metrics.UpdateCacheReads(domain, start)
 		return v, prevStep, nil
 	}
-	if aggTx, ok := tx.AggTx().(*AggregatorRoTx); ok {
+	if aggTx, ok := tx.AggTx().(*state.AggregatorRoTx); ok {
 		v, step, _, err = aggTx.getLatest(domain, k, tx, &sd.metrics, start)
 	} else {
 		v, step, err = tx.GetLatest(domain, k)
@@ -361,7 +285,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	return v, step, nil
 }
 
-func (sd *SharedDomains) Metrics() *DomainMetrics {
+func (sd *SharedDomains) Metrics() *changeset.DomainMetrics {
 	return &sd.metrics
 }
 
@@ -535,15 +459,19 @@ func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
 	sd.mem.DiscardWrites(d)
 }
 
-func ForkAggTx(tx kv.Tx, id kv.ForkableId) *ForkableAggTemporalTx {
-	if withAggTx, ok := tx.(interface{ AggForkablesTx(kv.ForkableId) any }); ok {
-		return withAggTx.AggForkablesTx(id).(*ForkableAggTemporalTx)
-	}
+func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommitmentContext {
+	return sd.sdCtx
+}
 
+// SeekCommitment lookups latest available commitment and sets it as current
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
+	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-type HasAgg interface {
-	Agg() any
-	ForkableAgg(ForkableId) any
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, sd.txNum, logPrefix, commitProgress)
 }

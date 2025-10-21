@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/db/state/sd"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1675,7 +1676,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 	return dt.getLatest(key, roTx, nil, time.Time{})
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *sd.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}

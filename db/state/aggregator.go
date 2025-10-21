@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/db/state/sd"
 	rand2 "golang.org/x/exp/rand"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
@@ -117,6 +118,11 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, stepsInFroz
 
 		produce: true,
 	}, nil
+}
+
+type HasAgg interface {
+	Agg() any
+	ForkableAgg(ForkableId) any
 }
 
 // GetStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -1801,7 +1807,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.getLatest(domain, k, tx, nil, time.Time{})
 }
 
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *sd.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, metrics, start)
 	}

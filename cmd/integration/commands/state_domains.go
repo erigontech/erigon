@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
@@ -532,7 +533,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := dbstate.NewSharedDomains(temporalTx, logger)
+	domains, err := sd.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return err
 	}

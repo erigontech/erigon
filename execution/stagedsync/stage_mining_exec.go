@@ -23,6 +23,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	dbstate "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
@@ -120,7 +120,7 @@ func SpawnMiningExecStage(s *StageState, sd *dbstate.SharedDomains, tx kv.Tempor
 
 	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
 	defer mb.Close()
-	simSd, err := dbstate.NewSharedDomains(mb, logger)
+	simSd, err := sd.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
 	}

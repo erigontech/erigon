@@ -29,6 +29,7 @@ import (
 	"strings"
 	"testing"
 
+	dbstate "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -38,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"

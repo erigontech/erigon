@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/db/state/sd"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -57,7 +58,7 @@ import (
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *dbstate.SharedDomains, maxBlockNum uint64) (
+func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *sd.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
 	txNumsReader := cfg.blockReader.TxnumReader(ctx)
@@ -121,7 +122,7 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg,
-	doms *dbstate.SharedDomains, rwTx kv.TemporalRwTx,
+	doms *sd.SharedDomains, rwTx kv.TemporalRwTx,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
@@ -163,7 +164,7 @@ func ExecV3(ctx context.Context,
 	var err error
 	if !inMemExec {
 		var err error
-		doms, err = dbstate.NewSharedDomains(applyTx, log.New())
+		doms, err = sd.NewSharedDomains(applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
@@ -449,7 +450,7 @@ type txExecutor struct {
 	cfg              ExecuteBlockCfg
 	agg              *dbstate.Aggregator
 	rs               *state.StateV3Buffered
-	doms             *dbstate.SharedDomains
+	doms             *sd.SharedDomains
 	u                Unwinder
 	isMining         bool
 	inMemExec        bool
@@ -484,7 +485,7 @@ func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
 }
 
-func (te *txExecutor) domains() *dbstate.SharedDomains {
+func (te *txExecutor) domains() *sd.SharedDomains {
 	return te.doms
 }
 
@@ -745,7 +746,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
+func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *sd.SharedDomains) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx)
 	}
@@ -841,7 +842,7 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *dbstate.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *sd.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it

@@ -372,6 +372,13 @@ func (tx *RwTx) LockDBInRam() error {
 func (tx *RwTx) Debug() kv.TemporalDebugTx { return tx }
 func (tx *Tx) Debug() kv.TemporalDebugTx   { return tx }
 
+func (tx *RwTx) NewMemBatch(ioMetrics interface{}) kv.TemporalMemBatch {
+	return state.NewTemporalMemBatch(tx, ioMetrics)
+}
+func (tx *Tx) NewMemBatch(ioMetrics interface{}) kv.TemporalMemBatch {
+	return state.NewTemporalMemBatch(tx, ioMetrics)
+}
+
 func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.RwTx

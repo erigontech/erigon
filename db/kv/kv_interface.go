@@ -27,9 +27,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
@@ -447,6 +449,8 @@ type TemporalDebugTx interface {
 	StepSize() uint64
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
+
+	NewMemBatch(ioMetrics interface{}) TemporalMemBatch
 }
 
 type TemporalDebugDB interface {
@@ -460,6 +464,21 @@ type TemporalDebugDB interface {
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+}
+
+type TemporalMemBatch interface {
+	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
+	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
+	GetLatest(table Domain, key []byte) (v []byte, prevStep Step, ok bool)
+	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
+	ClearRam()
+	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
+	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	SizeEstimate() uint64
+	Flush(ctx context.Context, tx RwTx) error
+	Close()
+	PutForkable(id ForkableId, num Num, v []byte) error
+	DiscardWrites(domain Domain)
 }
 
 type WithFreezeInfo interface {

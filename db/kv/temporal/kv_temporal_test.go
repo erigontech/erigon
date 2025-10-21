@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -35,7 +36,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
 
-	sd, err := state.NewSharedDomains(rwTtx1, log.Root())
+	sd, err := sd.NewSharedDomains(rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -240,7 +241,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
-	sd, err := state.NewSharedDomains(rwTtx1, log.Root())
+	sd, err := sd.NewSharedDomains(rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 

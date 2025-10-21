@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -65,7 +66,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := sd.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 

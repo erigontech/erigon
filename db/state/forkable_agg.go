@@ -883,3 +883,11 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 
 	panic("no forkable with id " + Registry.Name(forId))
 }
+
+func ForkAggTx(tx kv.Tx, id kv.ForkableId) *ForkableAggTemporalTx {
+	if withAggTx, ok := tx.(interface{ AggForkablesTx(kv.ForkableId) any }); ok {
+		return withAggTx.AggForkablesTx(id).(*ForkableAggTemporalTx)
+	}
+
+	return nil
+}

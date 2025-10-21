@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state_test
+package sd_test
 
 import (
 	"context"
@@ -22,6 +22,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -29,25 +31,24 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	stepSize := uint64(100)
-	db, agg := testDbAndAggregatorBench(t, stepSize)
+	db, agg := state.testDbAndAggregatorBench(t, stepSize)
 
 	ctx := context.Background()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := sd.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
 
-	rnd := newRnd(4500)
+	rnd := state.newRnd(4500)
 
 	keys := make([][]byte, 8)
 	for i := 0; i < len(keys); i++ {
@@ -118,14 +119,14 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 
 func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	stepSize := uint64(100)
-	db, _ := testDbAndAggregatorBench(b, stepSize)
+	db, _ := state.testDbAndAggregatorBench(b, stepSize)
 
 	ctx := context.Background()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := sd.NewSharedDomains(rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -165,7 +166,7 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 	tb.Helper()
 
 	doms := make(map[string]map[string][]upd)
-	r := newRnd(31)
+	r := state.newRnd(31)
 
 	accs := make(map[string][]upd)
 	stor := make(map[string][]upd)
@@ -187,17 +188,17 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 
 	return doms
 }
-func generateRandomKey(r *rndGen, size uint64) string {
+func generateRandomKey(r *state.rndGen, size uint64) string {
 	return string(generateRandomKeyBytes(r, size))
 }
 
-func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
+func generateRandomKeyBytes(r *state.rndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
 	return key
 }
 
-func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
+func generateAccountUpdates(r *state.rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
@@ -220,7 +221,7 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
+func generateArbitraryValueUpdates(r *state.rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 	//maxStorageSize := 24 * (1 << 10) // limit on contract code
@@ -238,7 +239,7 @@ func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint
 
 	return updates
 }
-func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
+func generateRandomTxNum(r *state.rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
 	txNum := uint64(r.IntN(int(maxTxNum)))
 	for usedTxNums[txNum] {
 		txNum = uint64(r.IntN(int(maxTxNum)))

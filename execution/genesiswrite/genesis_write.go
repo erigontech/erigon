@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	sd2 "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -329,7 +330,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer tx.Rollback()
 
-	sd, err := dbstate.NewSharedDomains(tx, logger)
+	sd, err := sd2.NewSharedDomains(tx, logger)
 	if err != nil {
 		return nil, nil, err
 	}

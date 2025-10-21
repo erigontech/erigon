@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -73,7 +73,7 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 }
 
 func isDomainAheadOfBlocks(tx kv.TemporalRwTx, logger log.Logger) bool {
-	doms, err := state.NewSharedDomains(tx, logger)
+	doms, err := sd.NewSharedDomains(tx, logger)
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err)
 		return errors.Is(err, commitmentdb.ErrBehindCommitment)
