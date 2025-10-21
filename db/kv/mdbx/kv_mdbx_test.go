@@ -75,7 +75,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 			tx, _ := db.BeginRw(context.Background())
 
 			v := vals[i%len(vals)]
-			v[0]++
+			v[0]++ // modify value a bit on every update
 			_ = tx.Put(kv.Headers, keys[i%len(keys)], v)
 			t := time.Now()
 			_ = tx.Commit()
