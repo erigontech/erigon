@@ -231,12 +231,6 @@ type TxTask struct {
 	rules        *chain.Rules
 }
 
-type GenericTracer interface {
-	TracingHooks() *tracing.Hooks
-	SetTransaction(tx types.Transaction)
-	Found() bool
-}
-
 func (t *TxTask) compare(other Task) int {
 	switch {
 	case t.Version().TxNum > other.Version().TxNum:

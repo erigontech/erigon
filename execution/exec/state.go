@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package exec3
+package exec
 
 import (
 	"context"
@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -106,7 +105,7 @@ type Worker struct {
 	chainTx     kv.TemporalTx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
-	in          *exec.QueueWithRetry
+	in          *QueueWithRetry
 	rs          *state.StateV3Buffered
 	stateWriter state.StateWriter
 	stateReader state.StateReader
@@ -116,7 +115,7 @@ type Worker struct {
 	ctx     context.Context
 	engine  consensus.Engine
 	genesis *types.Genesis
-	results *exec.ResultsQueue
+	results *ResultsQueue
 	chain   consensus.ChainReader
 
 	evm *vm.EVM
@@ -127,7 +126,7 @@ type Worker struct {
 	metrics *WorkerMetrics
 }
 
-func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
+func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.RoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
@@ -262,18 +261,18 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) {
 func (rw *Worker) Run() (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("exec3.Worker panic: %s, %s", rec, dbg.Stack())
+			err = fmt.Errorf("exec.Worker panic: %s, %s", rec, dbg.Stack())
 			rw.logger.Warn("Worker failed", "err", err)
 		}
 	}()
 
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
-		result := func() (result *exec.TxResult) {
+		result := func() (result *TxResult) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					result = &exec.TxResult{
+					result = &TxResult{
 						Task: txTask,
-						Err:  fmt.Errorf("exec3 task panic: %s, %s", rec, dbg.Stack()),
+						Err:  fmt.Errorf("exec task panic: %s, %s", rec, dbg.Stack()),
 					}
 				}
 			}()
@@ -286,7 +285,7 @@ func (rw *Worker) Run() (err error) {
 	return nil
 }
 
-func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
+func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
@@ -339,7 +338,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
+func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	if txTask.IsHistoric() && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -353,7 +352,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 		chainTx, err := rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx) //nolint
 
 		if err != nil {
-			return &exec.TxResult{
+			return &TxResult{
 				Task: txTask,
 				Err:  err,
 			}
@@ -373,7 +372,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 	rw.resetTxNum(txTask.Version().TxNum)
 
 	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
-		return &exec.TxResult{
+		return &TxResult{
 			Task: txTask,
 			Err:  err,
 		}
@@ -394,12 +393,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 }
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.RoDB,
-	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine consensus.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
+	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
+	engine consensus.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultsSize := workerCount * 8
-	rws = exec.NewResultsQueue(resultsSize, workerCount)
+	rws = NewResultsQueue(resultsSize, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
 	for i := 0; i < workerCount; i++ {
