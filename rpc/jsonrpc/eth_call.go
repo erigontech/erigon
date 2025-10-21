@@ -426,7 +426,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, state.PrunedError
 		}
 
-		sdCtx.SetLimitReadAsOfTxNum(lastTxnInBlock, false)
+		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
 		//domains.SetTrace(true)
 		if err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
