@@ -1041,18 +1041,16 @@ func (tx *MdbxTx) Rollback() {
 	if tx.tx == nil {
 		return
 	}
-	defer func() {
-		tx.tx = nil
-		tx.db.trackTxEnd()
-		if tx.readOnly {
-			tx.db.roTxsLimiter.Release(1)
-		} else {
-			runtime.UnlockOSThread()
-		}
-		tx.db.leakDetector.Del(tx.traceID)
-	}()
 	tx.closeCursors()
 	tx.tx.Abort()
+	tx.tx = nil
+	tx.db.trackTxEnd()
+	if tx.readOnly {
+		tx.db.roTxsLimiter.Release(1)
+	} else {
+		runtime.UnlockOSThread()
+	}
+	tx.db.leakDetector.Del(tx.traceID)
 }
 
 func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
