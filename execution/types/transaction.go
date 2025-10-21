@@ -386,17 +386,17 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
 	m := Message{
-		from:       from,
-		to:         to,
-		nonce:      nonce,
-		amount:     *amount,
-		gasLimit:   gasLimit,
-		data:       data,
-		accessList: accessList,
-		checkNonce: checkNonce,
+		from:             from,
+		to:               to,
+		nonce:            nonce,
+		amount:           *amount,
+		gasLimit:         gasLimit,
+		data:             data,
+		accessList:       accessList,
+		checkNonce:       checkNonce,
 		checkTransaction: checkTransaction,
-		checkGas:   checkGas,
-		isFree:     isFree,
+		checkGas:         checkGas,
+		isFree:           isFree,
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
