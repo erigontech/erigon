@@ -39,7 +39,9 @@ import (
 )
 
 // BenchmarkSyncPeriodDefault for `dbSyncBytesThreshold` constant
-//   - run: go test -bench=BenchmarkSyncPeriodDefault -run=BenchmarkSyncPeriodDefault -count=2 -benchtime=15s ./db/kv/mdbx
+//   - must use `-cpu=` because even 1-core overloading disk write IO. Multi-core bench is unreliable here (degradating with time).
+//   - same about `-benchtime=30s`
+//   - run: go test -bench=BenchmarkSyncPeriodDefault -run=BenchmarkSyncPeriodDefault -cpu=1 -count=1 -benchtime=30s ./db/kv/mdbx
 //   - -benchtime can't be smaller than SyncPeriod
 func BenchmarkSyncPeriodDefault(b *testing.B) {
 	keys, vals := make([][]byte, 1_000_000), make([][]byte, 1_000_000)
