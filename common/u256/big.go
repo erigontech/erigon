@@ -46,9 +46,8 @@ var (
 
 // Add sets z to the sum x+y
 // This is a garbage free version of  uint256.Add
-func Add(x, y uint256.Int) uint256.Int {
+func Add(x, y uint256.Int) (z uint256.Int) {
 	var carry uint64
-	var z uint256.Int
 	z[0], carry = bits.Add64(x[0], y[0], 0)
 	z[1], carry = bits.Add64(x[1], y[1], carry)
 	z[2], carry = bits.Add64(x[2], y[2], carry)
@@ -58,9 +57,8 @@ func Add(x, y uint256.Int) uint256.Int {
 
 // Sub sets z to the difference x-y
 // This is a garbage free version of  uint256.Sub
-func Sub(x, y uint256.Int) uint256.Int {
+func Sub(x, y uint256.Int) (z uint256.Int) {
 	var carry uint64
-	var z uint256.Int
 	z[0], carry = bits.Sub64(x[0], y[0], 0)
 	z[1], carry = bits.Sub64(x[1], y[1], carry)
 	z[2], carry = bits.Sub64(x[2], y[2], carry)
