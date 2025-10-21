@@ -144,11 +144,6 @@ type SharedDomains struct {
 	metrics           DomainMetrics
 }
 
-type HasAgg interface {
-	Agg() any
-	ForkableAgg(ForkableId) any
-}
-
 type inMem interface {
 	DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error
 	DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte, prevStep kv.Step) error
@@ -546,4 +541,9 @@ func ForkAggTx(tx kv.Tx, id kv.ForkableId) *ForkableAggTemporalTx {
 	}
 
 	return nil
+}
+
+type HasAgg interface {
+	Agg() any
+	ForkableAgg(ForkableId) any
 }
