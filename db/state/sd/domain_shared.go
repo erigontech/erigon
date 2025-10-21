@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -273,11 +272,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		sd.metrics.UpdateCacheReads(domain, start)
 		return v, prevStep, nil
 	}
-	if aggTx, ok := tx.AggTx().(*state.AggregatorRoTx); ok {
-		v, step, _, err = aggTx.getLatest(domain, k, tx, &sd.metrics, start)
-	} else {
-		v, step, err = tx.GetLatest(domain, k)
-	}
+	//if aggTx, ok := tx.AggTx().(*state.AggregatorRoTx); ok {
+	//	v, step, _, err = aggTx.getLatest(domain, k, tx, &sd.metrics, start)
+	//} else {
+	v, step, err = tx.GetLatest(domain, k)
+	//}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
