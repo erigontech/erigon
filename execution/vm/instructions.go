@@ -561,7 +561,7 @@ func opCodeCopy(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uin
 
 func opExtCodeCopy(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	var (
-		stack      = scope.Stack
+		stack      = &scope.Stack
 		a          = stack.pop()
 		memOffset  = stack.pop()
 		codeOffset = stack.pop()
