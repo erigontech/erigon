@@ -369,17 +369,17 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, gasUsed uin
 }
 
 type Hook struct {
-	ctx                           context.Context
-	notifications                 *shards.Notifications
-	sync                          *stagedsync.Sync
-	chainConfig                   *chain.Config
-	logger                        log.Logger
-	blockReader                   services.FullBlockReader
-	updateHead                    func(ctx context.Context)
-	db                            kv.RoDB
-	statusDataGetter              sentry_multi_client.StatusGetter
-	blockRangePublisher           *execp2p.Publisher
-	lastAnnouncedBlockRangeLatest uint64
+	ctx                                 context.Context
+	notifications                       *shards.Notifications
+	sync                                *stagedsync.Sync
+	chainConfig                         *chain.Config
+	logger                              log.Logger
+	blockReader                         services.FullBlockReader
+	updateHead                          func(ctx context.Context)
+	db                                  kv.RoDB
+	statusDataGetter                    sentry_multi_client.StatusGetter
+	blockRangePublisher                 *execp2p.Publisher
+	lastAnnouncedBlockRangeLatestNumber uint64
 }
 
 func NewHook(
@@ -443,13 +443,6 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	return h.afterRun(tx, finishProgressBefore)
 }
 
-func (h *Hook) NotifyUnwind(finishProgressBefore, finishProgressAfter uint64) {
-	if h == nil {
-		return
-	}
-	h.maybeAnnounceBlockRange(finishProgressBefore, finishProgressAfter)
-}
-
 func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	// Update sentry status for peers to see our sync status
 	if h.updateHead != nil {
@@ -460,7 +453,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		return err
 	}
 
-	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync)
+	h.maybeAnnounceBlockRange(finishStageAfterSync)
 	return h.sendNotifications(tx, finishProgressBefore, finishStageAfterSync)
 
 }
@@ -535,17 +528,14 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 	return nil
 }
 
-func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64) {
+func (h *Hook) maybeAnnounceBlockRange(finishStageAfterSync uint64) {
 	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
 		return
 	}
 
-	rollback := finishStageAfterSync < finishStageBeforeSync
-	initialAnnouncement := h.lastAnnouncedBlockRangeLatest == 0 && finishStageAfterSync > 0
-	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatest+32
-	if !rollback && !initialAnnouncement && !progressed {
-		return
-	}
+	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil
+	initialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0 && finishStageAfterSync > 0
+	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
 
 	status, err := h.statusDataGetter.GetStatusData(h.ctx)
 	if err != nil {
@@ -564,9 +554,13 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 		return
 	}
 
-	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "rollback", rollback)
+	if !hadUnwind && !initialAnnouncement && !progressed {
+		return
+	}
+
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind)
 	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
-	h.lastAnnouncedBlockRangeLatest = packet.Latest
+	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
 }
 
 func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
