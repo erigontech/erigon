@@ -509,8 +509,8 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 }
 
 func (db *MdbxKV) trackTxBegin() bool {
-	//db.txsCountMutex.Lock()
-	//defer db.txsCountMutex.Unlock()
+	db.txsCountMutex.Lock()
+	defer db.txsCountMutex.Unlock()
 
 	isOpen := !db.closed.Load()
 	if isOpen {
@@ -524,8 +524,8 @@ func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
 }
 
 func (db *MdbxKV) trackTxEnd() {
-	//db.txsCountMutex.Lock()
-	//defer db.txsCountMutex.Unlock()
+	db.txsCountMutex.Lock()
+	defer db.txsCountMutex.Unlock()
 
 	if db.txsCount > 0 {
 		db.txsCount--
