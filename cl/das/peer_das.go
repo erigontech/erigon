@@ -718,10 +718,9 @@ type downloadTableEntry struct {
 
 // downloadRequest is used to track the download progress of the column sidecars
 type downloadRequest struct {
-	beaconConfig           *clparams.BeaconChainConfig
-	mutex                  sync.RWMutex
-	blockRootToBeaconBlock map[common.Hash]*cltypes.SignedBlindedBeaconBlock
-	downloadTable          map[downloadTableEntry]map[uint64]bool
+	beaconConfig  *clparams.BeaconChainConfig
+	tableMutex    sync.RWMutex
+	downloadTable map[downloadTableEntry]map[uint64]bool
 }
 
 func initializeDownloadRequest(
@@ -775,15 +774,14 @@ func initializeDownloadRequest(
 		}
 	}
 	return &downloadRequest{
-		beaconConfig:           beaconConfig,
-		downloadTable:          downloadTable,
-		blockRootToBeaconBlock: blockRootToBeaconBlock,
+		beaconConfig:  beaconConfig,
+		downloadTable: downloadTable,
 	}, nil
 }
 
 func (d *downloadRequest) remainingEntries() []downloadTableEntry {
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
+	d.tableMutex.RLock()
+	defer d.tableMutex.RUnlock()
 	remaining := []downloadTableEntry{}
 	for entry := range d.downloadTable {
 		remaining = append(remaining, entry)
@@ -792,14 +790,14 @@ func (d *downloadRequest) remainingEntries() []downloadTableEntry {
 }
 
 func (d *downloadRequest) remainingEntriesCount() int {
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
+	d.tableMutex.RLock()
+	defer d.tableMutex.RUnlock()
 	return len(d.downloadTable)
 }
 
 func (d *downloadRequest) removeColumn(slot uint64, blockRoot common.Hash, columnIndex uint64) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
+	d.tableMutex.Lock()
+	defer d.tableMutex.Unlock()
 	entry := downloadTableEntry{
 		blockRoot: blockRoot,
 		slot:      slot,
@@ -811,8 +809,8 @@ func (d *downloadRequest) removeColumn(slot uint64, blockRoot common.Hash, colum
 }
 
 func (d *downloadRequest) removeBlock(slot uint64, blockRoot common.Hash) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
+	d.tableMutex.Lock()
+	defer d.tableMutex.Unlock()
 	delete(d.downloadTable, downloadTableEntry{
 		blockRoot: blockRoot,
 		slot:      slot,
@@ -822,8 +820,8 @@ func (d *downloadRequest) removeBlock(slot uint64, blockRoot common.Hash) {
 func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier] {
 	payload := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
 
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
+	d.tableMutex.RLock()
+	defer d.tableMutex.RUnlock()
 	for entry, columns := range d.downloadTable {
 		id := &cltypes.DataColumnsByRootIdentifier{
 			BlockRoot: entry.blockRoot,
