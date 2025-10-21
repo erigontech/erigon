@@ -96,13 +96,13 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		defer db.Close()
 		doBench(b, db)
 	})
-	b.Run("1mb", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).MustOpen()
+	b.Run("1mb 1sec", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
-	b.Run("5mb", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).MustOpen()
+	b.Run("5mb 1sec", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
