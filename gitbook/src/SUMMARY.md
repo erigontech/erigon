@@ -4,7 +4,6 @@
 
 * [Introduction](README.md)
   * [Why using Erigon?](introduction/why-using-erigon.md)
-  * [Contributing](introduction/contributing.md)
 * [Getting Started](getting-started/getting-started.md)
   * [Hardware Requirements](getting-started/hardware-requirements.md)
   * [Software Requirements](getting-started/software-requirements.md)
@@ -74,6 +73,7 @@
   * [Common Errors and Solutions](help/common-errors-and-solutions.md)
   * [Glossary of Key Terms](help/glossary-of-key-terms.md)
 * [About](about/about.md)
+  * [Contributing](summary/about/contributing.md)
   * [License](about/license.md)
   * [Disclaimer](about/disclaimer.md)
   * [Donate](about/donate.md)

@@ -2,7 +2,7 @@
 
 Erigon is an efficient Ethereum implementation designed for speed, modularity, and optimization.
 
-With Erigon 3 the default configuration shifts from archive node to [full node](introduction/fundamentals/sync-modes.md), enhancing efficiency, accessibility, and versatility for a wider range of users. Archive nodes remain available for developers and researchers needing full historical data, while the full node offers faster sync times and lower resource usage for everyday operations.
+With Erigon 3 the default configuration shifts from archive node to **full node**, enhancing efficiency, accessibility, and versatility for a wider range of users. Archive nodes remain available for developers and researchers needing full historical data, while the full node offers faster sync times and lower resource usage for everyday operations.
 
 See here [**why you should be using Erigon**](introduction/why-using-erigon.md).
 
