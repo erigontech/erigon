@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package sd
+package sd_test
 
 import (
 	"context"
@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/db/state/sd"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -45,7 +45,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(100)
-	db, _ := state.testDbAndAggregatorv3(t, stepSize)
+	db, _ := testDbAndAggregatorv3(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
 	ctx := context.Background()
@@ -63,7 +63,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
 	count := 10
-	rnd := state.newRnd(0)
+	rnd := newRnd(0)
 
 	err = rwTx.Commit()
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := sd.NewSharedDomains(rwTx, log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -193,7 +193,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 				pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, rwTx, state.composite(k0, l0), l0[24:], txNum, pv, step)
+				err = domains.DomainPut(kv.StorageDomain, rwTx, composite(k0, l0), l0[24:], txNum, pv, step)
 				require.NoError(t, err)
 			}
 		}

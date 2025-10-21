@@ -817,6 +817,15 @@ func generateSharedDomainsUpdates(t *testing.T, domains *sd.SharedDomains, tx kv
 	return usedKeys
 }
 
+func generateRandomKey(r *rndGen, size uint64) string {
+	return string(generateRandomKeyBytes(r, size))
+}
+func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
+	key := make([]byte, size)
+	r.Read(key)
+	return key
+}
+
 func generateSharedDomainsUpdatesForTx(t *testing.T, domains *sd.SharedDomains, tx kv.TemporalTx, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
 	t.Helper()
 

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package sd
+package sd_test
 
 import (
 	"context"
@@ -24,6 +24,10 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -58,6 +62,28 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *s
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 
+func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
+	return state.New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0)
+}
+
+func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *state.Aggregator) {
+	tb.Helper()
+	logger := log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
+
+	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	tb.Cleanup(agg.Close)
+	err := agg.OpenFolder()
+	require.NoError(tb, err)
+	return db, agg
+}
+
+func composite(k, k2 []byte) []byte {
+	return append(common.Copy(k), k2...)
+}
+
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	stepSize := uint64(100)
 	db, agg := testDbAndAggregatorBench(t, stepSize)
@@ -67,7 +93,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(rwTx, log.New())
+	domains, err := sd.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -150,7 +176,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(rwTx, log.New())
+	domains, err := sd.NewSharedDomains(rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
