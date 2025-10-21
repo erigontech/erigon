@@ -215,6 +215,11 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.TemporalRwTx, he
 			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
+	currentFinish := rawdb.ReadCurrentBlockNumber(tx)
+	var finishProgressBefore uint64
+	if currentFinish != nil {
+		finishProgressBefore = *currentFinish
+	}
 	if err := e.hook.BeforeRun(tx, true); err != nil {
 		return err
 	}
@@ -224,6 +229,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.TemporalRwTx, he
 	if err := e.executionPipeline.RunUnwind(nil, nil, tx); err != nil {
 		return err
 	}
+	e.hook.NotifyUnwind(finishProgressBefore, currentHeader.Number.Uint64())
 	return nil
 }
 

@@ -442,6 +442,14 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	}
 	return h.afterRun(tx, finishProgressBefore)
 }
+
+func (h *Hook) NotifyUnwind(finishProgressBefore, finishProgressAfter uint64) {
+	if h == nil {
+		return
+	}
+	h.maybeAnnounceBlockRange(finishProgressBefore, finishProgressAfter)
+}
+
 func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	// Update sentry status for peers to see our sync status
 	if h.updateHead != nil {
