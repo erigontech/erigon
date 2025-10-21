@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
@@ -322,6 +323,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		if config.Http.DBReadConcurrency > 0 {
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
+
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
@@ -343,6 +345,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
+			opts = opts.Flags(func(u uint) uint { return mdbx1.SafeNoSync | mdbx1.WriteMap })
 		case dbcfg.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
