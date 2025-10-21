@@ -172,6 +172,7 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	return opts
 }
 
+// Deprecated
 func PathDbMap() map[string]kv.RoDB {
 	return nil
 }
