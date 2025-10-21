@@ -286,11 +286,8 @@ func ExecV3(ctx context.Context,
 			pe.LogComplete(stepsInDb)
 		}()
 
-		flushEvery := time.NewTicker(2 * time.Second)
-		defer flushEvery.Stop()
-
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery, flushEvery)
+			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum
 		lastCommittedTxNum = pe.lastCommittedTxNum

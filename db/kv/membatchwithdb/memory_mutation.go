@@ -870,3 +870,5 @@ func (td temporaldb) OnFilesChange(onChange kv.OnFilesChange, onDelete kv.OnFile
 func (td temporaldb) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	return f(td.memoryMutation)
 }
+
+func (td temporaldb) Path() string { return "<mem>" }

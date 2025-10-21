@@ -94,7 +94,7 @@ type parallelExecutor struct {
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
-	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker, flushEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
 	var asyncTx kv.TemporalTx
@@ -347,6 +347,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							uncommittedGas = 0
 							uncommittedGas = 0
 						}
+
+						if flushPending {
+							return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+						}
 					}
 
 					blockUpdateCount = 0
@@ -372,6 +376,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						pe.domains().SetChangesetAccumulator(changeSet)
 					}
 				}
+
 			case <-executorContext.Done():
 				err = pe.wait(ctx)
 				return fmt.Errorf("executor context failed: %w", err)
@@ -385,18 +390,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
 				}
-			case <-flushEvery.C:
-				if flushPending {
-					if !initialCycle {
-						return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
-					}
-
-					if rwTx, err = pe.flushAndCommit(ctx, execStage, rwTx, asyncTxChan, useExternalTx); err != nil {
-						return fmt.Errorf("flush failed: %w", err)
-					}
-
-					flushPending = false
-				}
 			}
 		}
 	}()
@@ -409,12 +402,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		}
 	}
 
-	var err error
-	if rwTx, err = pe.flushAndCommit(ctx, execStage, rwTx, asyncTxChan, useExternalTx); err != nil {
-		return nil, rwTx, fmt.Errorf("flush failed: %w", err)
+	if err := pe.wait(ctx); err != nil {
+		return nil, rwTx, execErr
 	}
 
-	return lastHeader, rwTx, pe.wait(ctx)
+	return lastHeader, rwTx, execErr
 }
 
 func (pe *parallelExecutor) LogExecuted() {
