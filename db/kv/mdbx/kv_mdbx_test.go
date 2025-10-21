@@ -54,7 +54,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
 	}
 	cfg := New(dbcfg.ChainDB, log.New()).
-		PageSize(4 * datasize.KB).
+		PageSize(16 * datasize.KB).
 		MapSize(8 * datasize.GB).
 		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint {
