@@ -135,7 +135,9 @@ type Decompressor struct {
 	metadata        []byte
 
 	serializedDictSize uint64
+	lenDictSize        uint64 // huffman encoded lengths
 	dictWords          int
+	dictLens           int
 
 	filePath, fileName string
 
@@ -305,6 +307,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	pos += dictSize // offset patterns
 	// read positions
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
+	d.lenDictSize = dictSize
 	pos += 8
 
 	if pos+dictSize > uint64(d.size) {
@@ -335,6 +338,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		dictPos += uint64(n)
 		poss = append(poss, dp)
 	}
+	d.dictLens = len(poss)
 
 	if dictSize > 0 {
 		var bitLen int
@@ -462,7 +466,9 @@ func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
 func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
+func (d *Decompressor) SerializedLenSize() uint64  { return d.lenDictSize }
 func (d *Decompressor) DictWords() int             { return d.dictWords }
+func (d *Decompressor) DictLens() int              { return d.dictLens }
 
 func (d *Decompressor) Size() int64 {
 	return d.size
@@ -699,6 +705,10 @@ func (d *Decompressor) MakeGetter() *Getter {
 		patternDict: d.dict,
 		fName:       d.FileName(),
 	}
+}
+
+func (g *Getter) DataLen() int {
+	return len(g.data)
 }
 
 func (g *Getter) Reset(offset uint64) {
