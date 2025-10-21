@@ -255,6 +255,14 @@ func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uin
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
+func (sd *TemporalMemBatch) PutForkable(id ForkableId, num kv.Num, v []byte) error {
+	f, ok := sd.forkableWriters[id]
+	if !ok {
+		return fmt.Errorf("forkable not found: %s", Registry.Name(id))
+	}
+	return f.Put(num, v)
+}
+
 func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
 		d.Close()

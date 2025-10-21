@@ -431,24 +431,6 @@ func (w *DomainBufferedWriter) Close() {
 	}
 }
 
-// nolint
-func loadSkipFunc() etl.LoadFunc {
-	var preKey, preVal []byte
-	return func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if bytes.Equal(k, preKey) {
-			preVal = v
-			return nil
-		}
-		if err := next(nil, preKey, preVal); err != nil {
-			return err
-		}
-		if err := next(k, k, v); err != nil {
-			return err
-		}
-		preKey, preVal = k, v
-		return nil
-	}
-}
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
@@ -700,9 +682,6 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		compress = d.Compression
 	}
 	comp := seg.NewWriter(coll.valuesComp, compress)
-
-	stepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(stepBytes, ^uint64(stepTo))
 
 	kvs := make([]struct {
 		k, v []byte

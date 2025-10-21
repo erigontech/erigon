@@ -140,13 +140,29 @@ type SharedDomains struct {
 	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
-	mem               *TemporalMemBatch
+	mem               inMem
 	metrics           DomainMetrics
 }
 
 type HasAgg interface {
 	Agg() any
 	ForkableAgg(ForkableId) any
+}
+
+type inMem interface {
+	DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error
+	DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte, prevStep kv.Step) error
+	GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool)
+	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
+	SetChangesetAccumulator(acc *changeset.StateChangeSet)
+	GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error)
+	ClearRam()
+	IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error)
+	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error
+	SizeEstimate() uint64
+	Flush(ctx context.Context, tx kv.RwTx) error
+	Close()
+	PutForkable(id ForkableId, num kv.Num, v []byte) error
 }
 
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -223,12 +239,7 @@ func (sd *SharedDomains) AsUnmarkedPutter(id ForkableId) kv.UnmarkedPutter {
 }
 
 func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
-	f, ok := up.sd.mem.forkableWriters[up.forkableId]
-	if !ok {
-		panic(fmt.Sprintf("forkable not found: %s", Registry.Name(up.forkableId)))
-	}
-
-	return f.Put(num, v)
+	return up.sd.mem.PutForkable(up.forkableId, num, v)
 }
 
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
