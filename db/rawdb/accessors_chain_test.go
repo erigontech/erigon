@@ -236,7 +236,7 @@ func TestWriteTransactions_UniqueKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	usedKeys := make(map[string]bool)
-	var keysList [][]byte
+	keysList := make([][]byte, 0, 5)
 
 	for i := 0; i < 5; i++ {
 		expectedTxnID := baseTxnID.At(i)
@@ -278,7 +278,7 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	usedKeys := make(map[string]bool)
-	var keysList [][]byte
+	keysList := make([][]byte, 0, len(rawTxs))
 
 	for i, expectedData := range rawTxs {
 		expectedTxnID := baseTxnID.At(i)
