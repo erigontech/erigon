@@ -62,7 +62,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		SyncBytes(20 * datasize.MB).
 		SyncPeriod(2 * time.Second).
 		DirtySpace(uint64(32 * datasize.MB)).
-		PageSize(16 * datasize.KB)
+		PageSize(4 * datasize.KB)
 
 	doBench := func(b *testing.B, db kv.RwDB) {
 		//b.ReportAllocs()
