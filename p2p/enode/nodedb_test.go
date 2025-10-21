@@ -39,16 +39,16 @@ import (
 	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 )
 
-// BenchmarkSyncPeriodDefault for `dbSyncBytesThreshold` constant
+// BenchmarkNodeDBGeometry for `dbSyncBytesThreshold` constant
 //   - must use `-cpu=` because even 1-core overloading disk write IO. Multi-core bench is unreliable here (degradating with time).
 //   - same about `-benchtime=30s` and -benchtime can't be smaller than SyncPeriod
 //   - target is: to improve throughput without big ms_worst
 //   - params to choose: pageSize, syncPeriod, syncBytes
 //
-// go test -bench=BenchmarkSyncPeriodDefault/20kb      -run=BenchmarkSyncPeriodDefault -cpu=1 -count=1 -benchtime=10s ./p2p/enode > old.txt
-// go test -bench=BenchmarkSyncPeriodDefault/10mb_1sec -run=BenchmarkSyncPeriodDefault -cpu=1 -count=1 -benchtime=10s ./p2p/enode > new.txt
+// go test -bench=BenchmarkNodeDBGeometry/20kb      -run=BenchmarkNodeDBGeometry -cpu=1 -count=1 -benchtime=10s ./p2p/enode > old.txt
+// go test -bench=BenchmarkNodeDBGeometry/10mb_1sec -run=BenchmarkNodeDBGeometry -cpu=1 -count=1 -benchtime=10s ./p2p/enode > new.txt
 // benchstat old.txt new.txt
-func BenchmarkDBGeometry(b *testing.B) {
+func BenchmarkNodeDBGeometry(b *testing.B) {
 	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
 	for i := range keys {
 		keys[i] = []byte(fmt.Sprintf("key %d", i))

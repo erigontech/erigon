@@ -66,8 +66,8 @@ const (
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
 	dbVersion        = 10
 
-	dbSyncBytesThreshold = 5 * datasize.MB // see BenchmarkSyncPeriodDefault
-	dbSyncPeriod         = 2 * time.Second
+	dbSyncBytesThreshold = 5 * datasize.MB // see BenchmarkNodeDBGeometry
+	dbSyncPeriod         = 2 * time.Second // see BenchmarkNodeDBGeometry
 )
 
 var (
@@ -123,7 +123,7 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
-	// see `BenchmarkSyncPeriodDefault`
+	// see `BenchmarkNodeDBGeometry`
 	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		Path(path).
 		WithTableCfg(bucketsConfig).
