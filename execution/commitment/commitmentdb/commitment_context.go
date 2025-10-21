@@ -129,7 +129,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if ok {
 		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, logPrefix)
