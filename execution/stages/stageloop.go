@@ -469,7 +469,7 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if (h.notifications.Accumulator != nil) && (currentHeader != nil) {
-		if currentHeader.Number.Uint64() == 0 {
+		if currentHeader.Number.Sign() == 0 {
 			h.notifications.Accumulator.StartChange(currentHeader, nil, false)
 		}
 
