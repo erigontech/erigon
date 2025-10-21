@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/common/jwt"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -108,6 +109,8 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 		Miner: buildercfg.MiningConfig{
 			EnabledPOS: true,
 		},
+		ErigonDBStepSize:          config3.DefaultStepSize,
+		ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
 	}
 
 	ethNode, err := node.New(ctx, &nodeConfig, logger)
