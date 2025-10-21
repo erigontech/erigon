@@ -116,9 +116,14 @@ jobs:
           echo "::notice::Tip-tracking test completed successfully"
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
         else
-          echo "Error detected during tests"
-          echo "::error::Tip-tracking test encountered an error"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          if reason=$(python3 print_reason.py ${{ github.workspace }}/result-$CHAIN.json); then
+            echo "Error detected during tests: $reason"
+            echo "::error::Tip-tracking test encountered an error: $reason"
+          else
+            echo "Error detected during tests"
+            echo "::error::Tip-tracking test encountered an error"
+          fi
         fi
 
     - name: Upload Downloader Torrent Client Status
@@ -187,8 +192,7 @@ jobs:
     - name: Action for Not Success
       if: ${{ always() }}
       run: |
-        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]] || \
-           [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
           echo "::error::Error detected during tests, please see the summary section for details"
           exit 1
         fi 
