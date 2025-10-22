@@ -12,8 +12,8 @@ import (
 )
 
 func Test_LegacyTx_Timeboosted(t *testing.T) {
-	timeboostedVals := []bool{true, false}
-	for i := 0; i < 2; i++ {
+	timeboostedVals := []*bool{boolPtr(true), boolPtr(false), nil}
+	for i := 0; i < 3; i++ {
 		two := uint256.NewInt(2)
 		ltx := NewTransaction(4, common.HexToAddress("0x2"), two, 21000, two, []byte("data"))
 		ltx.Timeboosted = timeboostedVals[i]
@@ -34,13 +34,17 @@ func Test_LegacyTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, ltx.Data, ltx2.Data)
 		require.EqualValues(t, ltx.To, ltx2.To)
 
-		require.EqualValues(t, timeboostedVals[i], ltx2.IsTimeBoosted())
+		if timeboostedVals[i] == nil {
+			require.Nil(t, ltx2.Timeboosted)
+		} else {
+			require.EqualValues(t, timeboostedVals[i], ltx2.IsTimeBoosted())
+		}
 	}
 }
 
 func Test_DynamicFeeTx_Timeboosted(t *testing.T) {
-	timeboostedVals := []bool{true, false}
-	for i := 0; i < 2; i++ {
+	timeboostedVals := []*bool{boolPtr(true), boolPtr(false), nil}
+	for i := 0; i < 3; i++ {
 		two := uint256.NewInt(2)
 		three := uint256.NewInt(3)
 		chainID := uint256.NewInt(1)
@@ -84,13 +88,18 @@ func Test_DynamicFeeTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.To, tx2.To)
 		require.EqualValues(t, tx.ChainID.Bytes(), tx2.ChainID.Bytes())
 		require.EqualValues(t, len(tx.AccessList), len(tx2.AccessList))
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+
+		if timeboostedVals[i] == nil {
+			require.Nil(t, tx2.Timeboosted)
+		} else {
+			require.EqualValues(t, timeboostedVals[i], tx2.IsTimeBoosted())
+		}
 	}
 }
 
 func Test_AccessListTx_Timeboosted(t *testing.T) {
-	timeboostedVals := []bool{true, false}
-	for i := 0; i < 2; i++ {
+	timeboostedVals := []*bool{boolPtr(true), boolPtr(false), nil}
+	for i := 0; i < 3; i++ {
 		two := uint256.NewInt(2)
 		chainID := uint256.NewInt(1)
 		accessList := AccessList{
@@ -108,10 +117,10 @@ func Test_AccessListTx_Timeboosted(t *testing.T) {
 				},
 				GasPrice: two,
 			},
-			ChainID:     chainID,
-			AccessList:  accessList,
-			Timeboosted: timeboostedVals[i],
+			ChainID:    chainID,
+			AccessList: accessList,
 		}
+		tx.Timeboosted = timeboostedVals[i]
 
 		buf := bytes.NewBuffer(nil)
 		err := tx.EncodeRLP(buf)
@@ -133,13 +142,22 @@ func Test_AccessListTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.To, tx2.To)
 		require.EqualValues(t, tx.ChainID.Bytes(), tx2.ChainID.Bytes())
 		require.EqualValues(t, len(tx.AccessList), len(tx2.AccessList))
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+
+		if timeboostedVals[i] == nil {
+			require.Nil(t, tx2.Timeboosted)
+		} else {
+			require.EqualValues(t, timeboostedVals[i], tx2.IsTimeBoosted())
+		}
+
+		buf.Reset()
+		err = tx.MarshalBinaryForHashing(buf)
+		require.NoError(t, err)
 	}
 }
 
 func Test_BlobTx_Timeboosted(t *testing.T) {
-	timeboostedVals := []bool{true, false}
-	for i := 0; i < 2; i++ {
+	timeboostedVals := []*bool{boolPtr(true), boolPtr(false), nil}
+	for i := 0; i < 3; i++ {
 		two := uint256.NewInt(2)
 		three := uint256.NewInt(3)
 		chainID := uint256.NewInt(1)
@@ -158,15 +176,15 @@ func Test_BlobTx_Timeboosted(t *testing.T) {
 					GasLimit: 21000,
 					Data:     []byte("data"),
 				},
-				ChainID:     chainID,
-				TipCap:      two,
-				FeeCap:      three,
-				AccessList:  accessList,
-				Timeboosted: timeboostedVals[i],
+				ChainID:    chainID,
+				TipCap:     two,
+				FeeCap:     three,
+				AccessList: accessList,
 			},
 			MaxFeePerBlobGas:    maxFeePerBlobGas,
 			BlobVersionedHashes: blobHashes,
 		}
+		tx.DynamicFeeTransaction.Timeboosted = timeboostedVals[i]
 
 		buf := bytes.NewBuffer(nil)
 		err := tx.EncodeRLP(buf)
@@ -191,13 +209,17 @@ func Test_BlobTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.MaxFeePerBlobGas.Bytes(), tx2.MaxFeePerBlobGas.Bytes())
 		require.EqualValues(t, len(tx.AccessList), len(tx2.AccessList))
 		require.EqualValues(t, len(tx.BlobVersionedHashes), len(tx2.BlobVersionedHashes))
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+		if timeboostedVals[i] == nil {
+			require.Nil(t, tx2.Timeboosted)
+		} else {
+			require.EqualValues(t, timeboostedVals[i], tx2.IsTimeBoosted())
+		}
 	}
 }
 
 func Test_SetCodeTx_Timeboosted(t *testing.T) {
-	timeboostedVals := []bool{true, false}
-	for i := 0; i < 2; i++ {
+	timeboostedVals := []*bool{boolPtr(true), boolPtr(false), nil}
+	for i := 0; i < 3; i++ {
 		two := uint256.NewInt(2)
 		three := uint256.NewInt(3)
 		chainID := uint256.NewInt(1)
@@ -251,13 +273,18 @@ func Test_SetCodeTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.ChainID.Bytes(), tx2.ChainID.Bytes())
 		require.EqualValues(t, len(tx.AccessList), len(tx2.AccessList))
 		require.EqualValues(t, len(tx.Authorizations), len(tx2.Authorizations))
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+
+		if timeboostedVals[i] == nil {
+			require.Nil(t, tx2.Timeboosted)
+		} else {
+			require.EqualValues(t, timeboostedVals[i], tx2.IsTimeBoosted())
+		}
 	}
 }
 
 func Test_ArbRetryTx_Timeboosted(t *testing.T) {
-	timeboostedVals := []bool{true, false}
-	for i := 0; i < 2; i++ {
+	timeboostedVals := []*bool{boolPtr(true), boolPtr(false), nil}
+	for i := 0; i < 3; i++ {
 		two := big.NewInt(2)
 		chainID := big.NewInt(1)
 		ticketId := common.HexToHash("0x123")
@@ -276,8 +303,8 @@ func Test_ArbRetryTx_Timeboosted(t *testing.T) {
 			RefundTo:            common.HexToAddress("0x3"),
 			MaxRefund:           two,
 			SubmissionFeeRefund: two,
-			Timeboosted:         timeboostedVals[i],
 		}
+		tx.Timeboosted = timeboostedVals[i]
 
 		buf := bytes.NewBuffer(nil)
 		err := tx.EncodeRLP(buf)
@@ -304,7 +331,10 @@ func Test_ArbRetryTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.RefundTo, tx2.RefundTo)
 		require.EqualValues(t, tx.MaxRefund, tx2.MaxRefund)
 		require.EqualValues(t, tx.SubmissionFeeRefund, tx2.SubmissionFeeRefund)
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
-
+		if timeboostedVals[i] == nil {
+			require.Nil(t, tx2.Timeboosted)
+		} else {
+			require.EqualValues(t, timeboostedVals[i], tx2.IsTimeBoosted())
+		}
 	}
 }

@@ -751,9 +751,7 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 
 	// combine results
 	for i := range txs {
-		if receipts[i].timeboosted {
-			txs[i].SetTimeboosted(true)
-		}
+		txs[i].SetTimeboosted(&receipts[i].timeboosted)
 
 		if receipts[i].effectiveGasUsed != nil {
 			if srtx, ok := txs[i].(*types.ArbitrumSubmitRetryableTx); ok {
