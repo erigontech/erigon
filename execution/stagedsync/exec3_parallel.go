@@ -111,7 +111,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	applyResults := make(chan applyResult, 100_000)
 
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
-		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "parallel"),
+		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
 			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
 			"inMem", pe.inMemExec)
@@ -246,6 +246,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
 							commitProgress := make(chan *commitment.CommitProgress, 100)
+							stepsInDb := rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
 
 							go func() {
 								logEvery := time.NewTicker(20 * time.Second)
@@ -271,7 +272,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 											pe.LogCommitted(commitStart,
 												commitedBlocks-prevCommitedBlocks,
 												committedTransactions-prevCommittedTransactions,
-												committedGas-prevCommitedGas, rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize()), commitProgress)
+												committedGas-prevCommitedGas, stepsInDb, commitProgress)
 										}
 
 										lastCommitedLog = time.Now()
