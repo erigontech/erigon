@@ -282,10 +282,22 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer tx.Rollback()
 
+	err = e.unwindToCommonCanonical(tx, header)
+	if err != nil {
+		return nil, err
+	}
+
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
+	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
+	tx.Rollback()
+	tx, err = e.db.BeginTemporalRwNosync(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
 	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
 	validationStatus := executionproto.ExecutionStatus_Success
