@@ -95,9 +95,9 @@ func NewGossipReceiver(
 	RegisterGossipService(gm, voluntaryExitService)
 	RegisterGossipService(gm, blsToExecutionChangeService)
 	RegisterGossipService(gm, proposerSlashingService)
-	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250), withTokenBucketRateLimiterByPeer(8, 16))
+	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250))
 	RegisterGossipService(gm, blobService, withBeginVersion(clparams.DenebVersion), withEndVersion(clparams.FuluVersion))
-	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withTokenBucketRateLimiterByPeer(16, 32))
+	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withTokenBucketRateLimiterByPeer(32, 64))
 
 	gm.stats.goPrintStats()
 	return gm
