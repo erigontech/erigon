@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -144,7 +145,12 @@ func TestGenesisBlock() *types.Genesis {
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis {
 	// Override the default period to the user requested one
 	var config chain.Config
-	copier.Copy(&config, AllCliqueProtocolChanges)
+	err := copier.CopyWithOption(&config, AllCliqueProtocolChanges, copier.Option{DeepCopy: true})
+	if err != nil {
+		panic(fmt.Errorf("DeveloperGenesisBlock: copier.Copy: %w", err))
+	}
+	config.ChainName = networkname.Dev
+	config.Clique.Epoch = 30000
 	config.Clique.Period = period
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded

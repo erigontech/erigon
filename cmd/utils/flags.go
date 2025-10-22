@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -1974,7 +1975,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			}
 
 		}
-	} else {
+	} else if chain != networkname.Dev {
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
 			Fatalf("chain name is not recognized: %s", chain)
@@ -2073,6 +2074,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if !ctx.IsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
+		cfg.NetworkID = cfg.Genesis.Config.ChainID.Uint64()
+		genesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+		if err != nil {
+			Fatalf("Failed to create genesis block for dev chain: %v", err)
+		}
+		chainspec.RegisterChainSpec(networkname.Dev, chainspec.Spec{
+			Name:             networkname.Dev,
+			Genesis:          cfg.Genesis,
+			GenesisHash:      genesisBlock.Hash(),
+			GenesisStateRoot: genesisBlock.Root(),
+			Config:           cfg.Genesis.Config,
+		})
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
