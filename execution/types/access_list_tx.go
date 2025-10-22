@@ -78,7 +78,9 @@ func (tx *AccessListTx) copy() *AccessListTx {
 		AccessList: make(AccessList, len(tx.AccessList)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
-	cpy.Timeboosted = tx.Timeboosted
+	if tx.Timeboosted != nil {
+		cpy.Timeboosted = &(*tx.Timeboosted)
+	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -153,7 +155,7 @@ func (tx *AccessListTx) payloadSize(hashingOnly bool) (payloadSize, nonceLen, ga
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 
-	if tx.Timeboosted != nil && !hashingOnly {
+	if !hashingOnly && tx.Timeboosted != nil {
 		payloadSize++
 		payloadSize += rlp.BoolLen()
 	}
@@ -229,7 +231,7 @@ func (tx *AccessListTx) MarshalBinaryForHashing(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, false); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, true); err != nil {
 		return err
 	}
 	return nil
