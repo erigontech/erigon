@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -202,7 +203,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return canonical, nil
 }
 
-func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.TemporalRwTx, header *types.Header) error {
+func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *state.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
@@ -221,7 +222,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.TemporalRwTx, he
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.RunUnwind(nil, nil, tx); err != nil {
+	if err := e.executionPipeline.RunUnwind(nil, sd, tx); err != nil {
 		return err
 	}
 	return nil
@@ -280,9 +281,11 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if err != nil {
 		return nil, err
 	}
+	doms, err := state.NewSharedDomains(tx, e.logger)
+	defer doms.Close()
 	defer tx.Rollback()
 
-	err = e.unwindToCommonCanonical(tx, header)
+	err = e.unwindToCommonCanonical(doms, tx, header)
 	if err != nil {
 		return nil, err
 	}
