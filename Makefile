@@ -5,6 +5,7 @@ GOBIN := $(CURDIR)/$(GOBINREL)
 GOARCH ?= $(shell go env GOHOSTARCH)
 UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
+DOCKER_BINARIES ?= "erigon"
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
@@ -54,7 +55,7 @@ endif
 
 BUILD_TAGS =
 
-ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
+ifneq ($(shell "$(CURDIR)/node/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
@@ -121,6 +122,7 @@ docker:
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
+		--build-arg BINARIES="${DOCKER_BINARIES}" \
 		${DOCKER_FLAGS} \
 		.
 
@@ -485,7 +487,7 @@ DIST ?= $(CURDIR)/build/dist
 .PHONY: install
 install:
 	mkdir -p "$(DIST)"
-	cp -f "$$($(CURDIR)/turbo/silkworm/silkworm_lib_path.sh)" "$(DIST)"
+	cp -f "$$($(CURDIR)/node/silkworm/silkworm_lib_path.sh)" "$(DIST)"
 	cp -f "$(GOBIN)/"* "$(DIST)"
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"

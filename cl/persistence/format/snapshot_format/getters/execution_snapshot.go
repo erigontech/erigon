@@ -27,8 +27,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type ExecutionSnapshotReader struct {

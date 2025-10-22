@@ -60,9 +60,9 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, Version: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
-	ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
+	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(ii.Close)
 	ii.salt.Store(&salt)
@@ -522,7 +522,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			var found bool
 			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
-			maxSpan := ii.stepSize * config3.StepsInFrozenFile
+			maxSpan := ii.stepSize * config3.DefaultStepsInFrozenFile
 
 			for {
 				if stop := func() bool {
@@ -611,7 +611,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	cfg := ii.InvIdxCfg
 
 	var err error
-	ii, err = NewInvertedIndex(cfg, 16, ii.dirs, logger)
+	ii, err = NewInvertedIndex(cfg, 16, config3.DefaultStepsInFrozenFile, ii.dirs, logger)
 	require.NoError(err)
 	defer ii.Close()
 	ii.salt.Store(&salt)
@@ -623,74 +623,6 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 	mergeInverted(t, db, ii, txs)
 	checkRanges(t, db, ii, txs)
-}
-
-func TestChangedKeysIterator(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-
-	logger := log.New()
-	db, ii, txs := filledInvIndex(t, logger)
-	ctx := context.Background()
-	mergeInverted(t, db, ii, txs)
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer func() {
-		roTx.Rollback()
-	}()
-	ic := ii.BeginFilesRo()
-	defer ic.Close()
-	it := ic.IterateChangedKeys(0, 20, roTx)
-	defer func() {
-		it.Close()
-	}()
-	var keys []string
-	for it.HasNext() {
-		k := it.Next(nil)
-		keys = append(keys, fmt.Sprintf("%x", k))
-	}
-	it.Close()
-	require.Equal(t, []string{
-		"0000000000000001",
-		"0000000000000002",
-		"0000000000000003",
-		"0000000000000004",
-		"0000000000000005",
-		"0000000000000006",
-		"0000000000000007",
-		"0000000000000008",
-		"0000000000000009",
-		"000000000000000a",
-		"000000000000000b",
-		"000000000000000c",
-		"000000000000000d",
-		"000000000000000e",
-		"000000000000000f",
-		"0000000000000010",
-		"0000000000000011",
-		"0000000000000012",
-		"0000000000000013"}, keys)
-	it = ic.IterateChangedKeys(995, 1000, roTx)
-	keys = keys[:0]
-	for it.HasNext() {
-		k := it.Next(nil)
-		keys = append(keys, fmt.Sprintf("%x", k))
-	}
-	it.Close()
-	require.Equal(t, []string{
-		"0000000000000001",
-		"0000000000000002",
-		"0000000000000003",
-		"0000000000000004",
-		"0000000000000005",
-		"0000000000000006",
-		"0000000000000009",
-		"000000000000000c",
-		"000000000000001b",
-	}, keys)
 }
 
 func TestScanStaticFiles(t *testing.T) {

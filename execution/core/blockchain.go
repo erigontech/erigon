@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/diagnostics/metrics"
-	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -286,6 +286,7 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 		nil, nil,
 		data, nil,
 		false, // checkNonce
+		false, // checkTransaction
 		false, // checkGas
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
@@ -330,6 +331,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 		data, nil,
 		false, // checkNonce
 		false, // checkGas
+		false, // checkTransaction
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)

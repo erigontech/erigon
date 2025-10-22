@@ -39,12 +39,14 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -52,17 +54,11 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/features"
-	"github.com/erigontech/erigon/eth/ethconsensusconfig"
-	"github.com/erigontech/erigon/eth/integrity"
-	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
@@ -71,12 +67,20 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	stages2 "github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/eth"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig/features"
+	"github.com/erigontech/erigon/node/ethconsensusconfig"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
@@ -85,11 +89,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
-	"github.com/erigontech/erigon/turbo/app"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/shards"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -99,7 +98,7 @@ var cmdStageSnapshots = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -120,7 +119,7 @@ var cmdStageHeaders = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -141,7 +140,7 @@ var cmdStageBodies = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -162,7 +161,7 @@ var cmdStageSenders = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -183,7 +182,7 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -206,7 +205,7 @@ var cmdStageCustomTrace = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -229,7 +228,7 @@ var cmdPrintCommitment = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -250,7 +249,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -271,7 +270,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -293,7 +292,7 @@ var cmdPrintStages = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -329,7 +328,7 @@ var cmdPrintTableSizes = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -380,7 +379,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -400,7 +399,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -424,7 +423,7 @@ var cmdRunMigrations = &cobra.Command{
 			logger.Info("Opening DB", "label", label, "path", path)
 			// Non-accede and exclusive mode - to apply creation of new tables if needed.
 			cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
-			db, err := openDB(cfg, true, logger)
+			db, err := openDB(cfg, true, chain, logger)
 			if err != nil {
 				logger.Error("Opening DB", "error", err)
 				return
@@ -463,8 +462,6 @@ var cmdRunMigrations = &cobra.Command{
 func init() {
 	withConfig(cmdPrintStages)
 	withDataDir(cmdPrintStages)
-	withChain(cmdPrintStages)
-	withHeimdall(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
 	rootCmd.AddCommand(cmdAlloc)
@@ -606,7 +603,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	dirs := datadir.New(datadirCli)
-	if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
 	domains, err := dbstate.NewSharedDomains(tx, logger)
@@ -659,7 +656,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+			if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
@@ -763,7 +760,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	br, _ := blocksIO(db, logger)
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, tx) })
+		return db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetSenders(ctx, tx) })
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -846,7 +843,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	_, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
-		if err := reset2.ResetExec(ctx, db); err != nil {
+		if err := rawdbreset.ResetExec(ctx, db); err != nil {
 			return err
 		}
 		return nil
@@ -894,20 +891,19 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 	}
 
-	var tx kv.RwTx //nil - means lower-level code (each stage) will manage transactions
+	var tx kv.TemporalRwTx //nil - means lower-level code (each stage) will manage transactions
 	if noCommit {
 		var err error
-		tx, err = db.BeginRw(ctx)
+		tx, err = db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
-	txc := wrap.NewTxContainer(tx, nil)
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		err := stagedsync.UnwindExecutionStage(u, s, txc, ctx, cfg, logger)
+		err := stagedsync.UnwindExecutionStage(u, s, nil, tx, ctx, cfg, logger)
 		if err != nil {
 			return err
 		}
@@ -961,16 +957,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 			defer tx.Rollback()
 			for bn := execProgress; bn < block; bn++ {
-				txc = wrap.NewTxContainer(tx, txc.Doms)
-				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger); err != nil {
 					return err
 				}
 			}
 		} else {
-			if err := db.Update(ctx, func(tx kv.RwTx) error {
+			if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 				for bn := execProgress; bn < block; bn++ {
-					txc = wrap.NewTxContainer(tx, txc.Doms)
-					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger); err != nil {
 						return err
 					}
 				}
@@ -983,7 +977,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	for {
-		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
+		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, block, ctx, cfg, logger); err != nil {
 			var errExhausted *stagedsync.ErrLoopExhausted
 			if errors.As(err, &errExhausted) {
 				continue // has more blocks to exec
@@ -1012,7 +1006,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		if err := stagedsync.StageCustomTraceReset(ctx, db, cfg.Produce); err != nil {
 			return err
 		}
-		//if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
+		//if err := rawdbreset.Reset(ctx, db, stages.CustomTrace); err != nil {
 		//	return err
 		//}
 		return nil
@@ -1029,6 +1023,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	defer br.(*freezeblocks.BlockRetire).MadvNormal().DisableReadAhead()
 	//defer agg.MadvNormal().DisableReadAhead()
+
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
@@ -1090,7 +1085,7 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if reset {
-		return reset2.Reset(ctx, db, stages.Execution)
+		return rawdbreset.Reset(ctx, db, stages.Execution)
 	}
 
 	br, _ := blocksIO(db, logger)
@@ -1143,7 +1138,7 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
 	if reset {
-		return db.Update(ctx, reset2.ResetTxLookup)
+		return db.Update(ctx, rawdbreset.ResetTxLookup)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -1242,7 +1237,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
 		txNums := blockReader.TxnumReader(ctx)
 
-		_aggSingleton = dbstate.New(dirs).Logger(logger).MustOpen(ctx, db)
+		logger.Info("Using step size", "size", integStepSize)
+		_aggSingleton = dbstate.New(dirs).Logger(logger).StepSize(integStepSize).MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 

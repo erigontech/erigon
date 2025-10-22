@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -96,7 +96,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee())
 		txs = append(txs, rpcTx)
 
-		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum)
+		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum, nil)
 		if err != nil {
 			return nil, nil, false, err
 		}

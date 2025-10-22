@@ -217,23 +217,25 @@ parse_config() {
         log_error "Source datadir not found: $SOURCE_DATADIR"
         exit 1
     fi
+
+    [[ "$ERIGON_CMD1" != "null" ]] && [[ -n "$ERIGON_CMD1" ]] && ERIGON_CMD1_SET=true || ERIGON_CMD1_SET=false
+    [[ "$ERIGON_CMD2" != "null" ]] && [[ -n "$ERIGON_CMD2" ]] && ERIGON_CMD2_SET=true || ERIGON_CMD2_SET=false
     
-    if [[ "$ERIGON_CMD1" == "null" ]] || [[ -z "$ERIGON_CMD1" ]]; then
-        log_error "erigon_cmd1 is not specified in config"
-        exit 1
+    if [[ "$ERIGON_CMD1_SET" == true ]]; then
+        DATADIR1=$(extract_datadir "$ERIGON_CMD1" "erigon_cmd1")    
     fi
     
-    if [[ "$ERIGON_CMD2" == "null" ]] || [[ -z "$ERIGON_CMD2" ]]; then
-        log_error "erigon_cmd2 is not specified in config"
+    if [[ "$ERIGON_CMD2_SET" == true ]]; then
+        DATADIR2=$(extract_datadir "$ERIGON_CMD2" "erigon_cmd2")
+    fi
+
+    if [[ "$ERIGON_CMD1_SET" == false && "$ERIGON_CMD2_SET" == false ]]; then
+        log_error "At least one of erigon_cmd1 or erigon_cmd2 must be specified in config"
         exit 1
     fi
-    
-    # Extract datadirs from commands
-    DATADIR1=$(extract_datadir "$ERIGON_CMD1" "erigon_cmd1")
-    DATADIR2=$(extract_datadir "$ERIGON_CMD2" "erigon_cmd2")
-    
-    # Ensure datadirs are different
-    if [[ "$DATADIR1" == "$DATADIR2" ]]; then
+
+     # Ensure datadirs are different
+    if [[ "$ERIGON_CMD1_SET" == true && "$ERIGON_CMD2_SET" == true && "$DATADIR1" == "$DATADIR2" ]]; then
         log_error "Both commands use the same datadir: $DATADIR1"
         log_error "Commands must use different datadirs for benchmarking"
         exit 1
@@ -241,10 +243,15 @@ parse_config() {
 
     log_info "Configuration loaded:"
     log_info "  source_datadir: $SOURCE_DATADIR"
-    log_info "  erigon_cmd1: $ERIGON_CMD1"
-    log_info "  extracted datadir1: $DATADIR1"
-    log_info "  erigon_cmd2: $ERIGON_CMD2"
-    log_info "  extracted datadir2: $DATADIR2"
+    if [[ "$ERIGON_CMD1_SET" == true ]]; then
+        log_info "  erigon_cmd1: $ERIGON_CMD1"
+        log_info "  extracted datadir1: $DATADIR1"
+    fi
+
+    if [[ "$ERIGON_CMD2_SET" == true ]]; then
+        log_info "  erigon_cmd2: $ERIGON_CMD2"
+        log_info "  extracted datadir2: $DATADIR2"
+    fi
 }
 
 # Function to mirror datadir
@@ -338,22 +345,31 @@ main() {
     log_info "Beginning benchmark execution"
     log_info "========================================="
     
-    log_info "--- Run 1 ---"
-    mirror_datadir "$SOURCE_DATADIR" "$DATADIR1"
-    execute_benchmark "$ERIGON_CMD1" "$DATADIR1" 1
+    log_info ""
+    if [[ "$ERIGON_CMD1_SET" == true ]]; then
+        log_info "--- Run 1 ---"
+        mirror_datadir "$SOURCE_DATADIR" "$DATADIR1"
+        execute_benchmark "$ERIGON_CMD1" "$DATADIR1" 1
+    fi
     
     log_info ""
-    log_info "--- Run 2 ---"
-    mirror_datadir "$SOURCE_DATADIR" "$DATADIR2"
-    execute_benchmark "$ERIGON_CMD2" "$DATADIR2" 2
+    if [[ "$ERIGON_CMD2_SET" == true ]]; then
+        log_info "--- Run 2 ---"
+        mirror_datadir "$SOURCE_DATADIR" "$DATADIR2"
+        execute_benchmark "$ERIGON_CMD2" "$DATADIR2" 2
+    fi
     
     # Summary
     log_info "========================================="
     log_info "Benchmark execution completed successfully"
     log_info "========================================="
     log_info "Results:"
-    log_info "  Run 1: $DATADIR1 - Check benchmark_run1_*.log"
-    log_info "  Run 2: $DATADIR2 - Check benchmark_run2_*.log"
+    if [[ "$ERIGON_CMD1_SET" == true ]]; then
+        log_info "  Run 1: $DATADIR1 - Check benchmark_run1_*.log"
+    fi
+    if [[ "$ERIGON_CMD2_SET" == true ]]; then
+        log_info "  Run 2: $DATADIR2 - Check benchmark_run2_*.log"
+    fi
 }
 
 main "$@"

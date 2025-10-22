@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/core"
@@ -209,15 +208,14 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
-	txc := wrap.NewTxContainer(tx, nil)
-	domains, err := dbstate.NewSharedDomains(txc.Ttx, log.New())
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
 
-	r := rpchelper.NewLatestStateReader(txc.Ttx)
+	r := rpchelper.NewLatestStateReader(tx)
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb := state.New(r)
 
@@ -486,6 +484,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 		data,
 		accessList,
 		false, /* checkNonce */
+		false, /* checkTransaction */
 		true,  /* checkGas */
 		false, /* isFree */
 		uint256.MustFromBig(blobFeeCap),

@@ -34,8 +34,8 @@ import (
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 func expandHomeDir(dirpath string) string {
@@ -88,7 +88,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	migrationDBs := map[kv.Label]bool{
 		dbcfg.ChainDB:         true,
 		dbcfg.ConsensusDB:     true,
@@ -127,5 +127,6 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	if err != nil {
 		return nil, err
 	}
+
 	return temporal.New(rawDB, agg)
 }

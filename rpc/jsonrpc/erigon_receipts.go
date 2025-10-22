@@ -27,12 +27,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/eth/ethutils"
-	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -210,7 +210,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	if err != nil {
 		return nil, err
 	}
-	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
+	exec := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	defer exec.Close()
 
 	// The Logs should retrieve from latest to oldest order=Descend

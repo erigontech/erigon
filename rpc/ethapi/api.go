@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -169,7 +169,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 		nonce = args.Nonce.Uint64()
 	}
 
-	msg := types.NewMessage(addr, args.To, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
+	msg := types.NewMessage(addr, args.To, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
@@ -316,11 +316,12 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 // if statDiff is set, all diff will be applied first and then execute the call
 // message.
 type Account struct {
-	Nonce     *hexutil.Uint64              `json:"nonce"`
-	Code      *hexutil.Bytes               `json:"code"`
-	Balance   **hexutil.Big                `json:"balance"`
-	State     *map[common.Hash]common.Hash `json:"state"`
-	StateDiff *map[common.Hash]common.Hash `json:"stateDiff"`
+	Nonce            *hexutil.Uint64              `json:"nonce"`
+	Code             *hexutil.Bytes               `json:"code"`
+	Balance          **hexutil.Big                `json:"balance"`
+	State            *map[common.Hash]common.Hash `json:"state"`
+	StateDiff        *map[common.Hash]common.Hash `json:"stateDiff"`
+	MovePrecompileTo *common.Address              `json:"movePrecompileToAddress"`
 }
 
 func NewRevertError(result *evmtypes.ExecutionResult) *RevertError {

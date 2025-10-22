@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
@@ -31,10 +30,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 type StateV3 struct {

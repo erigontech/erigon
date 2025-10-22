@@ -61,12 +61,13 @@ const (
 	// Use localItemKey to create those keys.
 	dbLocalSeq = "seq"
 )
-
 const (
-	dbNodeExpiration     = 24 * time.Hour // Time after which an unseen node should be dropped.
-	dbCleanupCycle       = time.Hour      // Time period for running the expiration task.
-	dbVersion            = 10
-	dbSyncBytesThreshold = 20_000 // if we have about 20kb of dirty data , then flush to disk
+	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
+	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
+	dbVersion        = 10
+
+	dbSyncBytesThreshold = 5 * datasize.MB // see BenchmarkNodeDBGeometry
+	dbSyncPeriod         = 2 * time.Second // see BenchmarkNodeDBGeometry
 )
 
 var (
@@ -106,6 +107,7 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		InMem(nil, tmpDir).
 		WithTableCfg(bucketsConfig).
+		PageSize(4 * datasize.KB).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
 	if err != nil {
@@ -121,14 +123,16 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
+	// see `BenchmarkNodeDBGeometry`
 	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		Path(path).
 		WithTableCfg(bucketsConfig).
+		PageSize(4 * datasize.KB).
 		MapSize(8 * datasize.GB).
-		GrowthStep(16 * datasize.MB).
-		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
+		GrowthStep(2 * datasize.MB).
+		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync | mdbx1.WriteMap }).
 		SyncBytes(dbSyncBytesThreshold).
-		SyncPeriod(2 * time.Second).
+		SyncPeriod(dbSyncPeriod).
 		DirtySpace(uint64(32 * datasize.MB)).
 		// WithMetrics().
 		Open(ctx)
