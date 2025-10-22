@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -52,6 +53,8 @@ type GossipManager struct {
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
 
 	registeredServices []gossipService
+	stats              map[string]int64
+	statsMutex         sync.Mutex
 }
 
 func NewGossipReceiver(
@@ -82,10 +85,12 @@ func NewGossipReceiver(
 		ethClock:           ethClock,
 		committeeSub:       comitteeSub,
 		registeredServices: []gossipService{},
+		stats:              make(map[string]int64),
+		statsMutex:         sync.Mutex{},
 	}
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	// register services
-	RegisterGossipService(gm, blockService, withTokenBucketRateLimiterByPeer(1, 5))
+	RegisterGossipService(gm, blockService)
 	RegisterGossipService(gm, syncCommitteeMessagesService)
 	RegisterGossipService(gm, syncContributionService)
 	RegisterGossipService(gm, attesterSlashingService)
@@ -95,7 +100,19 @@ func NewGossipReceiver(
 	RegisterGossipService(gm, proposerSlashingService)
 	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250))
 	RegisterGossipService(gm, blobService, withBeginVersion(clparams.DenebVersion), withEndVersion(clparams.FuluVersion))
-	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withTokenBucketRateLimiterByPeer(128, 128))
+	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion))
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		times := 0
+		for range ticker.C {
+			gm.statsMutex.Lock()
+			for name, count := range gm.stats {
+				log.Info("Gossip Message Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*60))
+			}
+			gm.statsMutex.Unlock()
+			times++
+		}
+	}()
 	return gm
 }
 
@@ -137,6 +154,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
+			g.statsMutex.Lock()
+			g.stats[data.Name]++
+			g.statsMutex.Unlock()
 			return s.service.ProcessMessage(ctx, data.SubnetId, msg)
 		}
 	}
