@@ -31,11 +31,13 @@ const (
 	BorCheckpoints     Check = "BorCheckpoints"
 	Publishable        Check = "Publishable"
 	CommitmentKvi      Check = "CommitmentKvi"
+	CommitmentRoot     Check = "CommitmentRoot"
 )
 
 var AllChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents,
-	BorSpans, BorCheckpoints, RCacheNoDups, Publishable, CommitmentKvi,
+	BorSpans, BorCheckpoints, RCacheNoDups, Publishable,
+	CommitmentKvi, CommitmentRoot,
 }
 
 var NonDefaultChecks = []Check{}
