@@ -928,6 +928,17 @@ func TestDB_BatchTime(t *testing.T) {
 	}
 }
 
+func BenchmarkDB_BeginRO(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	db := _db.(*MdbxKV)
+
+	b.ResetTimer()
+	for i := 1; i <= b.N; i++ {
+		tx, _ := db.BeginRo(context.Background())
+		tx.Rollback()
+	}
+}
+
 func BenchmarkDB_Get(b *testing.B) {
 	_db := BaseCaseDBForBenchmark(b)
 	table := "Table"

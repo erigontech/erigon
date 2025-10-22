@@ -275,7 +275,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 
 			// commitment are indexed by txNum of the first tx (system-tx) of the block
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 			if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 				return nil, err
 			}
@@ -337,7 +337,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 
 			// calculate state root after tx identified by txNum (txNim+1)
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipt", nil)
 			if err != nil {
 				return nil, err
@@ -430,21 +430,26 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
-	sharedDomains, err := dbstate.NewSharedDomains(tx, log.Root())
-	if err != nil {
-		return nil, err
-	}
-	defer sharedDomains.Close()
+	var sharedDomains *dbstate.SharedDomains
+	defer func() {
+		if sharedDomains != nil {
+			sharedDomains.Close()
+		}
+	}()
 
 	var stateWriter state.StateWriter
 	var minTxNum uint64
 	if calculatePostState {
+		sharedDomains, err = dbstate.NewSharedDomains(tx, log.Root())
+		if err != nil {
+			return nil, err
+		}
 		minTxNum, err = g.txNumReader.Min(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
-		sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
+		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 		if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 			return nil, err
 		}
@@ -483,7 +488,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			// calculate state root after tx identified by txNum (txNim+1)
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipts", nil)
 			if err != nil {
 				return nil, err
