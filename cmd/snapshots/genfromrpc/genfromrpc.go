@@ -930,7 +930,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 		// b := core.MustCommitGenesis(gen, db, dirs, log.New())
 		// log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
 	} else {
-		start = curBlock
+		start = curBlock + 1
 	}
 
 	// Query latest block number.
