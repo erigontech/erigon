@@ -83,7 +83,7 @@ type EngineServer struct {
 	printPectraBanner bool
 }
 
-const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+const defaultFcuTimeout = 1 * time.Second
 
 func NewEngineServer(
 	logger log.Logger,
@@ -94,8 +94,12 @@ func NewEngineServer(
 	proposing bool,
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
+	fcuTimeout time.Duration,
 ) *EngineServer {
-	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
+	if fcuTimeout == 0 {
+		fcuTimeout = defaultFcuTimeout
+	}
+	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,

@@ -111,6 +111,7 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 		},
 		ErigonDBStepSize:          config3.DefaultStepSize,
 		ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		FcuTimeout:                10 * time.Second, // CI tests can run slowly
 	}
 
 	ethNode, err := node.New(ctx, &nodeConfig, logger)
