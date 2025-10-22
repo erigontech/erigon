@@ -22,8 +22,6 @@ import (
 	"github.com/iden3/go-iden3-crypto/keccak256"
 )
 
-// hard cap to avoid waiting forever when syncer is stuck “downloading”
-var NoActivityTimeout = 180 * time.Second // var to be overridden in tests
 var ErrNoActivity = errors.New("L1 Updater no activity")
 
 type Syncer interface {
@@ -374,8 +372,8 @@ func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWork
 
 		case <-idleTicker.C:
 			// Avoid blocking forever when no logs/results are received.
-			if time.Since(u.latestActivity) > NoActivityTimeout {
-				log.Warn(fmt.Sprintf("[%s] No activity for %s; exiting drain loop", logPrefix, NoActivityTimeout),
+			if time.Since(u.latestActivity) > u.cfg.L1NoActivityTimeout {
+				log.Warn(fmt.Sprintf("[%s] No activity for %s; exiting drain loop", logPrefix, u.cfg.L1NoActivityTimeout),
 					"tasksDone", tasksDone)
 				return nil, ErrNoActivity
 			}

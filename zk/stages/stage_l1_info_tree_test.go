@@ -83,7 +83,7 @@ func newStageEnv(t *testing.T) *stageEnv {
 	em.EXPECT().BlockByNumber(gomock.Any(), gomock.Any()).Return(block, nil).AnyTimes()
 
 	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 1, "latest", latest)
-	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1}, l1, nil)
+	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1, L1NoActivityTimeout: 100 * time.Millisecond}, l1, nil)
 	cfg := StageL1InfoTreeCfg(db1, &ethconfig.Zk{}, &chain.Config{}, updater)
 
 	return &stageEnv{
@@ -281,8 +281,9 @@ func TestSpawnL1InfoTreeStage_GetHeaderFails(t *testing.T) {
 }
 
 func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
-	l1infotree.NoActivityTimeout = 100 * time.Millisecond
-	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
+	syncer.DefaultBackoffSleep = 1 * time.Millisecond
+	syncer.GetHeaderBackoffMultiplier = 1.0
+	syncer.GetLogsBackoffMultiplier = 1.0
 
 	env := newStageEnv(t)
 	env.l1Syncer.SetFetchHeaders(true)
@@ -298,12 +299,13 @@ func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
 }
 
 func TestSpawnL1InfoTreeStage_FilterLogsFails(t *testing.T) {
-	l1infotree.NoActivityTimeout = 100 * time.Millisecond
-	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
+	syncer.DefaultBackoffSleep = 1 * time.Millisecond
+	syncer.GetHeaderBackoffMultiplier = 1.0
+	syncer.GetLogsBackoffMultiplier = 1.0
 
 	env := newStageEnv(t)
 
-	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(nil, fmt.Errorf("filter logs error")).AnyTimes()
+	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(nil, fmt.Errorf("429 error")).AnyTimes()
 
 	require.True(t, WaitFor(1*time.Second, func() bool {
 		err := runStageOnce(t, env)
@@ -312,8 +314,9 @@ func TestSpawnL1InfoTreeStage_FilterLogsFails(t *testing.T) {
 }
 
 func TestSpawnL1InfoTreeStage_GetHeadersFailsThenNextIterationOK(t *testing.T) {
-	l1infotree.NoActivityTimeout = 100 * time.Millisecond
-	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
+	syncer.DefaultBackoffSleep = 1 * time.Millisecond
+	syncer.GetHeaderBackoffMultiplier = 1.0
+	syncer.GetLogsBackoffMultiplier = 1.0
 
 	env := newStageEnv(t)
 

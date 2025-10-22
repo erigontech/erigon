@@ -201,6 +201,29 @@ func (ec *Client) HeaderByNumber(ctx context.Context, number *big.Int) (*types.H
 	return head, err
 }
 
+// HeadersByNumbers returns a list of block headers corresponding to the provided block numbers.
+// The returned slice order matches the input numbers order.
+func (ec *Client) HeadersByNumbers(ctx context.Context, numbers []*big.Int) ([]*types.Header, error) {
+	if len(numbers) == 0 {
+		return nil, nil
+	}
+	heads := make([]*types.Header, len(numbers))
+	reqs := make([]rpc.BatchElem, len(numbers))
+	for i, n := range numbers {
+		reqs[i] = rpc.BatchElem{
+			Method: "eth_getBlockByNumber",
+			Args:   []interface{}{toBlockNumArg(n), false},
+			Result: &heads[i],
+		}
+	}
+	if err := ec.c.BatchCallContext(ctx, reqs); err != nil {
+		return nil, err
+	}
+	// Do not fail the entire batch on per-element errors; callers may
+	// inspect nil entries and decide how to handle missing headers.
+	return heads, nil
+}
+
 type BigInt struct {
 	*big.Int
 }

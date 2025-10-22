@@ -250,6 +250,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L1HighestBlockType:                     ctx.String(utils.L1HighestBlockTypeFlag.Name),
 		L1MaticContractAddress:                 libcommon.HexToAddress(ctx.String(utils.L1MaticContractAddressFlag.Name)),
 		L1FirstBlock:                           ctx.Uint64(utils.L1FirstBlockFlag.Name),
+		L1NoActivityTimeout:                    ctx.Duration(utils.L1NoActivityTimeoutFlag.Name),
 		L1FinalizedBlockRequirement:            ctx.Uint64(utils.L1FinalizedBlockRequirementFlag.Name),
 		L1ContractAddressCheck:                 ctx.Bool(utils.L1ContractAddressCheckFlag.Name),
 		L1ContractAddressRetrieve:              ctx.Bool(utils.L1ContractAddressRetrieveFlag.Name),

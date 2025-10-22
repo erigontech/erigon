@@ -20,13 +20,14 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/erigontech/erigon/core/types"
 	"math/big"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon/core/types"
 
 	"github.com/erigontech/erigon/zk/zk_config"
 	"github.com/erigontech/erigon/zk/zk_config/cfg_dynamic_genesis"
@@ -536,6 +537,14 @@ var (
 		Required: false,
 		Usage:    "Ethereum L1 delay between queries for verifications and sequences - in milliseconds",
 		Value:    6000,
+	}
+
+	// L1 no-activity timeout controls how long the L1 sync stage will wait without
+	// receiving any logs before stopping the stage. Default is 3 minutes.
+	L1NoActivityTimeoutFlag = cli.DurationFlag{
+		Name:  "zkevm.l1-no-activity-timeout",
+		Usage: "Duration to wait without L1 activity before stopping the L1 sync stage",
+		Value: 3 * time.Minute,
 	}
 	L1HighestBlockTypeFlag = cli.StringFlag{
 		Name:  "zkevm.l1-highest-block-type",
