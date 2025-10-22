@@ -22,14 +22,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -54,19 +51,7 @@ type GossipManager struct {
 	emitters     *beaconevents.EventEmitter
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
 
-	// Services for processing messages from the network
-	blockService                 services.BlockService
-	blobService                  services.BlobSidecarsService
-	dataColumnSidecarService     services.DataColumnSidecarService
-	syncCommitteeMessagesService services.SyncCommitteeMessagesService
-	syncContributionService      services.SyncContributionService
-	aggregateAndProofService     services.AggregateAndProofService
-	attestationService           services.AttestationService
-	voluntaryExitService         services.VoluntaryExitService
-	blsToExecutionChangeService  services.BLSToExecutionChangeService
-	proposerSlashingService      services.ProposerSlashingService
-	attestationsLimiter          *timeBasedRateLimiter
-	registeredServices           []gossipService
+	registeredServices []gossipService
 }
 
 func NewGossipReceiver(
@@ -89,30 +74,18 @@ func NewGossipReceiver(
 	proposerSlashingService services.ProposerSlashingService,
 ) *GossipManager {
 	gm := &GossipManager{
-		sentinel:                     s,
-		forkChoice:                   forkChoice,
-		emitters:                     emitters,
-		beaconConfig:                 beaconConfig,
-		networkConfig:                networkConfig,
-		ethClock:                     ethClock,
-		committeeSub:                 comitteeSub,
-		blockService:                 blockService,
-		blobService:                  blobService,
-		dataColumnSidecarService:     dataColumnSidecarService,
-		syncCommitteeMessagesService: syncCommitteeMessagesService,
-		syncContributionService:      syncContributionService,
-		aggregateAndProofService:     aggregateAndProofService,
-		attestationService:           attestationService,
-		voluntaryExitService:         voluntaryExitService,
-		blsToExecutionChangeService:  blsToExecutionChangeService,
-		proposerSlashingService:      proposerSlashingService,
-		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 250),
-		registeredServices:           []gossipService{},
+		sentinel:           s,
+		forkChoice:         forkChoice,
+		emitters:           emitters,
+		beaconConfig:       beaconConfig,
+		networkConfig:      networkConfig,
+		ethClock:           ethClock,
+		committeeSub:       comitteeSub,
+		registeredServices: []gossipService{},
 	}
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	// register services
-	RegisterGossipService(gm, blockService)
-	RegisterGossipService(gm, blobService)
+	RegisterGossipService(gm, blockService, withTokenBucketRateLimiterByPeer(1, 5))
 	RegisterGossipService(gm, syncCommitteeMessagesService)
 	RegisterGossipService(gm, syncContributionService)
 	RegisterGossipService(gm, attesterSlashingService)
@@ -121,7 +94,8 @@ func NewGossipReceiver(
 	RegisterGossipService(gm, blsToExecutionChangeService)
 	RegisterGossipService(gm, proposerSlashingService)
 	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250))
-	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion))
+	RegisterGossipService(gm, blobService, withBeginVersion(clparams.DenebVersion), withEndVersion(clparams.FuluVersion))
+	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withTokenBucketRateLimiterByPeer(128, 128))
 	return gm
 }
 
@@ -143,43 +117,20 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinelproto.GossipDa
 	}
 	monitor.ObserveGossipTopicSeen(data.Name, len(data.Data))
 
-	if err := g.routeAndProcess(ctx, data); err != nil {
-		return err
-	}
-	if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
+	if err := g.routeAndProcess(ctx, data); errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
 		return nil
-	}
-	if err != nil { //nolint:govet
+	} else if err != nil { //nolint:govet
 		g.sentinel.BanPeer(ctx, data.Peer)
 		return err
 	}
 	return nil
 }
 
-func (g *GossipManager) isReadyToProcessOperations() bool {
-	return g.forkChoice.HighestSeen()+8 >= g.ethClock.GetCurrentSlot()
-}
-
-func copyOfPeerData(in *sentinelproto.GossipData) *sentinelproto.Peer {
-	if in == nil || in.Peer == nil {
-		return nil
-	}
-	ret := new(sentinelproto.Peer)
-	ret.State = in.Peer.State
-	ret.Pid = in.Peer.Pid
-	ret.Enr = in.Peer.Enr
-	ret.Direction = in.Peer.Direction
-	ret.AgentVersion = in.Peer.AgentVersion
-	ret.Address = in.Peer.Address
-
-	return ret
-}
-
 func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto.GossipData) error {
 	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
 	for _, s := range g.registeredServices {
-		if s.service.IsMyGossipMessage(data.Name) && s.checkConditions(data, version) {
+		if s.service.IsMyGossipMessage(data.Name) && s.SatisfiesConditions(data, version) {
 			msg, err := s.service.DecodeGossipMessage(data, version)
 			if err != nil {
 				log.Debug("Failed to decode gossip message", "name", data.Name, "error", err)
@@ -189,130 +140,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto
 			return s.service.ProcessMessage(ctx, data.SubnetId, msg)
 		}
 	}
+	return fmt.Errorf("unknown message: %s", data.Name)
+}
 
-	// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
-	// then attempts to deserialize the received data into it.
-	// If the deserialization fails, an error is logged and the loop returns to the next iteration.
-	// If the deserialization is successful, the object is set to the deserialized value and the loop returns to the next iteration.
-	switch data.Name {
-	case gossip.TopicNameBeaconBlock:
-		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig, version)
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
-			return err
-		}
-		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
-		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
-	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		obj := &services.SignedContributionAndProofForGossip{
-			Receiver:                   copyOfPeerData(data),
-			SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
-		}
-		if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
-			return err
-		}
-		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
-	case gossip.TopicNameVoluntaryExit:
-		obj := &services.SignedVoluntaryExitForGossip{
-			Receiver:            copyOfPeerData(data),
-			SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
-		}
-		if err := obj.SignedVoluntaryExit.DecodeSSZ(data.Data, int(version)); err != nil {
-			return err
-		}
-		return g.voluntaryExitService.ProcessMessage(ctx, data.SubnetId, obj)
-
-	case gossip.TopicNameProposerSlashing:
-		obj := &cltypes.ProposerSlashing{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
-			return err
-		}
-		return g.proposerSlashingService.ProcessMessage(ctx, data.SubnetId, obj)
-	case gossip.TopicNameAttesterSlashing:
-		attesterSlashing := cltypes.NewAttesterSlashing(version)
-		if err := attesterSlashing.DecodeSSZ(data.Data, int(version)); err != nil {
-			return err
-		}
-		g.sentinel.BanPeer(ctx, data.Peer)
-		if err := g.forkChoice.OnAttesterSlashing(attesterSlashing, false); err != nil {
-			return err
-		}
-
-		return nil
-	case gossip.TopicNameBlsToExecutionChange:
-		obj := &services.SignedBLSToExecutionChangeForGossip{
-			Receiver:                   copyOfPeerData(data),
-			SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
-		}
-		if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data.Data, int(version)); err != nil {
-			return err
-		}
-		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
-	case gossip.TopicNameBeaconAggregateAndProof:
-		obj := &services.SignedAggregateAndProofForGossip{
-			Receiver:                copyOfPeerData(data),
-			SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
-		}
-		if err := obj.SignedAggregateAndProof.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-			return err
-		}
-		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
-	default:
-		switch {
-		case gossip.IsTopicBlobSidecar(data.Name):
-			// decode sidecar
-			blobSideCar := &cltypes.BlobSidecar{}
-			if err := blobSideCar.DecodeSSZ(data.Data, int(version)); err != nil {
-				return err
-			}
-			defer log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
-			// The background checks above are enough for now.
-			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
-		case gossip.IsTopicDataColumnSidecar(data.Name):
-			// decode sidecar
-			dataColumnSidecar := &cltypes.DataColumnSidecar{}
-			if err := dataColumnSidecar.DecodeSSZ(data.Data, int(version)); err != nil {
-				return err
-			}
-			return g.dataColumnSidecarService.ProcessMessage(ctx, data.SubnetId, dataColumnSidecar)
-		case gossip.IsTopicSyncCommittee(data.Name):
-			obj := &services.SyncCommitteeMessageForGossip{
-				Receiver:             copyOfPeerData(data),
-				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
-			}
-			if err := obj.SyncCommitteeMessage.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-				return err
-			}
-			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, obj)
-		case gossip.IsTopicBeaconAttestation(data.Name):
-			obj := &services.AttestationForGossip{
-				Receiver: copyOfPeerData(data),
-				//Attestation:       &solid.Attestation{},
-				//SingleAttestation: &solid.SingleAttestation{},
-				ImmediateProcess: false,
-			}
-			if version <= clparams.DenebVersion {
-				obj.Attestation = &solid.Attestation{}
-				if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-					return err
-				}
-				if g.committeeSub.NeedToAggregate(obj.Attestation) || g.attestationsLimiter.tryAcquire() {
-					return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
-				}
-			} else {
-				// after electra
-				obj.SingleAttestation = &solid.SingleAttestation{}
-				if err := obj.SingleAttestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-					return err
-				}
-				if g.attestationsLimiter.tryAcquire() {
-					return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
-				}
-			}
-			return services.ErrIgnore
-		default:
-			return fmt.Errorf("unknown topic %s", data.Name)
-		}
-	}
+func (g *GossipManager) isReadyToProcessOperations() bool {
+	return g.forkChoice.HighestSeen()+8 >= g.ethClock.GetCurrentSlot()
 }
 
 func (g *GossipManager) Start(ctx context.Context) {
