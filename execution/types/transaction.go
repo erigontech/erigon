@@ -109,6 +109,10 @@ type Transaction interface {
 	SetTimeboosted(val *bool)
 }
 
+type TransactionForHashMarshaller interface {
+	MarshalBinaryForHashing(w io.Writer) error
+}
+
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
 // implementations of different transaction types
 type TransactionMisc struct {
@@ -351,7 +355,14 @@ func (s Transactions) Len() int { return len(s) }
 // because we assume that *Transaction will only ever contain valid txs that were either
 // constructed by decoding or via public API in this package.
 func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
-	if err := s[i].MarshalBinary(w); err != nil {
+	var err error
+	switch tm := s[i].(type) {
+	case TransactionForHashMarshaller:
+		err = tm.MarshalBinaryForHashing(w)
+	default:
+		err = s[i].MarshalBinary(w)
+	}
+	if err != nil {
 		panic(err)
 	}
 }
