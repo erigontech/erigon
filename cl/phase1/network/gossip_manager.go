@@ -88,14 +88,14 @@ func NewGossipReceiver(
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	// register services
 	RegisterGossipService(gm, blockService, withTokenBucketRateLimiterByPeer(1, 2))
-	RegisterGossipService(gm, syncContributionService, withTokenBucketRateLimiterByPeer(2, 4))
-	RegisterGossipService(gm, aggregateAndProofService, withTokenBucketRateLimiterByPeer(5, 10))
+	RegisterGossipService(gm, syncContributionService, withTokenBucketRateLimiterByPeer(8, 16))
+	RegisterGossipService(gm, aggregateAndProofService, withTokenBucketRateLimiterByPeer(8, 16))
 	RegisterGossipService(gm, syncCommitteeMessagesService)
 	RegisterGossipService(gm, attesterSlashingService)
 	RegisterGossipService(gm, voluntaryExitService)
 	RegisterGossipService(gm, blsToExecutionChangeService)
 	RegisterGossipService(gm, proposerSlashingService)
-	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250), withTokenBucketRateLimiterByPeer(4, 8))
+	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250), withTokenBucketRateLimiterByPeer(8, 16))
 	RegisterGossipService(gm, blobService, withBeginVersion(clparams.DenebVersion), withEndVersion(clparams.FuluVersion))
 	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withTokenBucketRateLimiterByPeer(16, 32))
 
