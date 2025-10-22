@@ -416,11 +416,7 @@ func TestMergedFileGet(t *testing.T) {
 
 	checkBuildFilesFn := func(mergeDisabled bool) {
 		agg.SetMergeDisabled(mergeDisabled)
-
-		for i := range amount {
-			err = agg.BuildFiles(RootNum(i + 1))
-			require.NoError(t, err)
-		}
+		require.NoError(t, agg.BuildFiles(RootNum(amount)))
 
 		snapCfg := Registry.SnapshotConfig(headerId)
 		var nDirtyFiles, nVisibleFiles int

@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 const (
@@ -472,7 +472,10 @@ func (s *simulator) simulateBlock(
 	}
 	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
 	engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
-	intraBlockState.SoftFinalise()
+	err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
+	if err != nil {
+		return nil, nil, err
+	}
 
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 	callResults := make([]CallResult, 0, len(bsc.Calls))

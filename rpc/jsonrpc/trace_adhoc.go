@@ -41,11 +41,11 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/node/shards"
 	ptracer "github.com/erigontech/erigon/polygon/tracer"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 const (
