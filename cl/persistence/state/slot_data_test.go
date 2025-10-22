@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func TestSlotData(t *testing.T) {

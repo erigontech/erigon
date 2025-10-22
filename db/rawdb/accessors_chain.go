@@ -28,16 +28,16 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/utils"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -469,35 +469,28 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	return txs, nil
 }
 
-// Write transactions to the database and use txnID as first identifier
-func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, txnID uint64) error {
-	txIdKey := make([]byte, 8)
+// Write transactions into DB and use txnID as first identifier
+func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, baseTxnID types.BaseTxnID) error {
+	rawTxs := make([][]byte, len(txs))
 	buf := bytes.NewBuffer(nil)
-	for _, txn := range txs {
+	for i, txn := range txs {
 		buf.Reset()
 		if err := rlp.Encode(buf, txn); err != nil {
 			return fmt.Errorf("broken txn rlp: %w", err)
 		}
-
-		binary.BigEndian.PutUint64(txIdKey, txnID)
-		if err := rwTx.Append(kv.EthTx, txIdKey, buf.Bytes()); err != nil {
-			return err
-		}
-		txnID++
+		rawTxs[i] = common.Copy(buf.Bytes())
 	}
-	return nil
+	return WriteRawTransactions(rwTx, rawTxs, baseTxnID)
 }
 
-func WriteRawTransactions(rwTx kv.RwTx, txs [][]byte, txnID uint64) error {
-	stx := txnID
+// Write already encoded transactions into DB and use txnID as first identifier
+func WriteRawTransactions(rwTx kv.RwTx, txs [][]byte, baseTxnID types.BaseTxnID) error {
 	txIdKey := make([]byte, 8)
-	for _, txn := range txs {
-		binary.BigEndian.PutUint64(txIdKey, txnID)
-		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
+	for txi, txn := range txs {
+		binary.BigEndian.PutUint64(txIdKey, baseTxnID.At(txi))
 		if err := rwTx.Append(kv.EthTx, txIdKey, txn); err != nil {
-			return fmt.Errorf("txnID=%d, firstNonSysTxn=%d, %w", txnID, stx, err)
+			return fmt.Errorf("baseTxnID=%d: %w", baseTxnID, err)
 		}
-		txnID++
 	}
 	return nil
 }
@@ -640,7 +633,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
-	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
+	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxnID); err != nil {
 		return false, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
 	return true, nil
@@ -649,6 +642,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (err error) {
 	// Pre-processing
 	body.SendersFromTxs()
+
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return err
@@ -662,7 +656,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	if err = WriteTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
+	if err = WriteTransactions(db, body.Transactions, data.BaseTxnID); err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
 	return nil
@@ -977,7 +971,7 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 
 func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 	if err := tx.ForEach(kv.PendingEpoch, hexutil.EncodeTs(number), func(k, v []byte) error {
-		return tx.Delete(kv.Epoch, k)
+		return tx.Delete(kv.PendingEpoch, k)
 	}); err != nil {
 		return err
 	}
@@ -1318,6 +1312,7 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil, 0); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
+
 	return nil
 }
 

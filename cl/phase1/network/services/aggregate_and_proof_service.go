@@ -24,12 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cl/utils/bls"
-
-	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -42,16 +36,20 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 // SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
 // asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
 // will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
-// that's why we are passing sentinel.SentinelClient and *sentinel.GossipData to enable the service
+// that's why we are passing sentinelproto.SentinelClient and *sentinelproto.GossipData to enable the service
 // to do all of that by itself.
 type SignedAggregateAndProofForGossip struct {
 	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
-	Receiver                *sentinel.Peer
+	Receiver                *sentinelproto.Peer
 	ImmediateProcess        bool
 }
 

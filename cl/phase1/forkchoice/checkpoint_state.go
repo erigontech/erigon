@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -165,10 +165,7 @@ func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint
 
 // committeeCount retrieves size of sync committee
 func (c *checkpointState) committeeCount(epoch, lenIndicies uint64) uint64 {
-	committeCount := lenIndicies / c.beaconConfig.SlotsPerEpoch / c.beaconConfig.TargetCommitteeSize
-	if c.beaconConfig.MaxCommitteesPerSlot < committeCount {
-		committeCount = c.beaconConfig.MaxCommitteesPerSlot
-	}
+	committeCount := min(c.beaconConfig.MaxCommitteesPerSlot, lenIndicies/c.beaconConfig.SlotsPerEpoch/c.beaconConfig.TargetCommitteeSize)
 	if committeCount < 1 {
 		committeCount = 1
 	}

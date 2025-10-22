@@ -35,14 +35,6 @@ import (
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/estimate"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -50,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -63,10 +56,18 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 var CLI struct {
@@ -114,13 +115,13 @@ func (w *withPPROF) withProfile() {
 	}
 }
 
-func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
+func (w *withSentinel) connectSentinel() (sentinelproto.SentinelClient, error) {
 	// YOLO message size
 	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(math.MaxInt)))
 	if err != nil {
 		return nil, err
 	}
-	return sentinel.NewSentinelClient(gconn), nil
+	return sentinelproto.NewSentinelClient(gconn), nil
 }
 
 func openFs(fsName string, path string) (afero.Fs, error) {
@@ -192,6 +193,7 @@ func (c *Chain) Run(ctx *Context) error {
 
 type ChainEndpoint struct {
 	Endpoint string `help:"endpoint" default:""`
+	Blobs    bool   `help:"also download blobs" default:"false"`
 	chainCfg
 	outputFolder
 }
@@ -244,6 +246,49 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	return block, nil
 }
 
+func retrieveBlobsFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, block *cltypes.SignedBeaconBlock) ([]*cltypes.BlobSidecar, error) {
+	// Construct the blob sidecars endpoint
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
+	blobUri := fmt.Sprintf("%s/0x%x", uri, root)
+	log.Debug("[Blob Retrieval] Requesting blob sidecars", "uri", blobUri)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blobUri, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = r.Body.Close()
+	}()
+
+	if r.StatusCode == http.StatusNotFound {
+		// No blobs for this block (pre-Deneb or no blob transactions)
+		return nil, nil
+	}
+
+	if r.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("blob retrieval failed, bad status code %d", r.StatusCode)
+	}
+
+	var blobsResponse struct {
+		Data []*cltypes.BlobSidecar `json:"data"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&blobsResponse); err != nil {
+		return nil, fmt.Errorf("blob retrieval decode failed %s", err)
+	}
+	return blobsResponse.Data, nil
+}
+
 func (c *ChainEndpoint) Run(ctx *Context) error {
 	_, beaconConfig, ntype, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
@@ -259,16 +304,33 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
 
 	dirs := datadir.New(c.Datadir)
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, blobDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
+	// open caplin snapshots too
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+	if err := csn.OpenFolder(); err != nil {
+		return err
+	}
+
+	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+	defer csn.Close()
+
 	baseUri, err := url.JoinPath(c.Endpoint, "eth/v2/beacon/blocks")
 	if err != nil {
 		return err
 	}
+
+	baseUriBlob, err := url.JoinPath(c.Endpoint, "eth/v1/beacon/blob_sidecars")
+	if err != nil {
+		return err
+	}
+
 	log.Info("Hooked", "uri", baseUri)
 	// Let's fetch the head first
 	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
@@ -306,6 +368,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		defer tx.Rollback()
 
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
+
 		// Let's fetch the head first
 		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*common.Hash)(&currentRoot))
 		if err != nil {
@@ -318,6 +381,27 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 			return false, err
 		}
+		if c.Blobs && currentBlock.Block.Body.BlobKzgCommitments.Len() > 0 {
+			ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{currentBlock}, beaconConfig)
+			if err != nil {
+				// Return an error if blob identifiers could not be retrieved
+				err = fmt.Errorf("failed to get blob identifiers: %w", err)
+				return false, err
+			}
+			blobs, err := retrieveBlobsFromRemoteEndpoint(ctx, beaconConfig, baseUriBlob, currentBlock)
+			if err != nil {
+				return false, fmt.Errorf("failed to retrieve blobs: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUriBlob, stringifiedRoot))
+			}
+			if _, _, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, blobDB, ids, blobs, func(header *cltypes.SignedBeaconBlockHeader) error {
+				if header.Signature == currentBlock.Signature {
+					return nil
+				}
+				return errors.New("mismatched block header in blob sidecar")
+			}); err != nil {
+				return false, fmt.Errorf("failed to verify and store blobs: %w", err)
+			}
+		}
+
 		currentRoot = currentBlock.Block.ParentRoot
 		currentSlot := currentBlock.Block.Slot
 		// it will stop if we end finding a gap or if we reach the maxIterations
@@ -330,13 +414,39 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 			if slot == nil || *slot == 0 {
 				break
 			}
+
 			if err := beacon_indicies.MarkRootCanonical(ctx, tx, *slot, currentRoot); err != nil {
 				return false, err
+			}
+			if c.Blobs {
+				blindedBlock, err := snr.ReadBlindedBlockBySlot(ctx, tx, *slot)
+				if err != nil {
+					return false, err
+				}
+				if blindedBlock == nil {
+					break
+				}
+
+				blindedBlockRoot, err := blindedBlock.Block.HashSSZ()
+				if err != nil {
+					return false, err
+				}
+				// check if we have all the blobs
+				kzgCommitments := blindedBlock.Block.Body.BlobKzgCommitments.Len()
+				kzgCommitmentsInDB, err := blobDB.KzgCommitmentsCount(ctx, blindedBlockRoot)
+				if err != nil {
+					return false, err
+				}
+				if kzgCommitmentsInDB != uint32(kzgCommitments) {
+					break
+				}
+
 			}
 			currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot)
 			if err != nil {
 				return false, err
 			}
+
 		}
 		if err := tx.Commit(); err != nil {
 			return false, err
@@ -394,7 +504,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -573,7 +683,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = r.Chain
-	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.Root())
+	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -581,7 +691,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
@@ -1038,7 +1148,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	})
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -1272,7 +1382,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err

@@ -36,30 +36,29 @@ import (
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 const inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
@@ -183,6 +182,10 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	// When the block is the first block of the sprint, it is expected to be delayed by `producerDelay`.
 	// That is to allow time for block propagation in the last sprint
 	delay := c.CalculatePeriod(number)
+	// Since there is only one producer in Rio/VeBlop, we don't need to add producer delay and backup multiplier
+	if c.IsRio(number) {
+		return delay
+	}
 	if c.IsSprintStart(number) {
 		delay = c.CalculateProducerDelay(number)
 	}
@@ -198,14 +201,15 @@ func MinNextBlockTime(parent *types.Header, succession int, config *borcfg.BorCo
 	return parent.Time + CalcProducerDelay(parent.Number.Uint64()+1, succession, config)
 }
 
-// ValidateHeaderTimeSignerSuccessionNumber - valset.ValidatorSet abstraction for unit tests
+// ValidateHeaderTimeSignerSuccessionNumber - heimdall.ValidatorSet abstraction for unit tests
 type ValidateHeaderTimeSignerSuccessionNumber interface {
 	GetSignerSuccessionNumber(signer common.Address, number uint64) (int, error)
 }
 
+//go:generate mockgen -typed=true -destination=./span_reader_mock.go -package=bor . spanReader
 type spanReader interface {
 	Span(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
-	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	Producers(ctx context.Context, blockNum uint64) (*heimdall.ValidatorSet, error)
 }
 
 //go:generate mockgen -typed=true -destination=./bridge_reader_mock.go -package=bor . bridgeReader
@@ -228,12 +232,16 @@ func ValidateHeaderTime(
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
 		if header.Time > uint64(now.Unix())+config.CalculatePeriod(header.Number.Uint64()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	} else {
 		// Don't waste time checking blocks from the future
 		if header.Time > uint64(now.Unix()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 
@@ -254,7 +262,9 @@ func ValidateHeaderTime(
 	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
 	if config.IsBhilai(header.Number.Uint64()) && succession != 0 {
 		if header.Time > uint64(now.Unix()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 
@@ -352,7 +362,7 @@ func New(
 		common.Address{},
 		func(_ common.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: common.Address{}.Bytes()}
+			return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: common.Address{}.Bytes()}
 		},
 	})
 
@@ -462,12 +472,16 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
 		if header.Time > uint64(now)+c.config.CalculatePeriod(number) {
-			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			}
 		}
 	} else {
 		// Don't waste time checking blocks from the future
 		if header.Time > uint64(now) {
-			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 
@@ -629,7 +643,7 @@ func (c *Bor) VerifySeal(chain ChainHeaderReader, header *types.Header) error {
 // consensus protocol requirements. The method accepts an optional list of parent
 // headers that aren't yet part of the local blockchain to generate the snapshots
 // from.
-func (c *Bor) verifySeal(chain ChainHeaderReader, header *types.Header, parents []*types.Header, validatorSet *valset.ValidatorSet) error {
+func (c *Bor) verifySeal(chain ChainHeaderReader, header *types.Header, parents []*types.Header, validatorSet *heimdall.ValidatorSet) error {
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
@@ -693,7 +707,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if c.config.IsSprintEnd(number) {
-		var newValidators []*valset.Validator
+		var newValidators []*heimdall.Validator
 		validators, err := c.spanReader.Producers(context.Background(), number+1)
 		if err != nil {
 			return err
@@ -701,7 +715,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 		newValidators = validators.Validators
 
 		// sort validator by address
-		sort.Sort(valset.ValidatorsByAddress(newValidators))
+		sort.Sort(heimdall.ValidatorsByAddress(newValidators))
 
 		if c.config.IsNapoli(header.Number.Uint64()) { // PIP-16: Transaction Dependency Data
 			var tempValidatorBytes []byte
@@ -808,11 +822,14 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			// check and commit span
-			if err := c.checkAndCommitSpan(header, syscall); err != nil {
-				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
-				c.logger.Error("[bor] committing span", "err", err)
-				return nil, err
+			// post VeBlop spans won't be committed to smart contract
+			if !c.config.IsRio(header.Number.Uint64()) {
+				// check and commit span
+				if err := c.checkAndCommitSpan(header, syscall); err != nil {
+					err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
+					c.logger.Error("[bor] committing span", "err", err)
+					return nil, err
+				}
 			}
 
 			// commit states
@@ -870,11 +887,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			// check and commit span
-			if err := c.checkAndCommitSpan(header, syscall); err != nil {
-				err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
-				c.logger.Error("[bor] committing span", "err", err)
-				return nil, nil, err
+			// Post Rio/VeBlop spans won't be committed to smart contract
+			if !c.config.IsRio(header.Number.Uint64()) {
+				// check and commit span
+				if err := c.checkAndCommitSpan(header, syscall); err != nil {
+					err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
+					c.logger.Error("[bor] committing span", "err", err)
+					return nil, nil, err
+				}
 			}
 			// commit states
 			if err := c.CommitStates(header, cx, syscall, true); err != nil {
@@ -896,7 +916,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
 	if chain != nil && chain.Config().IsBhilai(header.Number.Uint64()) {
-		misc.StoreBlockHashesEip2935(header, state, config, chain)
+		_ = misc.StoreBlockHashesEip2935(header, state)
 	}
 }
 
@@ -1147,11 +1167,11 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 	header := rawdb.ReadCurrentHeader(tx)
 	var currentHeaderNumber uint64 = 0
 	if header == nil {
-		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
+		return "", &heimdall.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
 	currentHeaderNumber = header.Number.Uint64()
 	if start > end || end > currentHeaderNumber {
-		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
+		return "", &heimdall.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
 	blockHeaders := make([]*types.Header, numHeaders)
 	for number := start; number <= end; number++ {
@@ -1264,7 +1284,7 @@ func (c *Bor) CommitStates(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount uint256.Int, bailout bool) error {
 	// get inputs before
 	input1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1275,17 +1295,8 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 		return err
 	}
 
-	if !bailout {
-		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
-		if err != nil {
-			return err
-		}
-	}
-	err = db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
-	if err != nil {
-		return err
-	}
-	// get outputs after
+	consensus.Transfer(db, sender, recipient, amount, bailout)
+
 	output1, err := db.GetBalance(sender)
 	if err != nil {
 		return err
@@ -1295,7 +1306,7 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 		return err
 	}
 	// add transfer log into state
-	addTransferLog(db, transferLogSig, sender, recipient, amount, &input1, &input2, &output1, &output2)
+	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
 	return nil
 }
 
@@ -1306,18 +1317,18 @@ func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 // AddFeeTransferLog adds fee transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender common.Address, coinbase common.Address, result *evmtypes.ExecutionResult) {
-	output1 := result.SenderInitBalance.Clone()
-	output2 := result.CoinbaseInitBalance.Clone()
+	output1 := result.SenderInitBalance
+	output2 := result.CoinbaseInitBalance
 	addTransferLog(
 		ibs,
 		transferFeeLogSig,
 		sender,
 		coinbase,
-		&result.FeeTipped,
-		&result.SenderInitBalance,
-		&result.CoinbaseInitBalance,
-		output1.Sub(output1, &result.FeeTipped),
-		output2.Add(output2, &result.FeeTipped),
+		result.FeeTipped,
+		result.SenderInitBalance,
+		result.CoinbaseInitBalance,
+		*output1.Sub(&output1, &result.FeeTipped),
+		*output2.Add(&output2, &result.FeeTipped),
 	)
 
 }

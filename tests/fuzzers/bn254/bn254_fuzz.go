@@ -15,8 +15,8 @@ import (
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 
-	cloudflare "github.com/erigontech/erigon-lib/crypto/bn254/cloudflare"
-	google "github.com/erigontech/erigon-lib/crypto/bn254/google"
+	cloudflare "github.com/erigontech/erigon/common/crypto/bn254/cloudflare"
+	google "github.com/erigontech/erigon/common/crypto/bn254/google"
 )
 
 func getG1Points(input io.Reader) (*cloudflare.G1, *google.G1, *bn254.G1Affine) {

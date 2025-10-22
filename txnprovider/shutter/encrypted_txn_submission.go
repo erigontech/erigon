@@ -21,7 +21,7 @@ package shutter
 import (
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
@@ -59,7 +59,7 @@ func EncryptedTxnSubmissionLess(a, b EncryptedTxnSubmission) bool {
 		return true
 	}
 
-	if a.EonIndex == b.EonIndex && a.TxnIndex <= b.TxnIndex {
+	if a.EonIndex == b.EonIndex && a.TxnIndex < b.TxnIndex {
 		return true
 	}
 

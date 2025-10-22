@@ -26,24 +26,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/sentinel/communication"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const maxMessageLength = 18 * datasize.MB
@@ -53,7 +51,7 @@ type BeaconRpcP2P struct {
 	// ctx is the context for the RPC client.
 	ctx context.Context
 	// sentinel is a client for sending and receiving messages to and from a beacon chain node.
-	sentinel sentinel.SentinelClient
+	sentinel sentinelproto.SentinelClient
 	// beaconConfig is the configuration for the beacon chain.
 	beaconConfig *clparams.BeaconChainConfig
 	// ethClock handles all time-related operations.
@@ -63,8 +61,8 @@ type BeaconRpcP2P struct {
 }
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
-// It takes a context, a sentinel.Sent
-func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, beaconState *state.CachingBeaconState) *BeaconRpcP2P {
+// It takes a context, a sentinelproto.Sent
+func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, beaconState *state.CachingBeaconState) *BeaconRpcP2P {
 	rpc := &BeaconRpcP2P{
 		ctx:          ctx,
 		sentinel:     sentinel,
@@ -120,13 +118,13 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, error) {
-	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	_, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
 	if err != nil {
 		return nil, pid, err
 	}
 
 	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
 	}
 
@@ -246,7 +244,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 
 // Peers retrieves peer count.
 func (b *BeaconRpcP2P) Peers() (uint64, error) {
-	amount, err := b.sentinel.GetPeers(b.ctx, &sentinel.EmptyMessage{})
+	amount, err := b.sentinel.GetPeers(b.ctx, &sentinelproto.EmptyMessage{})
 	if err != nil {
 		return 0, err
 	}
@@ -258,7 +256,7 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint6
 	if err != nil {
 		return err
 	}
-	_, err = b.sentinel.SetStatus(b.ctx, &sentinel.Status{
+	_, err = b.sentinel.SetStatus(b.ctx, &sentinelproto.Status{
 		ForkDigest:     utils.Bytes4ToUint32(forkDigest),
 		FinalizedRoot:  gointerfaces.ConvertHashToH256(finalizedRoot),
 		FinalizedEpoch: finalizedEpoch,
@@ -269,7 +267,7 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint6
 }
 
 func (b *BeaconRpcP2P) BanPeer(pid string) {
-	b.sentinel.BanPeer(b.ctx, &sentinel.Peer{Pid: pid})
+	b.sentinel.BanPeer(b.ctx, &sentinelproto.Peer{Pid: pid})
 }
 
 // responseData is a helper struct to store the version and the raw data of the response for each data container.
@@ -279,7 +277,7 @@ type responseData struct {
 }
 
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
-func (b *BeaconRpcP2P) parseResponseData(message *sentinel.ResponseData) ([]responseData, string, error) {
+func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([]responseData, string, error) {
 	if message.Error {
 		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
 		errBytes, _ := io.ReadAll(rd)
@@ -355,7 +353,7 @@ func (b *BeaconRpcP2P) sendRequest(
 ) ([]responseData, string, error) {
 	ctx, cn := context.WithTimeout(ctx, time.Second*2)
 	defer cn()
-	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
+	message, err := b.sentinel.SendRequest(ctx, &sentinelproto.RequestData{
 		Data:  reqPayload,
 		Topic: topic,
 	})
@@ -373,7 +371,7 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 ) ([]responseData, string, error) {
 	ctx, cn := context.WithTimeout(ctx, time.Second*2)
 	defer cn()
-	message, err := b.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
+	message, err := b.sentinel.SendPeerRequest(ctx, &sentinelproto.RequestDataWithPeer{
 		Pid:   peerId,
 		Data:  reqPayload,
 		Topic: topic,

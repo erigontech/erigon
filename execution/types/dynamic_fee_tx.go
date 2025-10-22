@@ -27,9 +27,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 type DynamicFeeTransaction struct {
@@ -102,6 +102,10 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 
 func (tx *DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
+}
+
+func (tx *DynamicFeeTransaction) GetAuthorizations() []Authorization {
+	return nil
 }
 
 func (tx *DynamicFeeTransaction) EncodingSize() int {
@@ -330,16 +334,18 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 // AsMessage returns the transaction as a core.Message.
 func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
-		nonce:      tx.Nonce,
-		gasLimit:   tx.GasLimit,
-		gasPrice:   *tx.FeeCap,
-		tipCap:     *tx.TipCap,
-		feeCap:     *tx.FeeCap,
-		to:         tx.To,
-		amount:     *tx.Value,
-		data:       tx.Data,
-		accessList: tx.AccessList,
-		checkNonce: true,
+		nonce:            tx.Nonce,
+		gasLimit:         tx.GasLimit,
+		gasPrice:         *tx.FeeCap,
+		tipCap:           *tx.TipCap,
+		feeCap:           *tx.FeeCap,
+		to:               tx.To,
+		amount:           *tx.Value,
+		data:             tx.Data,
+		accessList:       tx.AccessList,
+		checkNonce:       true,
+		checkTransaction: true,
+		checkGas:         true,
 	}
 	if !rules.IsLondon {
 		return nil, errors.New("eip-1559 transactions require London")

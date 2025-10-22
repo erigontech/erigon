@@ -30,7 +30,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestBlocksByRootHandler(t *testing.T) {
@@ -58,7 +58,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 

@@ -3,12 +3,12 @@ Erigon Types
 ================
 
 This document will list each major types defined and used by Erigon.
-They are found in `github.com/erigontech/erigon/execution/types` and `github.com/erigontech/erigon-lib/common`
+They are found in `github.com/erigontech/erigon/execution/types` and `github.com/erigontech/erigon/common`
 
 Address and Hash
 ================
 
-package: `github.com/erigontech/erigon-lib/common`
+package: `github.com/erigontech/erigon/common`
 
 .. code-block:: go
 
@@ -239,7 +239,7 @@ total difficulty accumulated up to the block. sum of all prev blocks difficultie
 Account
 =======
 
-package: `github.com/erigontech/erigon-lib/types/accounts`
+package: `github.com/erigontech/erigon/execution/types/accounts`
 
 .. code-block:: go
 

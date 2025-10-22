@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -230,15 +230,15 @@ func (api *BorImpl) GetCurrentProposer() (common.Address, error) {
 }
 
 // GetCurrentValidators gets the current validators
-func (api *BorImpl) GetCurrentValidators() ([]*valset.Validator, error) {
+func (api *BorImpl) GetCurrentValidators() ([]*heimdall.Validator, error) {
 	ctx := context.Background()
 	latestBlockNum, err := api.getLatestBlockNum(ctx)
 	if err != nil {
-		return make([]*valset.Validator, 0), err
+		return make([]*heimdall.Validator, 0), err
 	}
 	validatorSet, err := api.spanProducersReader.Producers(ctx, latestBlockNum)
 	if err != nil {
-		return make([]*valset.Validator, 0), err
+		return make([]*heimdall.Validator, 0), err
 	}
 	return validatorSet.Validators, nil
 }

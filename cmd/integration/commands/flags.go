@@ -20,8 +20,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var (
@@ -32,15 +33,14 @@ var (
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
-	reset, noCommit              bool
+	reset, noCommit, squeeze     bool
 	bucket                       string
 	datadirCli, toChaindata      string
 	migration                    string
 	integrityFast, integritySlow bool
 	file                         string
 	HeimdallURL                  string
-	txtrace                      bool // Whether to trace the execution (should only be used together with `block`)
-	unwindTypes                  []string
+	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
 	chain                        string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                string
 
@@ -50,6 +50,8 @@ var (
 
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
+
+	integStepSize uint64 // name prefixed to avoid conflict with another existing stepSize flag
 )
 
 func must(err error) {
@@ -112,6 +114,10 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
 }
 
+func withSqueeze(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+}
+
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
@@ -121,22 +127,21 @@ func withDataDir2(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
-	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enable internal database logs. Very high verbosity levels may require recompiling the database. The default value is 2, which means warnings are shown.")
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+	cmd.Flags().Uint64Var(&integStepSize, utils.ErigonDBStepSizeFlag.Name, utils.ErigonDBStepSizeFlag.Value, utils.ErigonDBStepSizeFlag.Usage)
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, "datadir", "", "data directory for temporary ELT files")
-	must(cmd.MarkFlagRequired("datadir"))
-	must(cmd.MarkFlagDirname("datadir"))
+	withDataDir2(cmd)
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
+}
 
-	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
-
-	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+func withConcurrentCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -179,10 +184,6 @@ func withStartTx(cmd *cobra.Command) {
 
 func withOutputCsvFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
-}
-
-func withUnwindTypes(cmd *cobra.Command) {
-	cmd.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "types to unwind for polygon sync")
 }
 
 func withChaosMonkey(cmd *cobra.Command) {
