@@ -413,15 +413,18 @@ func SyncSnapshots(
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
+			var toDelete []string
 			for _, f := range blockReader.FrozenFiles() {
+				log.Debug(fmt.Sprintf("[%s] --- DEBUG --- checking", logPrefix), "file", f)
 				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
 				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
 					continue
 				}
-				log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "file", fileInfo.Name(), "toBlock", toBlock)
-				if err := blockReader.Snapshots().Delete(fileInfo.Name()); err != nil {
-					return err
-				}
+				toDelete = append(toDelete, f)
+			}
+			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "files", toDelete)
+			if _, err := snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDelete}); err != nil {
+				return err
 			}
 		}
 
@@ -476,7 +479,7 @@ func SyncSnapshots(
 				continue
 			}
 
-			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
+			if filterToBlock(p.Name, toBlock, toStep, headerchain, logPrefix) {
 				continue
 			}
 
@@ -526,7 +529,8 @@ func SyncSnapshots(
 	return nil
 }
 
-func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
+func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool, logPrefix string) bool {
+	log.Debug(fmt.Sprintf("[%s] --- DEBUG --- filterToBlock", logPrefix), "file", name)
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
 	}
