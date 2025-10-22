@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"time"
 
@@ -224,9 +225,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
 		}
 		if bundle.BlockOverride.BlockHash != nil {
-			for blockNum, hash := range *bundle.BlockOverride.BlockHash {
-				overrideBlockHash[blockNum] = hash
-			}
+			maps.Copy(overrideBlockHash, *bundle.BlockOverride.BlockHash)
 		}
 		results := []map[string]interface{}{}
 		for _, txn := range bundle.Transactions {
