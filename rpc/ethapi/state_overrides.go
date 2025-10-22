@@ -31,7 +31,6 @@ import (
 type StateOverrides map[common.Address]Account
 
 func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
-
 	for addr, account := range *overrides {
 		// Override account nonce.
 		if account.Nonce != nil {
@@ -39,7 +38,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 				return err
 			}
 		}
-		// Override account(contract) code.
+		// Override account (contract) code.
 		if account.Code != nil {
 			if err := state.SetCode(addr, *account.Code); err != nil {
 				return err
@@ -72,7 +71,6 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
-				key := key
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
 				if err := state.SetState(addr, key, *intValue); err != nil {
 					return err

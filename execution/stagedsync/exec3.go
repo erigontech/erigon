@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -231,7 +230,7 @@ func ExecV3(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx)
+	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 	blockNum = doms.BlockNum()
 
 	if maxBlockNum < blockNum {
@@ -247,7 +246,7 @@ func ExecV3(ctx context.Context,
 	if !execStage.CurrentSyncCycle.IsInitialCycle {
 		var clean func()
 
-		readAhead, clean = exec3.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
+		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
 	}
 
@@ -337,7 +336,7 @@ func ExecV3(ctx context.Context,
 					se.lastCommittedTxNum = se.domains().TxNum()
 
 					commitStart := time.Now()
-					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 					applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
 					if err != nil {
 						return err
@@ -457,7 +456,7 @@ type txExecutor struct {
 	logger           log.Logger
 	logPrefix        string
 	progress         *Progress
-	taskExecMetrics  *exec3.WorkerMetrics
+	taskExecMetrics  *exec.WorkerMetrics
 	blockExecMetrics *blockExecMetrics
 	hooks            *tracing.Hooks
 
@@ -600,7 +599,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			var b *types.Block
 			err := tx.Apply(ctx, func(tx kv.Tx) error {
-				b, err = exec3.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
+				b, err = exec.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
 				return err
 			})
 			if err != nil {

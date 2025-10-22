@@ -24,7 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

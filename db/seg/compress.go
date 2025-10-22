@@ -74,6 +74,9 @@ type Cfg struct {
 	SamplingFactor uint64
 
 	Workers int
+
+	// arbitrary bytes set by user at start of the file
+	ExpectMetadata bool
 }
 
 var DefaultCfg = Cfg{
@@ -119,6 +122,8 @@ type Compressor struct {
 	trace            bool
 	logger           log.Logger
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
+
+	metadata []byte
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
@@ -173,6 +178,12 @@ func (c *Compressor) Close() {
 func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
 func (c *Compressor) FileName() string    { return c.outputFileName }
 func (c *Compressor) WorkersAmount() int  { return c.Workers }
+func (c *Compressor) SetMetadata(metadata []byte) {
+	if !c.ExpectMetadata {
+		panic("metadata not expected in compressor")
+	}
+	c.metadata = metadata
+}
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
@@ -265,6 +276,18 @@ func (c *Compressor) Compress() error {
 	tmpFileName := cf.Name()
 	defer dir.RemoveFile(tmpFileName)
 	defer cf.Close()
+	if c.ExpectMetadata {
+		dataLen := uint32(len(c.metadata))
+		var dataLenB [4]byte
+		binary.BigEndian.PutUint32(dataLenB[:], dataLen)
+		if _, err := cf.Write(dataLenB[:]); err != nil {
+			return err
+		}
+		if _, err := cf.Write(c.metadata); err != nil {
+			return err
+		}
+	}
+
 	t := time.Now()
 	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 		return err

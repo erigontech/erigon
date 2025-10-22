@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
@@ -36,7 +35,7 @@ type serialExecutor struct {
 	gasUsed         uint64
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
-	worker          *exec3.Worker
+	worker          *exec.Worker
 }
 
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -80,7 +79,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		var err error
-		b, err = exec3.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
+		b, err = exec.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
 		if err != nil {
 			return nil, rwTx, err
 		}
@@ -252,7 +251,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			pruneDuration = time.Since(timeStart)
 
-			stepsInDb := rawdbhelpers.IdxStepsCountV3(se.applyTx)
+			stepsInDb := rawdbhelpers.IdxStepsCountV3(se.applyTx, se.agg.StepSize())
 
 			var commitDuration time.Duration
 			rwTx, commitDuration, err = se.commit(ctx, execStage, rwTx, nil, useExternalTx)
@@ -323,8 +322,8 @@ func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx 
 func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) (err error) {
 
 	if se.worker == nil {
-		se.taskExecMetrics = exec3.NewWorkerMetrics()
-		se.worker = exec3.NewWorker(context.Background(), false, se.taskExecMetrics,
+		se.taskExecMetrics = exec.NewWorkerMetrics()
+		se.worker = exec.NewWorker(context.Background(), false, se.taskExecMetrics,
 			se.cfg.db, nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
 	}
 

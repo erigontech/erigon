@@ -116,6 +116,7 @@ type Message interface {
 
 	Nonce() uint64
 	CheckNonce() bool
+	CheckTransaction() bool
 	Data() []byte
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
@@ -294,7 +295,9 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				st.msg.From().Hex(), stNonce)
 		}
+	}
 
+	if st.msg.CheckTransaction() {
 		// Make sure the sender is an EOA (EIP-3607)
 		codeHash, err := st.state.GetCodeHash(st.msg.From())
 		if err != nil {
@@ -648,7 +651,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			// 2. authority recover
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
-				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
+				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
 				continue
 			}
 			authority := *authorityPtr
@@ -681,7 +684,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if authorityNonce != auth.Nonce {
-				log.Debug("invalid nonce, skipping", "auth index", i)
+				log.Trace("invalid nonce, skipping", "auth index", i)
 				continue
 			}
 

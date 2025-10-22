@@ -29,8 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec3"
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
+	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -82,7 +81,7 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type parallelExecutor struct {
 	txExecutor
-	execWorkers    []*exec3.Worker
+	execWorkers    []*exec.Worker
 	stopWorkers    func()
 	waitWorkers    func()
 	in             *exec.QueueWithRetry
@@ -271,7 +270,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 											pe.LogCommitted(commitStart,
 												commitedBlocks-prevCommitedBlocks,
 												committedTransactions-prevCommittedTransactions,
-												committedGas-prevCommitedGas, rawdbhelpers.IdxStepsCountV3(rwTx), commitProgress)
+												committedGas-prevCommitedGas, rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize()), commitProgress)
 										}
 
 										lastCommitedLog = time.Now()
@@ -841,13 +840,13 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execRequests = make(chan *execRequest, 100_000)
 	pe.in = exec.NewQueueWithRetry(100_000)
 
-	pe.taskExecMetrics = exec3.NewWorkerMetrics()
+	pe.taskExecMetrics = exec.NewWorkerMetrics()
 	pe.blockExecMetrics = newBlockExecMetrics()
 
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
 
-	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
+	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec.NewWorkersPool(
 		execLoopCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
