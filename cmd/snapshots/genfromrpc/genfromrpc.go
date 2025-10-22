@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -660,6 +661,8 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 	receiptsEnabled := client != nil
 	var receiptWg, unmarshalWg errgroup.Group
 
+	receiptLimiter := rate.NewLimiter(950, 999)
+
 	for i, rawTx := range rawTxs {
 		idx := i
 		txData := rawTx
@@ -679,6 +682,10 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 					var receipt ReceiptJson
 					if txData["hash"] == "" {
 						return errors.New("missing tx hash for receipt fetch")
+					}
+
+					if err := receiptLimiter.Wait(context.Background()); err != nil {
+						return fmt.Errorf("rate limiter error: %w", err)
 					}
 
 					err := client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", txData["hash"])
