@@ -1936,7 +1936,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		defer toWitness.Close()
 		toWitness.TouchPlainKey(string(addrToWitness), nil, toProcess.TouchAccount)
 
-		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, root, "")
+		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "")
 		require.NoError(t, err)
 		_ = witnessTrie
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
