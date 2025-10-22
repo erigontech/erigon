@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/common/dir"
 	"os"
 	"sort"
 	"strconv"
@@ -30,6 +29,8 @@ import (
 
 	"github.com/emicklei/dot"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common/dir"
 )
 
 // ////////////////////////////////////////////////

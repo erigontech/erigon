@@ -102,6 +102,7 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 			nil, nil,
 			event, nil,
 			false, // checkNonce
+			false, // checkTransaction
 			false, // checkGas
 			true,  // isFree
 			nil,
@@ -137,6 +138,7 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 			nil, nil,
 			event, nil,
 			false, // checkNonce
+			false, // checkTransaction
 			false, // checkGas
 			true,  // isFree
 			nil,
@@ -232,6 +234,7 @@ func messageFromData(to common.Address, data []byte) *types.Message {
 		nil, nil,
 		data, nil,
 		false, // checkNonce
+		false, // checkTransaction
 		false, // checkGas
 		true,  // isFree
 		nil,
@@ -256,6 +259,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			event,
 			nil,   // accessList
 			false, // checkNonce
+			false, // checkTransaction
 			false, // checkGas
 			true,  // isFree
 			nil,   // maxFeePerBlobGas
