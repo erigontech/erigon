@@ -25,8 +25,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // MaxTotalVotingPower - the maximum allowed total voting power.
@@ -42,6 +42,10 @@ import (
 const (
 	MaxTotalVotingPower      = int64(math.MaxInt64) / 8
 	PriorityWindowSizeFactor = 2
+)
+
+var (
+	EmptyValidatorSetError = errors.New("applying the validator changes would result in empty set")
 )
 
 type Validator struct {
@@ -780,7 +784,7 @@ func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes
 
 	// Check that the resulting set will not be empty.
 	if numNewValidators == 0 && len(vals.Validators) == len(deletes) {
-		return errors.New("applying the validator changes would result in empty set")
+		return EmptyValidatorSetError
 	}
 
 	// Compute the priorities for updates.
@@ -1027,7 +1031,11 @@ func GetUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator,
 	}
 
 	if err := v.UpdateWithChangeSet(changes); err != nil {
-		logger.Error("error while updating change set", "err", err)
+		if errors.Is(err, EmptyValidatorSetError) {
+			logger.Warn("transition to empty validator set")
+		} else {
+			logger.Error("error while updating change set", "err", err)
+		}
 	}
 
 	return v

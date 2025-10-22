@@ -24,7 +24,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
@@ -41,56 +41,12 @@ func TestLegacyBlockchain(t *testing.T) {
 	}
 
 	bt := new(testMatcher)
+	dir := filepath.Join(legacyDir, "BlockchainTests")
 
-	// Skip random failures due to selfish mining test
-	bt.skipLoad(`.*bcForgedTest/bcForkUncle\.json`)
-
-	// Slow tests
-	bt.slow(`.*bcExploitTest/DelegateCallSpam.json`)
-	bt.slow(`.*bcExploitTest/ShanghaiLove.json`)
-	bt.slow(`.*bcExploitTest/SuicideIssue.json`)
-	bt.slow(`.*/bcForkStressTest/`)
-	bt.slow(`.*/bcGasPricerTest/RPC_API_Test.json`)
-	bt.slow(`.*/bcWalletTest/`)
-
-	// Very slow test
-	bt.skipLoad(`.*/stTimeConsuming/.*`)
-	// test takes a lot for time and goes easily OOM because of sha3 calculation on a huge range,
-	// using 4.6 TGas
-	bt.skipLoad(`.*randomStatetest94.json.*`)
-
-	// After the merge we would accept side chains as canonical even if they have lower td
-	bt.skipLoad(`.*bcMultiChainTest/ChainAtoChainB_difficultyB.json`)
-	bt.skipLoad(`.*bcMultiChainTest/CallContractFromNotBestBlock.json`)
-	bt.skipLoad(`.*bcTotalDifficultyTest/uncleBlockAtBlock3afterBlock4.json`)
-	bt.skipLoad(`.*bcTotalDifficultyTest/lotsOfBranchesOverrideAtTheMiddle.json`)
-	bt.skipLoad(`.*bcTotalDifficultyTest/sideChainWithMoreTransactions.json`)
-	bt.skipLoad(`.*bcForkStressTest/ForkStressTest.json`)
-	bt.skipLoad(`.*bcMultiChainTest/lotsOfLeafs.json`)
-	bt.skipLoad(`.*bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain.json`)
-	bt.skipLoad(`.*bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain2.json`)
-
-	// With chain history removal, TDs become unavailable, this transition tests based on TTD are unrunnable
-	bt.skipLoad(`.*bcArrowGlacierToParis/powToPosBlockRejection.json`)
-
-	// This directory contains no test.
+	// This directory contains no tests
 	bt.skipLoad(`.*\.meta/.*`)
 
-	// General state tests are 'exported' as blockchain tests, but we can run them natively.
-	// For speedier CI-runs those are skipped.
-	bt.skipLoad(`^GeneralStateTests/`)
-
-	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
-	// TODO(yperbasis): make it work
-	bt.skipLoad(`^TransitionTests/bcArrowGlacierToParis/powToPosBlockRejection\.json`)
-	bt.skipLoad(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain\.json`)
-
-	// TODO: HistoryV3: doesn't produce receipts on execution by design. But maybe we can Generate them on-the fly (on history) and enable this tests
-	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
-	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
-	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
-
-	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
@@ -111,9 +67,24 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testMatcher)
+	dir := filepath.Join(eestDir, "blockchain_tests")
 
-	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
-	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
+	// Slow tests
+	bt.slow(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)
+	bt.slow(`^frontier/scenarios/test_scenarios.json`)
+	bt.slow(`^osaka/eip7939_count_leading_zeros/test_clz_opcode_scenarios.json`)
+	bt.slow(`^prague/eip7623_increase_calldata_cost/test_transaction_validity_type_1_type_2.json`)
+
+	// Very slow tests
+	bt.skipLoad(`^berlin/eip2930_access_list/test_tx_intrinsic_gas.json`)
+	bt.skipLoad(`^cancun/eip4844_blobs/test_sufficient_balance_blob_tx`)
+	bt.skipLoad(`^cancun/eip4844_blobs/test_valid_blob_tx_combinations.json`)
+	bt.skipLoad(`^frontier/opcodes/test_stack_overflow.json`)
+	bt.skipLoad(`^prague/eip2537_bls_12_381_precompiles/test_invalid.json`)
+	bt.skipLoad(`^prague/eip2537_bls_12_381_precompiles/test_valid.json`)
+
+	// Tested in the state test format by TestState
+	bt.skipLoad(`^static/state_tests/`)
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
@@ -121,11 +92,12 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 			t.Error(err)
 		}
 	})
-
 }
 
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
+	t.Skip("Osaka is already covered by TestExecutionSpecBlockchain")
+
 	if testing.Short() {
 		t.Skip()
 	}
@@ -135,8 +107,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testMatcher)
-
-	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests_devnet")
+	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root

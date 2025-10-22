@@ -30,16 +30,16 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/race"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
+	"github.com/erigontech/erigon/common/testlog"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	executiontests "github.com/erigontech/erigon/execution/tests"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
@@ -268,7 +268,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	err = cl.Initialise(ctx)
 	require.NoError(t, err)
-	transactor := testhelpers.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
+	transactor := executiontests.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
 	acc1PrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	acc1 := crypto.PubkeyToAddress(acc1PrivKey.PublicKey)
@@ -351,7 +351,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	cl = testhelpers.NewMockCl(logger, eat.MockCl, slotCalculator)
 	err = cl.Initialise(ctx)
 	require.NoError(t, err)
-	transactor = testhelpers.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
+	transactor = executiontests.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
 	deployer = testhelpers.NewContractsDeployer(contractDeployerPrivKey, eat.ContractBackend, cl, chainConfig.ChainID, eat.TxnInclusionVerifier)
 	// wait for the shutter validator to connect to our test decryptionKeySender bootstrap node
 	shutterValidatorP2pPrivKeyBytes := make([]byte, 32)

@@ -34,9 +34,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
@@ -675,13 +675,14 @@ type BeaconChainConfig struct {
 
 // GetBlobParameters returns the blob parameters at a given epoch
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
-	// Iterate through schedule in desceding order
-	for i := range b.BlobSchedule {
+	// Iterate through schedule in desc order
+	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
 		entry := b.BlobSchedule[i]
 		if epoch >= entry.Epoch {
 			return entry
 		}
 	}
+
 	// Default to Electra parameters if no matching schedule entry
 	return BlobParameters{
 		Epoch:            b.ElectraForkEpoch,
@@ -729,9 +730,9 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
-	// sort blob schedule by epoch in descending order
+	// sort blob schedule by epoch in ascending order
 	sort.Slice(b.BlobSchedule, func(i, j int) bool {
-		return b.BlobSchedule[i].Epoch > b.BlobSchedule[j].Epoch
+		return b.BlobSchedule[i].Epoch < b.BlobSchedule[j].Epoch
 	})
 }
 
@@ -1041,10 +1042,16 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x90000073
 	cfg.ElectraForkEpoch = 222464
 	cfg.ElectraForkVersion = 0x90000074
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 272640
 	cfg.FuluForkVersion = 0x90000075
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
+
+	cfg.BlobSchedule = []BlobParameters{
+		{274176, 15},
+		{275712, 21},
+	}
+
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1071,7 +1078,7 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x05017000
 	cfg.ElectraForkEpoch = 115968
 	cfg.ElectraForkVersion = 0x06017000
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 165120
 	cfg.FuluForkVersion = 0x07017000
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
@@ -1086,6 +1093,11 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.MinPerEpochChurnLimit = 4
 	cfg.ChurnLimitQuotient = 1 << 16
 	cfg.ProposerScoreBoost = 40
+
+	cfg.BlobSchedule = []BlobParameters{
+		{166400, 15},
+		{167936, 21},
+	}
 
 	cfg.InitializeForkSchedule()
 	return cfg
@@ -1116,7 +1128,7 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x50000910
 	cfg.ElectraForkEpoch = 2048
 	cfg.ElectraForkVersion = 0x60000910
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 50688
 	cfg.FuluForkVersion = 0x70000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
@@ -1133,6 +1145,11 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.SlotsPerEpoch = 32
 	cfg.EpochsPerSyncCommitteePeriod = 256
 	cfg.MinPerEpochChurnLimit = 4
+
+	cfg.BlobSchedule = []BlobParameters{
+		{52480, 15},
+		{54016, 21},
+	}
 
 	cfg.InitializeForkSchedule()
 	return cfg
@@ -1181,6 +1198,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
 	cfg.InitializeForkSchedule()
 	return cfg
 }

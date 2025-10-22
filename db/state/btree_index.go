@@ -34,11 +34,11 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
@@ -406,7 +406,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
 		if existenceFilter != nil {
-			existenceFilter.AddHash(hi)
+			if err := existenceFilter.AddHash(hi); err != nil {
+				return err
+			}
 		}
 		pos, _ = kv.Skip()
 

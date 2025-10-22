@@ -18,29 +18,32 @@ package freezeblocks
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type RemoteBlockReader struct {
@@ -63,6 +66,16 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
 	return block, err
 }
+
+func (r *RemoteBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	reply, err := r.client.MinimumBlockAvailable(ctx, &emptypb.Empty{})
+	if err != nil {
+		return 0, err
+	}
+
+	return reply.BlockNum, nil
+}
+
 func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
@@ -417,6 +430,53 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+
+func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	if r.FrozenBlocks() > 0 {
+		snapshotTypes := []snaptype.Enum{
+			snaptype2.Enums.Headers,
+			snaptype2.Enums.Bodies,
+			snaptype2.Enums.Transactions,
+		}
+
+		snapshotMin := uint64(0)
+		for _, snapType := range snapshotTypes {
+			if minBlock, ok := r.sn.SegmentsMinByType(snapType); ok {
+				if minBlock > snapshotMin {
+					snapshotMin = minBlock
+				}
+			}
+		}
+		return snapshotMin, nil
+	}
+
+	if tx == nil {
+		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
+	}
+
+	dbMinBlock, err := r.findFirstCompleteBlock(tx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
+	}
+
+	return dbMinBlock, nil
+}
+
+// findFirstCompleteBlock finds the first block (after genesis) where block body is available.
+// When no block bodies exist beyond genesis, it returns 0.
+func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
+	secondKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
+	}
+
+	if len(secondKey) < 8 { // incomplete key, no block found
+		return 0, nil
+	}
+
+	result := binary.BigEndian.Uint64(secondKey[:8])
+	return result, nil
+}
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
 	if r.borSn == nil {
 		return 0
@@ -1241,7 +1301,6 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 	view := r.sn.View()
 	defer view.Close()
 	for _, sn := range view.Bodies() {
-		sn := sn
 		defer sn.Src().MadvSequential().DisableReadAhead()
 
 		var buf []byte

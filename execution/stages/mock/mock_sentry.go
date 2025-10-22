@@ -32,19 +32,10 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/genesiswrite"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -55,29 +46,39 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/consensuschain"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconsensusconfig"
-	"github.com/erigontech/erigon/eth/tracers"
-	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	stages2 "github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/ethconsensusconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
@@ -85,7 +86,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -172,12 +172,21 @@ func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sent
 func (ms *MockSentry) PenalizePeer(context.Context, *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-func (ms *MockSentry) PeerMinBlock(context.Context, *sentryproto.PeerMinBlockRequest) (*emptypb.Empty, error) {
+
+func (ms *MockSentry) SetPeerMinimumBlock(context.Context, *sentryproto.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
+	return nil, nil
+}
+
+func (ms *MockSentry) SetPeerLatestBlock(context.Context, *sentryproto.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
+	return nil, nil
+}
+
+func (ms *MockSentry) SetPeerBlockRange(context.Context, *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
 func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
-	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH68}, nil
+	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
 func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
@@ -347,7 +356,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
-	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
+	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, nil)
+	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
@@ -382,21 +392,21 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
-	inMemoryExecution := func(txc wrap.TxContainer, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+	inMemoryExecution := func(sd *dbstate.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stages2.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
-		chainReader := consensuschain.NewReader(mock.ChainConfig, txc.Tx, mock.BlockReader, logger)
+		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, mock.Engine, txc, stateSync, unwindPoint, headersChain, bodiesChain, true); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain, true); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
 		var progress uint64
-		progress, err = stages.GetStageProgress(txc.Tx, stages.Execution)
+		progress, err = stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return err
 		}
@@ -414,6 +424,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		mock.Genesis,
 		mock.ChainConfig.ChainID.Uint64(),
 		logger,
+		mock.BlockReader,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
@@ -789,7 +800,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	initialCycle, firstCycle := MockInsertAsInitialCycle, false
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.NewTxContainer(nil, nil), ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, nil, nil, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
 	// Wait to know if a new background retirement has started

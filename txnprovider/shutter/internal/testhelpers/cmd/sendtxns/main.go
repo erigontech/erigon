@@ -26,13 +26,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	executiontests "github.com/erigontech/erigon/execution/tests"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/requests"
-	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 )
 
 func main() {
@@ -85,7 +85,7 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	chainId := spec.Config.ChainID
 
 	rpcClient := requests.NewRequestGenerator(url, logger)
-	transactor := testhelpers.NewTransactor(rpcClient, chainId)
+	transactor := executiontests.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)
 	to := common.HexToAddress(toStr)
 	count, err := strconv.Atoi(countStr)

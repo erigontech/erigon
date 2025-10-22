@@ -8,9 +8,9 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // Implements tracing required for ERC-7562 validation. The rules are as follows:
@@ -51,20 +51,20 @@ type ValidationRulesTracer struct {
 
 	bannedOpcodes    map[vm.OpCode]bool
 	prevWasGas       bool
-	senderAddress    libcommon.Address
-	accessedAccounts map[libcommon.Address]bool
-	currentContract  libcommon.Address
-	checkedAccounts  map[libcommon.Address]bool
+	senderAddress    common.Address
+	accessedAccounts map[common.Address]bool
+	currentContract  common.Address
+	checkedAccounts  map[common.Address]bool
 	senderHasCode    bool
 }
 
-func NewValidationRulesTracer(sender libcommon.Address, senderHasCode bool) *ValidationRulesTracer {
+func NewValidationRulesTracer(sender common.Address, senderHasCode bool) *ValidationRulesTracer {
 	t := &ValidationRulesTracer{
 		bannedOpcodes:    make(map[vm.OpCode]bool),
 		senderAddress:    sender,
 		senderHasCode:    senderHasCode,
-		accessedAccounts: make(map[libcommon.Address]bool),
-		checkedAccounts:  make(map[libcommon.Address]bool),
+		accessedAccounts: make(map[common.Address]bool),
+		checkedAccounts:  make(map[common.Address]bool),
 	}
 
 	bannedOpcodes := []vm.OpCode{
@@ -130,7 +130,7 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 
 	if opCode == vm.EXTCODESIZE || opCode == vm.EXTCODECOPY || opCode == vm.EXTCODEHASH {
 		if len(scope.StackData()) > 0 {
-			addr := libcommon.BytesToAddress(scope.StackData()[0].Bytes())
+			addr := common.BytesToAddress(scope.StackData()[0].Bytes())
 			if t.isDelegatedAccount(scope.Code()) && addr != t.senderAddress {
 				t.err = fmt.Errorf("access to delegated account %s not allowed", addr.Hex())
 				return
@@ -141,7 +141,7 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 
 	if opCode == vm.CALL || opCode == vm.CALLCODE || opCode == vm.DELEGATECALL || opCode == vm.STATICCALL {
 		if len(scope.StackData()) > 0 {
-			addr := libcommon.BytesToAddress(scope.StackData()[0].Bytes())
+			addr := common.BytesToAddress(scope.StackData()[0].Bytes())
 			if t.isDelegatedAccount(scope.Code()) && addr != t.senderAddress {
 				t.err = fmt.Errorf("access to delegated account %s not allowed", addr.Hex())
 				return
@@ -154,7 +154,7 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 	}
 }
 
-func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if t.err != nil {
 		return
 	}
@@ -190,7 +190,7 @@ func (t *ValidationRulesTracer) OnFault(pc uint64, op byte, gas, cost uint64, sc
 	}
 }
 
-func (t *ValidationRulesTracer) isAssociatedStorage(slot libcommon.Hash, addr libcommon.Address) bool {
+func (t *ValidationRulesTracer) isAssociatedStorage(slot common.Hash, addr common.Address) bool {
 	// Case 1: The slot value is the address
 	if bytes.Equal(slot.Bytes(), addr.Bytes()) {
 		return true
@@ -222,7 +222,7 @@ func (t *ValidationRulesTracer) isAssociatedStorage(slot libcommon.Hash, addr li
 	return false
 }
 
-func (t *ValidationRulesTracer) OnStorageChange(addr libcommon.Address, slot libcommon.Hash, prev, new uint256.Int) {
+func (t *ValidationRulesTracer) OnStorageChange(addr common.Address, slot common.Hash, prev, new uint256.Int) {
 	if t.err != nil {
 		return
 	}

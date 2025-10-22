@@ -34,9 +34,9 @@ import (
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -45,8 +45,8 @@ import (
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/debug"
 )
 
 // Node is a container on which services can be registered.

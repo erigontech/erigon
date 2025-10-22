@@ -31,7 +31,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -39,11 +39,22 @@ func FileName(version Version, from, to uint64, fileType string) string {
 	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
 }
 
+func FileMask(from, to uint64, fileType string) string {
+	return fmt.Sprintf("*-%06d-%06d-%s", from/1_000, to/1_000, fileType)
+}
+
 func SegmentFileName(version Version, from, to uint64, t Enum) string {
 	return FileName(version, from, to, t.String()) + ".seg"
 }
 func IdxFileName(version Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".idx"
+}
+
+func SegmentFileMask(from, to uint64, t Enum) string {
+	return FileMask(from, to, t.String()) + ".seg"
+}
+func IdxFileMask(from, to uint64, fType string) string {
+	return FileMask(from, to, fType) + ".idx"
 }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {

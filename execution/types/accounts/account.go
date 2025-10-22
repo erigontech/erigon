@@ -24,8 +24,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -270,6 +270,10 @@ func (a *Account) Copy(image *Account) {
 	copy(a.Root[:], image.Root[:])
 	copy(a.CodeHash[:], image.CodeHash[:])
 	a.Incarnation = image.Incarnation
+}
+
+func (a *Account) Empty() bool {
+	return a == nil || (a.Nonce == 0 && a.Balance.IsZero() && a.CodeHash == empty.CodeHash)
 }
 
 func (a *Account) DecodeForHashing(enc []byte) error {

@@ -29,27 +29,28 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/core/genesiswrite"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainparams "github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/eth"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -152,7 +153,10 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
+	syncDefault := ethconfig.Defaults.Sync
+	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{
+		Sync: syncDefault,
 		Dirs: dirs,
 		Snapshot: ethconfig.BlocksFreezing{
 			NoDownloader: true,
@@ -161,8 +165,9 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		Miner: buildercfg.MiningConfig{
 			EnabledPOS: true,
 		},
-		KeepStoredChainConfig: true,
-		ElBlockDownloaderV2:   true,
+		KeepStoredChainConfig:     true,
+		ErigonDBStepSize:          config3.DefaultStepSize,
+		ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -210,6 +215,11 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		// requests should not take more than 5 secs in a test env, yet we can spam frequently
 		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
 		engineapi.WithJsonRpcClientMaxRetries(100),
+		engineapi.WithRetryableErrCheckers(
+			engineapi.ErrContainsRetryableErrChecker("connection refused"),
+			// below happened on win CI
+			engineapi.ErrContainsRetryableErrChecker("No connection could be made because the target machine actively refused it"),
+		),
 	)
 	require.NoError(t, err)
 	var mockCl *MockCl
@@ -228,6 +238,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
+		Transactor:           NewTransactor(rpcApiClient, genesis.Config.ChainID),
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
@@ -251,6 +262,7 @@ type EngineApiTester struct {
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl
+	Transactor           Transactor
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey

@@ -23,9 +23,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -37,7 +34,10 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -239,10 +239,18 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint(),
 	})
 
-	f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations())
-	f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits())
-	f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals())
-	f.addProposerLookahead(block.Block.Slot, lastProcessedState.ProposerLookahead())
+	if err := f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations()); err != nil {
+		return err
+	}
+	if err := f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits()); err != nil {
+		return err
+	}
+	if err := f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals()); err != nil {
+		return err
+	}
+	if err := f.addProposerLookahead(block.Block.Slot, lastProcessedState.ProposerLookahead()); err != nil {
+		return err
+	}
 
 	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
 	// Update checkpoints

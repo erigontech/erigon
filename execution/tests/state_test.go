@@ -24,22 +24,20 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 func TestStateCornerCases(t *testing.T) {
-	//if testing.Short() {
-	//	t.Skip()
-	//}
 	t.Parallel()
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
@@ -74,28 +72,6 @@ func TestStateCornerCases(t *testing.T) {
 			})
 		}
 	})
-
-}
-
-func initMatcher(st *testMatcher) {
-	// Long tests:
-	st.slow(`^stAttackTest/ContractCreationSpam`)
-	st.slow(`^stBadOpcode/badOpcodes`)
-	st.slow(`^stPreCompiledContracts/modexp`)
-	st.slow(`^stQuadraticComplexityTest/`)
-	st.slow(`^stStaticCall/static_Call50000`)
-	st.slow(`^stStaticCall/static_Return50000`)
-	st.slow(`^stSystemOperationsTest/CallRecursiveBomb`)
-	st.slow(`^stTransactionTest/Opcodes_TransactionInit`)
-	// Very time consuming
-	st.skipLoad(`^stTimeConsuming/`)
-	st.skipLoad(`.*vmPerformance/loop.*`)
-	// Uses 1GB RAM per tested fork
-	st.skipLoad(`^stStaticCall/static_Call1MB`)
-
-	// Broken tests:
-	// EOF is not part of cancun
-	st.skipLoad(`^stEOF/`)
 }
 
 func TestState(t *testing.T) {
@@ -111,11 +87,19 @@ func TestState(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	st := new(testMatcher)
-	initMatcher(st)
+	// Corresponds to GeneralStateTests from ethereum/tests:
+	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
+	dir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
+
+	// Slow tests
+	st.slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
+
+	// Very slow tests
+	st.skipLoad(`^stTimeConsuming/`)
 
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, stateTestDir, func(t *testing.T, name string, test *testutil.StateTest) {
+	st.walk(t, dir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)

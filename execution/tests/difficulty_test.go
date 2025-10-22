@@ -22,6 +22,7 @@ package executiontests
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/tests/testforks"
@@ -34,8 +35,9 @@ func TestDifficulty(t *testing.T) {
 	}
 
 	dt := new(testMatcher)
+	dir := filepath.Join(legacyDir, "DifficultyTests")
 
-	dt.walk(t, difficultyTestDir, func(t *testing.T, name string, superTest map[string]json.RawMessage) {
+	dt.walk(t, dir, func(t *testing.T, name string, superTest map[string]json.RawMessage) {
 		for fork, rawTests := range superTest {
 			if fork == "_info" {
 				continue

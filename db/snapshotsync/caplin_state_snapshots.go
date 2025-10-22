@@ -32,19 +32,19 @@ import (
 
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
@@ -57,7 +57,10 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 		Salt:       &salt,
 		BaseDataID: sn.From,
 	}
-	if err := snaptype.BuildIndex(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := snaptype.BuildIndex(ctx, sn, version.Versions{
+		Current:      sn.Version,
+		MinSupported: sn.Version,
+	}, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
 		}
@@ -374,10 +377,11 @@ func openIdxForCaplinStateIfNeeded(s *DirtySegment, filePath string, optimistic 
 }
 
 func openIdxIfNeedForCaplinState(s *DirtySegment, filePath string) (err error) {
-	s.indexes = make([]*recsplit.Index, 1)
-	if s.indexes[0] != nil {
+	if len(s.indexes) > 0 && s.indexes[0] != nil {
 		return nil
 	}
+
+	s.indexes = make([]*recsplit.Index, 1)
 
 	filePath = strings.ReplaceAll(filePath, ".seg", ".idx")
 	index, err := recsplit.OpenIndex(filePath)

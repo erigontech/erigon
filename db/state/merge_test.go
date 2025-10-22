@@ -27,7 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -118,7 +119,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	cfg := statecfg.Schema.AccountsDomain.Hist.IiCfg
 
 	dirs := datadir.New(os.TempDir())
-	ii, err := NewInvertedIndex(cfg, aggStep, dirs, log.New())
+	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
 	ii.Accessors = 0
 	ii.salt.Store(&salt)
 	if err != nil {
@@ -621,9 +622,9 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		salt := uint32(1)
 		dirs := datadir.New(os.TempDir())
 		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
-		cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
+		cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
-		d, err := NewDomain(cfg, 1, dirs, log.New())
+		d, err := NewDomain(cfg, 1, config3.DefaultStepsInFrozenFile, dirs, log.New())
 		if err != nil {
 			panic(err)
 		}

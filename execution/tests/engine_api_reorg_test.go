@@ -18,16 +18,20 @@ package executiontests
 
 import (
 	"context"
+	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/state/contracts"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain/params"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/state/contracts"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t *testing.T) {
@@ -62,6 +66,100 @@ func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t 
 		b4Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err)
 		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b4Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+	})
+}
+
+func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucceed(t *testing.T) {
+	// Scenario:
+	//   - we were following the tip efficiently and exec-ing 1 block at a time
+	//   - the CL went offline for a some time
+	//   - when it came back online we executed
+	//   - fcu1 with 357 blocks forward, no unwinding (it connected to the last fcu before CL went offline)
+	//   - fcu2 with 64 blocks forward, no unwinding (it connected to fcu1)
+	//   - newPayload for a side chain at height fcu2+1 that requires an unwind to height fcu2-1
+	//   - we got stuck with error domains.GetDiffset(fcu2.BlockNum, fcu2.BlockHash) not found
+	//
+	// In this test we simplify this to just exec-ing a batch of N blocks <= maxReorgDepth and then
+	// doing a new payload with a side chain which requires 1 block unwind.
+	//
+	// Generate a canonical chain of N blocks
+	n := uint64(64)
+	logLvl := log.LvlDebug
+	receiver1 := common.HexToAddress("0x111")
+	receiver2 := common.HexToAddress("0x222")
+	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
+	canonicalChain := make([]*MockClPayload, n)
+	eatCanonical := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = n
+		},
+	})
+	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eatCanonical EngineApiTester) {
+		for i := range canonicalChain {
+			txn, err := eatCanonical.Transactor.SubmitSimpleTransfer(eatCanonical.CoinbaseKey, receiver1, big.NewInt(1))
+			require.NoError(t, err)
+			clPayload, err := eatCanonical.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+			err = eatCanonical.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, clPayload.ExecutionPayload, txn.Hash())
+			require.NoError(t, err)
+			canonicalChain[i] = clPayload
+		}
+	})
+	// Generate a side chain which goes up to N and executes the same txns until N-1 but at N executes different txns
+	sideChain := make([]*MockClPayload, n)
+	eatSide := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = n
+		},
+	})
+	eatSide.Run(t, func(ctx context.Context, t *testing.T, eatSide EngineApiTester) {
+		forkPoint := n - 1
+		for i := range sideChain[:forkPoint] {
+			txn, err := eatSide.Transactor.SubmitSimpleTransfer(eatSide.CoinbaseKey, receiver1, big.NewInt(1))
+			require.NoError(t, err)
+			clPayload, err := eatSide.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+			err = eatSide.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, clPayload.ExecutionPayload, txn.Hash())
+			require.NoError(t, err)
+			sideChain[i] = clPayload
+		}
+		for i := forkPoint; i < uint64(len(sideChain)); i++ {
+			txn, err := eatSide.Transactor.SubmitSimpleTransfer(eatSide.CoinbaseKey, receiver2, big.NewInt(1))
+			require.NoError(t, err)
+			clPayload, err := eatSide.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+			err = eatSide.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, clPayload.ExecutionPayload, txn.Hash())
+			require.NoError(t, err)
+			sideChain[i] = clPayload
+		}
+	})
+	// Sync another EL all the way up to the canonical tip, then give it the side chain tip as a new payload
+	eatSync := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = n
+		},
+	})
+	eatSync.Run(t, func(ctx context.Context, t *testing.T, eatSync EngineApiTester) {
+		for _, payload := range canonicalChain {
+			_, err := eatSync.MockCl.InsertNewPayload(ctx, payload)
+			require.NoError(t, err)
+		}
+		err := eatSync.MockCl.UpdateForkChoice(ctx, canonicalChain[len(canonicalChain)-1])
+		require.NoError(t, err)
+		_, err = eatSync.MockCl.InsertNewPayload(ctx, sideChain[len(sideChain)-1])
 		require.NoError(t, err)
 	})
 }
