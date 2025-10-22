@@ -156,7 +156,10 @@ func (c *Client) resolveRoot(ctx context.Context, loc *linkEntry) (rootEntry, er
 		}
 		return rootEntry{}, nameError{loc.domain, errNoRoot}
 	})
-	return e.(rootEntry), err
+	if root, ok := e.(rootEntry); ok {
+		return root, err
+	}
+	return rootEntry{}, fmt.Errorf("unexpected type from singleflight: %T", e)
 }
 
 func parseAndVerifyRoot(txt string, loc *linkEntry) (rootEntry, error) {
@@ -192,7 +195,10 @@ func (c *Client) resolveEntry(ctx context.Context, domain, hash string) (entry, 
 		c.entries.Add(cacheKey, e)
 		return e, nil
 	})
-	e, _ := ei.(entry)
+	e, ok := ei.(entry)
+	if !ok {
+		return nil, fmt.Errorf("unexpected type from singleflight: %T", ei)
+	}
 	return e, err
 }
 
