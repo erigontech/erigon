@@ -913,24 +913,28 @@ func genFromRPc(cliCtx *cli.Context) error {
 	db := mdbx.MustOpen(dirs.Chaindata)
 	defer db.Close()
 	var start uint64
-	var curBlock uint64
-	err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		curBlock, err = stages.GetStageProgress(tx, stages.Bodies)
-		return err
-	})
-	if err != nil {
-		log.Warn("can't check current block", "err", err)
-	}
-	if curBlock == 0 {
-		// write arb genesis
-		// log.Info("Writing arbitrum sepolia-rollup genesis")
-
-		// gen := chain.ArbSepoliaRollupGenesisBlock()
-
-		// b := core.MustCommitGenesis(gen, db, dirs, log.New())
-		// log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
+	if from := cliCtx.Uint64(FromBlock.Name); from > 0 {
+		start = from
 	} else {
-		start = curBlock + 1
+		var curBlock uint64
+		err = db.Update(context.Background(), func(tx kv.RwTx) error {
+			curBlock, err = stages.GetStageProgress(tx, stages.Bodies)
+			return err
+		})
+		if err != nil {
+			log.Warn("can't check current block", "err", err)
+		}
+		if curBlock == 0 {
+			// write arb genesis
+			// log.Info("Writing arbitrum sepolia-rollup genesis")
+
+			// gen := chain.ArbSepoliaRollupGenesisBlock()
+
+			// b := core.MustCommitGenesis(gen, db, dirs, log.New())
+			// log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
+		} else {
+			start = curBlock + 1
+		}
 	}
 
 	// Query latest block number.
