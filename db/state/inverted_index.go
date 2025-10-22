@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -33,9 +32,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon/common/dbg"
-
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -43,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -914,42 +911,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	mxPruneSizeIndex.Add(float64(stat.PruneCountValues))
 
 	return stat, err
-}
-
-func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator1 {
-	var ii1 InvertedIterator1
-	ii1.hasNextInDb = true
-	ii1.roTx = roTx
-	ii1.indexTable = iit.ii.ValuesTable
-	for _, item := range iit.files {
-		if item.endTxNum <= startTxNum {
-			continue
-		}
-		if item.startTxNum >= endTxNum {
-			break
-		}
-		if item.endTxNum >= endTxNum {
-			ii1.hasNextInDb = false
-		}
-		g := iit.dataReader(item.src.decompressor)
-		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				return ii1
-			}
-			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: wrapper, key: key, val: val, txNum: ^item.endTxNum})
-			ii1.hasNextInFiles = true
-		}
-	}
-	binary.BigEndian.PutUint64(ii1.startTxKey[:], startTxNum)
-	ii1.startTxNum = startTxNum
-	ii1.endTxNum = endTxNum
-	ii1.advanceInDb()
-	ii1.advanceInFiles()
-	ii1.advance()
-	return ii1
 }
 
 // collate [stepFrom, stepTo)
