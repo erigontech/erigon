@@ -403,7 +403,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.PagedReader, ps *
 		pos = nextPos
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
 		if existenceFilter != nil {
-			existenceFilter.AddHash(hi)
+			if err := existenceFilter.AddHash(hi); err != nil {
+				return err
+			}
 		}
 		p.Processed.Add(1)
 	}

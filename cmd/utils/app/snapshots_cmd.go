@@ -391,6 +391,16 @@ var snapshotCommand = cli.Command{
 				&cli.Uint64Flag{Name: "new-step-size", Required: true, DefaultText: strconv.FormatUint(config3.DefaultStepSize, 10)},
 			}),
 		},
+		{
+			Name:        "info",
+			Action:      segInfo,
+			Description: "Show misc information about a segment file",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.PathFlag{Name: "file", Required: true},
+				&cli.StringFlag{Name: "compress", Required: true, Usage: "Values compression type: all,none,keys,values"},
+			}),
+		},
 	},
 }
 

@@ -286,6 +286,7 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 		nil, nil,
 		data, nil,
 		false, // checkNonce
+		false, // checkTransaction
 		false, // checkGas
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
@@ -330,6 +331,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 		data, nil,
 		false, // checkNonce
 		false, // checkGas
+		false, // checkTransaction
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
