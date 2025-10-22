@@ -927,6 +927,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
+		case integrity.CommitmentKvi:
+			if err := integrity.CheckCommitmentKvi(ctx, db, failFast, logger); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
