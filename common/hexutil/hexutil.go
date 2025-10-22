@@ -24,7 +24,6 @@ import (
 	"strconv"
 )
 
-
 // Decode decodes a hex string with 0x prefix.
 func Decode(input string) ([]byte, error) {
 	if len(input) == 0 {
