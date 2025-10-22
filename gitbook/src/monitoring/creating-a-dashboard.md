@@ -1,360 +1,93 @@
 # Creating a dashboard
 
-You can set up monitoring for Erigon using Grafana and Prometheus. Erigon has built-in support for this monitoring stack with pre-configured dashboards and metrics collection. This guide will walk you through setting up a complete monitoring dashboard for Erigon using Prometheus and Grafana, leveraging the built-in monitoring tools provided in the Erigon codebase.
+Erigon provides robust, built-in support for monitoring using the Prometheus and Grafana stack. This setup offers comprehensive visibility into node performance, storage usage, and network activity, including relevant metrics for the integrated Consensus Layer (Caplin).
 
-The monitoring setup leverages Erigon's built-in metrics system and provides comprehensive visibility into node performance, storage usage, and network activity. The pre-configured dashboards are actively maintained and include metrics for both execution and consensus layer operations when running with Caplin.
+#### Prerequisites
 
-## Prerequisites
+* Docker and Docker Compose installed
+* Erigon node running
+* Basic understanding of Prometheus and Grafana
 
-- Docker and Docker Compose installed
-- Erigon node running
-- Basic understanding of Prometheus and Grafana
+#### Step 1: Enable Metrics in Erigon
 
-## Step 1: Enable Metrics in Erigon
+You must first enable metrics collection in your running Erigon instance.
 
-First, you need to enable metrics collection in your Erigon instance by adding the `--metrics` flag.
-
-```bash
+```sh
 ./erigon --metrics --datadir=/your/data/dir
 ```
 
-If you need to specify a custom metrics address, use `--metrics.addr`.
+To specify a custom address for metrics, use the `--metrics.addr` flag.
 
-## Step 2: Configure Prometheus Targets
+#### Step 2: Configure Prometheus Targets
 
-Add your Erigon hosts to the Prometheus configuration file:
+The Erigon codebase includes a default configuration file for Prometheus.
 
 1. Copy the default configuration: `./cmd/prometheus/prometheus.yml`
-2. Edit the file to include your Erigon instance endpoints
-3. Save the modified configuration file
+2. Edit the file to include the endpoints of your running Erigon instance(s).
+3. Save the modified configuration file.
 
-## Step 3: Launch Monitoring Stack
+#### Step 3: Launch Monitoring Stack
 
-Erigon provides a simple Docker Compose setup for the monitoring stack:
+Erigon provides a simple Docker Compose setup to launch the monitoring services.
 
-```bash
+```sh
 docker compose up -d prometheus grafana
 ```
 
-Alternatively, you can use the make target:
+Alternatively, use the built-in $$ $\text{make}$ $$ target: $$ $\text{make prometheus}$ $$
 
-```bash
+```sh
 make prometheus
 ```
 
-## Step 4: Access Grafana Dashboard
+#### Step 4: Access Grafana Dashboard
 
-Once the containers are running, access Grafana at [localhost:3000](http://localhost:3000).
+Once the containers are running, access the Grafana interface at $$ $\text{localhost:3000}$ $$.
 
-**Default credentials:** `admin/admin`
+* Default credentials: `admin/admin`
 
-## Step 5: Pre-configured Dashboards
+#### Step 5: Utilize Pre-configured Dashboards
 
-Erigon comes with comprehensive pre-built dashboards that monitor various aspects of the node:
+Erigon comes with comprehensive, pre-built dashboards that you can find in `./cmd/prometheus/readme.md` .
 
-### Main Dashboard Features
-The `erigon_internals.json` dashboard includes panels for:
+The `erigon.json` dashboard is the recommended high-level board for most users, tracking critical performance and resource metrics:
 
-- **Storage Monitoring**: Snapshots, chaindata, and temp directory sizes
-- **Block Processing**: Block importing latency and execution times
-- **Network Activity**: Gossip bandwidth and P2P metrics
-- **State Management**: Domain operations and pruning statistics
+* **Performance**: Block Execution Speed, Processing Times (validation and execution latencies).
+* **Storage & Growth**: Monitor chaindata and snapshot sizes.
+* **Network Activity**: Gossip bandwidth and P2P metrics.
+* **State Management**: Domain operations and pruning statistics.
 
-### Key Metrics to Monitor
+#### Step 6: Memory Usage Monitoring (Important Note)
 
-1. **Block Execution Speed** - Measures how long it takes Erigon to execute individual blocks
-2. **Storage Growth** - Monitor chaindata and snapshot sizes
-3. **Processing Times** - Track validation and execution latencies
+Standard OS tools like `htop`$$ $\text{htop}$ $$ can be misleading for Erigon's memory usage because its database (MDBX) uses `MemoryMap`. The OS manages the OS Page Cache, which is shared and automatically freed when needed.
 
-## Step 6: Environment Configuration
+The dedicated panels in the `erigon.json` dashboard track accurate Go memory statistics. Erigon's application typically uses around 1GB during normal operation, while the OS Page Cache handles the bulk of data access memory efficiently.
+
+#### Step 7: Environment and Custom Configuration
 
 You can customize the setup using environment variables:
 
-- `XDG_DATA_HOME`: Changes default database folder location
-- `ERIGON_PROMETHEUS_CONFIG`: Path to custom prometheus.yml file  
-- `ERIGON_GRAFANA_CONFIG`: Path to custom grafana.ini file
+| **Variable**                                                        | **Description**                                                      |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `XDG_DATA_HOME`$$ $\text{XDG\_DATA\_HOME}$ $$                       | Changes default database folder location.                            |
+| $$ $\text{ERIGON\_PROMETHEUS\_CONFIG}$ $$`ERIGON_PROMETHEUS_CONFIG` | Path to a custom $$ $\text{prometheus.yml}$ $$`prometheus.yml` file. |
+| `ERIGON_GRAFANA_CONFIG`$$ $\text{ERIGON\_GRAFANA\_CONFIG}$ $$       | Path to a custom `grafana.ini`$$ $\text{grafana.ini}$ $$ file.       |
 
-Example with custom configuration:
-```bash
+Example with a Custom Prometheus Configuration:
+
+Bash
+
+```sh
 ERIGON_PROMETHEUS_CONFIG=/path/to/custom/prometheus.yml docker compose up prometheus grafana
 ```
 
-## Step 7: Adding Custom Hosts
+#### Troubleshooting
 
-To monitor multiple Erigon instances:
+* Ensure Erigon is running with the `--metrics` flag enabled.
+* Verify Prometheus can reach your Erigon metrics endpoint (default port varies).
+* Check Docker container logs if services fail to start.
+* Confirm firewall settings allow access to monitoring ports.
 
-1. Copy `./cmd/prometheus/prometheus.yml`
-2. Add your additional Erigon hosts to the targets
-3. Use the custom config: `ERIGON_PROMETHEUS_CONFIG=/new/location/prometheus.yml docker compose up prometheus grafana`
+#### For Developers
 
-## Step 8: Memory Usage Monitoring
-
-The dashboard includes proper memory usage tracking that accounts for OS page cache. This is important because standard tools like `htop` can be misleading for Erigon memory usage. Erigon's internal database (MDBX) uses `MemoryMap` where the OS manages all read, write, and cache operations instead of the application. The `htop` tool shows "App + OS used to hold page cache for given App" in the `res` column, but this isn't informative because most of that memory is OS page cache that gets automatically freed when needed.
-
-The pre-configured Grafana dashboards include specific memory monitoring panels. The main `erigon.json` dashboard tracks Go memory statistics including:
-
-- `go_memstats_heap_alloc_bytes`: Current heap allocation
-- `go_memstats_sys_bytes`: Total system memory
-- `go_memstats_stack_inuse_bytes`: Stack memory in use
-
-Erigon uses approximately 4GB of RAM during genesis sync and around 1GB during normal operation, while OS page cache can utilize unlimited memory [9](#1-8) . The system is designed so that OS page cache automatically manages memory allocation and can be shared between multiple processes accessing the same database files.
-
-
-
-## Troubleshooting
-
-- Ensure Erigon is running with `--metrics` flag enabled
-- Verify Prometheus can reach your Erigon metrics endpoint (default port varies)
-- Check Docker container logs if services fail to start
-- Confirm firewall settings allow access to monitoring ports
-
-## Developers
-
-For developers wanting to add custom metrics, examples can be found in the codebase, and gRPC metrics are available by searching for `grpc_prometheus.Register` in the code.
-
-<!--
-### Citations
-
-**File:** cmd/prometheus/Readme.md (L1-1)
-```markdown
-Add flag `--metrics` to Erigon or any other process (add `--metrics.addr` if need).
-```
-
-**File:** cmd/prometheus/Readme.md (L3-3)
-```markdown
-Add hosts to collecting metrics in: `./cmd/prometheus/prometheus.yml`
-```
-
-**File:** cmd/prometheus/Readme.md (L5-5)
-```markdown
-Run Grafana and Prometheus: `docker compose up -d prometheus grafana` or `make prometheus`
-```
-
-**File:** cmd/prometheus/Readme.md (L7-7)
-```markdown
-Go to: [localhost:3000](localhost:3000), admin/admin
-```
-
-**File:** cmd/prometheus/Readme.md (L9-13)
-```markdown
-Env variables:
-
-- `XDG_DATA_HOME` re-defines default prometheus and grafana databases folder.
-- `ERIGON_PROMETHEUS_CONFIG` path to custom `prometheus.yml` file. Default is: `./cmd/prometheus/prometheus.yml`
-- `ERIGON_GRAFANA_CONFIG` path to custom `grafana.ini file`. Default is: `./cmd/prometheus/grafana.ini`
-```
-
-**File:** cmd/prometheus/Readme.md (L15-16)
-```markdown
-To add custom Erigon host: copy `./cmd/prometheus/prometheus.yml`, modify, pass new location by:
-`ERIGON_PROMETHEUS_CONFIG=/new/location/prometheus.yml docker compose up prometheus grafana`
-```
-
-**File:** cmd/prometheus/Readme.md (L29-31)
-```markdown
-See example: `ethdb/object_db.go:dbGetTimer`
-
-```
-
-**File:** cmd/prometheus/dashboards/erigon_internals.json (L1-60)
-```json
-{
-  "__inputs": [
-    {
-      "name": "DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM",
-      "label": "grafanacloud-erigonovhmonitoring-prom",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
-  "__elements": {},
-  "__requires": [
-    {
-      "type": "panel",
-      "id": "barchart",
-      "name": "Bar chart",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "bargauge",
-      "name": "Bar gauge",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "gauge",
-      "name": "Gauge",
-      "version": ""
-    },
-    {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "12.1.0-91295"
-    },
-    {
-      "type": "panel",
-      "id": "piechart",
-      "name": "Pie chart",
-      "version": ""
-    },
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "1.0.0"
-    },
-    {
-      "type": "panel",
-      "id": "stat",
-      "name": "Stat",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
-      "version": ""
-```
-
-**File:** cmd/prometheus/dashboards/erigon_internals.json (L185-195)
-```json
-              "expr": "devops_erigon_dirs_size_total{directory=\"/erigon-data/snapshots\", instance=~\"$nodo\"}",
-              "legendFormat": "__auto",
-              "range": true,
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            }
-          ],
-          "title": "<datadir>/SNAPSHOTS TOTAL SIZE (GB)",
-```
-
-**File:** cmd/prometheus/dashboards/erigon_internals.json (L282-292)
-```json
-              "expr": "devops_erigon_dirs_size_total{directory=\"/erigon-data/chaindata\", instance=~\"$nodo\"}",
-              "legendFormat": "__auto",
-              "range": true,
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            }
-          ],
-          "title": "<datadir>/CHAINDATA size (GB)",
-```
-
-**File:** cmd/prometheus/dashboards/erigon_internals.json (L1867-1877)
-```json
-              "expr": "block_importing_latency{instance=~\"$instance\"}",
-              "legendFormat": "{{label_name}} {{instance}}",
-              "range": true,
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            }
-          ],
-          "title": "Block importing latency",
-```
-
-**File:** cmd/prometheus/dashboards/erigon_internals.json (L2583-2593)
-```json
-              "expr": "execution_time{instance=~\"$instance\"}",
-              "legendFormat": "{{label_name}} {{instance}}",
-              "range": true,
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            }
-          ],
-          "title": "ValidateChain: time spent",
-```
-
-**File:** cmd/prometheus/dashboards/erigon_internals.json (L3153-3166)
-```json
-              "expr": "rate(gossip_topics_seen_beacon_block{instance=~\"$instance\"}[$__rate_interval])/125 > 0  ",
-              "fullMetaSearch": false,
-              "includeNullMetadata": true,
-              "legendFormat": "kb/s {{instance}}",
-              "range": true,
-              "refId": "A",
-              "useBackend": false,
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            }
-          ],
-          "title": "Beacon Block Gossip bandwidth",
-```
-
-**File:** cmd/prometheus/dashboards/erigon_internals.json (L4324-4345)
-```json
-              "expr": "domain_running_files_building{instance=~\"$instance\"}",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "running files building: {{instance}}",
-              "range": true,
-              "refId": "E"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "editorMode": "code",
-              "expr": "domain_wal_flushes{instance=~\"$instance\"}",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "WAL flushes {{instance}}",
-              "range": true,
-              "refId": "F"
-            }
-          ],
-          "title": "State: running collate/merge/prune",
-```
-
-**File:** cmd/prometheus/dashboards/erigon_internals.json (L5716-5725)
-```json
-              "expr": "chain_execution_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "format": "time_series",
-              "interval": "",
-              "intervalFactor": 1,
-              "legendFormat": "execution: {{instance}}",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Block Execution speed ",
-```
-
-**File:** README.md (L443-443)
-```markdown
-`docker compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
-```
-
-**File:** README.md (L751-755)
-```markdown
-`htop` on column `res` shows memory of "App + OS used to hold page cache for given App", but it's not informative,
-because if `htop` says that app using 90% of memory you still can run 3 more instances of app on the same machine -
-because most of that `90%` is "OS pages cache".
-OS automatically frees this cache any time it needs memory. Smaller "page cache size" may not impact performance of
-Erigon at all.
-```
-
-**File:** README.md (L762-763)
-```markdown
-- `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in
-  browser `localhost:3000`, credentials `admin/admin`)
-```
--->
+For developers, the `erigon_internals.json` dashboard offers a low-level, complex view of the node for in-depth debugging (not recommended for typical users). Custom metrics can be added by searching for `grpc_prometheus.Register` within the codebase.
