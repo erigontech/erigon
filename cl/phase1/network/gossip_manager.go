@@ -149,7 +149,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto
 	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
 	for _, s := range g.registeredServices {
-		if s.service.IsMyGossipMessage(data.Name) && s.SatisfiesConditions(data, version) {
+		if s.service.IsMyGossipMessage(data.Name) {
+			if !s.SatisfiesConditions(data, version) {
+				return services.ErrIgnore
+			}
 			msg, err := s.service.DecodeGossipMessage(data, version)
 			if err != nil {
 				log.Debug("Failed to decode gossip message", "name", data.Name, "error", err)
