@@ -654,7 +654,10 @@ var timeboostedTxTypes = map[string]bool{
 	"0x69": true, // no timbeoosted but for simplicity of checking
 }
 
-var receiptLimiter = rate.NewLimiter(950, 980)
+var (
+	receiptLimiter = rate.NewLimiter(950, 980)
+	blockLimiter   = rate.NewLimiter(100, 100)
+)
 
 func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	txs := make(types.Transactions, len(rawTxs))
@@ -770,8 +773,18 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 	return txs, nil
 }
 
+// blockWithNumber holds a block and its number for sorting
+type blockWithNumber struct {
+	number uint64
+	block  *types.Block
+}
+
 // GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
 func GetBlockByNumber(client, receiptClient *rpc.Client, blockNumber *big.Int, verify bool, isArbitrum bool) (*types.Block, error) {
+	if err := blockLimiter.Wait(context.Background()); err != nil {
+		return nil, fmt.Errorf("block rate limiter error: %w", err)
+	}
+
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
@@ -830,6 +843,44 @@ func GetBlockByNumber(client, receiptClient *rpc.Client, blockNumber *big.Int, v
 		}
 	}
 	return blk, nil
+}
+
+// fetchBlocksBatch fetches multiple blocks concurrently and returns them sorted by block number
+func fetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]blockWithNumber, error) {
+	if startBlock >= endBlock {
+		return nil, nil
+	}
+
+	actualBatchSize := batchSize
+	if endBlock-startBlock < batchSize {
+		actualBatchSize = endBlock - startBlock
+	}
+
+	blocks := make([]blockWithNumber, actualBatchSize)
+	var eg errgroup.Group
+
+	for i := uint64(0); i < actualBatchSize; i++ {
+		idx := i
+		blockNum := startBlock + i
+		eg.Go(func() error {
+			blockNumber := new(big.Int).SetUint64(blockNum)
+			blk, err := GetBlockByNumber(client, receiptClient, blockNumber, verify, isArbitrum)
+			if err != nil {
+				return fmt.Errorf("error fetching block %d: %w", blockNum, err)
+			}
+			blocks[idx] = blockWithNumber{
+				number: blockNum,
+				block:  blk,
+			}
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	return blocks, nil
 }
 
 // genFromRPc connects to the RPC, fetches blocks starting from the given block,
@@ -893,63 +944,84 @@ func genFromRPc(cliCtx *cli.Context) error {
 	latestBlock.SetString(latestBlockHex[2:], 16)
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	var blockNumber big.Int
-	// Process blocks from the starting block up to the latest.
-	for i := start; i < latestBlock.Uint64(); {
-		prev := i
-		prevTime := time.Now()
-		timer := time.NewTimer(40 * time.Second)
-		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
-			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
-				blockNumber.SetUint64(blockNum)
-				blk, err := GetBlockByNumber(client, receiptClient, &blockNumber, verification, isArbitrum)
-				if err != nil {
-					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
+	const batchSize = 10
+
+	logStartBlock := start
+	logStartTime := time.Now()
+	var lastBlockHash common.Hash
+
+	logTimer := time.NewTimer(40 * time.Second)
+	defer logTimer.Stop()
+
+	for prev := start; prev < latestBlock.Uint64(); {
+		blocks, err := fetchBlocksBatch(client, receiptClient, prev, latestBlock.Uint64(), batchSize, verification, isArbitrum)
+		if err != nil {
+			log.Warn("Error fetching block batch", "start", prev, "err", err)
+			return err
+		}
+
+		if len(blocks) > 0 {
+			last := blocks[len(blocks)-1]
+			prev = last.number
+			lastBlockHash = last.block.Hash()
+		}
+
+		select {
+		case <-logTimer.C:
+			elapsed := time.Since(logStartTime)
+			blocksProcessed := prev - logStartBlock
+			blkSec := float64(blocksProcessed) / elapsed.Seconds()
+			log.Info("Progress", "block", prev-1, "hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
+
+			// Reset counters and timer for next interval
+			logStartBlock = prev
+			logStartTime = time.Now()
+		default:
+		}
+
+		if noWrite {
+			continue
+		}
+
+		err = db.Update(context.TODO(), func(tx kv.RwTx) error {
+			for _, bwn := range blocks {
+				blk := bwn.block
+				blockNum := bwn.number
+
+				if err := rawdb.WriteBlock(tx, blk); err != nil {
+					return fmt.Errorf("error writing block %d: %w", blockNum, err)
 				}
-				if !noWrite {
-					if err := rawdb.WriteBlock(tx, blk); err != nil {
-						return fmt.Errorf("error writing block %d: %w", blockNum, err)
-					}
-					if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-						return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
-					}
-					if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-						return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
-					}
-					rawdb.WriteHeadBlockHash(tx, blk.Hash())
-					if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
-						return err
-					}
-					if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
-						return err
-					}
-					if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
-						return err
-					}
-					if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
-						return err
-					}
-					if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
-						return err
-					}
-
+				if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+					return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 				}
+				if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+					return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+				}
+			}
 
-				// Update the progress counter.
-				i = blockNum + 1
+			if len(blocks) > 0 {
+				blk := blocks[len(blocks)-1].block
+				blockNum := blocks[len(blocks)-1].number
 
-				select {
-				case <-timer.C:
-					blkSec := float64(blockNum-prev) / time.Since(prevTime).Seconds()
-					log.Info("Block processed", "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
-					return nil
-				default:
-					// continue processing without waiting
+				rawdb.WriteHeadBlockHash(tx, blk.Hash())
+				if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+					return err
+				}
+				if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
+					return err
+				}
+				if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
+					return err
+				}
+				if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
+					return err
+				}
+				if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
+					return err
 				}
 			}
 			return nil
 		})
-		timer.Stop()
 		if err != nil {
 			log.Warn("Error updating db", "err", err)
 			return err
