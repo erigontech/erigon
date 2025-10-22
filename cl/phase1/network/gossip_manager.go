@@ -66,6 +66,7 @@ type GossipManager struct {
 	blsToExecutionChangeService  services.BLSToExecutionChangeService
 	proposerSlashingService      services.ProposerSlashingService
 	attestationsLimiter          *timeBasedRateLimiter
+	registeredServices           []services.Service[any]
 }
 
 func NewGossipReceiver(
@@ -87,7 +88,7 @@ func NewGossipReceiver(
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
 ) *GossipManager {
-	return &GossipManager{
+	gm := &GossipManager{
 		sentinel:                     s,
 		forkChoice:                   forkChoice,
 		emitters:                     emitters,
@@ -107,6 +108,21 @@ func NewGossipReceiver(
 		proposerSlashingService:      proposerSlashingService,
 		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 250),
 	}
+	// register services
+	gm.registeredServices = []services.Service[any]{
+		blockService,
+		/*blobService,
+		dataColumnSidecarService,
+		syncCommitteeMessagesService,
+		syncContributionService,
+		aggregateAndProofService,
+		attestationService,
+		voluntaryExitService,
+		blsToExecutionChangeService,
+		proposerSlashingService,
+		*/
+	}
+	return gm
 }
 
 func (g *GossipManager) onRecv(ctx context.Context, data *sentinelproto.GossipData, l log.Ctx) (err error) {

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 var (
@@ -93,6 +95,20 @@ func NewBlockService(
 	}
 	go b.loop(ctx)
 	return b
+}
+
+func (b *blockService) IsMyMessage(name string) bool {
+	return name == gossip.TopicNameBeaconBlock
+}
+
+func (b *blockService) DecodeMessage(data *sentinelproto.GossipData) (*cltypes.SignedBeaconBlock, error) {
+	currentEpoch := b.ethClock.GetCurrentEpoch()
+	version := b.beaconCfg.GetCurrentStateVersion(currentEpoch)
+	obj := cltypes.NewSignedBeaconBlock(b.beaconCfg, version)
+	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 // ProcessMessage processes a block message according to https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block

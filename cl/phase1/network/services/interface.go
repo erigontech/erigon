@@ -20,11 +20,14 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 // Note: BlobSidecarService and BlockService are tested in spectests
 
 type Service[T any] interface {
+	IsMyMessage(name string) bool
+	DecodeMessage(data *sentinelproto.GossipData) (T, error)
 	ProcessMessage(ctx context.Context, subnet *uint64, msg T) error
 }
 
