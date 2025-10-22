@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -154,8 +156,15 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
+			name := data.Name
+			// remove any suffix number from the name, e.g. "beacon_attestation_0" -> "beacon_attestation"
+			tokens := strings.Split(name, "_")
+			// if last token is a number, remove it
+			if _, err := strconv.Atoi(tokens[len(tokens)-1]); err == nil {
+				name = strings.Join(tokens[:len(tokens)-1], "_")
+			}
 			g.statsMutex.Lock()
-			g.stats[data.Name]++
+			g.stats[name]++
 			g.statsMutex.Unlock()
 			return s.service.ProcessMessage(ctx, data.SubnetId, msg)
 		}
