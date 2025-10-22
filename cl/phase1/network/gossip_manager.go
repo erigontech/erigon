@@ -55,8 +55,7 @@ type GossipManager struct {
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
 
 	registeredServices []gossipService
-	stats              map[string]int64
-	statsMutex         sync.Mutex
+	stats              *gossipMessageStats
 }
 
 func NewGossipReceiver(
@@ -87,34 +86,23 @@ func NewGossipReceiver(
 		ethClock:           ethClock,
 		committeeSub:       comitteeSub,
 		registeredServices: []gossipService{},
-		stats:              make(map[string]int64),
-		statsMutex:         sync.Mutex{},
+		stats:              &gossipMessageStats{},
 	}
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	// register services
-	RegisterGossipService(gm, blockService)
+	RegisterGossipService(gm, blockService, withTokenBucketRateLimiterByPeer(1, 2))
+	RegisterGossipService(gm, syncContributionService, withTokenBucketRateLimiterByPeer(2, 4))
+	RegisterGossipService(gm, aggregateAndProofService, withTokenBucketRateLimiterByPeer(5, 10))
 	RegisterGossipService(gm, syncCommitteeMessagesService)
-	RegisterGossipService(gm, syncContributionService)
 	RegisterGossipService(gm, attesterSlashingService)
-	RegisterGossipService(gm, aggregateAndProofService)
 	RegisterGossipService(gm, voluntaryExitService)
 	RegisterGossipService(gm, blsToExecutionChangeService)
 	RegisterGossipService(gm, proposerSlashingService)
-	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250))
+	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250), withTokenBucketRateLimiterByPeer(4, 8))
 	RegisterGossipService(gm, blobService, withBeginVersion(clparams.DenebVersion), withEndVersion(clparams.FuluVersion))
-	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion))
-	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		times := 0
-		for range ticker.C {
-			gm.statsMutex.Lock()
-			for name, count := range gm.stats {
-				log.Info("Gossip Message Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*60))
-			}
-			gm.statsMutex.Unlock()
-			times++
-		}
-	}()
+	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withTokenBucketRateLimiterByPeer(16, 32))
+
+	gm.stats.goPrintStats()
 	return gm
 }
 
@@ -151,24 +139,17 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto
 	for _, s := range g.registeredServices {
 		if s.service.IsMyGossipMessage(data.Name) {
 			if !s.SatisfiesConditions(data, version) {
+				g.stats.addReject(data.Name)
 				return services.ErrIgnore
 			}
 			msg, err := s.service.DecodeGossipMessage(data, version)
 			if err != nil {
 				log.Debug("Failed to decode gossip message", "name", data.Name, "error", err)
+				g.stats.addReject(data.Name)
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
-			name := data.Name
-			// remove any suffix number from the name, e.g. "beacon_attestation_0" -> "beacon_attestation"
-			tokens := strings.Split(name, "_")
-			// if last token is a number, remove it
-			if _, err := strconv.Atoi(tokens[len(tokens)-1]); err == nil {
-				name = strings.Join(tokens[:len(tokens)-1], "_")
-			}
-			g.statsMutex.Lock()
-			g.stats[name]++
-			g.statsMutex.Unlock()
+			g.stats.addAccept(data.Name)
 			return s.service.ProcessMessage(ctx, data.SubnetId, msg)
 		}
 	}
@@ -274,4 +255,60 @@ Reconnect:
 			}
 		}
 	}
+}
+
+type gossipMessageStats struct {
+	accepts    map[string]int64
+	rejects    map[string]int64
+	statsMutex sync.Mutex
+}
+
+func (s *gossipMessageStats) addAccept(name string) {
+	tokens := strings.Split(name, "_")
+	// if last token is a number, remove it
+	if _, err := strconv.Atoi(tokens[len(tokens)-1]); err == nil {
+		name = strings.Join(tokens[:len(tokens)-1], "_")
+	}
+
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+	if s.accepts == nil {
+		s.accepts = make(map[string]int64)
+	}
+	s.accepts[name]++
+}
+
+func (s *gossipMessageStats) addReject(name string) {
+	tokens := strings.Split(name, "_")
+	// if last token is a number, remove it
+	if _, err := strconv.Atoi(tokens[len(tokens)-1]); err == nil {
+		name = strings.Join(tokens[:len(tokens)-1], "_")
+	}
+
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+	if s.rejects == nil {
+		s.rejects = make(map[string]int64)
+	}
+	s.rejects[name]++
+}
+
+func (s *gossipMessageStats) goPrintStats() {
+	go func() {
+		duration := 5 * time.Minute
+		ticker := time.NewTicker(duration)
+		defer ticker.Stop()
+		times := int64(0)
+		for range ticker.C {
+			s.statsMutex.Lock()
+			for name, count := range s.accepts {
+				log.Debug("Gossip Message Accepts Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
+			}
+			for name, count := range s.rejects {
+				log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
+			}
+			s.statsMutex.Unlock()
+			times++
+		}
+	}()
 }
