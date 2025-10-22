@@ -19,15 +19,15 @@ package sync
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/synctest"
+	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/p2p"
 )
 
 func TestBlockEventsSpamGuard(t *testing.T) {
@@ -49,35 +49,34 @@ func TestBlockEventsSpamGuard(t *testing.T) {
 
 func TestTipEventsCompositeChannel(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		heimdallEvents := NewEventChannel[Event](3)
+		p2pEvents := NewEventChannel[Event](2)
+		ch := NewTipEventsCompositeChannel(heimdallEvents, p2pEvents)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		eg := errgroup.Group{}
+		eg.Go(func() error {
+			return ch.Run(ctx)
+		})
+		t.Cleanup(func() {
+			err := eg.Wait()
+			require.ErrorIs(t, err, context.Canceled)
+		})
 
-	heimdallEvents := NewEventChannel[Event](3)
-	p2pEvents := NewEventChannel[Event](2)
-	ch := NewTipEventsCompositeChannel(heimdallEvents, p2pEvents)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	t.Cleanup(cancel)
+		ch.PushEvent(Event{Type: EventTypeNewMilestone})
+		ch.PushEvent(Event{Type: EventTypeNewBlockHashes}) // should be dropped due to the following 2 events
+		ch.PushEvent(Event{Type: EventTypeNewBlock})
+		ch.PushEvent(Event{Type: EventTypeNewBlockHashes})
 
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		err := ch.Run(ctx)
-		println(err)
-		return err
+		events := make([]EventType, 3)
+		events[0] = read(ctx, t, ch.Events()).Type
+		events[1] = read(ctx, t, ch.Events()).Type
+		events[2] = read(ctx, t, ch.Events()).Type
+		require.ElementsMatch(t, events, []EventType{EventTypeNewMilestone, EventTypeNewBlock, EventTypeNewBlockHashes})
+		require.Empty(t, ch.heimdallEventsChannel.events)
+		require.Empty(t, ch.p2pEventsChannel.events)
 	})
-
-	ch.PushEvent(Event{Type: EventTypeNewMilestone})
-	ch.PushEvent(Event{Type: EventTypeNewBlockHashes}) // should be dropped due to the following 2 events
-	ch.PushEvent(Event{Type: EventTypeNewBlock})
-	ch.PushEvent(Event{Type: EventTypeNewBlockHashes})
-
-	events := make([]EventType, 3)
-	events[0] = read(ctx, t, ch.Events()).Type
-	events[1] = read(ctx, t, ch.Events()).Type
-	events[2] = read(ctx, t, ch.Events()).Type
-	require.ElementsMatch(t, events, []EventType{EventTypeNewMilestone, EventTypeNewBlock, EventTypeNewBlockHashes})
-	require.Empty(t, ch.heimdallEventsChannel.events)
-	require.Empty(t, ch.p2pEventsChannel.events)
-	cancel()
-	err := eg.Wait()
-	require.ErrorIs(t, err, context.Canceled)
 }
 
 func read(ctx context.Context, t *testing.T, ch <-chan Event) Event {

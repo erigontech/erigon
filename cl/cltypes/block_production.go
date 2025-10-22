@@ -20,8 +20,8 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
 )
 
 // BlindOrExecutionBeaconBlock is a union type that can be either a BlindedBeaconBlock or a BeaconBlock, depending on the context.
@@ -67,7 +67,7 @@ func (b *BlindOrExecutionBeaconBlock) ToExecution() *DenebBeaconBlock {
 		StateRoot:     b.StateRoot,
 		Body:          b.BeaconBody,
 	}
-	DenebBeaconBlock := NewDenebBeaconBlock(b.Cfg, b.Version())
+	DenebBeaconBlock := NewDenebBeaconBlock(b.Cfg, b.Version(), b.Slot)
 	DenebBeaconBlock.Block = beaconBlock
 	for _, kzgProof := range b.KzgProofs {
 		proof := KZGProof{}

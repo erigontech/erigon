@@ -25,12 +25,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/c2h5oh/datasize"
+	"github.com/go-viper/mapstructure/v2"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/pelletier/go-toml/v2"
@@ -42,28 +43,31 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/version"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/logging"
+	"github.com/erigontech/erigon/node/paths"
+	"github.com/erigontech/erigon/p2p/nat"
 
-	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+
+	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
@@ -90,17 +94,18 @@ var (
 	natSetting                     string
 	torrentVerbosity               int
 	downloadRateStr, uploadRateStr string
-	torrentDownloadSlots           int
-	staticPeersStr                 string
-	torrentPort                    int
-	torrentMaxPeers                int
-	torrentConnsPerFile            int
-	targetFile                     string
-	disableIPV6                    bool
-	disableIPV4                    bool
-	seedbox                        bool
-	dbWritemap                     bool
-	all                            bool
+	// How do I mark this deprecated with cobra?
+	torrentDownloadSlots int
+	staticPeersStr       string
+	torrentPort          int
+	torrentMaxPeers      int
+	torrentConnsPerFile  int
+	targetFile           string
+	disableIPV6          bool
+	disableIPV4          bool
+	seedbox              bool
+	dbWritemap           bool
+	all                  bool
 )
 
 func init() {
@@ -118,6 +123,7 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
+	// Deprecated.
 	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
@@ -195,7 +201,7 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if cmd.Name() != "torrent_cat" {
 			logger = debug.SetupCobra(cmd, "downloader")
-			logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+			logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
@@ -216,40 +222,64 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err := checkChainName(ctx, dirs, chain); err != nil {
 		return err
 	}
-	torrentLogLevel, _, err := downloadercfg.Int2LogLevel(torrentVerbosity)
+	torrentLogLevel, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
 	}
 
-	var downloadRate, uploadRate datasize.ByteSize
-	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
+	downloadRate, err := utils.GetStringFlagRateLimit(downloadRateStr)
+	if err != nil {
 		return err
 	}
-	if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
+	uploadRate, err := utils.GetStringFlagRateLimit(uploadRateStr)
+	if err != nil {
 		return err
 	}
 
-	logger.Info("[snapshots] cli flags", "chain", chain, "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String(), "webseed", webseeds)
-	staticPeers := common.CliString2Array(staticPeersStr)
+	logger.Info(
+		"[snapshots] cli flags",
+		"chain", chain,
+		"addr", downloaderApiAddr,
+		"datadir", dirs.DataDir,
+		"ipv6-enabled", !disableIPV6,
+		"ipv4-enabled", !disableIPV4,
+		"download.rate", downloadRateStr,
+		"upload.rate", uploadRateStr,
+		"webseed", webseeds,
+	)
 
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
+	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(webseeds)
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		_, err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
+		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
 		if err != nil {
 			return err
 		}
 	}
-	cfg, err := downloadercfg.New(ctx, dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
+	cfg, err := downloadercfg.New(
+		ctx,
+		dirs,
+		version,
+		torrentLogLevel,
+		torrentPort,
+		torrentConnsPerFile,
+		webseedsList,
+		chain,
+		dbWritemap,
+		downloadercfg.NewCfgOpts{
+			DownloadRateLimit: downloadRate.TorrentRateLimit(),
+			UploadRateLimit:   uploadRate.TorrentRateLimit(),
+		},
+	)
 	if err != nil {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", 32)
+	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", runtime.NumCPU())
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -259,41 +289,62 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
+	// Called manually to ensure all torrents are present before verification.
+	cfg.AddTorrentsFromDisk = false
+	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
+	cfg.ManualDataVerification = manualDataVerification
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
+	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
-	d.HandleTorrentClientStatus()
+	d.HandleTorrentClientStatus(nil)
+
+	err = d.AddTorrentsFromDisk(ctx)
+	if err != nil {
+		return fmt.Errorf("adding torrents from disk: %w", err)
+	}
+
+	// I think we could use DisableInitialPieceVerification to get the behaviour we want here: One
+	// hash, and fail if it's in the verify files list or we have fail fast on.
 
 	if len(_verifyFiles) > 0 {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
-	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
+	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
 		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
+		if verifyFailfast {
+			return nil
+		}
 	}
+
+	// This only works if Cfg.ManualDataVerification is held by reference by the Downloader. The
+	// alternative is to pass the value through AddTorrentsFromDisk, do it per Torrent ourselves, or
+	// defer all hashing to the torrent Client in the Downloader and wait for it to complete.
+	cfg.ManualDataVerification = false
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	d.MainLoopInBackground(false)
+	// I'm kinda curious... but it was false before.
+	d.MainLoopInBackground(true)
 	if seedbox {
-		var downloadItems []*proto_downloader.AddItem
-		for _, it := range snapcfg.KnownCfg(chain).Preverified {
-			downloadItems = append(downloadItems, &proto_downloader.AddItem{
+		var downloadItems []*downloaderproto.AddItem
+		snapCfg, _ := snapcfg.KnownCfg(chain)
+		for _, it := range snapCfg.Preverified.Items {
+			downloadItems = append(downloadItems, &downloaderproto.AddItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
 			})
 		}
-		if _, err := bittorrentServer.Add(ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+		if _, err := bittorrentServer.Add(ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
 			return err
 		}
 	}
@@ -375,19 +426,24 @@ var torrentCat = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
 		}
+		var ms map[string]any
+		err = mapstructure.Decode(mi, &ms)
+		if err != nil {
+			return fmt.Errorf("decoding metainfo into map: %w", err)
+		}
 		fmt.Printf("InfoHash = '%x'\n", mi.HashInfoBytes())
-		mi.InfoBytes = nil
-		bytes, err := toml.Marshal(mi)
+		delete(ms, "InfoBytes")
+		bytes, err := toml.Marshal(ms)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s\n", string(bytes))
-		return nil
+		_, err = os.Stdout.Write(bytes)
+		return err
 	},
 }
 var torrentClean = &cobra.Command{
 	Use:     "torrent_clean",
-	Short:   "Remove all .torrent files from datadir directory",
+	Short:   "RemoveFile all .torrent files from datadir directory",
 	Example: "go run ./cmd/downloader torrent_clean --datadir=<datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
@@ -405,7 +461,7 @@ var torrentClean = &cobra.Command{
 			if !strings.HasSuffix(de.Name(), ".torrent") || strings.HasPrefix(de.Name(), ".") {
 				return nil
 			}
-			err = os.Remove(filepath.Join(dirs.Snap, path))
+			err = dir.RemoveFile(filepath.Join(dirs.Snap, path))
 			if err != nil {
 				logger.Warn("[snapshots.torrent] remove", "err", err, "path", path)
 				return err
@@ -501,7 +557,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 func manifest(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 
-	files, err := downloader.SeedableFiles(dirs, chain, all)
+	files, err := downloader.SeedableFiles(dirs, chain, true)
 	if err != nil {
 		return err
 	}
@@ -527,17 +583,11 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "history/"+fName)
 	}
 	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "idx/"+fName)
 	}
 
@@ -563,7 +613,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 		for _, filePath := range files {
-			if err := os.Remove(filePath); err != nil {
+			if err := dir.RemoveFile(filePath); err != nil {
 				return err
 			}
 		}
@@ -581,13 +631,6 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	}
 
 	for _, t := range torrents {
-		// we don't release commitment history in this time. let's skip it here.
-		if strings.Contains(t.DisplayName, "history") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
-		if strings.Contains(t.DisplayName, "idx") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)
@@ -653,7 +696,7 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 	grpcServer := grpc.NewServer(opts...)
 	reflection.Register(grpcServer) // Register reflection service on gRPC server.
 	if snServer != nil {
-		proto_downloader.RegisterDownloaderServer(grpcServer, snServer)
+		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}
 
 	//if metrics.Enabled {
@@ -681,7 +724,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	if !exists {
 		return nil
 	}
-	db, err := mdbx.New(kv.ChainDB, log.New()).
+	db, err := mdbx.New(dbcfg.ChainDB, log.New()).
 		Path(dirs.Chaindata).
 		Accede(true).
 		Open(ctx)
@@ -691,12 +734,13 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	defer db.Close()
 
 	if cc := tool.ChainConfigFromDB(db); cc != nil {
-		chainConfig := params.ChainConfigByChainName(chainName)
-		if chainConfig == nil {
+		spc, err := chainspec.ChainSpecByName(chainName)
+		if err != nil {
 			return fmt.Errorf("unknown chain: %s", chainName)
 		}
-		if chainConfig.ChainID.Uint64() != cc.ChainID.Uint64() {
-			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
+		if spc.Config.ChainID.Uint64() != cc.ChainID.Uint64() {
+			advice := fmt.Sprintf("\nTo change to '%s', remove %s %s\nAnd then start over with --chain=%s", chainName, dirs.Chaindata, filepath.Join(dirs.Snap, "preverified.toml"), chainName)
+			return fmt.Errorf("datadir already was configured with --chain=%s"+advice, cc.ChainName)
 		}
 	}
 	return nil

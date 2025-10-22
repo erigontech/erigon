@@ -18,18 +18,24 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
+	"math"
 	"math/big"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/gasprice"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -246,6 +252,99 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
+}
+
+// EthHardForkConfig represents config of a hard-fork
+type EthHardForkConfig struct {
+	ActivationTime  uint64                    `json:"activationTime"`
+	BlobSchedule    *params.BlobConfig        `json:"blobSchedule"`
+	ChainId         hexutil.Uint              `json:"chainId"`
+	ForkId          hexutil.Bytes             `json:"forkId"`
+	Precompiles     map[string]common.Address `json:"precompiles"`
+	SystemContracts map[string]common.Address `json:"systemContracts"`
+}
+
+// EthConfigResp is the response type of eth_config
+type EthConfigResp struct {
+	Current *EthHardForkConfig `json:"current"`
+	Next    *EthHardForkConfig `json:"next"`
+	Last    *EthHardForkConfig `json:"last"`
+}
+
+// Config returns the HardFork config for current and upcoming forks:
+// assuming linear fork progression and ethereum-like schedule
+func (api *APIImpl) Config(ctx context.Context, blockTimeOverride *hexutil.Uint64) (*EthConfigResp, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var currentBlockTime uint64
+	if blockTimeOverride != nil {
+		// optional utility arg to aid with testing
+		currentBlockTime = blockTimeOverride.Uint64()
+	} else {
+		h, err := api.headerByRPCNumber(ctx, rpc.LatestBlockNumber, tx)
+		if err != nil {
+			return nil, err
+		}
+		if h == nil {
+			return nil, errors.New("latest header not found")
+		}
+		currentBlockTime = h.Time
+	}
+
+	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	gatherForksFrom := genesis.Time()
+	if genesis.Time() >= currentBlockTime {
+		// handle forks activated at genesis with activation time 0
+		gatherForksFrom = 0
+		currentBlockTime = 0
+	}
+
+	response := EthConfigResp{}
+	forkBlockNums, forkTimes := forkid.GatherForks(chainConfig, gatherForksFrom)
+	// current fork config
+	currentForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, currentBlockTime)
+	response.Current = fillForkConfig(chainConfig, currentForkId.Hash, currentForkId.Activation)
+
+	// next fork config
+	if currentForkId.Next == 0 {
+		// means there are no later forks setup to be activated after the current one
+		return &response, nil
+	}
+
+	nextForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, currentForkId.Next)
+	response.Next = fillForkConfig(chainConfig, nextForkId.Hash, nextForkId.Activation)
+
+	// last fork config
+	lastForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, math.MaxUint64)
+	response.Last = fillForkConfig(chainConfig, lastForkId.Hash, lastForkId.Activation)
+
+	return &response, nil
+}
+
+func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime uint64) *EthHardForkConfig {
+	forkConfig := EthHardForkConfig{}
+	forkConfig.ActivationTime = activationTime
+	forkConfig.BlobSchedule = chainConfig.GetBlobConfig(activationTime)
+	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
+	forkConfig.ForkId = forkId[:]
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: math.MaxUint64,
+		Time:        activationTime,
+	}
+	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
+	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
+	for addr, precompile := range precompiles {
+		forkConfig.Precompiles[precompile.Name()] = addr
+	}
+	forkConfig.SystemContracts = chainConfig.SystemContracts(activationTime)
+	return &forkConfig
 }
 
 type GasPriceOracleBackend struct {

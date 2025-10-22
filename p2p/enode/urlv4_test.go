@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-p2p/enr"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func init() {

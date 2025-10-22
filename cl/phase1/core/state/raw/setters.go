@@ -17,10 +17,10 @@
 package raw
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 )
 
 func (b *BeaconState) SetVersion(version clparams.StateVersion) {
@@ -573,4 +573,9 @@ func (b *BeaconState) SetConsolidationBalanceToConsume(balance uint64) {
 func (b *BeaconState) SetEarlistConsolidationEpoch(epoch uint64) {
 	b.earliestConsolidationEpoch = epoch
 	b.markLeaf(EarliestConsolidationEpochLeafIndex)
+}
+
+func (b *BeaconState) SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ) {
+	b.proposerLookahead = proposerLookahead
+	b.markLeaf(ProposerLookaheadLeafIndex)
 }

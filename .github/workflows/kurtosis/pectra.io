@@ -5,7 +5,7 @@ participants_matrix:
       el_log_level: "debug"
   cl:
     - cl_type: teku
-      cl_image: consensys/teku:develop
+      cl_image: consensys/teku:25.9.1
     - cl_type: lighthouse
       cl_image: sigp/lighthouse:v7.0.1
 
@@ -14,7 +14,7 @@ network_params:
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
-  seconds_per_slot: 3
+  seconds_per_slot: 4
   genesis_delay: 90
 
 additional_services:

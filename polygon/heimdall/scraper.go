@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	commonerrors "github.com/erigontech/erigon-lib/common/errors"
-	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/event"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
+	"github.com/erigontech/erigon/common/event"
+	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type Scraper[TEntity Entity] struct {
@@ -127,7 +127,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 			case <-progressLogTicker.C:
 				if len(entities) > 0 {
 					s.logger.Info(
-						heimdallLogPrefix("scraper periodic progress"),
+						heimdallLogPrefix("scraper progress"),
 						"name", s.name,
 						"rangeStart", idRange.Start,
 						"rangeEnd", idRange.End,

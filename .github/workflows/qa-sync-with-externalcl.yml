@@ -29,12 +29,14 @@ jobs:
       CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 3600 # 1 hour
-      TOTAL_TIME_SECONDS: 25200 # 7 hours
+      TOTAL_TIME_SECONDS: 28800 # 8 hours
       ERIGON_ASSERT: true
+      LIGHTHOUSE_VERSION: v8.0.0-rc.1
+      LIGHTHOUSE_FILE: lighthouse-${{ env.LIGHTHOUSE_VERSION }}-x86_64-unknown-linux-gnu.tar.gz
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Clean Erigon Build & Data Directories
         run: |
@@ -43,11 +45,10 @@ jobs:
 
       - name: Install ${{ matrix.client }} and generate JWT secret
         run: |
-          mkdir -p $CL_DATA_DIR
           if [ "${{ matrix.client }}" == "lighthouse" ]; then
-            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.1/lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz
-            tar -xvf lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
-            rm lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz
+            curl -L -o "${CL_DATA_DIR}/${LIGHTHOUSE_FILE}" "https://github.com/sigp/lighthouse/releases/download/${LIGHTHOUSE_VERSION}/${LIGHTHOUSE_FILE}"
+            tar -xvf "${CL_DATA_DIR}/${LIGHTHOUSE_FILE}" -C $CL_DATA_DIR
+            rm "${CL_DATA_DIR}/${LIGHTHOUSE_FILE}"
           elif [ "${{ matrix.client }}" == "prysm" ]; then
             curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
             chmod +x $CL_DATA_DIR/prysm.sh
@@ -109,7 +110,7 @@ jobs:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
             ${{ github.workspace }}/result-${{ matrix.chain }}.json
-            ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ github.workspace }}/erigon_data/logs/
             ${{ github.workspace }}/consensus/data/beacon/logs/beacon.log
 
       - name: Upload test results (Prysm)
@@ -119,8 +120,15 @@ jobs:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
             ${{ github.workspace }}/result-${{ matrix.chain }}.json
-            ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ github.workspace }}/erigon_data/logs/
             ${{ github.workspace }}/consensus/data/beacon.log
+
+      - name: Upload metric plots
+        if: steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: metric-plots--${{ matrix.client }}-${{ matrix.chain }}
+          path: ${{ github.workspace }}/metrics-${{ matrix.chain }}-plots*
 
       - name: Clean up Erigon data directory
         if: always()

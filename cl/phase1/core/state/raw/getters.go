@@ -20,11 +20,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/common"
 )
 
 var (
@@ -349,6 +349,10 @@ func (b *BeaconState) PendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingP
 
 func (b *BeaconState) PendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
 	return b.pendingConsolidations
+}
+
+func (b *BeaconState) ProposerLookahead() solid.Uint64VectorSSZ {
+	return b.proposerLookahead
 }
 
 // more compluicated ones

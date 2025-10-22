@@ -13,7 +13,7 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-    
+
 jobs:
   tests:
     strategy:
@@ -23,10 +23,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: ${{ contains(fromJSON('[
             "refs/heads/release/2.60",
             "refs/heads/release/2.61",
@@ -47,10 +47,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: ${{ contains(fromJSON('[
             "refs/heads/release/2.60",
             "refs/heads/release/2.61",

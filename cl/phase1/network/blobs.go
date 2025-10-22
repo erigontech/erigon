@@ -23,12 +23,14 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/common/log/v3"
 )
+
+var ErrTimeout = errors.New("timeout")
 
 var requestBlobBatchExpiration = 15 * time.Second
 
@@ -127,7 +129,7 @@ Loop:
 			return nil, ctx.Err()
 		case <-timer.C:
 			log.Trace("RequestBlobsFrantically: timeout")
-			return nil, errors.New("timeout")
+			return nil, ErrTimeout
 		default:
 			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 				break Loop

@@ -19,7 +19,7 @@ package jsonrpc
 import (
 	"context"
 
-	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon/p2p"
 )
 
 const (

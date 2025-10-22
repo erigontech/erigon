@@ -19,14 +19,12 @@ package raw
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
-
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 // BlockRoot computes the block root for the state.
@@ -57,6 +55,8 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 	case clparams.DenebVersion:
 		return 2736653
 	case clparams.ElectraVersion:
+		return 2736653
+	case clparams.FuluVersion:
 		return 2736653
 	default:
 		// ?????
@@ -89,6 +89,9 @@ func (b *BeaconState) getSchema() []interface{} {
 		s = append(s, &b.depositRequestsStartIndex, &b.depositBalanceToConsume, &b.exitBalanceToConsume, &b.earliestExitEpoch, &b.consolidationBalanceToConsume,
 			&b.earliestConsolidationEpoch, b.pendingDeposits, b.pendingPartialWithdrawals, b.pendingConsolidations)
 	}
+	if b.version >= clparams.FuluVersion {
+		s = append(s, b.proposerLookahead)
+	}
 	return s
 }
 
@@ -104,6 +107,9 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		b.pendingDeposits = solid.NewPendingDepositList(b.beaconConfig)
 		b.pendingPartialWithdrawals = solid.NewPendingWithdrawalList(b.beaconConfig)
 		b.pendingConsolidations = solid.NewPendingConsolidationList(b.beaconConfig)
+	}
+	if version >= int(clparams.FuluVersion) {
+		b.proposerLookahead = solid.NewUint64VectorSSZ(int((b.beaconConfig.MinSeedLookahead + 1) * b.beaconConfig.SlotsPerEpoch))
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
@@ -135,6 +141,9 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 		size += b.pendingDeposits.EncodingSizeSSZ()
 		size += b.pendingPartialWithdrawals.EncodingSizeSSZ()
 		size += b.pendingConsolidations.EncodingSizeSSZ()
+	}
+	if b.version >= clparams.FuluVersion {
+		size += b.proposerLookahead.EncodingSizeSSZ()
 	}
 	return
 }

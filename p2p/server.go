@@ -36,17 +36,17 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/discover"
-	"github.com/erigontech/erigon-p2p/enode"
-	"github.com/erigontech/erigon-p2p/enr"
-	"github.com/erigontech/erigon-p2p/event"
-	"github.com/erigontech/erigon-p2p/nat"
-	"github.com/erigontech/erigon-p2p/netutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/p2p/discover"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/p2p/event"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 const (
@@ -115,8 +115,6 @@ type Config struct {
 	// protocol.
 	BootstrapNodesV5 []*enode.Node `toml:",omitempty"`
 
-	LookupBootnodeURLs LookupBootnodeURLsFunc
-
 	// Static nodes are used as pre-configured connections which are always
 	// maintained and re-connected on disconnects.
 	StaticNodes []*enode.Node
@@ -184,7 +182,8 @@ type Config struct {
 
 	DiscoveryDNS []string
 
-	LookupDNSNetwork LookupDNSNetworkFunc
+	// Enable WIT protocol for stateless witness data exchange
+	EnableWitProtocol bool
 }
 
 func (config *Config) ListenPort() int {
@@ -588,7 +587,7 @@ func (srv *Server) setupLocalNode() error {
 		// do it in the background.
 		srv.loopWG.Add(1)
 		go func() {
-			defer debug.LogPanic()
+			defer dbg.LogPanic()
 			defer srv.loopWG.Done()
 			if ip, err := srv.NAT.ExternalIP(); err == nil {
 				srv.logger.Info("NAT ExternalIP resolved", "ip", ip)
@@ -633,7 +632,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 		if !realaddr.IP.IsLoopback() && srv.NAT.SupportsMapping() {
 			srv.loopWG.Add(1)
 			go func() {
-				defer debug.LogPanic()
+				defer dbg.LogPanic()
 				defer srv.loopWG.Done()
 				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery", srv.logger)
 			}()
@@ -749,7 +748,7 @@ func (srv *Server) setupListening(ctx context.Context) error {
 		if !tcp.IP.IsLoopback() && (srv.NAT != nil) && srv.NAT.SupportsMapping() {
 			srv.loopWG.Add(1)
 			go func() {
-				defer debug.LogPanic()
+				defer dbg.LogPanic()
 				defer srv.loopWG.Done()
 				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p", srv.logger)
 			}()
@@ -758,7 +757,7 @@ func (srv *Server) setupListening(ctx context.Context) error {
 
 	srv.loopWG.Add(1)
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		defer srv.loopWG.Done()
 		srv.listenLoop(ctx)
 	}()
@@ -776,7 +775,7 @@ func (srv *Server) doPeerOp(fn peerOpFunc) {
 
 // run is the main loop of the server.
 func (srv *Server) run() {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	if len(srv.Config.Protocols) > 0 {
 		srv.logger.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", *srv.localnodeAddrCache.Load(), "name", srv.Name)
 	}
@@ -978,7 +977,7 @@ func (srv *Server) listenLoop(ctx context.Context) {
 			srv.logger.Trace("Accepted connection", "addr", fd.RemoteAddr())
 		}
 		go func() {
-			defer debug.LogPanic()
+			defer dbg.LogPanic()
 			defer slots.Release(1)
 			// The error is logged in Server.setupConn().
 			_ = srv.SetupConn(fd, inboundConn, nil)
@@ -1114,7 +1113,7 @@ func (srv *Server) launchPeer(c *conn, pubkey [64]byte) *Peer {
 
 // runPeer runs in its own goroutine for each peer.
 func (srv *Server) runPeer(p *Peer) {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	if srv.newPeerHook != nil {
 		srv.newPeerHook(p)
 	}
