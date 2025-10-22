@@ -47,7 +47,7 @@ func (s *gossipMessageStats) addReject(name string) {
 
 func (s *gossipMessageStats) goPrintStats() {
 	go func() {
-		duration := 5 * time.Minute
+		duration := time.Minute
 		ticker := time.NewTicker(duration)
 		defer ticker.Stop()
 		times := int64(0)
