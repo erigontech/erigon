@@ -727,7 +727,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	if header.Number.Uint64() >= DEBUG_LOG_FROM {
 		fmt.Printf("finalize1: %d,%d\n", header.Number.Uint64(), len(receipts))
 	}
-	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, receipts)
+	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Sign() == 0, header, receipts)
 	if err != nil {
 		return nil, err
 	}
@@ -844,7 +844,7 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to c
 		if header == nil {
 			panic("not found header")
 		}
-		if header.Number.Uint64() == 0 {
+		if header.Number.Sign() == 0 {
 			break
 		}
 		if to == header.Hash() {

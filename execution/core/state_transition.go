@@ -116,6 +116,7 @@ type Message interface {
 
 	Nonce() uint64
 	CheckNonce() bool
+	CheckTransaction() bool
 	Data() []byte
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
@@ -298,7 +299,9 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				st.msg.From().Hex(), stNonce)
 		}
+	}
 
+	if st.msg.CheckTransaction() {
 		// Make sure the sender is an EOA (EIP-3607)
 		codeHash, err := st.state.GetCodeHash(st.msg.From())
 		if err != nil {

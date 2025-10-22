@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"time"
 
@@ -36,7 +37,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type Bundle struct {
@@ -224,9 +225,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
 		}
 		if bundle.BlockOverride.BlockHash != nil {
-			for blockNum, hash := range *bundle.BlockOverride.BlockHash {
-				overrideBlockHash[blockNum] = hash
-			}
+			maps.Copy(overrideBlockHash, *bundle.BlockOverride.BlockHash)
 		}
 		results := []map[string]interface{}{}
 		for _, txn := range bundle.Transactions {
