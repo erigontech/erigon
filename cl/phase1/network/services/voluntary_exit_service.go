@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
@@ -66,6 +67,21 @@ func NewVoluntaryExitService(
 		ethClock:               ethClock,
 		batchSignatureVerifier: batchSignatureVerifier,
 	}
+}
+
+func (s *voluntaryExitService) IsMyGossipMessage(name string) bool {
+	return name == gossip.TopicNameVoluntaryExit
+}
+
+func (s *voluntaryExitService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedVoluntaryExitForGossip, error) {
+	obj := &SignedVoluntaryExitForGossip{
+		Receiver:            copyOfPeerData(data),
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
+	}
+	if err := obj.SignedVoluntaryExit.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedVoluntaryExitForGossip) error {

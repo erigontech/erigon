@@ -66,7 +66,7 @@ type GossipManager struct {
 	blsToExecutionChangeService  services.BLSToExecutionChangeService
 	proposerSlashingService      services.ProposerSlashingService
 	attestationsLimiter          *timeBasedRateLimiter
-	registeredServices           []services.Service[any]
+	registeredServices           []gossipService
 }
 
 func NewGossipReceiver(
@@ -107,21 +107,21 @@ func NewGossipReceiver(
 		blsToExecutionChangeService:  blsToExecutionChangeService,
 		proposerSlashingService:      proposerSlashingService,
 		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 250),
+		registeredServices:           []gossipService{},
 	}
+	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	// register services
-	gm.registeredServices = []services.Service[any]{
-		blockService,
-		/*blobService,
-		dataColumnSidecarService,
-		syncCommitteeMessagesService,
-		syncContributionService,
-		aggregateAndProofService,
-		attestationService,
-		voluntaryExitService,
-		blsToExecutionChangeService,
-		proposerSlashingService,
-		*/
-	}
+	RegisterGossipService(gm, blockService)
+	RegisterGossipService(gm, blobService)
+	RegisterGossipService(gm, syncCommitteeMessagesService)
+	RegisterGossipService(gm, syncContributionService)
+	RegisterGossipService(gm, attesterSlashingService)
+	RegisterGossipService(gm, aggregateAndProofService)
+	RegisterGossipService(gm, voluntaryExitService)
+	RegisterGossipService(gm, blsToExecutionChangeService)
+	RegisterGossipService(gm, proposerSlashingService)
+	RegisterGossipService(gm, attestationService, withTimeBasedRateLimiter(6*time.Second, 250))
+	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion))
 	return gm
 }
 
@@ -178,6 +178,17 @@ func copyOfPeerData(in *sentinelproto.GossipData) *sentinelproto.Peer {
 func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto.GossipData) error {
 	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
+	for _, s := range g.registeredServices {
+		if s.service.IsMyGossipMessage(data.Name) && s.checkConditions(data, version) {
+			msg, err := s.service.DecodeGossipMessage(data, version)
+			if err != nil {
+				log.Debug("Failed to decode gossip message", "name", data.Name, "error", err)
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return err
+			}
+			return s.service.ProcessMessage(ctx, data.SubnetId, msg)
+		}
+	}
 
 	// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
 	// then attempts to deserialize the received data into it.

@@ -97,13 +97,11 @@ func NewBlockService(
 	return b
 }
 
-func (b *blockService) IsMyMessage(name string) bool {
+func (b *blockService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBeaconBlock
 }
 
-func (b *blockService) DecodeMessage(data *sentinelproto.GossipData) (*cltypes.SignedBeaconBlock, error) {
-	currentEpoch := b.ethClock.GetCurrentEpoch()
-	version := b.beaconCfg.GetCurrentStateVersion(currentEpoch)
+func (b *blockService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
 	obj := cltypes.NewSignedBeaconBlock(b.beaconCfg, version)
 	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 		return nil, err

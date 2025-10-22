@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -26,8 +27,8 @@ import (
 // Note: BlobSidecarService and BlockService are tested in spectests
 
 type Service[T any] interface {
-	IsMyMessage(name string) bool
-	DecodeMessage(data *sentinelproto.GossipData) (T, error)
+	IsMyGossipMessage(name string) bool
+	DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (T, error)
 	ProcessMessage(ctx context.Context, subnet *uint64, msg T) error
 }
 
