@@ -781,7 +781,7 @@ func GetBlockByNumber(client, receiptClient *rpc.Client, blockNumber *big.Int, v
 	if verify && txHash != block.TxHash {
 		log.Error("transactionHash mismatch", "expected", block.TxHash, "got", txHash, "num", blockNumber)
 		for i, tx := range txs {
-			log.Error("tx", "index", i, "hash", tx.Hash())
+			log.Error("tx", "index", i, "hash", tx.Hash(), "type", tx.Type())
 			if tx.Type() == types.ArbitrumSubmitRetryableTxType {
 				srtx := tx.(*types.ArbitrumSubmitRetryableTx)
 				srtx.PrintMe()

@@ -226,8 +226,10 @@ func (tx *LegacyTx) payloadSize(hashingOnly bool) (payloadSize, nonceLen, gasLen
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
-
-	if tx.Timeboosted != nil && !hashingOnly {
+	if hashingOnly {
+		return
+	}
+	if tx.Timeboosted != nil {
 		payloadSize++
 		payloadSize += rlp.BoolLen()
 	}
@@ -311,9 +313,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 	}
 
 	if tx.Timeboosted != nil {
-		if err := rlp.EncodeBool(*tx.Timeboosted, w, b); err != nil {
-			return err
-		}
+		return rlp.EncodeBool(*tx.Timeboosted, w, b)
 	}
 	return nil
 
