@@ -50,7 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
 )
 
