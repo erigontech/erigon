@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/node/silkworm"
 )
 
 type SnapshotsCfg struct {
