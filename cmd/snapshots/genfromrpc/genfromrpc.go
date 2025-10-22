@@ -654,7 +654,7 @@ var timeboostedTxTypes = map[string]bool{
 	"0x69": true, // no timbeoosted but for simplicity of checking
 }
 
-var receiptLimiter = rate.NewLimiter(950, 950)
+var receiptLimiter = rate.NewLimiter(1000, 1000)
 
 func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	txs := make(types.Transactions, len(rawTxs))
