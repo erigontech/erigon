@@ -160,7 +160,7 @@ func (evm *EVM) SetCallGasTemp(gas uint64) {
 	evm.callGasTemp = gas
 }
 
-// SetPrecompiles sets the callGasTemp for the EVM
+// SetPrecompiles sets the precompiles for the EVM
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	evm.precompiles = precompiles
 }
