@@ -462,10 +462,10 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *state.SharedDomains, tx kv.TemporalRw
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
 			if s.posTransition != nil {
-				ptx := tx
+				ptx := tx.(kv.Tx)
 
 				if ptx == nil {
-					if tx, err := db.BeginTemporalRw(context.Background()); err == nil {
+					if tx, err := db.BeginTemporalRo(context.Background()); err == nil {
 						ptx = tx
 						defer tx.Rollback()
 					}

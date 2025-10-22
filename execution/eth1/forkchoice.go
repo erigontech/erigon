@@ -201,7 +201,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
 	}
-	defer tx.Rollback()
+	defer func() {
+		tx.Rollback()
+	}()
 
 	{ // used by eth_syncing
 		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)

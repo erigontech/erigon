@@ -175,7 +175,6 @@ func ReadChainHeadWithTx(tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
 	if err != nil {
 		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
 	}
-
 	return ChainHead{height, time, hash, minimumBlock, td256}, nil
 }
 

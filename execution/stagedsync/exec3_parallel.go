@@ -147,7 +147,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		defer func() {
 			if rec := recover(); rec != nil {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
-			} else if err != nil && !errors.Is(err, context.Canceled) {
+			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err)
 			} else {
 				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
@@ -404,7 +404,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	if err := pe.wait(ctx); err != nil {
-		return nil, rwTx, execErr
+		return nil, rwTx, err
+	}
+
+	err := execStage.Update(rwTx, pe.lastCommittedBlockNum)
+
+	if err != nil {
+		return nil, rwTx, err
 	}
 
 	return lastHeader, rwTx, execErr

@@ -696,12 +696,6 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 		return nil, 0, err
 	}
 
-	_, err = rawdb.IncrementStateVersion(tx)
-
-	if err != nil {
-		return nil, 0, fmt.Errorf("writing plain state version: %w", err)
-	}
-
 	tx.CollectMetrics()
 
 	var t2 time.Duration

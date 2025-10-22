@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
@@ -274,6 +275,9 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	sd.pastChangesAccumulator = make(map[string]*changeset.StateChangeSet)
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
+	}
+	if _, err := rawdb.IncrementStateVersion(tx); err != nil {
+		return fmt.Errorf("can't write plain state version: %w", err)
 	}
 	return nil
 }
