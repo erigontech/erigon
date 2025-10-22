@@ -20,9 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
-	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -138,10 +135,12 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
 	for _, s := range g.registeredServices {
 		if s.service.IsMyGossipMessage(data.Name) {
+			// check if the message satisfies the conditions
 			if !s.SatisfiesConditions(data, version) {
 				g.stats.addReject(data.Name)
 				return services.ErrIgnore
 			}
+			// decode the message
 			msg, err := s.service.DecodeGossipMessage(data, version)
 			if err != nil {
 				log.Debug("Failed to decode gossip message", "name", data.Name, "error", err)
@@ -149,11 +148,12 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
+			// process the message
 			g.stats.addAccept(data.Name)
 			return s.service.ProcessMessage(ctx, data.SubnetId, msg)
 		}
 	}
-	return fmt.Errorf("unknown message: %s", data.Name)
+	return fmt.Errorf("unknown message topic: %s", data.Name)
 }
 
 func (g *GossipManager) isReadyToProcessOperations() bool {
@@ -255,60 +255,4 @@ Reconnect:
 			}
 		}
 	}
-}
-
-type gossipMessageStats struct {
-	accepts    map[string]int64
-	rejects    map[string]int64
-	statsMutex sync.Mutex
-}
-
-func (s *gossipMessageStats) addAccept(name string) {
-	tokens := strings.Split(name, "_")
-	// if last token is a number, remove it
-	if _, err := strconv.Atoi(tokens[len(tokens)-1]); err == nil {
-		name = strings.Join(tokens[:len(tokens)-1], "_")
-	}
-
-	s.statsMutex.Lock()
-	defer s.statsMutex.Unlock()
-	if s.accepts == nil {
-		s.accepts = make(map[string]int64)
-	}
-	s.accepts[name]++
-}
-
-func (s *gossipMessageStats) addReject(name string) {
-	tokens := strings.Split(name, "_")
-	// if last token is a number, remove it
-	if _, err := strconv.Atoi(tokens[len(tokens)-1]); err == nil {
-		name = strings.Join(tokens[:len(tokens)-1], "_")
-	}
-
-	s.statsMutex.Lock()
-	defer s.statsMutex.Unlock()
-	if s.rejects == nil {
-		s.rejects = make(map[string]int64)
-	}
-	s.rejects[name]++
-}
-
-func (s *gossipMessageStats) goPrintStats() {
-	go func() {
-		duration := 5 * time.Minute
-		ticker := time.NewTicker(duration)
-		defer ticker.Stop()
-		times := int64(0)
-		for range ticker.C {
-			s.statsMutex.Lock()
-			for name, count := range s.accepts {
-				log.Debug("Gossip Message Accepts Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
-			}
-			for name, count := range s.rejects {
-				log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
-			}
-			s.statsMutex.Unlock()
-			times++
-		}
-	}()
 }
