@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/erigontech/erigon/db/state/statecfg"
-
 	"github.com/spf13/cobra"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 var inspectCmd = &cobra.Command{
