@@ -44,18 +44,16 @@ func (ar AccountRef) Address() common.Address { return (common.Address)(ar) }
 // Contract represents an ethereum contract in the state database. It contains
 // the contract code, calling arguments. Contract implements ContractRef
 type Contract struct {
-	// callerAddress is the result of the caller which initialised this
+	// caller is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
-	callerAddress common.Address
-	caller        common.Address
-	self          common.Address
-	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
-	analysis      bitvec         // Locally cached result of JUMPDEST analysis
+	caller    common.Address
+	addr      common.Address
+	jumpdests *JumpDestCache // Aggregated result of JUMPDEST analysis.
+	analysis  bitvec         // Locally cached result of JUMPDEST analysis
 
 	Code     []byte
 	CodeHash common.Hash
-	CodeAddr common.Address
 
 	value uint256.Int
 }
@@ -89,11 +87,10 @@ func (c *JumpDestCache) LogStats() {
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller common.Address, callerAddress common.Address, addr common.Address, value uint256.Int, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
-		caller:        caller,
-		callerAddress: callerAddress,
-		self:          addr,
-		value:         value,
-		jumpdests:     jumpDest,
+		caller:    callerAddress,
+		addr:      addr,
+		value:     value,
+		jumpdests: jumpDest,
 	}
 }
 
@@ -158,26 +155,18 @@ func (c *Contract) GetOp(n uint64) OpCode {
 
 // Caller returns the caller of the contract.
 //
-// Caller will recursively call caller when the contract is a delegate
-// call, including that of caller's caller.
+// Caller will recursively set to the caller's caller when
+// the contract is a delegate call, including that of caller's caller.
 func (c *Contract) Caller() common.Address {
-	return c.callerAddress
+	return c.caller
 }
 
 // Address returns the contracts address
 func (c *Contract) Address() common.Address {
-	return c.self
+	return c.addr
 }
 
 // Value returns the contract's value (sent to it from it's caller)
-func (c *Contract) Value() *uint256.Int {
-	return &c.value
-}
-
-// SetCodeOptionalHash can be used to provide code, but it's optional to provide hash.
-// In case hash is not provided, the jumpdest analysis will not be saved to the parent context
-func (c *Contract) SetCodeOptionalHash(addr common.Address, codeAndHash *codeAndHash) {
-	c.Code = codeAndHash.code
-	c.CodeHash = codeAndHash.hash
-	c.CodeAddr = addr
+func (c *Contract) Value() uint256.Int {
+	return c.value
 }

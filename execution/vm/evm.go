@@ -258,36 +258,30 @@ func (evm *EVM) call(typ OpCode, caller common.Address, parent *Contract, addr c
 		var contract Contract
 		if typ == CALLCODE {
 			contract = Contract{
-				caller:        caller,
-				callerAddress: caller,
-				self:          caller,
-				value:         value,
-				jumpdests:     evm.config.JumpDestCache,
-				Code:          code,
-				CodeHash:      codeHash,
-				CodeAddr:      addr,
+				caller:    caller,
+				addr:      caller,
+				value:     value,
+				jumpdests: evm.config.JumpDestCache,
+				Code:      code,
+				CodeHash:  codeHash,
 			}
 		} else if typ == DELEGATECALL {
 			contract = Contract{
-				caller:        caller,
-				callerAddress: parent.callerAddress,
-				self:          caller,
-				value:         parent.value,
-				jumpdests:     evm.config.JumpDestCache,
-				Code:          code,
-				CodeHash:      codeHash,
-				CodeAddr:      addr,
+				caller:    parent.caller,
+				addr:      caller,
+				value:     parent.value,
+				jumpdests: evm.config.JumpDestCache,
+				Code:      code,
+				CodeHash:  codeHash,
 			}
 		} else {
 			contract = Contract{
-				caller:        caller,
-				callerAddress: caller,
-				self:          addr,
-				value:         value,
-				jumpdests:     evm.config.JumpDestCache,
-				Code:          code,
-				CodeHash:      codeHash,
-				CodeAddr:      addr,
+				caller:    caller,
+				addr:      addr,
+				value:     value,
+				jumpdests: evm.config.JumpDestCache,
+				Code:      code,
+				CodeHash:  codeHash,
 			}
 		}
 		readOnly := false
@@ -454,8 +448,14 @@ func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemai
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := *NewContract(caller, caller, address, value, evm.config.JumpDestCache)
-	contract.SetCodeOptionalHash(address, codeAndHash)
+	contract := Contract{
+		caller:    caller,
+		addr:      address,
+		value:     value,
+		jumpdests: evm.config.JumpDestCache,
+		Code:      codeAndHash.code,
+		CodeHash:  codeAndHash.hash,
+	}
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil

@@ -165,7 +165,7 @@ func (ctx *CallContext) Address() common.Address {
 
 // CallValue returns the value supplied with this call.
 func (ctx *CallContext) CallValue() uint256.Int {
-	return *ctx.Contract.Value()
+	return ctx.Contract.Value()
 }
 
 // CallInput returns the input/calldata with this call. Callers must not modify
