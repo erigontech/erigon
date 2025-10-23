@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 )
 
 // Defines the `internal_` JSON-RPC namespace.
@@ -13,6 +14,7 @@ import (
 // working on Erigon code. They can be added/changed/removed without further notice.
 type InternalAPI interface {
 	GetTxNumInfo(ctx context.Context, txNum uint64) (*TxNumInfo, error)
+	GetStepsInDB(ctx context.Context) (float64, error)
 }
 
 type TxNumInfo struct {
@@ -59,4 +61,15 @@ func (api *InternalAPIImpl) GetTxNumInfo(ctx context.Context, txNum uint64) (*Tx
 		BlockNum: bn,
 		Idx:      uint64(txIndex),
 	}, nil
+}
+
+func (api *InternalAPIImpl) GetStepsInDB(ctx context.Context) (float64, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	steps := rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize())
+	return steps, nil
 }
