@@ -954,7 +954,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 	logStartTime := time.Now()
 	var lastBlockHash common.Hash
 
-	logTimer := time.NewTimer(40 * time.Second)
+	logTimer := time.NewTicker(40 * time.Second)
 	defer logTimer.Stop()
 
 	for prev := start; prev < latestBlock.Uint64(); {
