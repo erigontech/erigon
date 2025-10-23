@@ -966,7 +966,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 		if len(blocks) > 0 {
 			last := blocks[len(blocks)-1]
-			prev = last.number
+			prev = last.number + 1
 			lastBlockHash = last.block.Hash()
 		}
 
@@ -988,9 +988,11 @@ func genFromRPc(cliCtx *cli.Context) error {
 		}
 
 		err = db.Update(context.TODO(), func(tx kv.RwTx) error {
+			var blk *types.Block
+			var blockNum uint64
 			for _, bwn := range blocks {
-				blk := bwn.block
-				blockNum := bwn.number
+				blk = bwn.block
+				blockNum = bwn.number
 
 				if err := rawdb.WriteBlock(tx, blk); err != nil {
 					return fmt.Errorf("error writing block %d: %w", blockNum, err)
@@ -1004,13 +1006,10 @@ func genFromRPc(cliCtx *cli.Context) error {
 			}
 
 			if len(blocks) > 0 {
-				blk := blocks[len(blocks)-1].block
-				blockNum := blocks[len(blocks)-1].number
-
-				rawdb.WriteHeadBlockHash(tx, blk.Hash())
 				if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
 					return err
 				}
+				rawdb.WriteHeadBlockHash(tx, blk.Hash())
 				if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
 					return err
 				}
