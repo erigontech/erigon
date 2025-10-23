@@ -833,8 +833,8 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 	return blk, nil
 }
 
-// fetchBlocksBatch fetches multiple blocks concurrently and returns them sorted by block number
-func fetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]blockWithNumber, error) {
+// FetchBlocksBatch fetches multiple blocks concurrently and returns them sorted by block number
+func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]blockWithNumber, error) {
 	if startBlock >= endBlock {
 		return nil, nil
 	}
@@ -936,7 +936,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 	latestBlock.SetString(latestBlockHex[2:], 16)
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	const batchSize = 50
+	const batchSize = 5
 
 	var lastBlockHash common.Hash
 
@@ -947,7 +947,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 	defer logEvery.Stop()
 
 	for prev := start; prev < latestBlock.Uint64(); {
-		blocks, err := fetchBlocksBatch(client, receiptClient, prev, latestBlock.Uint64(), batchSize, verification, isArbitrum)
+		blocks, err := FetchBlocksBatch(client, receiptClient, prev, latestBlock.Uint64(), batchSize, verification, isArbitrum)
 		if err != nil {
 			log.Warn("Error fetching block batch", "start", prev, "err", err)
 			return err
