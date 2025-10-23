@@ -1153,6 +1153,11 @@ var (
 	}
 
 	// ErigonDB geometry settings
+	ErigonDBStepSizeFlag = cli.Uint64Flag{
+		Name:  "erigondb.override.stepsize",
+		Usage: "Override the number of transactions per step; may lead to a corrupted database if used incorrectly",
+		Value: config3.DefaultStepSize,
+	}
 	ErigonDBStepsInFrozenFileFlag = cli.Uint64Flag{
 		Name:  "erigondb.override.stepsinfrozenfile",
 		Usage: "Override the number of steps in frozen snapshot files; may lead to a corrupted database if used incorrectly",
@@ -2025,6 +2030,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
 
+	cfg.ErigonDBStepSize = ctx.Int(ErigonDBStepSizeFlag.Name)
 	cfg.ErigonDBStepsInFrozenFile = ctx.Int(ErigonDBStepsInFrozenFileFlag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {

@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -32,19 +31,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/db/snaptype"
-
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -56,6 +50,9 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 type InvertedIndex struct {
@@ -120,10 +117,10 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		panic("assert: empty `stepSize`")
 	}
 
-	if ii.Version.DataEF.IsZero() {
+	if ii.FileVersion.DataEF.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", ii.Name))
 	}
-	if ii.Version.AccessorEFI.IsZero() {
+	if ii.FileVersion.AccessorEFI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", ii.Name))
 	}
 
@@ -134,13 +131,13 @@ func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep kv.Step) string 
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
-	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.Version.AccessorEFI.String(), ii.FilenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.FileVersion.AccessorEFI.String(), ii.FilenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efNewFilePath(fromStep, toStep kv.Step) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.Version.DataEF.String(), ii.FilenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.FileVersion.DataEF.String(), ii.FilenameBase, fromStep, toStep))
 }
 
 func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string {
@@ -253,10 +250,10 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 }
 
 func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
+	fromStep, toStep := item.StepRange(ii.stepSize)
 	if item.decompressor == nil {
-		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.FilenameBase, item.startTxNum/ii.stepSize, item.endTxNum/ii.stepSize)
+		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.FilenameBase, fromStep, toStep)
 	}
-	fromStep, toStep := kv.Step(item.startTxNum/ii.stepSize), kv.Step(item.endTxNum/ii.stepSize)
 	return ii.buildMapAccessor(ctx, fromStep, toStep, ii.dataReader(item.decompressor), ps)
 }
 func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
@@ -918,42 +915,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	return stat, err
 }
 
-func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator1 {
-	var ii1 InvertedIterator1
-	ii1.hasNextInDb = true
-	ii1.roTx = roTx
-	ii1.indexTable = iit.ii.ValuesTable
-	for _, item := range iit.files {
-		if item.endTxNum <= startTxNum {
-			continue
-		}
-		if item.startTxNum >= endTxNum {
-			break
-		}
-		if item.endTxNum >= endTxNum {
-			ii1.hasNextInDb = false
-		}
-		g := iit.dataReader(item.src.decompressor)
-		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				return ii1
-			}
-			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: wrapper, key: key, val: val, txNum: ^item.endTxNum})
-			ii1.hasNextInFiles = true
-		}
-	}
-	binary.BigEndian.PutUint64(ii1.startTxKey[:], startTxNum)
-	ii1.startTxNum = startTxNum
-	ii1.endTxNum = endTxNum
-	ii1.advanceInDb()
-	ii1.advanceInFiles()
-	ii1.advance()
-	return ii1
-}
-
 // collate [stepFrom, stepTo)
 func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) (InvertedIndexCollation, error) {
 	stepTo := step + 1
@@ -1157,7 +1118,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
-	if !ii.Version.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
 		versionOfRs = 1
 	}
 	cfg := recsplit.RecSplitArgs{
