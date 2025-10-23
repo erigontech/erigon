@@ -301,7 +301,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readOnly bool) ([]byte, uint64, error) {
+func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, err error) {
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, nil
@@ -312,7 +312,6 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 	in.returnData = nil
 
 	var (
-		err         error
 		op          OpCode // current opcode
 		callContext = getCallContext(contract, input, gas)
 		// For optimisation reason we're using uint64 as the program counter.
