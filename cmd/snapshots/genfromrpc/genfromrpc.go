@@ -950,11 +950,11 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	const batchSize = 10
 
-	logStartBlock := start
-	logStartTime := time.Now()
 	var lastBlockHash common.Hash
 
-	logTimer := time.NewTicker(40 * time.Second)
+	logInterval := time.Second * 40
+	logTimer := time.NewTicker(logInterval)
+	logStartBlock := start
 	defer logTimer.Stop()
 
 	for prev := start; prev < latestBlock.Uint64(); {
@@ -972,14 +972,9 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 		select {
 		case <-logTimer.C:
-			elapsed := time.Since(logStartTime)
-			blocksProcessed := prev - logStartBlock
-			blkSec := float64(blocksProcessed) / elapsed.Seconds()
+			blkSec := float64(prev-logStartBlock) / logInterval.Seconds()
 			log.Info("Progress", "block", prev-1, "hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
-
-			// Reset counters and timer for next interval
 			logStartBlock = prev
-			logStartTime = time.Now()
 		default:
 		}
 
