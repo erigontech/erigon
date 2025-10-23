@@ -71,28 +71,41 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 		t.Skip()
 	}
 
-	//defer log.Root().SetHandler(log.Root().GetHandler())
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StdoutHandler))
-	//log.SetRootHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(io.Writer(os.Stdout), log.TerminalFormat())))
-	//testlog.Logger(t, log.LvlTrace).SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(io.Writer(os.Stderr), log.TerminalFormat())))
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "arb-execution-spec-tests", "blockchain_tests")
-	//bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
-	//bt.skipLoad(`^.*\.json$`)
-
-	//bt.whitelist("^berlin/eip2930_access_list/acl/transaction_intrinsic_gas_cost.json")
+	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
+	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
-		//if name != "berlin/eip2929_gas_cost_increases/precompile_warming/precompile_warming.json/tests/berlin/eip2929_gas_cost_increases/test_precompile_warming.py::test_precompile_warming[fork_ParisToShanghaiAtTime15k-address_0x0000000000000000000000000000000000000001-precompile_in_successor_True-precompile_in_predecessor_True-blockchain_test]" {
-		//	t.Skip()
-		//}
-
-		//t.Parallel()
+		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
+		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+			t.Error(err)
+		}
+	})
+
+}
+
+func TestArbitrumExecutionSpecBlockchain(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	bt := new(testMatcher)
+
+	dir := filepath.Join(".", "arb-execution-spec-tests", "blockchain_tests")
+	checkStateRoot := true
+
+	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)
 		}
