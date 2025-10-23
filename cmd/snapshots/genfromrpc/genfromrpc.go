@@ -655,33 +655,229 @@ var timeboostedTxTypes = map[string]bool{
 	"0x69": true, // no timbeoosted but for simplicity of checking
 }
 
+// genFromRPc connects to the RPC, fetches blocks starting from the given block,
+// and writes them into the local database.
+func genFromRPc(cliCtx *cli.Context) error {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	jsonRpcAddr := cliCtx.String(RpcAddr.Name)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	// Connect to RPC.
+	client, err := rpc.Dial(jsonRpcAddr, log.Root())
+	if err != nil {
+		log.Warn("Error connecting to RPC", "err", err)
+		return err
+	}
+	verification := cliCtx.Bool(Verify.Name)
+	isArbitrum := cliCtx.Bool(Arbitrum.Name)
+
+	urlReciept := dbg.EnvString("ERIGON_ARB_RECEIPT_URL", "")
+	var receiptClient *rpc.Client
+	if isArbitrum && urlReciept != "" {
+		receiptClient, err = rpc.Dial(urlReciept, log.Root())
+		if err != nil {
+			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
+			return err
+		}
+		log.Info("Connected to receipt RPC", "url", urlReciept)
+	}
+
+	db := mdbx.MustOpen(dirs.Chaindata)
+	defer db.Close()
+	var start uint64
+	if from := cliCtx.Uint64(FromBlock.Name); from > 0 {
+		start = from
+	} else {
+		var curBlock uint64
+		err = db.Update(context.Background(), func(tx kv.RwTx) error {
+			curBlock, err = stages.GetStageProgress(tx, stages.Bodies)
+			return err
+		})
+		if err != nil {
+			log.Warn("can't check current block", "err", err)
+		}
+		if curBlock == 0 {
+			// write arb genesis
+			// log.Info("Writing arbitrum sepolia-rollup genesis")
+
+			// gen := chain.ArbSepoliaRollupGenesisBlock()
+
+			// b := core.MustCommitGenesis(gen, db, dirs, log.New())
+			// log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
+		} else {
+			start = curBlock + 1
+		}
+	}
+
+	// Query latest block number.
+	var latestBlockHex string
+	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
+		log.Warn("Error fetching latest block number", "err", err)
+		return err
+	}
+
+	latestBlock := new(big.Int)
+	latestBlock.SetString(latestBlockHex[2:], 16)
+
+	noWrite := cliCtx.Bool(NoWrite.Name)
+
+	receiptClient.SetRequestLimit(rate.Limit(900), 10)
+	client.SetRequestLimit(rate.Limit(10_000), 100)
+
+	const batchSize = 50
+	return GetAndCommitBlocks(context.Background(), db, client, receiptClient, start, latestBlock.Uint64(), batchSize, verification, isArbitrum, noWrite)
+}
+
 var (
-	//receiptLimiter = rate.NewLimiter(900, 200)
-	blockLimiter = rate.NewLimiter(10000, 100)
-
-	receiptAllowed chan struct{}
-
-	receiptQueries = new(atomic.Uint64)
-	//prevReceiprQueries = new(atomic.Uint64)
+	receiptQueries  = new(atomic.Uint64)
 	prevReceiptTime = new(atomic.Uint64)
 )
 
-func init() {
-	//size := int(receiptLimiter.Limit())
-	//receiptAllowed = make(chan struct{}, size)
+func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *rpc.Client, startBlockNum, endBlockNum, batchSize uint64, verify, isArbitrum, dryRun bool) error {
+	var (
+		lastBlockHash common.Hash
+		lastBlockNum  uint64
+
+		logInterval = time.Second * 40
+		logEvery    = time.NewTicker(logInterval)
+	)
+
+	defer logEvery.Stop()
+
+	prevReceiptTime.Store(uint64(time.Now().Unix()))
+
+	for prev := startBlockNum; prev < endBlockNum; {
+		blocks, err := FetchBlocksBatch(client, receiptClient, prev, endBlockNum, batchSize, verify, isArbitrum)
+		if err != nil {
+			log.Warn("Error fetching block batch", "startBlockNum", prev, "err", err)
+			return err
+		}
+		if len(blocks) == 0 {
+			log.Info("No more blocks fetched, exiting", "latestFetchedBlock", lastBlockNum, "hash", lastBlockHash)
+		}
+
+		last := blocks[len(blocks)-1]
+		prev = last.NumberU64() + 1
+		lastBlockNum = prev
+		lastBlockHash = last.Hash()
+
+		select {
+		case <-logEvery.C:
+			blkSec := float64(prev-startBlockNum) / logInterval.Seconds()
+			log.Info("Progress", "block", prev-1, "hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
+			startBlockNum = prev
+
+			prevReceiptTime.Store(uint64(time.Now().Unix()))
+			receiptQueries.Store(0)
+		default:
+		}
+
+		if dryRun {
+			continue
+		}
+		if err = commitUpdate(ctx, db, blocks); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func acquireReceiptLimiter() {
-	//if err := receiptLimiter.Wait(context.TODO()); err != nil {
-	//	panic(err)
-	//}
-	//receiptAllowed <- struct{}{}
-	//
-	receiptQueries.Add(1)
+func commitUpdate(ctx context.Context, db kv.RwDB, blocks []*types.Block) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		var blk *types.Block
+		var blockNum uint64
+		for _, blk = range blocks {
+			blockNum = blk.NumberU64()
+
+			if err := rawdb.WriteBlock(tx, blk); err != nil {
+				return fmt.Errorf("error writing block %d: %w", blockNum, err)
+			}
+			if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+				return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+			}
+			if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+				return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+			}
+		}
+
+		if len(blocks) > 0 {
+			if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+				return err
+			}
+			rawdb.WriteHeadBlockHash(tx, blk.Hash())
+			if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
+				return err
+			}
+			if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
+				return err
+			}
+			if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
+				return err
+			}
+			if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-func releaseReceiptLimiter() {
-	//<-receiptAllowed
+// GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
+func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, blockNumber *big.Int, verify, isArbitrum bool) (*types.Block, error) {
+	var block BlockJson
+	err := client.CallContext(ctx, &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
+	if err != nil {
+		return nil, err
+	}
+
+	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum)
+	if err != nil {
+		return nil, err
+	}
+
+	// Derive the TxHash from the decoded transactions.
+	txHash := types.DeriveSha(txs)
+	if verify && txHash != block.TxHash {
+		log.Error("transactionHash mismatch", "expected", block.TxHash, "got", txHash, "num", blockNumber)
+		for i, tx := range txs {
+			log.Error("tx", "index", i, "hash", tx.Hash(), "type", tx.Type())
+		}
+		return nil, fmt.Errorf("tx hash mismatch, expected %s, got %s. num=%d", block.TxHash, txHash, blockNumber)
+	}
+	blk := types.NewBlockFromNetwork(&types.Header{
+		ParentHash:      block.ParentHash,
+		UncleHash:       block.UncleHash,
+		Coinbase:        block.Coinbase,
+		Root:            block.Root,
+		TxHash:          block.TxHash,
+		ReceiptHash:     block.ReceiptHash,
+		Bloom:           block.Bloom,
+		Difficulty:      (*big.Int)(block.Difficulty),
+		Number:          (*big.Int)(block.Number),
+		GasLimit:        block.GasLimit.Uint64(),
+		GasUsed:         block.GasUsed.Uint64(),
+		Time:            block.Time.Uint64(),
+		Extra:           block.Extra,
+		MixDigest:       block.MixDigest,
+		Nonce:           block.Nonce,
+		BaseFee:         (*big.Int)(block.BaseFee),
+		WithdrawalsHash: block.WithdrawalsHash,
+		BlobGasUsed:     (*uint64)(block.BlobGasUsed),
+		ExcessBlobGas:   (*uint64)(block.ExcessBlobGas),
+		// Optional fields:
+		ParentBeaconBlockRoot: block.ParentBeaconBlockRoot,
+		RequestsHash:          block.RequestsHash,
+	}, &types.Body{
+		Transactions: txs,
+		Uncles:       block.Uncles,
+		Withdrawals:  block.Withdrawals,
+	})
+	if verify {
+		if blk.Hash() != block.BlkHash {
+			return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), block.BlkHash, blockNumber)
+		}
+	}
+	return blk, nil
 }
 
 func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
@@ -749,14 +945,12 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					return errors.New("missing tx hash for receipt fetch")
 				}
 
-				acquireReceiptLimiter()
+				receiptQueries.Add(1)
 				err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
-				releaseReceiptLimiter()
-
 				if err != nil {
-					//receiptQueries.Load() - prevReceiprQueries.Load()/prevReceiptTime.Load()
 					started := time.Unix(int64(prevReceiptTime.Load()), 0)
-					log.Info("receipt queries", "total", receiptQueries.Load(), "spent", time.Since(started), "avg rate", float64(receiptQueries.Load())/time.Since(started).Seconds())
+					spent := time.Since(started)
+					log.Info("receipt queries", "total", receiptQueries.Load(), "spent", spent, "avg rate", float64(receiptQueries.Load())/spent.Seconds())
 					return fmt.Errorf("failed to get receipt for tx %s: %w", txData["hash"], err)
 				}
 
@@ -783,72 +977,10 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 	return txs, nil
 }
 
-// blockWithNumber holds a block and its number for sorting
-type blockWithNumber struct {
-	number uint64
-	block  *types.Block
-}
-
-// GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, blockNumber *big.Int, verify, isArbitrum bool) (*types.Block, error) {
-	var block BlockJson
-	err := client.CallContext(ctx, &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
-	if err != nil {
-		return nil, err
-	}
-
-	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum)
-	if err != nil {
-		return nil, err
-	}
-
-	// Derive the TxHash from the decoded transactions.
-	txHash := types.DeriveSha(txs)
-	if verify && txHash != block.TxHash {
-		log.Error("transactionHash mismatch", "expected", block.TxHash, "got", txHash, "num", blockNumber)
-		for i, tx := range txs {
-			log.Error("tx", "index", i, "hash", tx.Hash(), "type", tx.Type())
-		}
-		return nil, fmt.Errorf("tx hash mismatch, expected %s, got %s. num=%d", block.TxHash, txHash, blockNumber)
-	}
-	blk := types.NewBlockFromNetwork(&types.Header{
-		ParentHash:      block.ParentHash,
-		UncleHash:       block.UncleHash,
-		Coinbase:        block.Coinbase,
-		Root:            block.Root,
-		TxHash:          block.TxHash,
-		ReceiptHash:     block.ReceiptHash,
-		Bloom:           block.Bloom,
-		Difficulty:      (*big.Int)(block.Difficulty),
-		Number:          (*big.Int)(block.Number),
-		GasLimit:        block.GasLimit.Uint64(),
-		GasUsed:         block.GasUsed.Uint64(),
-		Time:            block.Time.Uint64(),
-		Extra:           block.Extra,
-		MixDigest:       block.MixDigest,
-		Nonce:           block.Nonce,
-		BaseFee:         (*big.Int)(block.BaseFee),
-		WithdrawalsHash: block.WithdrawalsHash,
-		BlobGasUsed:     (*uint64)(block.BlobGasUsed),
-		ExcessBlobGas:   (*uint64)(block.ExcessBlobGas),
-		// Optional fields:
-		ParentBeaconBlockRoot: block.ParentBeaconBlockRoot,
-		RequestsHash:          block.RequestsHash,
-	}, &types.Body{
-		Transactions: txs,
-		Uncles:       block.Uncles,
-		Withdrawals:  block.Withdrawals,
-	})
-	if verify {
-		if blk.Hash() != block.BlkHash {
-			return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), block.BlkHash, blockNumber)
-		}
-	}
-	return blk, nil
-}
+//var blockLimiter = rate.NewLimiter(10000, 100) // limits block fetches
 
 // FetchBlocksBatch fetches multiple blocks concurrently and returns them sorted by block number
-func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]blockWithNumber, error) {
+func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]*types.Block, error) {
 	if startBlock >= endBlock {
 		return nil, nil
 	}
@@ -858,16 +990,16 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 		actualBatchSize = endBlock - startBlock
 	}
 
-	blocks := make([]blockWithNumber, actualBatchSize)
+	blocks := make([]*types.Block, actualBatchSize)
 	var eg errgroup.Group
 
 	for i := uint64(0); i < actualBatchSize; i++ {
 		idx := i
 		blockNum := startBlock + i
 
-		if err := blockLimiter.Wait(context.Background()); err != nil {
-			return nil, fmt.Errorf("block rate limiter error: %w", err)
-		}
+		//if err := blockLimiter.Wait(context.Background()); err != nil {
+		//	return nil, fmt.Errorf("block rate limiter error: %w", err)
+		//}
 
 		eg.Go(func() error {
 			blockNumber := new(big.Int).SetUint64(blockNum)
@@ -875,10 +1007,7 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 			if err != nil {
 				return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 			}
-			blocks[idx] = blockWithNumber{
-				number: blockNum,
-				block:  blk,
-			}
+			blocks[idx] = blk
 			return nil
 		})
 	}
@@ -886,154 +1015,5 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
-
 	return blocks, nil
-}
-
-// genFromRPc connects to the RPC, fetches blocks starting from the given block,
-// and writes them into the local database.
-func genFromRPc(cliCtx *cli.Context) error {
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	jsonRpcAddr := cliCtx.String(RpcAddr.Name)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-
-	// Connect to RPC.
-	client, err := rpc.Dial(jsonRpcAddr, log.Root())
-	if err != nil {
-		log.Warn("Error connecting to RPC", "err", err)
-		return err
-	}
-	verification := cliCtx.Bool(Verify.Name)
-	isArbitrum := cliCtx.Bool(Arbitrum.Name)
-
-	urlReciept := dbg.EnvString("ERIGON_ARB_RECEIPT_URL", "")
-	var receiptClient *rpc.Client
-	if isArbitrum && urlReciept != "" {
-		receiptClient, err = rpc.Dial(urlReciept, log.Root())
-		if err != nil {
-			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
-			return err
-		}
-		log.Info("Connected to receipt RPC", "url", urlReciept)
-	}
-
-	db := mdbx.MustOpen(dirs.Chaindata)
-	defer db.Close()
-	var start uint64
-	if from := cliCtx.Uint64(FromBlock.Name); from > 0 {
-		start = from
-	} else {
-		var curBlock uint64
-		err = db.Update(context.Background(), func(tx kv.RwTx) error {
-			curBlock, err = stages.GetStageProgress(tx, stages.Bodies)
-			return err
-		})
-		if err != nil {
-			log.Warn("can't check current block", "err", err)
-		}
-		if curBlock == 0 {
-			// write arb genesis
-			// log.Info("Writing arbitrum sepolia-rollup genesis")
-
-			// gen := chain.ArbSepoliaRollupGenesisBlock()
-
-			// b := core.MustCommitGenesis(gen, db, dirs, log.New())
-			// log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
-		} else {
-			start = curBlock + 1
-		}
-	}
-
-	// Query latest block number.
-	var latestBlockHex string
-	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
-		log.Warn("Error fetching latest block number", "err", err)
-		return err
-	}
-
-	latestBlock := new(big.Int)
-	latestBlock.SetString(latestBlockHex[2:], 16)
-	noWrite := cliCtx.Bool(NoWrite.Name)
-
-	const batchSize = 5
-
-	var lastBlockHash common.Hash
-
-	logInterval := time.Second * 40
-	logEvery := time.NewTicker(logInterval)
-	logStartBlock := start
-	prevReceiptTime.Store(uint64(time.Now().Unix()))
-	defer logEvery.Stop()
-
-	receiptClient.SetRequestLimit(rate.Limit(800), 10)
-
-	for prev := start; prev < latestBlock.Uint64(); {
-		blocks, err := FetchBlocksBatch(client, receiptClient, prev, latestBlock.Uint64(), batchSize, verification, isArbitrum)
-		if err != nil {
-			log.Warn("Error fetching block batch", "start", prev, "err", err)
-			return err
-		}
-
-		if len(blocks) > 0 {
-			last := blocks[len(blocks)-1]
-			prev = last.number + 1
-			lastBlockHash = last.block.Hash()
-		}
-
-		select {
-		case <-logEvery.C:
-			blkSec := float64(prev-logStartBlock) / logInterval.Seconds()
-			log.Info("Progress", "block", prev-1, "hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
-			logStartBlock = prev
-		default:
-		}
-
-		if noWrite {
-			continue
-		}
-
-		err = db.Update(context.TODO(), func(tx kv.RwTx) error {
-			var blk *types.Block
-			var blockNum uint64
-			for _, bwn := range blocks {
-				blk = bwn.block
-				blockNum = bwn.number
-
-				if err := rawdb.WriteBlock(tx, blk); err != nil {
-					return fmt.Errorf("error writing block %d: %w", blockNum, err)
-				}
-				if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-					return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
-				}
-				if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-					return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
-				}
-			}
-
-			if len(blocks) > 0 {
-				if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
-					return err
-				}
-				rawdb.WriteHeadBlockHash(tx, blk.Hash())
-				if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
-					return err
-				}
-				if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
-					return err
-				}
-				if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
-					return err
-				}
-				if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			log.Warn("Error updating db", "err", err)
-			return err
-		}
-	}
-	return nil
 }
