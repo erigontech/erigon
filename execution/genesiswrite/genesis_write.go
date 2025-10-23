@@ -466,6 +466,14 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
+	if g.Config != nil && g.Config.IsGlamsterdam(g.Timestamp) {
+		if g.BlockAccessListHash != nil {
+			head.BlockAccessListHash = g.BlockAccessListHash
+		} else {
+			head.BlockAccessListHash = &empty.BlockAccessListHash
+		}
+	}
+
 	// these fields need to be overriden for Bor running in a kurtosis devnet
 	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
 		withdrawals = []*types.Withdrawal{}

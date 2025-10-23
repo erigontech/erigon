@@ -90,6 +90,7 @@ func TestCommitStatesIndore(t *testing.T) {
 				nil,
 				nil,
 				false, // checkNonce
+				false, // checkTransaction
 				false, // checkGas
 				false, // isFree
 				nil,
