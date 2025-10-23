@@ -21,6 +21,7 @@ package rlp
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"sync"
@@ -111,9 +112,7 @@ func (c *typeCache) generate(typ reflect.Type, tags tags) *typeinfo {
 
 	// Copy cur to next.
 	c.next = make(map[typekey]*typeinfo, len(cur)+1)
-	for k, v := range cur {
-		c.next[k] = v
-	}
+	maps.Copy(c.next, cur)
 
 	// Generate.
 	info := c.infoWhileGenerating(typ, tags)
