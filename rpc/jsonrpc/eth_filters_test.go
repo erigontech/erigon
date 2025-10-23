@@ -114,3 +114,24 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestGetBlockFilters(t *testing.T) {
+	m := mock.Mock(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+
+	bf, err := api.NewBlockFilter(ctx)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, bf)
+
+	blocks, err := api.GetFilterChanges(ctx, bf)
+	assert.NoError(t, err)
+	assert.Empty(t, blocks)
+
+	ok, err := api.UninstallFilter(ctx, bf)
+	assert.NoError(t, err)
+	assert.True(t, ok)
+}
