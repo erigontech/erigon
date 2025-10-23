@@ -657,7 +657,7 @@ var timeboostedTxTypes = map[string]bool{
 
 var (
 	//receiptLimiter = rate.NewLimiter(900, 200)
-	blockLimiter = rate.NewLimiter(10000, 10000)
+	blockLimiter = rate.NewLimiter(10000, 100)
 
 	receiptAllowed chan struct{}
 
