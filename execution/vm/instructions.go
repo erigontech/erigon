@@ -1150,7 +1150,7 @@ func opDelegateCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := interpreter.evm.DelegateCall(&scope.Contract, toAddr, args, gas)
+	ret, returnGas, err := interpreter.evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
