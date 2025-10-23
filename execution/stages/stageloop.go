@@ -196,6 +196,19 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 			break
 		}
 	}
+	if hook != nil {
+		var headerStageProgress uint64
+		if err := db.View(ctx, func(tx kv.Tx) (err error) {
+			headerStageProgress, err = stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		hook.LastNewBlockSeen(headerStageProgress)
+	}
 	return nil
 }
 
