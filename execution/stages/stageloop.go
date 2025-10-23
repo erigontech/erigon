@@ -557,7 +557,7 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageAfterSync uint64, isSynced boo
 		return
 	}
 
-	h.logger.Info("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind)
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind)
 	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
 	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
 }
