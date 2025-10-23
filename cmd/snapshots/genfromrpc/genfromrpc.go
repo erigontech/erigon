@@ -99,9 +99,9 @@ type BlockJson struct {
 
 // ReceiptJson holds the minimal receipt data needed for timeboosted transactions
 type ReceiptJson struct {
-	TransactionHash common.Hash `json:"transactionHash"`
-	Timeboosted     bool        `json:"timeboosted"`
-	GasUsed         hexutil.Big `json:"gasUsed"`
+	TransactionHash common.Hash  `json:"transactionHash"`
+	Timeboosted     bool         `json:"timeboosted"`
+	GasUsed         *hexutil.Big `json:"gasUsed"`
 }
 
 // receiptData holds parsed receipt information for a transaction
@@ -659,12 +659,12 @@ var (
 	blockLimiter   = rate.NewLimiter(100, 100)
 )
 
-func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
+func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	txs := make(types.Transactions, len(rawTxs))
 	receipts := make([]receiptData, len(rawTxs))
 
 	receiptsEnabled := client != nil
-	var receiptWg, unmarshalWg errgroup.Group
+	var unmarshalWg errgroup.Group
 
 	for i, rawTx := range rawTxs {
 		idx := i
@@ -679,35 +679,6 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 			if !ok {
 				return fmt.Errorf("missing tx type at index %d", idx)
 			}
-			if receiptsEnabled && timeboostedTxTypes[typeTx] {
-				txType := typeTx
-				receiptWg.Go(func() error {
-					var receipt ReceiptJson
-					if txData["hash"] == "" {
-						return errors.New("missing tx hash for receipt fetch")
-					}
-
-					if err := receiptLimiter.Wait(context.Background()); err != nil {
-						return fmt.Errorf("rate limiter error: %w", err)
-					}
-
-					err := client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", txData["hash"])
-					if err != nil {
-						return fmt.Errorf("failed to get receipt for tx %s: %w", txData["hash"], err)
-					}
-
-					if receipt.Timeboosted {
-						receipts[idx].timeboosted = true
-					}
-
-					if txType == "0x69" {
-						receipts[idx].effectiveGasUsed = receipt.GasUsed.ToInt()
-					}
-
-					return nil
-				})
-			}
-
 			var tx types.Transaction
 			switch typeTx {
 			case "0x0": // Legacy
@@ -747,29 +718,41 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 				return fmt.Errorf("unknown tx type: %s at index %d", typeTx, idx)
 			}
 
+			if receiptsEnabled && timeboostedTxTypes[typeTx] {
+				var receipt ReceiptJson
+				if txData["hash"] == "" {
+					return errors.New("missing tx hash for receipt fetch")
+				}
+
+				if err = receiptLimiter.Wait(ctx); err != nil {
+					return fmt.Errorf("rate limiter error: %w", err)
+				}
+
+				err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
+				if err != nil {
+					return fmt.Errorf("failed to get receipt for tx %s: %w", txData["hash"], err)
+				}
+
+				tx.SetTimeboosted(&receipts[idx].timeboosted)
+
+				if typeTx == "0x69" {
+					if egu := receipt.GasUsed.Uint64(); egu > 0 {
+						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
+							srtx.EffectiveGasUsed = egu
+						}
+					}
+				}
+			}
+
 			txs[idx] = tx
+
 			return nil
 		})
 	}
 
-	if err := receiptWg.Wait(); err != nil {
-		return nil, err
-	}
 	if err := unmarshalWg.Wait(); err != nil {
 		return nil, err
 	}
-
-	// combine results
-	for i := range txs {
-		txs[i].SetTimeboosted(&receipts[i].timeboosted)
-
-		if receipts[i].effectiveGasUsed != nil {
-			if srtx, ok := txs[i].(*types.ArbitrumSubmitRetryableTx); ok {
-				srtx.EffectiveGasUsed = receipts[i].effectiveGasUsed.Uint64()
-			}
-		}
-	}
-
 	return txs, nil
 }
 
@@ -780,18 +763,18 @@ type blockWithNumber struct {
 }
 
 // GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func GetBlockByNumber(client, receiptClient *rpc.Client, blockNumber *big.Int, verify bool, isArbitrum bool) (*types.Block, error) {
+func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, blockNumber *big.Int, verify, isArbitrum bool) (*types.Block, error) {
 	if err := blockLimiter.Wait(context.Background()); err != nil {
 		return nil, fmt.Errorf("block rate limiter error: %w", err)
 	}
 
 	var block BlockJson
-	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
+	err := client.CallContext(ctx, &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(receiptClient, block.Transactions, verify, isArbitrum)
+	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum)
 	if err != nil {
 		return nil, err
 	}
@@ -802,10 +785,6 @@ func GetBlockByNumber(client, receiptClient *rpc.Client, blockNumber *big.Int, v
 		log.Error("transactionHash mismatch", "expected", block.TxHash, "got", txHash, "num", blockNumber)
 		for i, tx := range txs {
 			log.Error("tx", "index", i, "hash", tx.Hash(), "type", tx.Type())
-			if tx.Type() == types.ArbitrumSubmitRetryableTxType {
-				srtx := tx.(*types.ArbitrumSubmitRetryableTx)
-				srtx.PrintMe()
-			}
 		}
 		return nil, fmt.Errorf("tx hash mismatch, expected %s, got %s. num=%d", block.TxHash, txHash, blockNumber)
 	}
@@ -864,7 +843,7 @@ func fetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 		blockNum := startBlock + i
 		eg.Go(func() error {
 			blockNumber := new(big.Int).SetUint64(blockNum)
-			blk, err := GetBlockByNumber(client, receiptClient, blockNumber, verify, isArbitrum)
+			blk, err := GetBlockByNumber(context.Background(), client, receiptClient, blockNumber, verify, isArbitrum)
 			if err != nil {
 				return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 			}
@@ -953,9 +932,9 @@ func genFromRPc(cliCtx *cli.Context) error {
 	var lastBlockHash common.Hash
 
 	logInterval := time.Second * 40
-	logTimer := time.NewTicker(logInterval)
+	logEvery := time.NewTicker(logInterval)
 	logStartBlock := start
-	defer logTimer.Stop()
+	defer logEvery.Stop()
 
 	for prev := start; prev < latestBlock.Uint64(); {
 		blocks, err := fetchBlocksBatch(client, receiptClient, prev, latestBlock.Uint64(), batchSize, verification, isArbitrum)
@@ -971,7 +950,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 		}
 
 		select {
-		case <-logTimer.C:
+		case <-logEvery.C:
 			blkSec := float64(prev-logStartBlock) / logInterval.Seconds()
 			log.Info("Progress", "block", prev-1, "hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
 			logStartBlock = prev

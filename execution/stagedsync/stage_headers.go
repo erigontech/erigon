@@ -206,7 +206,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			fetchWg.Go(func() error {
 				var blockNumber big.Int
 				blockNumber.SetUint64(currentBlockNum)
-				blk, err := snapshots.GetBlockByNumber(client, receiptClient, &blockNumber, false, cfg.chainConfig.IsArbitrum())
+				blk, err := snapshots.GetBlockByNumber(context.Background(), client, receiptClient, &blockNumber, false, cfg.chainConfig.IsArbitrum())
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", currentBlockNum, err)
 				}
