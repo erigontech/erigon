@@ -441,7 +441,7 @@ func (s *simulator) simulateBlock(
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
 	if bsc.BlockOverrides.BlobBaseFee != nil {
-		blockCtx.BlobBaseFee = bsc.BlockOverrides.BlobBaseFee.ToUint256()
+		blockCtx.BlobBaseFee = *bsc.BlockOverrides.BlobBaseFee.ToUint256()
 	}
 	rules := blockCtx.Rules(s.chainConfig)
 

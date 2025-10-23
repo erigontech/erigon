@@ -83,7 +83,7 @@ type EngineServer struct {
 	printPectraBanner bool
 }
 
-const defaultFcuTimeout = 1 * time.Second
+const DefaultFcuTimeout = 1 * time.Second
 
 func NewEngineServer(
 	logger log.Logger,
@@ -97,7 +97,7 @@ func NewEngineServer(
 	fcuTimeout time.Duration,
 ) *EngineServer {
 	if fcuTimeout == 0 {
-		fcuTimeout = defaultFcuTimeout
+		fcuTimeout = DefaultFcuTimeout
 	}
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
 	srv := &EngineServer{
