@@ -721,7 +721,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	receiptClient.SetRequestLimit(rate.Limit(900), 10)
+	receiptClient.SetRequestLimit(rate.Limit(800), 10)
 	client.SetRequestLimit(rate.Limit(10_000), 100)
 
 	const batchSize = 50
