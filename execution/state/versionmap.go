@@ -71,10 +71,12 @@ type VersionMap struct {
 	trace bool
 }
 
-func NewVersionMap() *VersionMap {
-	return &VersionMap{
+func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
+	vm := &VersionMap{
 		s: map[common.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
 	}
+	vm.WriteChanges(changes)
+	return vm
 }
 
 func (vm *VersionMap) SetTrace(trace bool) {

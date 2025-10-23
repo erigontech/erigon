@@ -744,7 +744,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.applyResults, execRequest.profile)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.profile)
 			}
 		}
 
@@ -760,12 +760,15 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execTasks.pushPending(i)
 		executor.validateTasks.pushPending(i)
 
-		if len(t.Dependencies()) > 0 {
+		switch {
+		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
 				executor.execTasks.addDependency(depTxIndex+1, i)
 			}
 			executor.execTasks.clearPending(i)
-		} else {
+		case len(execRequest.accessList) != 0:
+			break
+		default:
 			sender, err := t.TxSender()
 			if err != nil {
 				return err
@@ -1150,6 +1153,7 @@ type execRequest struct {
 	blockNum     uint64
 	blockHash    common.Hash
 	gasPool      *core.GasPool
+	accessList   types.BlockAccessList
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
@@ -1218,7 +1222,7 @@ type blockExecutor struct {
 	applyCount  int
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
 		blockHash:    blockHash,
@@ -1228,7 +1232,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool,
 		estimateDeps: map[int][]int{},
 		preValidated: map[int]bool{},
 		blockIO:      &state.VersionedIO{},
-		versionMap:   state.NewVersionMap(),
+		versionMap:   state.NewVersionMap(accessList),
 		profile:      profile,
 		applyResults: applyResults,
 		gasPool:      gasPool,
