@@ -43,8 +43,8 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/turbo/shards"
 )
 
 // EthBackendAPIVersion

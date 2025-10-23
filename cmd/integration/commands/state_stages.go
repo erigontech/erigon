@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/shards"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )

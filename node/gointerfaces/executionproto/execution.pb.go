@@ -271,6 +271,7 @@ type Header struct {
 	ExcessBlobGas         *uint64                `protobuf:"varint,20,opt,name=excess_blob_gas,json=excessBlobGas,proto3,oneof" json:"excess_blob_gas,omitempty"`                          // added in Dencun (EIP-4844)
 	ParentBeaconBlockRoot *typesproto.H256       `protobuf:"bytes,21,opt,name=parent_beacon_block_root,json=parentBeaconBlockRoot,proto3,oneof" json:"parent_beacon_block_root,omitempty"` // added in Dencun (EIP-4788)
 	RequestsHash          *typesproto.H256       `protobuf:"bytes,22,opt,name=requests_hash,json=requestsHash,proto3,oneof" json:"requests_hash,omitempty"`                                // added in Pectra (EIP-7685)
+	BlockAccessListHash   *typesproto.H256       `protobuf:"bytes,25,opt,name=block_access_list_hash,json=blockAccessListHash,proto3,oneof" json:"block_access_list_hash,omitempty"`       // added in Glamsterdam (EIP-7928)
 	// AuRa
 	AuraStep      *uint64 `protobuf:"varint,23,opt,name=aura_step,json=auraStep,proto3,oneof" json:"aura_step,omitempty"`
 	AuraSeal      []byte  `protobuf:"bytes,24,opt,name=aura_seal,json=auraSeal,proto3,oneof" json:"aura_seal,omitempty"`
@@ -458,6 +459,13 @@ func (x *Header) GetParentBeaconBlockRoot() *typesproto.H256 {
 func (x *Header) GetRequestsHash() *typesproto.H256 {
 	if x != nil {
 		return x.RequestsHash
+	}
+	return nil
+}
+
+func (x *Header) GetBlockAccessListHash() *typesproto.H256 {
+	if x != nil {
+		return x.BlockAccessListHash
 	}
 	return nil
 }
@@ -1637,7 +1645,8 @@ const file_execution_execution_proto_rawDesc = "" +
 	"\x11latest_valid_hash\x18\x02 \x01(\v2\v.types.H256R\x0flatestValidHash\x12)\n" +
 	"\x10validation_error\x18\x03 \x01(\tR\x0fvalidationError\"3\n" +
 	"\x13IsCanonicalResponse\x12\x1c\n" +
-	"\tcanonical\x18\x01 \x01(\bR\tcanonical\"\xad\t\n" +
+	"\tcanonical\x18\x01 \x01(\bR\tcanonical\"\x8f\n" +
+	"\n" +
 	"\x06Header\x12,\n" +
 	"\vparent_hash\x18\x01 \x01(\v2\v.types.H256R\n" +
 	"parentHash\x12'\n" +
@@ -1670,15 +1679,17 @@ const file_execution_execution_proto_rawDesc = "" +
 	"\rblob_gas_used\x18\x13 \x01(\x04H\x02R\vblobGasUsed\x88\x01\x01\x12+\n" +
 	"\x0fexcess_blob_gas\x18\x14 \x01(\x04H\x03R\rexcessBlobGas\x88\x01\x01\x12I\n" +
 	"\x18parent_beacon_block_root\x18\x15 \x01(\v2\v.types.H256H\x04R\x15parentBeaconBlockRoot\x88\x01\x01\x125\n" +
-	"\rrequests_hash\x18\x16 \x01(\v2\v.types.H256H\x05R\frequestsHash\x88\x01\x01\x12 \n" +
-	"\taura_step\x18\x17 \x01(\x04H\x06R\bauraStep\x88\x01\x01\x12 \n" +
-	"\taura_seal\x18\x18 \x01(\fH\aR\bauraSeal\x88\x01\x01B\x13\n" +
+	"\rrequests_hash\x18\x16 \x01(\v2\v.types.H256H\x05R\frequestsHash\x88\x01\x01\x12E\n" +
+	"\x16block_access_list_hash\x18\x19 \x01(\v2\v.types.H256H\x06R\x13blockAccessListHash\x88\x01\x01\x12 \n" +
+	"\taura_step\x18\x17 \x01(\x04H\aR\bauraStep\x88\x01\x01\x12 \n" +
+	"\taura_seal\x18\x18 \x01(\fH\bR\bauraSeal\x88\x01\x01B\x13\n" +
 	"\x11_base_fee_per_gasB\x12\n" +
 	"\x10_withdrawal_hashB\x10\n" +
 	"\x0e_blob_gas_usedB\x12\n" +
 	"\x10_excess_blob_gasB\x1b\n" +
 	"\x19_parent_beacon_block_rootB\x10\n" +
-	"\x0e_requests_hashB\f\n" +
+	"\x0e_requests_hashB\x19\n" +
+	"\x17_block_access_list_hashB\f\n" +
 	"\n" +
 	"_aura_stepB\f\n" +
 	"\n" +
@@ -1863,72 +1874,73 @@ var file_execution_execution_proto_depIdxs = []int32{
 	27, // 15: execution.Header.withdrawal_hash:type_name -> types.H256
 	27, // 16: execution.Header.parent_beacon_block_root:type_name -> types.H256
 	27, // 17: execution.Header.requests_hash:type_name -> types.H256
-	27, // 18: execution.BlockBody.block_hash:type_name -> types.H256
-	4,  // 19: execution.BlockBody.uncles:type_name -> execution.Header
-	30, // 20: execution.BlockBody.withdrawals:type_name -> types.Withdrawal
-	4,  // 21: execution.Block.header:type_name -> execution.Header
-	5,  // 22: execution.Block.body:type_name -> execution.BlockBody
-	4,  // 23: execution.GetHeaderResponse.header:type_name -> execution.Header
-	27, // 24: execution.GetTDResponse.td:type_name -> types.H256
-	5,  // 25: execution.GetBodyResponse.body:type_name -> execution.BlockBody
-	27, // 26: execution.GetSegmentRequest.block_hash:type_name -> types.H256
-	6,  // 27: execution.InsertBlocksRequest.blocks:type_name -> execution.Block
-	27, // 28: execution.ForkChoice.head_block_hash:type_name -> types.H256
-	27, // 29: execution.ForkChoice.finalized_block_hash:type_name -> types.H256
-	27, // 30: execution.ForkChoice.safe_block_hash:type_name -> types.H256
-	0,  // 31: execution.InsertionResult.result:type_name -> execution.ExecutionStatus
-	27, // 32: execution.ValidationRequest.hash:type_name -> types.H256
-	27, // 33: execution.AssembleBlockRequest.parent_hash:type_name -> types.H256
-	27, // 34: execution.AssembleBlockRequest.prev_randao:type_name -> types.H256
-	28, // 35: execution.AssembleBlockRequest.suggested_fee_recipient:type_name -> types.H160
-	30, // 36: execution.AssembleBlockRequest.withdrawals:type_name -> types.Withdrawal
-	27, // 37: execution.AssembleBlockRequest.parent_beacon_block_root:type_name -> types.H256
-	31, // 38: execution.AssembledBlockData.execution_payload:type_name -> types.ExecutionPayload
-	27, // 39: execution.AssembledBlockData.block_value:type_name -> types.H256
-	32, // 40: execution.AssembledBlockData.blobs_bundle:type_name -> types.BlobsBundle
-	33, // 41: execution.AssembledBlockData.requests:type_name -> types.RequestsBundle
-	19, // 42: execution.GetAssembledBlockResponse.data:type_name -> execution.AssembledBlockData
-	5,  // 43: execution.GetBodiesBatchResponse.bodies:type_name -> execution.BlockBody
-	27, // 44: execution.GetBodiesByHashesRequest.hashes:type_name -> types.H256
-	12, // 45: execution.Execution.InsertBlocks:input_type -> execution.InsertBlocksRequest
-	15, // 46: execution.Execution.ValidateChain:input_type -> execution.ValidationRequest
-	13, // 47: execution.Execution.UpdateForkChoice:input_type -> execution.ForkChoice
-	16, // 48: execution.Execution.AssembleBlock:input_type -> execution.AssembleBlockRequest
-	18, // 49: execution.Execution.GetAssembledBlock:input_type -> execution.GetAssembledBlockRequest
-	34, // 50: execution.Execution.CurrentHeader:input_type -> google.protobuf.Empty
-	11, // 51: execution.Execution.GetTD:input_type -> execution.GetSegmentRequest
-	11, // 52: execution.Execution.GetHeader:input_type -> execution.GetSegmentRequest
-	11, // 53: execution.Execution.GetBody:input_type -> execution.GetSegmentRequest
-	11, // 54: execution.Execution.HasBlock:input_type -> execution.GetSegmentRequest
-	23, // 55: execution.Execution.GetBodiesByRange:input_type -> execution.GetBodiesByRangeRequest
-	22, // 56: execution.Execution.GetBodiesByHashes:input_type -> execution.GetBodiesByHashesRequest
-	27, // 57: execution.Execution.IsCanonicalHash:input_type -> types.H256
-	27, // 58: execution.Execution.GetHeaderHashNumber:input_type -> types.H256
-	34, // 59: execution.Execution.GetForkChoice:input_type -> google.protobuf.Empty
-	34, // 60: execution.Execution.Ready:input_type -> google.protobuf.Empty
-	34, // 61: execution.Execution.FrozenBlocks:input_type -> google.protobuf.Empty
-	14, // 62: execution.Execution.InsertBlocks:output_type -> execution.InsertionResult
-	2,  // 63: execution.Execution.ValidateChain:output_type -> execution.ValidationReceipt
-	1,  // 64: execution.Execution.UpdateForkChoice:output_type -> execution.ForkChoiceReceipt
-	17, // 65: execution.Execution.AssembleBlock:output_type -> execution.AssembleBlockResponse
-	20, // 66: execution.Execution.GetAssembledBlock:output_type -> execution.GetAssembledBlockResponse
-	7,  // 67: execution.Execution.CurrentHeader:output_type -> execution.GetHeaderResponse
-	8,  // 68: execution.Execution.GetTD:output_type -> execution.GetTDResponse
-	7,  // 69: execution.Execution.GetHeader:output_type -> execution.GetHeaderResponse
-	9,  // 70: execution.Execution.GetBody:output_type -> execution.GetBodyResponse
-	26, // 71: execution.Execution.HasBlock:output_type -> execution.HasBlockResponse
-	21, // 72: execution.Execution.GetBodiesByRange:output_type -> execution.GetBodiesBatchResponse
-	21, // 73: execution.Execution.GetBodiesByHashes:output_type -> execution.GetBodiesBatchResponse
-	3,  // 74: execution.Execution.IsCanonicalHash:output_type -> execution.IsCanonicalResponse
-	10, // 75: execution.Execution.GetHeaderHashNumber:output_type -> execution.GetHeaderHashNumberResponse
-	13, // 76: execution.Execution.GetForkChoice:output_type -> execution.ForkChoice
-	24, // 77: execution.Execution.Ready:output_type -> execution.ReadyResponse
-	25, // 78: execution.Execution.FrozenBlocks:output_type -> execution.FrozenBlocksResponse
-	62, // [62:79] is the sub-list for method output_type
-	45, // [45:62] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	27, // 18: execution.Header.block_access_list_hash:type_name -> types.H256
+	27, // 19: execution.BlockBody.block_hash:type_name -> types.H256
+	4,  // 20: execution.BlockBody.uncles:type_name -> execution.Header
+	30, // 21: execution.BlockBody.withdrawals:type_name -> types.Withdrawal
+	4,  // 22: execution.Block.header:type_name -> execution.Header
+	5,  // 23: execution.Block.body:type_name -> execution.BlockBody
+	4,  // 24: execution.GetHeaderResponse.header:type_name -> execution.Header
+	27, // 25: execution.GetTDResponse.td:type_name -> types.H256
+	5,  // 26: execution.GetBodyResponse.body:type_name -> execution.BlockBody
+	27, // 27: execution.GetSegmentRequest.block_hash:type_name -> types.H256
+	6,  // 28: execution.InsertBlocksRequest.blocks:type_name -> execution.Block
+	27, // 29: execution.ForkChoice.head_block_hash:type_name -> types.H256
+	27, // 30: execution.ForkChoice.finalized_block_hash:type_name -> types.H256
+	27, // 31: execution.ForkChoice.safe_block_hash:type_name -> types.H256
+	0,  // 32: execution.InsertionResult.result:type_name -> execution.ExecutionStatus
+	27, // 33: execution.ValidationRequest.hash:type_name -> types.H256
+	27, // 34: execution.AssembleBlockRequest.parent_hash:type_name -> types.H256
+	27, // 35: execution.AssembleBlockRequest.prev_randao:type_name -> types.H256
+	28, // 36: execution.AssembleBlockRequest.suggested_fee_recipient:type_name -> types.H160
+	30, // 37: execution.AssembleBlockRequest.withdrawals:type_name -> types.Withdrawal
+	27, // 38: execution.AssembleBlockRequest.parent_beacon_block_root:type_name -> types.H256
+	31, // 39: execution.AssembledBlockData.execution_payload:type_name -> types.ExecutionPayload
+	27, // 40: execution.AssembledBlockData.block_value:type_name -> types.H256
+	32, // 41: execution.AssembledBlockData.blobs_bundle:type_name -> types.BlobsBundle
+	33, // 42: execution.AssembledBlockData.requests:type_name -> types.RequestsBundle
+	19, // 43: execution.GetAssembledBlockResponse.data:type_name -> execution.AssembledBlockData
+	5,  // 44: execution.GetBodiesBatchResponse.bodies:type_name -> execution.BlockBody
+	27, // 45: execution.GetBodiesByHashesRequest.hashes:type_name -> types.H256
+	12, // 46: execution.Execution.InsertBlocks:input_type -> execution.InsertBlocksRequest
+	15, // 47: execution.Execution.ValidateChain:input_type -> execution.ValidationRequest
+	13, // 48: execution.Execution.UpdateForkChoice:input_type -> execution.ForkChoice
+	16, // 49: execution.Execution.AssembleBlock:input_type -> execution.AssembleBlockRequest
+	18, // 50: execution.Execution.GetAssembledBlock:input_type -> execution.GetAssembledBlockRequest
+	34, // 51: execution.Execution.CurrentHeader:input_type -> google.protobuf.Empty
+	11, // 52: execution.Execution.GetTD:input_type -> execution.GetSegmentRequest
+	11, // 53: execution.Execution.GetHeader:input_type -> execution.GetSegmentRequest
+	11, // 54: execution.Execution.GetBody:input_type -> execution.GetSegmentRequest
+	11, // 55: execution.Execution.HasBlock:input_type -> execution.GetSegmentRequest
+	23, // 56: execution.Execution.GetBodiesByRange:input_type -> execution.GetBodiesByRangeRequest
+	22, // 57: execution.Execution.GetBodiesByHashes:input_type -> execution.GetBodiesByHashesRequest
+	27, // 58: execution.Execution.IsCanonicalHash:input_type -> types.H256
+	27, // 59: execution.Execution.GetHeaderHashNumber:input_type -> types.H256
+	34, // 60: execution.Execution.GetForkChoice:input_type -> google.protobuf.Empty
+	34, // 61: execution.Execution.Ready:input_type -> google.protobuf.Empty
+	34, // 62: execution.Execution.FrozenBlocks:input_type -> google.protobuf.Empty
+	14, // 63: execution.Execution.InsertBlocks:output_type -> execution.InsertionResult
+	2,  // 64: execution.Execution.ValidateChain:output_type -> execution.ValidationReceipt
+	1,  // 65: execution.Execution.UpdateForkChoice:output_type -> execution.ForkChoiceReceipt
+	17, // 66: execution.Execution.AssembleBlock:output_type -> execution.AssembleBlockResponse
+	20, // 67: execution.Execution.GetAssembledBlock:output_type -> execution.GetAssembledBlockResponse
+	7,  // 68: execution.Execution.CurrentHeader:output_type -> execution.GetHeaderResponse
+	8,  // 69: execution.Execution.GetTD:output_type -> execution.GetTDResponse
+	7,  // 70: execution.Execution.GetHeader:output_type -> execution.GetHeaderResponse
+	9,  // 71: execution.Execution.GetBody:output_type -> execution.GetBodyResponse
+	26, // 72: execution.Execution.HasBlock:output_type -> execution.HasBlockResponse
+	21, // 73: execution.Execution.GetBodiesByRange:output_type -> execution.GetBodiesBatchResponse
+	21, // 74: execution.Execution.GetBodiesByHashes:output_type -> execution.GetBodiesBatchResponse
+	3,  // 75: execution.Execution.IsCanonicalHash:output_type -> execution.IsCanonicalResponse
+	10, // 76: execution.Execution.GetHeaderHashNumber:output_type -> execution.GetHeaderHashNumberResponse
+	13, // 77: execution.Execution.GetForkChoice:output_type -> execution.ForkChoice
+	24, // 78: execution.Execution.Ready:output_type -> execution.ReadyResponse
+	25, // 79: execution.Execution.FrozenBlocks:output_type -> execution.FrozenBlocksResponse
+	63, // [63:80] is the sub-list for method output_type
+	46, // [46:63] is the sub-list for method input_type
+	46, // [46:46] is the sub-list for extension type_name
+	46, // [46:46] is the sub-list for extension extendee
+	0,  // [0:46] is the sub-list for field type_name
 }
 
 func init() { file_execution_execution_proto_init() }

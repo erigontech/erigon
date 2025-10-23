@@ -70,10 +70,11 @@ type Config struct {
 	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime   *big.Int `json:"cancunTime,omitempty"`
-	PragueTime   *big.Int `json:"pragueTime,omitempty"`
-	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
+	ShanghaiTime    *big.Int `json:"shanghaiTime,omitempty"`
+	CancunTime      *big.Int `json:"cancunTime,omitempty"`
+	PragueTime      *big.Int `json:"pragueTime,omitempty"`
+	OsakaTime       *big.Int `json:"osakaTime,omitempty"`
+	GlamsterdamTime *big.Int `json:"glamsterdamTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -164,6 +165,7 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
+		GlamsterdamTime:               big.NewInt(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
@@ -334,6 +336,11 @@ func (c *Config) IsBhilai(num uint64) bool {
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
+}
+
+// IsGlamsterdam returns whether time is either equal to the Glamsterdam fork time or greater.
+func (c *Config) IsGlamsterdam(time uint64) bool {
+	return isForked(c.GlamsterdamTime, time)
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
@@ -710,7 +717,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka                                 bool
+	IsPrague, IsOsaka, IsGlamsterdam                  bool
 	IsAura                                            bool
 }
 
