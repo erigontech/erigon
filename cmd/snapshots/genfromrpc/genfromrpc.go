@@ -656,12 +656,12 @@ var timeboostedTxTypes = map[string]bool{
 }
 
 var (
-	receiptLimiter = rate.NewLimiter(800, 400)
+	receiptLimiter = rate.NewLimiter(900, 200)
 	blockLimiter   = rate.NewLimiter(10000, 10000)
 
 	receiptQueries = new(atomic.Uint64)
 	//prevReceiprQueries = new(atomic.Uint64)
-	//prevReceiptTime    = new(atomic.Uint64)
+	prevReceiptTime = new(atomic.Uint64)
 )
 
 func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
@@ -737,7 +737,8 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
 				if err != nil {
 					//receiptQueries.Load() - prevReceiprQueries.Load()/prevReceiptTime.Load()
-					log.Info("receipt queries", "total", receiptQueries.Load())
+					started := time.Unix(int64(prevReceiptTime.Load()), 0)
+					log.Info("receipt queries", "total", receiptQueries.Load(), "spent", time.Since(started), "avg rate", float64(receiptQueries.Load())/time.Since(started).Seconds())
 					return fmt.Errorf("failed to get receipt for tx %s: %w", txData["hash"], err)
 				}
 
@@ -935,13 +936,14 @@ func genFromRPc(cliCtx *cli.Context) error {
 	latestBlock.SetString(latestBlockHex[2:], 16)
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	const batchSize = 10
+	const batchSize = 50
 
 	var lastBlockHash common.Hash
 
 	logInterval := time.Second * 40
 	logEvery := time.NewTicker(logInterval)
 	logStartBlock := start
+	prevReceiptTime.Store(uint64(time.Now().Unix()))
 	defer logEvery.Stop()
 
 	for prev := start; prev < latestBlock.Uint64(); {
