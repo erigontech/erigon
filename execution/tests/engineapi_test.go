@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,12 @@ func TestEngineApiTestJsonUnmarshall(t *testing.T) {
 func TestEngineApiPerformance(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
+	}
+
+	if runtime.GOOS == "windows" {
+		// this test fails on windows ci with the following error:
+		// panic: fail to open mdbx: mdbx_env_open: The paging file is too small for this operation to complete.
+		t.Skip("causes mdbx 'paging file is too small' panic")
 	}
 
 	engineApiTestDir := filepath.Join(".", "engineapi-performance-tests")
