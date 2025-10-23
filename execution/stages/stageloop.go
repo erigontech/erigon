@@ -140,9 +140,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	for {
 		// run stages first time - it will download blocks
 		if hook != nil {
-			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				err = hook.BeforeRun(tx, false)
-				return err
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				return hook.BeforeRun(tx, false)
 			}); err != nil {
 				return err
 			}
@@ -154,13 +153,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}
 
 		if hook != nil {
-			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+			if err := db.View(ctx, func(tx kv.Tx) error {
 				finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
 				if err != nil {
 					return err
 				}
-				err = hook.AfterRun(tx, finishProgressBefore)
-				return err
+				return hook.AfterRun(tx, finishProgressBefore, false)
 			}); err != nil {
 				return err
 			}
@@ -200,11 +198,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	if hook != nil {
 		var headerStageProgress uint64
-		if err := db.View(ctx, func(tx kv.Tx) (err error) {
-			headerStageProgress, err = stages.GetStageProgress(tx, stages.Headers)
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			progress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
 				return err
 			}
+			headerStageProgress = progress
 			return nil
 		}); err != nil {
 			return err
@@ -285,7 +284,7 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *state.Share
 	}
 
 	// -- send notifications START
-	if err = hook.AfterRun(tx, finishProgressBefore); err != nil {
+	if err = hook.AfterRun(tx, finishProgressBefore, isSynced); err != nil {
 		return false, err
 	}
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
@@ -433,17 +432,17 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	}
 	return h.beforeRun(tx, inSync)
 }
-func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
+func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
 	if h == nil {
 		return nil
 	}
 	if tx == nil {
-		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore) })
+		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore, isSynced) })
 	}
-	return h.afterRun(tx, finishProgressBefore)
+	return h.afterRun(tx, finishProgressBefore, isSynced)
 }
 
-func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
+func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
 	// Update sentry status for peers to see our sync status
 	if h.updateHead != nil {
 		h.updateHead(h.ctx)
@@ -453,7 +452,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		return err
 	}
 
-	h.maybeAnnounceBlockRange(finishStageAfterSync)
+	h.maybeAnnounceBlockRange(finishStageAfterSync, isSynced)
 	return h.sendNotifications(tx, finishProgressBefore, finishStageAfterSync)
 
 }
@@ -528,13 +527,13 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 	return nil
 }
 
-func (h *Hook) maybeAnnounceBlockRange(finishStageAfterSync uint64) {
-	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
+func (h *Hook) maybeAnnounceBlockRange(finishStageAfterSync uint64, isSynced bool) {
+	if h.blockRangePublisher == nil || h.statusDataGetter == nil || !isSynced {
 		return
 	}
 
 	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil
-	initialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0 && finishStageAfterSync > 0
+	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
 	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
 
 	status, err := h.statusDataGetter.GetStatusData(h.ctx)
@@ -554,11 +553,11 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageAfterSync uint64) {
 		return
 	}
 
-	if !hadUnwind && !initialAnnouncement && !progressed {
+	if !hadUnwind && !isInitialAnnouncement && !progressed {
 		return
 	}
 
-	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind)
+	h.logger.Info("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind)
 	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
 	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
 }

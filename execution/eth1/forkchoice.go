@@ -557,7 +557,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
-				return e.hook.AfterRun(tx, finishProgressBefore)
+				return e.hook.AfterRun(tx, finishProgressBefore, true)
 			}); err != nil {
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 				return
