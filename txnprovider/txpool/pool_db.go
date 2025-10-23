@@ -136,7 +136,7 @@ func SaveChainConfigIfNeed(
 	}
 
 	if cc != nil && !force {
-		if cc.ChainID.Uint64() == 0 {
+		if cc.ChainID.Sign() == 0 {
 			return nil, 0, errors.New("wrong chain config")
 		}
 		return initBor(cc), blockNum, nil
@@ -179,7 +179,7 @@ func SaveChainConfigIfNeed(
 	}); err != nil {
 		return nil, 0, err
 	}
-	if cc.ChainID.Uint64() == 0 {
+	if cc.ChainID.Sign() == 0 {
 		return nil, 0, errors.New("wrong chain config")
 	}
 	return initBor(cc), blockNum, nil

@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 const (
@@ -437,10 +437,21 @@ func (s *simulator) simulateBlock(
 	}
 	intraBlockState := state.New(stateReader)
 
+	// Create a custom block context and apply any custom block overrides
+	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
+		bsc.BlockOverrides, blockHashOverrides)
+	if bsc.BlockOverrides.BlobBaseFee != nil {
+		blockCtx.BlobBaseFee = bsc.BlockOverrides.BlobBaseFee.ToUint256()
+	}
+	rules := blockCtx.Rules(s.chainConfig)
+
+	// Determine the active precompiled contracts for this block.
+	activePrecompiles := vm.ActivePrecompiledContracts(rules)
+
 	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
 	if stateOverrides != nil {
-		if err := stateOverrides.Override(intraBlockState); err != nil {
+		if err := stateOverrides.OverrideWithPrecompiles(intraBlockState, activePrecompiles); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -461,21 +472,16 @@ func (s *simulator) simulateBlock(
 	}
 	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
 	engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
-	intraBlockState.SoftFinalise()
-
-	// Create a custom block context and apply any custom block overrides
-	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
-		bsc.BlockOverrides, blockHashOverrides)
-	if bsc.BlockOverrides.BlobBaseFee != nil {
-		blockCtx.BlobBaseFee = bsc.BlockOverrides.BlobBaseFee.ToUint256()
+	err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
+	if err != nil {
+		return nil, nil, err
 	}
-	rules := blockCtx.Rules(s.chainConfig)
 
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
-			&cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig)
+			&cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig, activePrecompiles)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -553,6 +559,7 @@ func (s *simulator) simulateCall(
 	cumulativeBlobGasUsed *uint64,
 	logTracer *rpchelper.LogTracer,
 	vmConfig vm.Config,
+	precompiles vm.PrecompiledContracts,
 ) (*CallResult, types.Transaction, *types.Receipt, error) {
 	// Setup context, so it may be cancelled after the call has completed or in case of unmetered gas use a timeout.
 	var cancel context.CancelFunc
@@ -585,6 +592,9 @@ func (s *simulator) simulateCall(
 
 	// Create a new instance of the EVM with necessary configuration options
 	evm := vm.NewEVM(blockCtx, txCtx, intraBlockState, s.chainConfig, vmConfig)
+
+	// It is possible to override precompiles with EVM bytecode or move them to another address.
+	evm.SetPrecompiles(precompiles)
 
 	// Wait for the context to be done and cancel the EVM. Even if the EVM has finished, cancelling may be done (repeatedly)
 	go func() {

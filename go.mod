@@ -17,7 +17,7 @@ require (
 	github.com/99designs/gqlgen v0.17.78
 	github.com/FastFilter/xorfilter v0.2.1
 	github.com/Masterminds/sprig/v3 v3.2.3
-	github.com/RoaringBitmap/roaring/v2 v2.11.0
+	github.com/RoaringBitmap/roaring/v2 v2.12.0
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/chansync v0.7.0
 	github.com/anacrolix/envpprof v1.4.0
@@ -58,7 +58,7 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/golang/snappy v1.0.0
 	github.com/google/btree v1.1.3
-	github.com/google/cel-go v0.26.0
+	github.com/google/cel-go v0.26.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/gofuzz v1.2.0
 	github.com/google/uuid v1.6.0
