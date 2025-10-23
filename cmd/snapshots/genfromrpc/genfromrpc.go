@@ -655,7 +655,7 @@ var timeboostedTxTypes = map[string]bool{
 }
 
 var (
-	receiptLimiter = rate.NewLimiter(950, 980)
+	receiptLimiter = rate.NewLimiter(900, 940)
 	blockLimiter   = rate.NewLimiter(100, 100)
 )
 
