@@ -31,9 +31,10 @@ import (
 	"strings"
 	"testing"
 
-	dbstate "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
+
+	dbstate "github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"

@@ -24,11 +24,12 @@ import (
 	"testing"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
-	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -925,7 +926,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			tx, err := coreDB.BeginTemporalRw(ctx)
 			defer tx.Rollback()
 			asrt.NoError(err)
-			sd, err := sd.NewSharedDomains(tx, logger)
+			sd, err := execctx.NewSharedDomains(tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
@@ -1049,7 +1050,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginTemporalRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
-	sd, err := sd.NewSharedDomains(tx.(kv.TemporalTx), logger)
+	sd, err := execctx.NewSharedDomains(tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
 

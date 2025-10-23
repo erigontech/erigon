@@ -27,11 +27,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	dbstate "github.com/erigontech/erigon/db/state/sd"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	dbstate "github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"

@@ -24,9 +24,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -287,7 +288,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *sd.SharedDomains) {
+func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
 	tb.Helper()
 
 	dirs := datadir.New(tb.TempDir())
@@ -298,7 +299,7 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *sd.SharedDom
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
 
-	domains, err := sd.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(tb, err)
 	tb.Cleanup(domains.Close)
 

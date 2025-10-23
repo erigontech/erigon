@@ -5,8 +5,9 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -23,7 +24,7 @@ func TestAppendReceipt(t *testing.T) {
 	defer tx.Rollback()
 
 	ttx := tx
-	doms, err := sd.NewSharedDomains(ttx, log.New())
+	doms, err := execctx.NewSharedDomains(ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()
 

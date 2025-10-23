@@ -30,8 +30,9 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	sd2 "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
+
+	sd2 "github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"

@@ -29,9 +29,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/db/state/changeset"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/db/state/changeset"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -689,7 +690,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 	}, 0, 128)
 	var fromTxNum, endTxNum uint64 = 0, uint64(stepTo) * d.stepSize
 	if stepFrom > 0 {
-		fromTxNum = uint64((stepFrom - 1)) * d.stepSize
+		fromTxNum = uint64(stepFrom-1) * d.stepSize
 	}
 
 	//var stepInDB []byte

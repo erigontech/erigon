@@ -31,8 +31,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/state/changeset"
 	rand2 "golang.org/x/exp/rand"
+
+	"github.com/erigontech/erigon/db/state/changeset"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/tidwall/btree"

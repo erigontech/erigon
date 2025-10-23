@@ -21,9 +21,10 @@ import (
 	"fmt"
 	"sync"
 
-	dbstate "github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
+
+	dbstate "github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"

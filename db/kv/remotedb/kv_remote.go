@@ -243,6 +243,8 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
+func (tx *tx) NewMemBatch(ioMetrics interface{}) kv.TemporalMemBatch { panic("not implemented") }
+
 func (tx *tx) AggTx() any                                      { panic("not implemented") }
 func (tx *tx) Debug() kv.TemporalDebugTx                       { return kv.TemporalDebugTx(tx) }
 func (tx *tx) FreezeInfo() kv.FreezeInfo                       { panic("not implemented") }

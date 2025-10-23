@@ -11,8 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -494,7 +495,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := sd.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -612,7 +613,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := sd.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 

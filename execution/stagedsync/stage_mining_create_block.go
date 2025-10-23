@@ -24,7 +24,8 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	dbstate "github.com/erigontech/erigon/db/state/sd"
+
+	dbstate "github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"

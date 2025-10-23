@@ -6,6 +6,8 @@ import (
 	"path"
 	"path/filepath"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -15,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"golang.org/x/sync/errgroup"
 )
 
 /*

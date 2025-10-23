@@ -25,9 +25,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/db/state/sd"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -236,7 +237,7 @@ func TestAPI(t *testing.T) {
 		var txID uint64
 		err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			txID = tx.ViewID()
-			d, err := sd.NewSharedDomains(tx, log.New())
+			d, err := execctx.NewSharedDomains(tx, log.New())
 			if err != nil {
 				return err
 			}
