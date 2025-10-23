@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/tidwall/btree"
 )
 
@@ -33,8 +34,8 @@ func (p AccountPath) String() string {
 		return "Code Size"
 	case SelfDestructPath:
 		return "Destruct"
-	case StatePath:
-		return "State"
+	case StoragePath:
+		return "Storage"
 	default:
 		return fmt.Sprintf(" Unknown %d", p)
 	}
@@ -48,7 +49,7 @@ const (
 	CodeHashPath
 	CodeSizePath
 	SelfDestructPath
-	StatePath
+	StoragePath
 )
 
 type AccountKey struct {
@@ -57,7 +58,7 @@ type AccountKey struct {
 }
 
 func (k AccountKey) String() string {
-	if k.Path == StatePath {
+	if k.Path == StoragePath {
 		return fmt.Sprintf("%x", k.Key)
 	}
 
@@ -92,6 +93,26 @@ func (vm *VersionMap) getKeyCells(addr common.Address, path AccountPath, key com
 	}
 
 	return
+}
+
+func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
+	for _, accountChanges := range changes {
+		for _, storageChanges := range accountChanges.StorageChanges {
+			for _, change := range storageChanges.Changes {
+				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+			}
+		}
+		for _, balanceChange := range accountChanges.BalanceChanges {
+			vm.Write(accountChanges.Address, BalancePath, common.Hash{}, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
+		}
+		for _, nonceChange := range accountChanges.NonceChanges {
+			vm.Write(accountChanges.Address, NoncePath, common.Hash{}, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
+		}
+		for _, codeChange := range accountChanges.CodeChanges {
+			vm.Write(accountChanges.Address, BalancePath, common.Hash{}, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Data, true)
+		}
+	}
+
 }
 
 func (vm *VersionMap) Write(addr common.Address, path AccountPath, key common.Hash, v Version, data interface{}, complete bool) {

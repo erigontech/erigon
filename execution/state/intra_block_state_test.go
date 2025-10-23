@@ -806,8 +806,8 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 	// map deletes necessary here as they happen in scheduler not ibs
-	states[1].versionMap.Delete(addr, StatePath, key1, 1, true)
-	states[1].versionMap.Delete(addr, StatePath, key2, 1, true)
+	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
+	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
 	states[1].versionMap.Delete(addr, BalancePath, common.Hash{}, 1, true)
 
 	// Tx3 read

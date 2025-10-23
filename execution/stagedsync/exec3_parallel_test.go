@@ -232,7 +232,7 @@ type opkey struct {
 var randomPathGenerator = func(i int, j int, total int) opkey {
 	addr := common.BigToAddress((big.NewInt(int64(i % 10))))
 	hash := common.BigToHash((big.NewInt(int64(total))))
-	return opkey{addr, hash, state.StatePath}
+	return opkey{addr, hash, state.StoragePath}
 }
 
 var dexPathGenerator = func(i int, j int, total int) opkey {
