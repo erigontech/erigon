@@ -537,6 +537,7 @@ The `--help` flag listing is reproduced below for your convenience.
 ./build/bin/erigon --help
 ```
 
+{% code overflow="wrap" fullWidth="true" %}
 ```shell
 NAME:
    erigon - erigon
@@ -809,3 +810,4 @@ GLOBAL OPTIONS:
    --version, -v                                                                       print the version
 
 ```
+{% endcode %}
