@@ -656,8 +656,8 @@ var timeboostedTxTypes = map[string]bool{
 }
 
 var (
-	receiptLimiter = rate.NewLimiter(900, 200)
-	blockLimiter   = rate.NewLimiter(10000, 10000)
+	//receiptLimiter = rate.NewLimiter(900, 200)
+	blockLimiter = rate.NewLimiter(10000, 10000)
 
 	receiptAllowed chan struct{}
 
@@ -667,21 +667,21 @@ var (
 )
 
 func init() {
-	size := int(receiptLimiter.Limit())
-	receiptAllowed = make(chan struct{}, size)
+	//size := int(receiptLimiter.Limit())
+	//receiptAllowed = make(chan struct{}, size)
 }
 
 func acquireReceiptLimiter() {
-	if err := receiptLimiter.Wait(context.TODO()); err != nil {
-		panic(err)
-	}
-	receiptAllowed <- struct{}{}
-
+	//if err := receiptLimiter.Wait(context.TODO()); err != nil {
+	//	panic(err)
+	//}
+	//receiptAllowed <- struct{}{}
+	//
 	receiptQueries.Add(1)
 }
 
 func releaseReceiptLimiter() {
-	<-receiptAllowed
+	//<-receiptAllowed
 }
 
 func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
@@ -964,6 +964,8 @@ func genFromRPc(cliCtx *cli.Context) error {
 	logStartBlock := start
 	prevReceiptTime.Store(uint64(time.Now().Unix()))
 	defer logEvery.Stop()
+
+	receiptClient.SetRequestLimit(rate.Limit(800), 10)
 
 	for prev := start; prev < latestBlock.Uint64(); {
 		blocks, err := FetchBlocksBatch(client, receiptClient, prev, latestBlock.Uint64(), batchSize, verification, isArbitrum)
