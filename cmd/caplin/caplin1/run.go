@@ -25,9 +25,10 @@ import (
 	"path"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/spf13/afero"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc/credentials"
+
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon"
@@ -64,16 +65,17 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/spf13/afero"
-	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc/credentials"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
@@ -96,11 +98,11 @@ func OpenCaplinDatabase(ctx context.Context,
 	os.MkdirAll(dbPath, 0700)
 	os.MkdirAll(dataDirIndexer, 0700)
 
-	db := mdbx.New(kv.CaplinDB, log.New()).Path(dbPath).
+	db := mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
 			return kv.ChaindataTablesCfg
 		}).MustOpen()
-	blobDB := mdbx.New(kv.CaplinDB, log.New()).Path(blobDbPath).
+	blobDB := mdbx.New(dbcfg.CaplinDB, log.New()).Path(blobDbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.ChaindataTablesCfg
 		}).MustOpen()
@@ -126,7 +128,7 @@ func OpenCaplinDatabase(ctx context.Context,
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader proto_downloader.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader downloaderproto.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
 
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig

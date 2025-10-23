@@ -27,9 +27,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 // AccessTuple is the element type of an access list.
@@ -413,16 +413,18 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 // AsMessage returns the transaction as a core.Message.
 func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
-		nonce:      tx.Nonce,
-		gasLimit:   tx.GasLimit,
-		gasPrice:   *tx.GasPrice,
-		tipCap:     *tx.GasPrice,
-		feeCap:     *tx.GasPrice,
-		to:         tx.To,
-		amount:     *tx.Value,
-		data:       tx.Data,
-		accessList: tx.AccessList,
-		checkNonce: true,
+		nonce:            tx.Nonce,
+		gasLimit:         tx.GasLimit,
+		gasPrice:         *tx.GasPrice,
+		tipCap:           *tx.GasPrice,
+		feeCap:           *tx.GasPrice,
+		to:               tx.To,
+		amount:           *tx.Value,
+		data:             tx.Data,
+		accessList:       tx.AccessList,
+		checkNonce:       true,
+		checkTransaction: true,
+		checkGas:         true,
 	}
 
 	if !rules.IsBerlin {

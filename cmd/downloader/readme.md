@@ -80,7 +80,7 @@ Flag `--snapshots` is compatible with `--prune` flag
  
 # Create new snapshots (can change snapshot size by: --from=0 --to=1_000_000 --segment.size=500_000)
 # It will dump blocks from Database to .seg files:
-erigon seg retire --datadir=<your_datadir> 
+erigon snapshots retire --datadir=<your_datadir> 
 
 # Create .torrent files (you can think about them as "checksum")
 downloader torrent_create --datadir=<your_datadir>
@@ -136,7 +136,7 @@ Downloader does:
 
 - Read .torrent files, download everything described by .torrent files
 - Use https://github.com/ngosang/trackerslist
-  see [./downloader/util.go](../../erigon-lib/downloader/util.go)
+  see [./downloader/util.go](../../db/downloader/util.go)
 - automatically seeding
 
 Technical details:

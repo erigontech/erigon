@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -19,18 +20,19 @@ import (
 // ii) existence filter: kvei
 // iii) bt index: btree index; e.g. .bt
 
-// snapshot name schema holder and parser
-// each entity holds one schema.
+// "snapshot files" name schema holder and parser
+// each entity has one schema.
 type SnapNameSchema interface {
 	DataTag() string
-	AccessorList() Accessors
+	IndexTags() []string
+	AccessorList() statecfg.Accessors
 	Parse(filename string) (f *SnapInfo, ok bool)
 
 	// these give out full filepath, not just filename
-	DataFile(version Version, from, to RootNum) string
-	AccessorIdxFile(version Version, from, to RootNum, idxPos uint64) string // index or accessor file (recsplit typically)
-	BtIdxFile(version Version, from, to RootNum) string                      // hack to pass params required for opening btree index
-	ExistenceFile(version Version, from, to RootNum) string
+	DataFile(version statecfg.Version, from, to RootNum) string
+	AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint64) string // index or accessor file (recsplit typically)
+	BtIdxFile(version statecfg.Version, from, to RootNum) string                      // hack to pass params required for opening btree index
+	ExistenceFile(version statecfg.Version, from, to RootNum) string
 
 	AccessorIdxCount() uint64
 	DataDirectory() string
@@ -57,7 +59,7 @@ type E2SnapSchema struct {
 	dataFileTag   string
 	indexFileTags []string
 
-	accessors Accessors
+	accessors statecfg.Accessors
 
 	// caches
 	dataFileMetadata      *_fileMetadata
@@ -81,7 +83,7 @@ func NewE2SnapSchemaWithStep(dirs datadir.Dirs, dataFileTag string, indexFileTag
 		stepSize:      stepSize,
 		dataFileTag:   dataFileTag,
 		indexFileTags: indexFileTags,
-		accessors:     AccessorHashMap,
+		accessors:     statecfg.AccessorHashMap,
 
 		dataFileMetadata: &_fileMetadata{
 			folder:    dirs.Snap,
@@ -100,7 +102,11 @@ func (s *E2SnapSchema) DataTag() string {
 	return s.dataFileTag
 }
 
-func (a *E2SnapSchema) AccessorList() Accessors {
+func (s *E2SnapSchema) IndexTags() []string {
+	return s.indexFileTags
+}
+
+func (a *E2SnapSchema) AccessorList() statecfg.Accessors {
 	return a.accessors
 }
 
@@ -148,19 +154,19 @@ func (s *E2SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 	}
 }
 
-func (s *E2SnapSchema) DataFile(version Version, from, to RootNum) string {
+func (s *E2SnapSchema) DataFile(version statecfg.Version, from, to RootNum) string {
 	return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg)))
 }
 
-func (s *E2SnapSchema) AccessorIdxFile(version Version, from, to RootNum, idxPos uint64) string {
+func (s *E2SnapSchema) AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint64) string {
 	return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx)))
 }
 
-func (s *E2SnapSchema) BtIdxFile(version Version, from, to RootNum) string {
+func (s *E2SnapSchema) BtIdxFile(version statecfg.Version, from, to RootNum) string {
 	panic("unsupported")
 }
 
-func (s *E2SnapSchema) ExistenceFile(version Version, from, to RootNum) string {
+func (s *E2SnapSchema) ExistenceFile(version statecfg.Version, from, to RootNum) string {
 	panic("unsupported")
 }
 
@@ -193,14 +199,13 @@ func (s *E2SnapSchema) DataFileCompression() seg.FileCompression {
 }
 
 // E3 Schema
-
 type E3SnapSchema struct {
 	stepSize uint64
 
 	dataExtension       DataExtension
 	dataFileTag         string
 	dataFileCompression seg.FileCompression
-	accessors           Accessors
+	accessors           statecfg.Accessors
 
 	accessorIdxExtension AccessorExtension
 	// caches
@@ -214,7 +219,36 @@ type E3SnapSchemaBuilder struct {
 	e *E3SnapSchema
 }
 
-func NewE3SnapSchemaBuilder(accessors Accessors, stepSize uint64) *E3SnapSchemaBuilder {
+func SnapSchemaFromDomainCfg(cfg statecfg.DomainCfg, dirs datadir.Dirs, stepSize uint64) (domain, history, ii *E3SnapSchema) {
+	domainb := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression)
+	accessors := cfg.Accessors
+	if accessors.Has(statecfg.AccessorBTree) {
+		domainb.BtIndex()
+	}
+	if accessors.Has(statecfg.AccessorExistence) {
+		domainb.Existence()
+	}
+	if accessors.Has(statecfg.AccessorHashMap) {
+		domainb.Accessor(dirs.SnapDomain)
+	}
+	domain = domainb.Build()
+
+	if cfg.Hist.HistoryDisabled {
+		return
+	}
+
+	history = NewE3SnapSchemaBuilder(cfg.Hist.Accessors, stepSize).
+		Data(dirs.SnapHistory, cfg.Name.String(), DataExtensionV, cfg.Hist.Compression).
+		Accessor(dirs.SnapAccessors).Build()
+	ii = NewE3SnapSchemaBuilder(cfg.Hist.IiCfg.Accessors, stepSize).
+		Data(dirs.SnapIdx, cfg.Name.String(), DataExtensionEf, cfg.Hist.IiCfg.Compression).
+		Accessor(dirs.SnapAccessors).Build()
+
+	return
+}
+
+func NewE3SnapSchemaBuilder(accessors statecfg.Accessors, stepSize uint64) *E3SnapSchemaBuilder {
 	eschema := E3SnapSchemaBuilder{
 		e: &E3SnapSchema{},
 	}
@@ -282,13 +316,13 @@ func (b *E3SnapSchemaBuilder) Build() *E3SnapSchema {
 		panic("dataFileMetadata not set")
 	}
 
-	e.btIdxFileMetadata = b.checkPresence(AccessorBTree, e.btIdxFileMetadata)
-	e.indexFileMetadata = b.checkPresence(AccessorHashMap, e.indexFileMetadata)
-	e.existenceFileMetadata = b.checkPresence(AccessorExistence, e.existenceFileMetadata)
+	e.btIdxFileMetadata = b.checkPresence(statecfg.AccessorBTree, e.btIdxFileMetadata)
+	e.indexFileMetadata = b.checkPresence(statecfg.AccessorHashMap, e.indexFileMetadata)
+	e.existenceFileMetadata = b.checkPresence(statecfg.AccessorExistence, e.existenceFileMetadata)
 	return e
 }
 
-func (b *E3SnapSchemaBuilder) checkPresence(check Accessors, met *_fileMetadata) *_fileMetadata {
+func (b *E3SnapSchemaBuilder) checkPresence(check statecfg.Accessors, met *_fileMetadata) *_fileMetadata {
 	if b.e.accessors&check == 0 && met != nil {
 		panic(fmt.Sprintf("accessor %s is not meant to be supported for %s", check, b.e.dataFileTag))
 	} else if b.e.accessors&check != 0 && met == nil {
@@ -353,13 +387,13 @@ func (s *E3SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 	return nil, false
 }
 
-func (s *E3SnapSchema) DataFile(version Version, from, to RootNum) string {
+func (s *E3SnapSchema) DataFile(version statecfg.Version, from, to RootNum) string {
 	return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataExtension))
 }
 
-func (s *E3SnapSchema) AccessorIdxFile(version Version, from, to RootNum, idxPos uint64) string {
+func (s *E3SnapSchema) AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint64) string {
 	if !s.indexFileMetadata.supported {
-		panic(fmt.Sprintf("%s not supported for %s", AccessorHashMap, s.dataFileTag))
+		panic(fmt.Sprintf("%s not supported for %s", statecfg.AccessorHashMap, s.dataFileTag))
 	}
 	if idxPos > 0 {
 		panic("e3 accessor idx pos should be 0")
@@ -367,16 +401,16 @@ func (s *E3SnapSchema) AccessorIdxFile(version Version, from, to RootNum, idxPos
 	return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.accessorIdxExtension))
 }
 
-func (s *E3SnapSchema) BtIdxFile(version Version, from, to RootNum) string {
+func (s *E3SnapSchema) BtIdxFile(version statecfg.Version, from, to RootNum) string {
 	if !s.btIdxFileMetadata.supported {
-		panic(fmt.Sprintf("%s not supported for %s", AccessorBTree, s.dataFileTag))
+		panic(fmt.Sprintf("%s not supported for %s", statecfg.AccessorBTree, s.dataFileTag))
 	}
 	return filepath.Join(s.btIdxFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d.bt", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize)))
 }
 
-func (s *E3SnapSchema) ExistenceFile(version Version, from, to RootNum) string {
+func (s *E3SnapSchema) ExistenceFile(version statecfg.Version, from, to RootNum) string {
 	if !s.existenceFileMetadata.supported {
-		panic(fmt.Sprintf("%s not supported for %s", AccessorExistence, s.dataFileTag))
+		panic(fmt.Sprintf("%s not supported for %s", statecfg.AccessorExistence, s.dataFileTag))
 	}
 	return filepath.Join(s.existenceFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d.kvei", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize)))
 }
@@ -385,7 +419,11 @@ func (s *E3SnapSchema) DataTag() string {
 	return s.dataFileTag
 }
 
-func (s *E3SnapSchema) AccessorList() Accessors {
+func (s *E3SnapSchema) IndexTags() []string {
+	return []string{s.dataFileTag}
+}
+
+func (s *E3SnapSchema) AccessorList() statecfg.Accessors {
 	return s.accessors
 }
 
@@ -420,4 +458,60 @@ func (s *E3SnapSchema) FileExtensions() (extensions []string) {
 	}
 
 	return
+}
+
+// these are v + vi or bt/kvei residing in same folder `snapshots/forkables`
+func NewForkableSnapSchema(cfg statecfg.ForkableCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize)
+	b.Data(dirs.SnapForkable, cfg.Name, DataExtensionV, cfg.Compression)
+	if cfg.Accessors&statecfg.AccessorBTree != 0 {
+		b.BtIndex()
+	}
+	if cfg.Accessors&statecfg.AccessorHashMap != 0 {
+		b.Accessor(dirs.SnapForkable)
+	}
+	if cfg.Accessors&statecfg.AccessorExistence != 0 {
+		b.Existence()
+	}
+
+	return b.Build()
+}
+
+func NewDomainSnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression)
+
+	if cfg.Accessors.Has(statecfg.AccessorBTree) {
+		b.BtIndex()
+	}
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		// kvi in same folder
+		b.Accessor(dirs.SnapDomain)
+	}
+	if cfg.Accessors.Has(statecfg.AccessorExistence) {
+		b.Existence()
+	}
+
+	return b.Build()
+}
+
+func NewHistorySnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapHistory, cfg.Name.String(), DataExtensionV, cfg.Compression)
+
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		b.Accessor(dirs.SnapAccessors)
+	}
+
+	return b.Build()
+}
+
+func NewIISnapSchema(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapIdx, cfg.Name.String(), DataExtensionEf, cfg.Compression)
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		b.Accessor(dirs.SnapAccessors)
+	}
+
+	return b.Build()
 }

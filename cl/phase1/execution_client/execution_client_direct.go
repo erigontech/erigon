@@ -24,16 +24,16 @@ import (
 	"math/big"
 	"time"
 
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 const reorgTooDeepDepth = 3
@@ -78,7 +78,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startInsertBlockAndWait := time.Now()
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, nil)); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}
@@ -106,11 +106,11 @@ func (cc *ExecutionClientDirect) NewPayload(
 	monitor.ObserveExecutionClientValidateChain(startValidateChain)
 	// check status
 	switch status {
-	case execution.ExecutionStatus_BadBlock, execution.ExecutionStatus_InvalidForkchoice:
+	case executionproto.ExecutionStatus_BadBlock, executionproto.ExecutionStatus_InvalidForkchoice:
 		return PayloadStatusInvalidated, errors.New("bad block")
-	case execution.ExecutionStatus_Busy, execution.ExecutionStatus_MissingSegment, execution.ExecutionStatus_TooFarAway:
+	case executionproto.ExecutionStatus_Busy, executionproto.ExecutionStatus_MissingSegment, executionproto.ExecutionStatus_TooFarAway:
 		return PayloadStatusNotValidated, nil
-	case execution.ExecutionStatus_Success:
+	case executionproto.ExecutionStatus_Success:
 		return PayloadStatusValidated, nil
 	}
 	return PayloadStatusNone, errors.New("unexpected status")
@@ -121,10 +121,10 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	if status == execution.ExecutionStatus_InvalidForkchoice {
+	if status == executionproto.ExecutionStatus_InvalidForkchoice {
 		return nil, errors.New("forkchoice was invalid")
 	}
-	if status == execution.ExecutionStatus_BadBlock {
+	if status == executionproto.ExecutionStatus_BadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
@@ -185,7 +185,7 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 	return cc.chainRW.HasBlock(ctx, hash)
 }
 
-func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
 }
 

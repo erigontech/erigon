@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
 	"testing"
@@ -32,17 +33,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -51,8 +47,13 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
@@ -388,7 +389,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	}
 
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -398,7 +399,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 
 	msg := m.SentMessage(0)
 
-	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+	require.Equal(sentryproto.MessageId_RECEIPTS_66, msg.Id)
 
 	encoded, err := rlp.EncodeToBytes(types.Receipts{})
 	require.NoError(err)
@@ -1095,7 +1096,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, new(uint256.Int), contract), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(tx)
-			theAddr = crypto.CreateAddress(bankAddress, nonce)
+			theAddr = types.CreateAddress(bankAddress, nonce)
 		case 1:
 			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), input), *signer, bankKey)
 			require.NoError(t, err)
@@ -1485,7 +1486,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	}...)
 
 	initHash := crypto.Keccak256Hash(initCode)
-	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
@@ -1807,7 +1808,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}...)
 
 	initHash := crypto.Keccak256Hash(initCode)
-	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
 		Config: libchain.TestChainConfig,
@@ -1869,9 +1870,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		var exp = new(expectation)
 		exp.blocknum = i + 1
 		exp.values = make(map[int]int)
-		for k, v := range current.values {
-			exp.values[k] = v
-		}
+		maps.Copy(exp.values, current.values)
 		exp.exist = current.exist
 
 		b.SetCoinbase(common.Address{1})
@@ -2010,7 +2009,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}...)
 
 	initHash := crypto.Keccak256Hash(initCode)
-	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
@@ -2189,7 +2188,7 @@ func TestEIP1559Transition(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(common.Ether))
 		gspec   = &types.Genesis{
-			Config: chainspec.SepoliaChainConfig,
+			Config: chainspec.Sepolia.Config,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: funds.ToBig()},
 				addr2: {Balance: funds.ToBig()},

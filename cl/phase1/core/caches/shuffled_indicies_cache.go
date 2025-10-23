@@ -4,7 +4,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 var ShuffledIndiciesCacheGlobal = NewShuffledIndiciesCache(MaxShuffledIndiciesCacheSize)

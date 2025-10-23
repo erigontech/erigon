@@ -20,15 +20,14 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
 var databaseTablesCfg = kv.TableCfg{
@@ -63,51 +62,8 @@ type EntityStore[TEntity Entity] interface {
 	SnapType() snaptype.Type
 }
 
-type NoopEntityStore[TEntity Entity] struct {
-	Type snaptype.Type
-}
-
-func (NoopEntityStore[TEntity]) Prepare(ctx context.Context) error {
-	return nil
-}
-
-func (NoopEntityStore[TEntity]) Close() {}
-
-func (NoopEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
-	return 0, false, errors.New("noop")
-}
-func (NoopEntityStore[TEntity]) LastFrozenEntityId() (uint64, bool, error) { return 0, false, nil }
-func (NoopEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
-	var res TEntity
-	return res, false, errors.New("noop")
-}
-func (NoopEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
-	var res TEntity
-	return res, false, errors.New("noop")
-}
-func (NoopEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
-	return nil
-}
-
-func (NoopEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-	return 0, false, errors.New("noop")
-}
-
-func (NoopEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
-	return nil, errors.New("noop")
-}
-func (NoopEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
-	return 0, nil
-}
-
-func (NoopEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
-	return 0, nil
-}
-
-func (ns NoopEntityStore[TEntity]) SnapType() snaptype.Type { return ns.Type }
-
 type mdbxEntityStore[TEntity Entity] struct {
-	db                *polygoncommon.Database
+	db                *polygondb.Database
 	table             string
 	snapType          snaptype.Type
 	makeEntity        func() TEntity
@@ -116,7 +72,7 @@ type mdbxEntityStore[TEntity Entity] struct {
 }
 
 func newMdbxEntityStore[TEntity Entity](
-	db *polygoncommon.Database,
+	db *polygondb.Database,
 	table string,
 	snapType snaptype.Type,
 	makeEntity func() TEntity,

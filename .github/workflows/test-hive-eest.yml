@@ -35,7 +35,7 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v5
         with:
-          repository: erigontech/hive
+          repository: ethereum/hive
           ref: master
           path: hive
     
@@ -46,7 +46,7 @@ jobs:
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
     
       - name: Setup go env and cache
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '>=1.24'
 
@@ -75,7 +75,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eels/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -99,7 +99,7 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            if (( failed > 3 )); then
+            if (( failed > 0 )); then
               echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1

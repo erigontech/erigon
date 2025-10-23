@@ -7,15 +7,15 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
 type spanRangeIndex struct {
-	db    *polygoncommon.Database
+	db    *polygondb.Database
 	table string
 }
 
-func NewSpanRangeIndex(db *polygoncommon.Database, table string) *spanRangeIndex {
+func NewSpanRangeIndex(db *polygondb.Database, table string) *spanRangeIndex {
 	return &spanRangeIndex{db, table}
 }
 
@@ -83,7 +83,7 @@ type txSpanRangeIndex struct {
 }
 
 func NewTxSpanRangeIndex(db kv.RoDB, table string, tx kv.Tx) *txSpanRangeIndex {
-	return &txSpanRangeIndex{&spanRangeIndex{db: polygoncommon.AsDatabase(db.(kv.RwDB)), table: table}, tx}
+	return &txSpanRangeIndex{&spanRangeIndex{db: polygondb.AsDatabase(db.(kv.RwDB)), table: table}, tx}
 }
 
 func (i *txSpanRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {

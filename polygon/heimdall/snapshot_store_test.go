@@ -10,17 +10,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // Span tests
@@ -32,7 +32,8 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 5_000, 132, dir, logger)
 	createTestSegmentFile(t, 0, 5_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
+	borRoSnapshots.DownloadComplete()
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -54,7 +55,8 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T
 
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
+	borRoSnapshots.DownloadComplete()
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -84,7 +86,8 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 0, 4_000, Spans.Name()))
 	err := dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
+	borRoSnapshots.DownloadComplete()
 	t.Cleanup(borRoSnapshots.Close)
 	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -111,7 +114,8 @@ func TestHeimdallStoreEntity(t *testing.T) {
 	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
+	borRoSnapshots.DownloadComplete()
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -143,7 +147,8 @@ func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
 	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
+	borRoSnapshots.DownloadComplete()
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -170,7 +175,8 @@ func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
 	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
+	borRoSnapshots.DownloadComplete()
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -304,52 +310,52 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 }
 
 var spanDataForTesting = []Span{
-	Span{
+	{
 		Id:         0,
 		StartBlock: 0,
 		EndBlock:   999,
 	},
-	Span{
+	{
 		Id:         1,
 		StartBlock: 1000,
 		EndBlock:   1999,
 	},
-	Span{
+	{
 		Id:         2,
 		StartBlock: 2000,
 		EndBlock:   2999,
 	},
-	Span{
+	{
 		Id:         3,
 		StartBlock: 3000,
 		EndBlock:   3999,
 	},
-	Span{
+	{
 		Id:         4,
 		StartBlock: 4000,
 		EndBlock:   4999,
 	},
-	Span{
+	{
 		Id:         5,
 		StartBlock: 5000,
 		EndBlock:   5999,
 	},
-	Span{
+	{
 		Id:         6,
 		StartBlock: 6000,
 		EndBlock:   6999,
 	},
-	Span{
+	{
 		Id:         7,
 		StartBlock: 7000,
 		EndBlock:   7999,
 	},
-	Span{
+	{
 		Id:         8,
 		StartBlock: 8000,
 		EndBlock:   8999,
 	},
-	Span{
+	{
 		Id:         9,
 		StartBlock: 9000,
 		EndBlock:   9999,
@@ -358,52 +364,52 @@ var spanDataForTesting = []Span{
 
 // span data that is irregular, containing possible span rotations
 var spanDataWithRotations = []Span{
-	Span{ // first  span
+	{ // first  span
 		Id:         0,
 		StartBlock: 0,
 		EndBlock:   999,
 	},
-	Span{ // new span announced
+	{ // new span announced
 		Id:         1,
 		StartBlock: 1000,
 		EndBlock:   1999,
 	},
-	Span{ // span rotation
+	{ // span rotation
 		Id:         2,
 		StartBlock: 4,
 		EndBlock:   1999,
 	},
-	Span{ // span rotation
+	{ // span rotation
 		Id:         3,
 		StartBlock: 5,
 		EndBlock:   1999,
 	},
-	Span{ // span rotation
+	{ // span rotation
 		Id:         4,
 		StartBlock: 6,
 		EndBlock:   1999,
 	},
-	Span{ // new span announced
+	{ // new span announced
 		Id:         5,
 		StartBlock: 2000,
 		EndBlock:   2999,
 	},
-	Span{ // span rotation
+	{ // span rotation
 		Id:         6,
 		StartBlock: 11,
 		EndBlock:   1999,
 	},
-	Span{ // new span announced, this will have duplicate StartBlock
+	{ // new span announced, this will have duplicate StartBlock
 		Id:         7,
 		StartBlock: 2000,
 		EndBlock:   2999,
 	},
-	Span{ // span rotation
+	{ // span rotation
 		Id:         8,
 		StartBlock: 3100,
 		EndBlock:   4999,
 	},
-	Span{ // span rotation
+	{ // span rotation
 		Id:         9,
 		StartBlock: 4600,
 		EndBlock:   5999,

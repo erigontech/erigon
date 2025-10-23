@@ -35,11 +35,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
@@ -58,9 +53,14 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 type BlockPublishingValidation string
@@ -1042,7 +1042,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 
 	// check blob bundle
 	if blobsBundle != nil && blockPayload.Version() >= clparams.DenebVersion {
-		err := func(b *engine_types.BlobsBundleV1) error {
+		err := func(b *engine_types.BlobsBundle) error {
 			// check the length of the blobs bundle
 			if len(b.Commitments) != len(b.Proofs) || len(b.Commitments) != len(b.Blobs) {
 				return errors.New("commitments, proofs and blobs must have the same length")
@@ -1273,7 +1273,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		lenBlobs,
 	)
 	// Broadcast the block and its blobs
-	if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
+	if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
 		Name: gossip.TopicNameBeaconBlock,
 		Data: blkSSZ,
 	}); err != nil {
@@ -1283,7 +1283,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	if blk.Version() < clparams.FuluVersion {
 		for idx, blob := range blobsSidecarsBytes {
 			idx64 := uint64(idx)
-			if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
 				Name:     gossip.TopicNamePrefixBlobSidecar,
 				Data:     blob,
 				SubnetId: &idx64,
@@ -1301,7 +1301,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				continue
 			}
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
-			if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
 				Name:     gossip.TopicNamePrefixDataColumnSidecar,
 				Data:     columnSSZ,
 				SubnetId: &subnet,

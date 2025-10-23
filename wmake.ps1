@@ -23,13 +23,11 @@ Param(
     [ValidateSet(
         "clean",
         "db-tools",
-        "devnet",
         "downloader",
         "erigon",
         "evm",
         "hack",
         "integration",
-        "observer",
         "pics",
         "rpcdaemon",
         "rpctest",
@@ -72,13 +70,11 @@ if ($BuildTargets.Count -gt 1) {
 
 if ($BuildTargets[0] -eq "all") {
     $BuildTargets = @(
-        "devnet",
         "downloader",
         "erigon",
         "evm",
         "hack",
         "integration",
-        "observer",
         "pics",
         "rpcdaemon",
         "rpctest",

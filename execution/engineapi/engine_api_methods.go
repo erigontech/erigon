@@ -20,9 +20,9 @@ import (
 	"context"
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
@@ -195,7 +195,7 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.CapellaVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
 	if err != nil {
 		return nil, err
 	}

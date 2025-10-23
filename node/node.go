@@ -34,18 +34,19 @@ import (
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/debug"
 )
 
 // Node is a container on which services can be registered.
@@ -293,13 +294,13 @@ func (n *Node) DataDir() string {
 
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
-	case kv.ChainDB:
+	case dbcfg.ChainDB:
 		name = "chaindata"
-	case kv.TxPoolDB:
+	case dbcfg.TxPoolDB:
 		name = "txpool"
-	case kv.PolygonBridgeDB:
+	case dbcfg.PolygonBridgeDB:
 		name = "polygon-bridge"
-	case kv.ConsensusDB:
+	case dbcfg.ConsensusDB:
 		if len(name) == 0 {
 			return nil, errors.New("expected a consensus name")
 		}
@@ -309,7 +310,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New("", label)
+		db = memdb.New(nil, "", label)
 		return db, nil
 	}
 
@@ -331,7 +332,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			Exclusive(exclusive)
 
 		switch label {
-		case kv.ChainDB:
+		case dbcfg.ChainDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
 			}
@@ -342,7 +343,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
-		case kv.ConsensusDB:
+		case dbcfg.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
 			}
@@ -365,7 +366,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		return nil, err
 	}
 
-	if label == kv.ChainDB {
+	if label == dbcfg.ChainDB {
 		migrator := migrations.NewMigrator(label)
 		if err := migrator.VerifyVersion(db, dbPath); err != nil {
 			return nil, err

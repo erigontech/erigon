@@ -7,18 +7,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/erigontech/erigon/db/version"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // search key in all files of all domains and print file names
@@ -98,7 +97,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			}
 			accessor := item.index
 			if accessor == nil {
-				fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(kv.Step(item.startTxNum/dt.stepSize), kv.Step(item.endTxNum/dt.stepSize)))
+				fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(item.StepRange(dt.stepSize)))
 				if err != nil {
 					panic(err)
 				}
@@ -111,7 +110,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 				}
 				if exists {
 					var err error
-					accessor, err = recsplit.OpenIndex(fPath)
+					accessor, err = dt.d.openHashMapAccessor(fPath)
 					if err != nil {
 						_, fName := filepath.Split(fPath)
 						dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)

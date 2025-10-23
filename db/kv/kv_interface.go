@@ -27,10 +27,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 /*
@@ -124,6 +125,7 @@ type RoDB interface {
 
 	// CHandle pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
 	CHandle() unsafe.Pointer
+	Path() string
 }
 
 type RwDB interface {
@@ -382,7 +384,6 @@ func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
 type (
 	Domain      uint16
-	Appendable  uint16
 	InvertedIdx uint16
 	ForkableId  uint16
 )
@@ -390,7 +391,9 @@ type (
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step Step, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
+	StepsInFiles(entitySet ...Domain) Step
 }
+
 type TemporalTx interface {
 	Tx
 	TemporalGetter
@@ -442,14 +445,14 @@ type TemporalDebugTx interface {
 	DomainProgress(domain Domain) (txNum uint64)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
-
-	CanUnwindToBlockNum() (uint64, error)
-	CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
+	Dirs() datadir.Dirs
+	AllForkableIds() []ForkableId
 }
 
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
+	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
 	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB
@@ -508,6 +511,7 @@ type TemporalRwDB interface {
 	RwDB
 	TemporalRoDB
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
+	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 }
 
@@ -540,19 +544,6 @@ type PendingMutations interface {
 
 type DBVerbosityLvl int8
 type Label string
-
-const (
-	ChainDB         = "chaindata"
-	TxPoolDB        = "txpool"
-	SentryDB        = "sentry"
-	ConsensusDB     = "consensus"
-	DownloaderDB    = "downloader"
-	HeimdallDB      = "heimdall"
-	DiagnosticsDB   = "diagnostics"
-	PolygonBridgeDB = "polygon-bridge"
-	CaplinDB        = "caplin"
-	TemporaryDB     = "temporary"
-)
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 const dbLabelName = "db"
