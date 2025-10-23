@@ -69,8 +69,8 @@ func withEndVersion(endVersion clparams.StateVersion) func(_ *sentinelproto.Goss
 	}
 }
 
-// withTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
-func withTimeBasedRateLimiter(duration time.Duration, maxRequests int) func(_ *sentinelproto.GossipData, curVersion clparams.StateVersion) bool {
+// withGlobalTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
+func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) func(_ *sentinelproto.GossipData, curVersion clparams.StateVersion) bool {
 	limiter := newTimeBasedRateLimiter(duration, maxRequests)
 	return func(_ *sentinelproto.GossipData, _ clparams.StateVersion) bool {
 		return limiter.tryAcquire()
