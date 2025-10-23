@@ -533,7 +533,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 	if resp.Busy {
 		s.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
-		return nil, &engine_helpers.UnknownPayloadErr
+		return nil, &engine_helpers.ExecutionBusyErr
 	}
 	// If the service is busy or there is no data for the given id then respond accordingly.
 	if resp.Data == nil {

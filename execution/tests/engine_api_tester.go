@@ -44,6 +44,7 @@ import (
 	chainparams "github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
@@ -219,6 +220,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 			engineapi.ErrContainsRetryableErrChecker("connection refused"),
 			// below happened on win CI
 			engineapi.ErrContainsRetryableErrChecker("No connection could be made because the target machine actively refused it"),
+			engineapi.ErrIsRetryableErrChecker(&engine_helpers.ExecutionBusyErr),
 		),
 	)
 	require.NoError(t, err)
