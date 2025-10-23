@@ -194,18 +194,26 @@ func TestPublisher_PublishBlockRangeUpdate(t *testing.T) {
 			LatestHash: common.HexToHash("0xabcdef"),
 		}
 
+		sendDone := make(chan struct{})
+		pt.sentryClient.EXPECT().
+			SendMessageToAll(gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, outbound *sentryproto.OutboundMessageData, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+				require.Equal(t, sentryproto.MessageId_BLOCK_RANGE_UPDATE_69, outbound.Id)
+
+				var decoded eth.BlockRangeUpdatePacket
+				require.NoError(t, rlp.DecodeBytes(outbound.Data, &decoded))
+				require.Equal(t, packet, decoded)
+				close(sendDone)
+				return &sentryproto.SentPeers{}, nil
+			}).
+			Times(1)
+
 		pt.publisher.PublishBlockRangeUpdate(packet)
 
-		require.Eventually(t, func() bool {
-			return len(pt.capturedSends()) == 3
-		}, time.Second, 5*time.Millisecond)
-
-		for _, send := range pt.capturedSends() {
-			require.Equal(t, sentryproto.MessageId_BLOCK_RANGE_UPDATE_69, send.Data.Id)
-
-			var decoded eth.BlockRangeUpdatePacket
-			require.NoError(t, rlp.DecodeBytes(send.Data.Data, &decoded))
-			require.Equal(t, packet, decoded)
+		select {
+		case <-sendDone:
+		case <-time.After(time.Second):
+			require.FailNow(t, "timed out waiting for block range update send")
 		}
 	})
 }
