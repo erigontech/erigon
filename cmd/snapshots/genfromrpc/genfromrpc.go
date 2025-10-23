@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -655,8 +656,12 @@ var timeboostedTxTypes = map[string]bool{
 }
 
 var (
-	receiptLimiter = rate.NewLimiter(900, 940)
+	receiptLimiter = rate.NewLimiter(900, 500)
 	blockLimiter   = rate.NewLimiter(100, 100)
+
+	receiptQueries = new(atomic.Uint64)
+	//prevReceiprQueries = new(atomic.Uint64)
+	//prevReceiptTime    = new(atomic.Uint64)
 )
 
 func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
@@ -728,8 +733,11 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					return fmt.Errorf("rate limiter error: %w", err)
 				}
 
+				receiptQueries.Add(1)
 				err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
 				if err != nil {
+					//receiptQueries.Load() - prevReceiprQueries.Load()/prevReceiptTime.Load()
+					log.Info("receipt queries", "total", receiptQueries.Load())
 					return fmt.Errorf("failed to get receipt for tx %s: %w", txData["hash"], err)
 				}
 
