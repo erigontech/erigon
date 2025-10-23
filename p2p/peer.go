@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -183,10 +184,8 @@ func (p *Peer) RunningProtocol(protocol string) bool {
 // versions is supported by both this node and the peer p.
 func (p *Peer) RunningCap(protocol string, versions []uint) bool {
 	if proto, ok := p.running[protocol]; ok {
-		for _, ver := range versions {
-			if proto.Version == ver {
-				return true
-			}
+		if slices.Contains(versions, proto.Version) {
+			return true
 		}
 	}
 	return false
@@ -437,7 +436,6 @@ outer:
 func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error) {
 	p.wg.Add(len(p.running))
 	for _, proto := range p.running {
-		proto := proto
 		proto.closed = p.closed
 		proto.wstart = writeStart
 		proto.werr = writeErr
