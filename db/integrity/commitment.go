@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -28,11 +29,15 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool,
 	}
 	defer tx.Rollback()
 	aggTx := state.AggTx(tx)
-	stepSize := aggTx.StepSize()
+	files := aggTx.Files(kv.CommitmentDomain)
+	// atm our older files are missing the root due to purification, so this flag can be used to only check the last file
+	onlyCheckLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE", false)
+	if onlyCheckLastFile && len(files) > 0 {
+		files = files[len(files)-1:]
+	}
 	var integrityErr error
-	for _, file := range aggTx.Files(kv.CommitmentDomain) {
-		step := kv.Step(file.EndRootNum())
-		endTxNum := step.ToTxNum(stepSize) - 1
+	for _, file := range files {
+		endTxNum := file.EndRootNum()
 		logger.Trace("checking commitment root in", "file", file.Fullpath(), "endTxNum", endTxNum)
 		v, ok, _, _, err := aggTx.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, endTxNum)
 		if err != nil {
