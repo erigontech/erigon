@@ -3,8 +3,9 @@ package bench
 import (
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 	"math"
+
+	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 )
 
 const (
@@ -27,7 +28,7 @@ func GenerateBenchData(ctx context.Context, c *rpcclient.Client) (BenchData, err
 		uint64(math.Floor(float64(latest) * 0.75)),
 	}
 
-	var blocks []BenchItem
+	blocks := make([]BenchItem, 0, len(targets))
 	for _, t := range targets {
 		num, hashes, err := findBlockWithTxs(ctx, c, t)
 		if err != nil {

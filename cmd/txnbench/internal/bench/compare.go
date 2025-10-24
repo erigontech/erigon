@@ -23,7 +23,7 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 	for k := range newAgg {
 		keys[k] = struct{}{}
 	}
-	var blocks []uint64
+	blocks := make([]uint64, 0, len(keys))
 	for k := range keys {
 		blocks = append(blocks, k)
 	}
