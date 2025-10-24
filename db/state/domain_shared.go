@@ -135,6 +135,10 @@ func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []b
 	return gt.sd.HasPrefix(name, prefix, gt.tx)
 }
 
+func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
+	return gt.tx.StepsInFiles(entitySet...)
+}
+
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd, tx}
 }
