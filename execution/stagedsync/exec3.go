@@ -457,6 +457,16 @@ func ExecV3(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 	var errExhausted *ErrLoopExhausted
 
+	var lastFrozenTxNum uint64
+	var lastFrozenStep kv.Step
+
+	if temporalTx, ok := applyTx.(kv.TemporalTx); ok {
+		lastFrozenStep = temporalTx.StepsInFiles(kv.CommitmentDomain)
+	}
+	if lastFrozenStep > 0 {
+		lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(doms.StepSize())) - 1
+	}
+
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		shouldGenerateChangesets := shouldGenerateChangeSets(cfg, blockNum, maxBlockNum, initialCycle)
@@ -559,7 +569,7 @@ Loop:
 				Withdrawals:     b.Withdrawals(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
-				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+				HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 
 				BlockReceipts: blockReceipts,
 
@@ -791,15 +801,20 @@ Loop:
 			}
 		}
 
-		if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
-			errExhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
-			break
-		}
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+
+		lastExecutedStep := kv.Step(inputTxNum / agg.StepSize())
+
+		// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
+		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
+		if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
+			if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
+				return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+			}
 		}
 	}
 
