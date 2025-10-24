@@ -452,7 +452,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) er
 		return err
 	}
 
-	h.maybeAnnounceBlockRange(finishStageAfterSync, isSynced)
+	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync, isSynced)
 	return h.sendNotifications(tx, finishProgressBefore, finishStageAfterSync)
 
 }
@@ -527,12 +527,12 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 	return nil
 }
 
-func (h *Hook) maybeAnnounceBlockRange(finishStageAfterSync uint64, isSynced bool) {
+func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
 	if h.blockRangePublisher == nil || h.statusDataGetter == nil || !isSynced {
 		return
 	}
 
-	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil
+	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
 	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
 	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
 
