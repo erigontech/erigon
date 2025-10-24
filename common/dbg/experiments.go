@@ -272,25 +272,28 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 	}
 }
 
-var tracedBlocks map[uint64]struct{}
-var traceAllBlocks bool
-var tracedTxIndexes map[int64]struct{}
-
-func TraceBlock(blockNum uint64) bool {
-	if tracedBlocks == nil {
-		tracedBlocks = map[uint64]struct{}{}
-		if len(TraceBlocks) == 1 && TraceBlocks[0] == math.MaxUint64 {
-			traceAllBlocks = true
-		}
+var traceAllBlocks bool = len(TraceBlocks) == 1 && TraceBlocks[0] == math.MaxUint64
+var tracedBlocks map[uint64]struct{} = func() map[uint64]struct{} {
+	traced := map[uint64]struct{}{}
+	if !traceAllBlocks {
 		for _, blockNum := range TraceBlocks {
-			tracedBlocks[blockNum] = struct{}{}
+			traced[blockNum] = struct{}{}
 		}
 	}
+	return traced
+}()
+var tracedTxIndexes map[int64]struct{} = func() map[int64]struct{} {
+	traced := map[int64]struct{}{}
+	for _, index := range TraceTxIndexes {
+		traced[index] = struct{}{}
+	}
+	return traced
+}()
 
+func TraceBlock(blockNum uint64) bool {
 	if traceAllBlocks {
 		return true
 	}
-
 	_, ok := tracedBlocks[blockNum]
 	return ok
 }
@@ -299,20 +302,11 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 	if !TraceBlock(blockNum) {
 		return false
 	}
-
-	if tracedTxIndexes == nil {
-		tracedTxIndexes = map[int64]struct{}{}
-		for _, index := range TraceTxIndexes {
-			tracedTxIndexes[index] = struct{}{}
-		}
-	}
-
 	if len(tracedTxIndexes) != 0 {
 		if _, ok := tracedTxIndexes[int64(txIndex)]; !ok {
 			return false
 		}
 	}
-
 	return true
 }
 
@@ -326,8 +320,11 @@ var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struc
 }()
 
 func TraceAccount(addr common.Address) bool {
-	_, ok := tracedAccounts[addr]
-	return ok
+	if len(tracedAccounts) != 0 {
+		_, ok := tracedAccounts[addr]
+		return ok
+	}
+	return false
 }
 
 func TracingAccounts() bool {
