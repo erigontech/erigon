@@ -1035,13 +1035,13 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	}
 
 	if signedBlindedBlock.Version().AfterOrEqual(clparams.FuluVersion) {
-		requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(a.beaconChainCfg, executionRequests))
-		rawBody := blockPayload.Body()
+		requestsList := cltypes.GetExecutionRequestsList(a.beaconChainCfg, executionRequests)
+		requestsHash := cltypes.ComputeExecutionRequestHash(requestsList)
 		header, err := blockPayload.RlpHeader(&signedBlindedBlock.Block.ParentRoot, requestsHash)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 		}
-		rawBlock := types.RawBlock{Header: header, Body: rawBody}
+		rawBlock := types.RawBlock{Header: header, Body: blockPayload.Body()}
 		blockRlpSize := rawBlock.EncodingSize()
 		blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
 		if blockRlpSize > params.MaxRlpBlockSize {

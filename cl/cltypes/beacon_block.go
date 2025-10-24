@@ -531,7 +531,7 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
 
 func GetExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, r *ExecutionRequests) []hexutil.Bytes {
 	if r == nil {
-		return nil
+		return []hexutil.Bytes{}
 	}
 	ret := []hexutil.Bytes{}
 	for _, r := range []struct {
