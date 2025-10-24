@@ -87,18 +87,18 @@ func NewGossipReceiver(
 	}
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	// register services
-	RegisterGossipService(gm, blockService, withTokenBucketRateLimiterByPeer(1, 2))
-	RegisterGossipService(gm, syncContributionService, withTokenBucketRateLimiterByPeer(8, 16))
-	RegisterGossipService(gm, aggregateAndProofService, withTokenBucketRateLimiterByPeer(8, 16))
-	RegisterGossipService(gm, syncCommitteeMessagesService, withTokenBucketRateLimiterByPeer(8, 16))
-	RegisterGossipService(gm, attesterSlashingService, withTokenBucketRateLimiterByPeer(2, 4))
-	RegisterGossipService(gm, voluntaryExitService, withTokenBucketRateLimiterByPeer(2, 4))
-	RegisterGossipService(gm, blsToExecutionChangeService, withTokenBucketRateLimiterByPeer(2, 4))
-	RegisterGossipService(gm, proposerSlashingService, withTokenBucketRateLimiterByPeer(2, 4))
+	RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2))
+	RegisterGossipService(gm, syncContributionService, withRateLimiterByPeer(8, 16))
+	RegisterGossipService(gm, aggregateAndProofService, withRateLimiterByPeer(8, 16))
+	RegisterGossipService(gm, syncCommitteeMessagesService, withRateLimiterByPeer(8, 16))
+	RegisterGossipService(gm, attesterSlashingService, withRateLimiterByPeer(2, 4))
+	RegisterGossipService(gm, voluntaryExitService, withRateLimiterByPeer(2, 4))
+	RegisterGossipService(gm, blsToExecutionChangeService, withRateLimiterByPeer(2, 4))
+	RegisterGossipService(gm, proposerSlashingService, withRateLimiterByPeer(2, 4))
 	RegisterGossipService(gm, attestationService, withGlobalTimeBasedRateLimiter(6*time.Second, 250))
-	RegisterGossipService(gm, blobService, withBeginVersion(clparams.DenebVersion), withEndVersion(clparams.FuluVersion))
+	RegisterGossipService(gm, blobService, withBeginVersion(clparams.DenebVersion), withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, 32))
 	// fulu
-	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withTokenBucketRateLimiterByPeer(32, 64))
+	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64))
 
 	gm.stats.goPrintStats()
 	return gm

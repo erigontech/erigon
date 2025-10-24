@@ -77,8 +77,8 @@ func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) fun
 	}
 }
 
-// withTokenBucketRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
-func withTokenBucketRateLimiterByPeer(ratePerSecond float64, burst int) func(_ *sentinelproto.GossipData, _ clparams.StateVersion) bool {
+// withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
+func withRateLimiterByPeer(ratePerSecond float64, burst int) func(_ *sentinelproto.GossipData, _ clparams.StateVersion) bool {
 	limiter := newTokenBucketRateLimiter(ratePerSecond, burst)
 	return func(data *sentinelproto.GossipData, _ clparams.StateVersion) bool {
 		return limiter.acquire(data.Peer.Pid)
