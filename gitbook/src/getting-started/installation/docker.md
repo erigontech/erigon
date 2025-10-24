@@ -1,7 +1,10 @@
-# Docker
-*How to run a Erigon node with Docker*
+---
+description: How to run a Erigon node with Docker
+---
 
-Using Docker allows starting Erigon packaged as a Docker image without installing the program directly on your system.
+# Docker
+
+sing Docker allows starting Erigon packaged as a Docker image without installing the program directly on your system.
 
 ### General Info
 
@@ -10,8 +13,7 @@ Using Docker allows starting Erigon packaged as a Docker image without installin
 * All build flags are now passed to the release workflow, allowing users to view previously missed build information in our released binaries and Docker images. Additionally, this change is expected to result in better build optimization.
 * Docker images now contain the label “org.opencontainers.image.revision,” which refers to the commit ID from the Erigon project used to build the artifacts.
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
-* Images are stored at <https://hub.docker.com/r/erigontech/erigon>.
-
+* Images are stored at [https://hub.docker.com/r/erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
 
 ## Prerequisites
 
@@ -63,6 +65,7 @@ make user_macos
 ### Environment Variables
 
 There is a `.env.example` file in the root of the repo.
+
 ```
 * DOCKER_UID - The UID of the docker user
 
@@ -123,6 +126,4 @@ sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${E
 
 If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
 
-<div class="warning">
 Windows support for docker-compose is not ready yet.
-</div>

@@ -27,9 +27,7 @@ The RPC Daemon supports various API namespaces, which can be enabled or disabled
 * [`internal`](internal.md): Erigon specific API for development and debugging purposes.
 * [`gRPC`](grpc.md): API for lower-level data access.
 
-{% hint style="danger" %}
-**Warning**: `admin_` and `debug_` namespaces are not intended to be publicly accessible. To prevent unauthorized access, you must not expose RPC daemon port to the Internetif you are using these namespaces. For environments serving both public and private requests, we strongly recommend running a second, private RPC daemon exclusively for your internal `admin_` and `debug_` requests.
-{% endhint %}
+{% include "../.gitbook/includes/warning-admin_-and-debug_-....md" %}
 
 ## Erigon RPC Transports
 

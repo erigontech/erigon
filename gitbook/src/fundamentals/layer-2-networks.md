@@ -1,6 +1,6 @@
 # Layer 2 Networks
 
-## Running an Op-Node alongside Erigon
+### Running an Op-Node alongside Erigon
 
 To run an op-node alongside Erigon, follow these steps:
 

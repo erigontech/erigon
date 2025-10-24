@@ -6,6 +6,8 @@ You can download and install the latest version of Erigon (e.g., v3.1.0) directl
 
 Go to the [Erigon releases page](https://github.com/erigontech/erigon/releases) and select the latest version (or whichever version you prefer).
 
+<figure><img src="../../.gitbook/assets/image (1).png" alt=""><figcaption></figcaption></figure>
+
 Then, download the appropriate binary for your system:
 
 * For **Linux**:

@@ -36,6 +36,6 @@ The default flag is `--chain=mainnet`, which enables Erigon 3 to operate on the 
 | ------ | ------ | ------- |
 | Chiado | chiado | 10200   |
 
-{% hint style="success" %}
+{% hint style="warning" %}
 \* The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
 {% endhint %}

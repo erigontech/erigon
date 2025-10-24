@@ -1,4 +1,10 @@
-# JWT secret
+---
+description: >-
+  Understanding the JWT Secret: Authentication for Erigon and the Consensus
+  Layer
+---
+
+# JWT Secret
 
 The JWT secret is a key that allows Ethereum entities to securely validate JWTs used for authentication, authorization, and transmitting information, like a passphrase that allows Ethereum nodes/servers to verify if requests are legitimate. It should be protected and not exposed publicly.
 
@@ -8,11 +14,11 @@ In Ethereum, JWTs can be used to validate transactions or API calls. The Ethereu
 
 If the newly generated signature matches the one in the JWT, it proves the JWT is valid and comes from an authorized source in possession of the secret. Different nodes/servers would have different secrets allowing them to verify the JWTs intended for them.
 
-More information here: <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md>
+More information here: [https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md)
 
-# Erigon JWT secret
+## Erigon JWT secret
 
-Erigon creates automatically a JWT secret upon launch. 
+Erigon creates automatically a JWT secret upon launch.
 
 By default, the JWT secret key is located in the datadir as `jwt.hex`, and its path can be specified with the `--authrpc.jwtsecret` flag.
 

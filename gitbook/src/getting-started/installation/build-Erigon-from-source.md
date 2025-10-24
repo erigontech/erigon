@@ -1,12 +1,10 @@
 # Build Erigon from source
-*How to build Erigon in Linux and MacOS from source*
+
+_How to build Erigon in Linux and MacOS from source_
 
 The basic Erigon configuration is suitable for most users who simply want to run a node. To build the latest stable release, use the following command:
 
-```bash
-git clone --branch release/3.1 --single-branch https://github.com/erigontech/erigon.git
-cd erigon
-```
+{% include "../../.gitbook/includes/git-clone-branch-release-....md" %}
 
 Next, compile the software using:
 

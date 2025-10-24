@@ -1,3 +1,7 @@
+---
+description: 'Erigon''s Modular Architecture: Running Components as Separate Processes'
+---
+
 # Modules
 
 Erigon is by default an "all-in-one" binary solution, but it's possible start any internal component as a separated processes:

@@ -1,3 +1,9 @@
+---
+description: >-
+  Securing Erigon Communication with TLS Authentication: A Step-by-Step OpenSSL
+  Guide
+---
+
 # TLS Authentication
 
 ## Introduction

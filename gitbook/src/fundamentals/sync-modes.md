@@ -20,7 +20,7 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 {% hint style="success" %}
 **\* Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-They are enabled by default for **Minimal** and **Full Node.** can be activated or deactivated with the flag `--persist.receipts <value>` .
+They are enabled by default for **Minimal** and **Full Node.** They can be activated or deactivated with the flag `--persist.receipts <value>` .
 {% endhint %}
 
 ## Archive node

@@ -1,6 +1,10 @@
+---
+description: How to perform a smooth and quick transition from Geth to Erigon.
+---
+
 # Migrating from Geth
 
-This guide provides a smooth and quick transition from **Geth** to **Erigon**. To begin, ensure you have sufficient disk space. The most secure method involves syncing an Erigon node on the same machine along with your existing Geth node. This allows for verification of the Erigon node's proper synchronization, functional verification, and minimal node downtime. This approach is highly recommended for public JSON-RPC providers and validators.
+The most secure method involves syncing an Erigon node on the same machine along with your existing Geth node. This allows for verification of the Erigon node's proper synchronization, functional verification, and minimal node downtime. This approach is highly recommended for public JSON-RPC providers and validators.
 
 * **If you have enough disk space**, [Option 1](migrating-from-geth.md#option-1-sync-erigon-alongside-geth) is the recommended choice.
 * **If disk space is limited and downtime is not an option**, we recommend extending the disk or, if not possible, syncing Erigon on a separate machine. Once synced, move all validator-related files to the new machine and decommission the old one.

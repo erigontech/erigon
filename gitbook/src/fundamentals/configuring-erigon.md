@@ -1,5 +1,5 @@
 ---
-description: Advanced usage
+description: Customizing your Erigon node
 ---
 
 # Configuring Erigon
