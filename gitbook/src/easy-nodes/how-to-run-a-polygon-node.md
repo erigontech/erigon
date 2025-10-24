@@ -45,7 +45,7 @@ erigon \
 
 #### Flags explanation
 
-* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respctevely the Polygon mainnet and the API endpoint for the Heimdall network; to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`.
+* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network; to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`.
 * `--datadir=<your_data_dir>` to store Erigon files in a non-default location. Default data directory is `./home/user/.local/share/erigon`.
 * Erigon is full node by default, use `--prune.mode=archive` to run a archive node or `--prune.mode=minimal` (EIP-4444). If you want to change [sync mode](../fundamentals/sync-modes.md) delete the `--datadir` folder content and restart Erigon with the appropriate flags.
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../fundamentals/web3-wallet.md).
@@ -53,4 +53,4 @@ erigon \
 
 To stop your Erigon node you can use the `CTRL+C` command.
 
-Additional flags can be added to [configure](../fundamentals/configuring-erigon.md) Erigon with several [options](../fundamentals/configuring-erigon.md#options).
+Additional flags can be added to [configure](../fundamentals/configuring-erigon.md) Erigon with several options.

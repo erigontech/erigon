@@ -75,8 +75,6 @@ You can customize the setup using environment variables:
 
 Example with a Custom Prometheus Configuration:
 
-Bash
-
 ```sh
 ERIGON_PROMETHEUS_CONFIG=/path/to/custom/prometheus.yml docker compose up prometheus grafana
 ```

@@ -1,3 +1,7 @@
+---
+description: 'Your Erigon Guide: Core Features, Setup Instructions, and Essential Links'
+---
+
 # Introduction
 
 Erigon is an efficient Ethereum implementation noted for its performance, modularity, and small disk footprint. Key features include modularity (for scalable RPC clusters), a BitTorrent solution for historical data, and OtterSync for quicker node synchronization. This makes it ideal for professionals needing performance, solo stakers on consumer hardware, and developers requiring a flexible, fast-syncing environment.

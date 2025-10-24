@@ -49,4 +49,4 @@ To stop your Erigon node you can use the `CTRL+C` command.
 
 When you get familiar with running Erigon from CLI you may also consider [staking](../staking/staking.md) and/or run a [Ethereum node with an external Consensus Layer](ethereum-with-an-external-cl.md).
 
-Additional flags can be added to [configure](../fundamentals/configuring-erigon.md) Erigon with several [options](../fundamentals/configuring-erigon.md#options).
+Additional flags can be added to [configure](../fundamentals/configuring-erigon.md) Erigon with several options.

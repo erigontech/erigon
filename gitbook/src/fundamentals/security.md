@@ -10,27 +10,43 @@ The security practices focus heavily on the RPC daemon since it's the primary ex
 
 ## Network Security
 
-**Firewall Configuration**: Secure your network ports properly. The default ports include:
+Securing your network ports is essential for protecting your Erigon node. Proper firewall configuration is the first line of defense.&#x20;
 
-* Port `30303` for P2P networking
-* Port `8545` for JSON-RPC (if enabled)
-* Port `9090` for private API communication
+Based on best practices for execution clients, your local machine's firewall settings should be configured as follows:
 
-**CORS Protection**: When exposing RPC endpoints, avoid using wildcard CORS domains. Instead, set specific hostnames or IP addresses to prevent cross-origin attacks.
+| **Port** | **Protocol** | **Purpose**                   | **Firewall Action**                                                                                                                      |
+| -------- | ------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 30303    | TCP & UDP    | Peer-to-Peer (P2P) Networking | Allow inbound and outbound traffic to enable peer discovery and connections.                                                             |
+| 8545     | TCP          | JSON-RPC (Public API)         | Block all traffic _except_ from explicitly defined trusted machines. This port should never be publicly exposed without strict controls. |
+| 9090     | TCP          | Private API Communication     | Block all traffic except for communication between your internal components (e.g., RPC daemon and core node).                            |
 
-## RPC Security
+#### CORS Protection
 
-**Method Allowlisting**: Restrict available RPC methods using access control lists. Create a `rules.json` file specifying only the methods you need:
+When exposing public RPC endpoints (like those on port 8545), use the following practice to mitigate cross-origin attacks:
 
-```json
-{
-  "allow": ["net_version", "web3_eth_getBlockByHash"]
-}
-```
+* Avoid using a wildcard `*` for Cross-Origin Resource Sharing (CORS) domains.
+* Set specific hostnames or IP addresses for CORS to ensure only authorized frontend applications can interact with your RPC service.
 
-**Remove Admin APIs**: Don't include `admin` in your `--http.api` list for public-facing nodes.
+## API Security
 
-**Rate Limiting**: Protect against DOS attacks by configuring `--rpc.batch.concurrency` and `--rpc.batch.limit`.
+The RPC daemon is the primary external interface, making API security critical. To protect against abuse, denial-of-service (DoS) attacks, OOM issues and unauthorized access, implement the following controls:
+
+| **Security Measure** | **Description**                                                                                                                                                                                                       | **Erigon Configuration**                                                                                                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Method Allowlisting  | <p>Restrict the available RPC methods to only those strictly necessary. This significantly reduces the attack surface. </p><p></p><p>Can be applied to <code>--erigon</code> or <code>--rpcdaemon</code> process.</p> | Use the `--rpc.accessList=rules.json` flag, pointing to a JSON file (e.g., `rules.json`) that specifies the allowed methods: `{"allow": ["net_version", "eth_getBlockByHash"]}`      |
+| Remove Admin APIs    | Never include sensitive namespaces like `admin` or `debug` in the `--http.api` list for public-facing nodes. These APIs are intended for node operators only.                                                         | Omit the `admin` and `debug` namespaces from `--http.api`.                                                                                                                           |
+| Rate Limiting        | Protect against DoS attacks by limiting the processing capacity for batch requests.                                                                                                                                   | Configure `--rpc.batch.concurrency` and `--rpc.batch.limit` flags.                                                                                                                   |
+| Subscription Filters | Control WebSocket subscriptions to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests.                                                                                                    | <p>Utilize the various <code>--rpc.subscription.filters.*</code> flags.</p><p><strong>Note</strong>: These are disabled by default because they increase the risk of OOM issues.</p> |
+
+### External Protection Layer (Recommended for Production)
+
+For production environments where RPC endpoints are exposed publicly, it is strongly recommended to place the Erigon node behind a robust proxy layer. This layer should be responsible for:
+
+* **Application-Level Filtering**: Implementing more granular logic than basic allowlists.
+* **Rate Limiting**: Providing centralized, high-performance rate limiting.
+* **TLS Termination**: Handling SSL/TLS encryption/decryption.
+* **Monitoring and Logging**: Tracking requests for security auditing.
+* **Web Application Firewalls (WAFs)**: Protecting against common web exploits.
 
 {% include "../.gitbook/includes/warning-admin_-and-debug_-....md" %}
 
@@ -51,7 +67,3 @@ The security practices focus heavily on the RPC daemon since it's the primary ex
 **Transaction Pool Security**: Use `--txpool.nolocals=true` for public nodes to prevent local transaction injection.
 
 **Virtual Host Protection**: Configure `HTTPVirtualHosts` to prevent DNS rebinding attacks. This validates the Host header to ensure requests come from authorized domains.
-
-## Health Monitoring
-
-**Health Checks**: Implement monitoring using the `/health` endpoint to detect issues early. Configure minimum peer counts and block validation to ensure your node stays healthy.
