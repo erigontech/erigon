@@ -533,6 +533,11 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 		return
 	}
 
+	// we want to announce BlockRangeUpdate
+	// - after initialization
+	// - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
+	//									case of fast execution due to empty blocks or small SyncLoopBlockLimit
+	// - after sync: every 32 blocks or on unwind of any depth
 	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
 	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
 	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
