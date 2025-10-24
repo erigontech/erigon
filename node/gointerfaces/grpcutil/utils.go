@@ -68,55 +68,55 @@ func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCreden
 }
 
 func ServerTLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCredentials, error) {
-    if tlsCACert == "" {
-        if tlsCertFile == "" && tlsKeyFile == "" {
-            return nil, nil
-        }
-        return credentials.NewServerTLSFromFile(tlsCertFile, tlsKeyFile)
-    }
-    peerCert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
-    if err != nil {
-        return nil, fmt.Errorf("load peer cert/key error:%w", err)
-    }
-    caCert, err := os.ReadFile(tlsCACert)
-    if err != nil {
-        return nil, fmt.Errorf("read ca cert file error:%w", err)
-    }
-    caCertPool := x509.NewCertPool()
-    caCertPool.AppendCertsFromPEM(caCert)
-    return credentials.NewTLS(&tls.Config{
-        Certificates: []tls.Certificate{peerCert},
-        ClientCAs:    caCertPool,
-        ClientAuth:   tls.RequireAndVerifyClientCert,
-        MinVersion:   tls.VersionTLS12,
-    }), nil
+	if tlsCACert == "" {
+		if tlsCertFile == "" && tlsKeyFile == "" {
+			return nil, nil
+		}
+		return credentials.NewServerTLSFromFile(tlsCertFile, tlsKeyFile)
+	}
+	peerCert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load peer cert/key error:%w", err)
+	}
+	caCert, err := os.ReadFile(tlsCACert)
+	if err != nil {
+		return nil, fmt.Errorf("read ca cert file error:%w", err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+	return credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{peerCert},
+		ClientCAs:    caCertPool,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		MinVersion:   tls.VersionTLS12,
+	}), nil
 }
 
 func ClientTLS(tlsCACert, tlsCertFile, tlsKeyFile, serverName string) (credentials.TransportCredentials, error) {
-    var certs []tls.Certificate
-    if tlsCertFile != "" || tlsKeyFile != "" {
-        peerCert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
-        if err != nil {
-            return nil, fmt.Errorf("load peer cert/key error:%w", err)
-        }
-        certs = []tls.Certificate{peerCert}
-    }
-    var rootCAs *x509.CertPool
-    if tlsCACert != "" {
-        caCert, err := os.ReadFile(tlsCACert)
-        if err != nil {
-            return nil, fmt.Errorf("read ca cert file error:%w", err)
-        }
-        rootCAs = x509.NewCertPool()
-        rootCAs.AppendCertsFromPEM(caCert)
-    }
-    cfg := &tls.Config{
-        Certificates: certs,
-        RootCAs:      rootCAs,
-        ServerName:   serverName,
-        MinVersion:   tls.VersionTLS12,
-    }
-    return credentials.NewTLS(cfg), nil
+	var certs []tls.Certificate
+	if tlsCertFile != "" || tlsKeyFile != "" {
+		peerCert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load peer cert/key error:%w", err)
+		}
+		certs = []tls.Certificate{peerCert}
+	}
+	var rootCAs *x509.CertPool
+	if tlsCACert != "" {
+		caCert, err := os.ReadFile(tlsCACert)
+		if err != nil {
+			return nil, fmt.Errorf("read ca cert file error:%w", err)
+		}
+		rootCAs = x509.NewCertPool()
+		rootCAs.AppendCertsFromPEM(caCert)
+	}
+	cfg := &tls.Config{
+		Certificates: certs,
+		RootCAs:      rootCAs,
+		ServerName:   serverName,
+		MinVersion:   tls.VersionTLS12,
+	}
+	return credentials.NewTLS(cfg), nil
 }
 
 func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.Server {
@@ -133,7 +133,7 @@ func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.S
 	//}
 
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
-    opts := []grpc.ServerOption{
+	opts := []grpc.ServerOption{
 		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
 		grpc.MaxConcurrentStreams(rateLimit), // to force clients reduce concurrency level
 		// Don't drop the connection, settings accordign to this comment on GitHub
@@ -145,9 +145,9 @@ func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.S
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
-    if creds != nil {
-        opts = append(opts, grpc.Creds(creds))
-    }
+	if creds != nil {
+		opts = append(opts, grpc.Creds(creds))
+	}
 	grpcServer := grpc.NewServer(opts...)
 	reflection.Register(grpcServer)
 
