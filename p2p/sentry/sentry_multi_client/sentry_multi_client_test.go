@@ -129,8 +129,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 }
 
 func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	testMinimumBlockHeight := uint64(100)
 	testLatestBlockHeight := uint64(200)
@@ -226,7 +225,6 @@ func TestMultiClient_AnnounceBlockRangeLoop_SkipInvalidRanges(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			mockSentry := &mockSentryClient{
 				handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {

@@ -98,8 +98,7 @@ jobs:
           run_suite engine api 0
           # 3 failures out of 8 tests at time of writing
           run_suite engine auth 3
-          # 100 failures out of 190 tests at time of writing
-          run_suite rpc compat 100
+          run_suite rpc compat 0
         continue-on-error: true
 
       - name: Upload output log
