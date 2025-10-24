@@ -39,23 +39,20 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// TLS is deprecated: use ServerTLS or ClientTLS instead.
 func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCredentials, error) {
-	return nil, fmt.Errorf("grpcutil.TLS is deprecated: use ServerTLS or ClientTLS")
-}
-
-func ServerTLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCredentials, error) {
+	// load peer cert/key, ca cert
 	if tlsCACert == "" {
 		if tlsCertFile == "" && tlsKeyFile == "" {
 			return nil, nil
 		}
 		return credentials.NewServerTLSFromFile(tlsCertFile, tlsKeyFile)
 	}
+	var caCert []byte
 	peerCert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("load peer cert/key error:%w", err)
 	}
-	caCert, err := os.ReadFile(tlsCACert)
+	caCert, err = os.ReadFile(tlsCACert)
 	if err != nil {
 		return nil, fmt.Errorf("read ca cert file error:%w", err)
 	}
@@ -66,34 +63,9 @@ func ServerTLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.Transport
 		ClientCAs:    caCertPool,
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		MinVersion:   tls.VersionTLS12,
+		//nolint:gosec
+		InsecureSkipVerify: true, // This is to make it work when Common Name does not match - remove when procedure is updated for common name
 	}), nil
-}
-
-func ClientTLS(tlsCACert, tlsCertFile, tlsKeyFile, serverName string) (credentials.TransportCredentials, error) {
-	var certs []tls.Certificate
-	if tlsCertFile != "" || tlsKeyFile != "" {
-		peerCert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("load peer cert/key error:%w", err)
-		}
-		certs = []tls.Certificate{peerCert}
-	}
-	var rootCAs *x509.CertPool
-	if tlsCACert != "" {
-		caCert, err := os.ReadFile(tlsCACert)
-		if err != nil {
-			return nil, fmt.Errorf("read ca cert file error:%w", err)
-		}
-		rootCAs = x509.NewCertPool()
-		rootCAs.AppendCertsFromPEM(caCert)
-	}
-	cfg := &tls.Config{
-		Certificates: certs,
-		RootCAs:      rootCAs,
-		ServerName:   serverName,
-		MinVersion:   tls.VersionTLS12,
-	}
-	return credentials.NewTLS(cfg), nil
 }
 
 func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.Server {
