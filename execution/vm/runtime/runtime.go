@@ -85,6 +85,7 @@ func setDefaults(cfg *Config) {
 			CancunTime:            new(big.Int),
 			PragueTime:            new(big.Int),
 			OsakaTime:             new(big.Int),
+			GlamsterdamTime:       new(big.Int),
 		}
 	}
 

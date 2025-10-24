@@ -42,7 +42,11 @@ import (
 var emptyHash = common.Hash{}
 
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
-	precompiles := Precompiles(evm.chainRules)
+	// Precompiled contracts can be overridden, otherwise determine the active set based on chain rules
+	precompiles := evm.precompiles
+	if precompiles == nil {
+		precompiles = Precompiles(evm.chainRules)
+	}
 	p, ok := precompiles[addr]
 	return p, ok
 }
@@ -79,6 +83,8 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+	// optional overridden set of precompiled contracts
+	precompiles PrecompiledContracts
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -152,6 +158,11 @@ func (evm *EVM) CallGasTemp() uint64 {
 // SetCallGasTemp sets the callGasTemp for the EVM
 func (evm *EVM) SetCallGasTemp(gas uint64) {
 	evm.callGasTemp = gas
+}
+
+// SetPrecompiles sets the precompiles for the EVM
+func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
+	evm.precompiles = precompiles
 }
 
 // Interpreter returns the current interpreter
