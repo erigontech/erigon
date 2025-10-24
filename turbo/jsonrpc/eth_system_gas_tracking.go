@@ -134,7 +134,7 @@ func (t *RecurringL1GasPriceTracker) GetLatestPrice() (*big.Int, error) {
 	if t.frequency == 0 {
 		if time.Since(t.lastFetch) > 3*time.Second {
 			if err := t.fetchAndStoreNewL1GasPrice(); err != nil {
-				return nil, err
+				return new(big.Int).SetUint64(t.defaultGasPrice), nil
 			}
 		}
 		return t.getLatestPrice(), nil
@@ -143,7 +143,7 @@ func (t *RecurringL1GasPriceTracker) GetLatestPrice() (*big.Int, error) {
 	latest := t.getLatestPrice()
 	if latest == nil {
 		if err := t.fetchAndStoreNewL1GasPrice(); err != nil {
-			return nil, err
+			return new(big.Int).SetUint64(t.defaultGasPrice), nil
 		}
 		latest = t.getLatestPrice()
 	}
@@ -267,6 +267,7 @@ func (t *RecurringL1GasPriceTracker) calculateAndStoreNewLowestPrice(newPrice *b
 
 	// now figure out the lowest price in all of the history by iterating over the priceHistory
 	lowestPrice := t.priceHistory[0]
+
 	for _, price := range t.priceHistory {
 		if price.Cmp(lowestPrice) == -1 {
 			lowestPrice = price

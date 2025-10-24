@@ -1,8 +1,17 @@
 name: Pre-Pectra type1 test
 on:
+  push:
+    branches:
+      - zkevm
+      - stable/**
+      - project/**
+      - release/**
   pull_request:
     branches:
-      - project/pp2
+      - zkevm
+      - stable/**
+      - project/**
+      - release/**
     types:
       - opened
       - reopened

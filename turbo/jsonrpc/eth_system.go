@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
+	"github.com/erigontech/erigon/ethclient"
 
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
@@ -135,6 +136,53 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	// ZK-specific behavior:
+	// - Sequencer: return a non-zero floor tip based on gas tracker lowest price
+	//   (aligns wallet hints with sequencer admission floor).
+	// - Non-sequencer: proxy to upstream L2 for SuggestGasTipCap
+	// Non-ZK: fall back to local oracle
+	if cc, err := api.chainConfig(ctx, tx); err == nil && cc != nil {
+		chainId := cc.ChainID
+		zk := chain.IsZk(chainId.Uint64())
+		if zk {
+			if !api.isZkNonSequencer(chainId) {
+				// Sequencer: if gasless, return zero tip
+				if api.BaseAPI.gasless {
+					var zero hexutil.Big
+					return &zero, nil
+				}
+				// Prefer tracker lowest price; fallback to default if tracker unavailable
+				var tip *big.Int
+				if api.gasTracker != nil {
+					tip = api.gasTracker.GetLowestPrice()
+				}
+				if tip == nil {
+					tip = new(big.Int).SetUint64(api.DefaultGasPrice)
+				}
+				return (*hexutil.Big)(tip), nil
+			} else { // non-sequencer
+				if api.BaseAPI.gasless {
+					var price hexutil.Big
+					return &price, nil
+				}
+
+				client, err := ethclient.DialContext(ctx, api.l2RpcUrl)
+				if err != nil {
+					return nil, err
+				}
+				defer client.Close()
+
+				price, err := client.SuggestGasTipCap(ctx)
+				if err != nil {
+					return nil, err
+				}
+
+				return (*hexutil.Big)(price), nil
+			}
+		}
+	}
+
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
@@ -143,16 +191,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 	return (*hexutil.Big)(tipcap), err
 }
 
-type feeHistoryResult struct {
-	OldestBlock      *hexutil.Big     `json:"oldestBlock"`
-	Reward           [][]*hexutil.Big `json:"reward,omitempty"`
-	BaseFee          []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
-	GasUsedRatio     []float64        `json:"gasUsedRatio"`
-	BlobBaseFee      []*hexutil.Big   `json:"baseFeePerBlobGas,omitempty"`
-	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
-}
-
-func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
+func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*ethclient.FeeHistory, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -164,19 +203,13 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	if err != nil {
 		return nil, err
 	}
-	results := &feeHistoryResult{
+
+	// By default, use oracle-provided values
+	results := &ethclient.FeeHistory{
 		OldestBlock:  (*hexutil.Big)(oldest),
 		GasUsedRatio: gasUsed,
 	}
-	if reward != nil {
-		results.Reward = make([][]*hexutil.Big, len(reward))
-		for i, w := range reward {
-			results.Reward[i] = make([]*hexutil.Big, len(w))
-			for j, v := range w {
-				results.Reward[i][j] = (*hexutil.Big)(v)
-			}
-		}
-	}
+
 	if baseFee != nil {
 		results.BaseFee = make([]*hexutil.Big, len(baseFee))
 		for i, v := range baseFee {
@@ -191,6 +224,90 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	}
 	if blobGasUsedRatio != nil {
 		results.BlobGasUsedRatio = blobGasUsedRatio
+	}
+
+	if cc, err2 := api.chainConfig(ctx, tx); err2 == nil && cc != nil {
+		zk := chain.IsZk(cc.ChainID.Uint64())
+		if zk {
+			if !api.isZkNonSequencer(cc.ChainID) {
+				// Sequencer: start from oracle rewards; if a row is all zeros or the block is empty,
+				// fill higher percentiles with a non-zero floor, leaving the smallest percentile 0
+				// when multiple percentiles are requested. This mirrors OP-like behavior.
+				if api.BaseAPI.gasless {
+					// Return a zeroed rewards matrix
+					results.Reward = zeroRewardsMatrix(len(reward), len(rewardPercentiles))
+					return results, nil
+				}
+				// Use gas tracker lowest price to align with admission floor. Fallback to default.
+				floor := new(big.Int).SetUint64(api.DefaultGasPrice)
+				if api.gasTracker != nil {
+					if minTip := api.gasTracker.GetLowestPrice(); minTip != nil {
+						floor = new(big.Int).Set(minTip)
+					}
+				}
+				blocks := len(reward)
+				results.Reward = make([][]*hexutil.Big, blocks)
+				for i := 0; i < blocks; i++ {
+					row := make([]*hexutil.Big, len(rewardPercentiles))
+					allZero := true
+					for j := range row {
+						if j < len(reward[i]) && reward[i][j] != nil {
+							if reward[i][j].Sign() > 0 {
+								allZero = false
+							}
+							row[j] = (*hexutil.Big)(reward[i][j])
+						}
+					}
+					// Determine emptiness by gasUsed ratio when available
+					emptyBlock := false
+					if i < len(gasUsed) {
+						emptyBlock = gasUsed[i] == 0
+					}
+					if allZero || emptyBlock {
+						for j := range row {
+							if j == 0 && len(rewardPercentiles) > 1 {
+								var zero hexutil.Big
+								row[j] = &zero
+							} else {
+								row[j] = (*hexutil.Big)(new(big.Int).Set(floor))
+							}
+						}
+					}
+					results.Reward[i] = row
+				}
+				return results, nil
+			} else {
+				if api.BaseAPI.gasless {
+					// return zeroed reward matrix
+					results.Reward = zeroRewardsMatrix(len(reward), len(rewardPercentiles))
+					return results, nil
+				}
+
+				client, err := ethclient.DialContext(ctx, api.l2RpcUrl)
+				if err != nil {
+					return nil, err
+				}
+				defer client.Close()
+
+				feeHistory, err := client.FeeHistory(ctx, uint64(blockCount), lastBlock, rewardPercentiles)
+				if err != nil {
+					return nil, err
+				}
+
+				return feeHistory, nil
+			}
+		}
+	}
+
+	if reward != nil {
+		results.Reward = make([][]*hexutil.Big, len(reward))
+		for i, w := range reward {
+			results.Reward[i] = make([]*hexutil.Big, len(w))
+			for j, v := range w {
+				results.Reward[i][j] = (*hexutil.Big)(v)
+			}
+		}
+
 	}
 	return results, nil
 }
@@ -279,4 +396,18 @@ func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Bl
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil
+}
+
+// zeroRewardsMatrix builds a blocks x percentiles matrix filled with zero values.
+func zeroRewardsMatrix(blocks, percLen int) [][]*hexutil.Big {
+	out := make([][]*hexutil.Big, blocks)
+	for i := 0; i < blocks; i++ {
+		row := make([]*hexutil.Big, percLen)
+		for j := 0; j < percLen; j++ {
+			var z hexutil.Big
+			row[j] = &z
+		}
+		out[i] = row
+	}
+	return out
 }
