@@ -34,5 +34,5 @@ type AccProofResult struct {
 type StorProofResult struct {
 	Key   string          `json:"key"`
 	Value *hexutil.Big    `json:"value"`
-	Proof []hexutil.Bytes `json:"proof"`
+	Proof []hexutil.Bytes `json:"proof",omitempty`
 }

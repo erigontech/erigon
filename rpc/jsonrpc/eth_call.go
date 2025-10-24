@@ -504,6 +504,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
 			proof.StorageProof[i].Proof = []hexutil.Bytes{}
 			proof.StorageProof[i].Value = new(hexutil.Big)
+			logger.Warn(fmt.Sprintf("Empty Root HASH %s\n", proof.StorageProof[i].Proof))
 			continue
 		}
 
@@ -526,6 +527,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{}
+		logger.Warn(fmt.Sprintf("init StorageProof %s\n", proof.StorageProof[i].Proof))
+
 		if len(storageProof) != 0 {
 			proof.StorageProof[i].Proof = *(*[]hexutil.Bytes)(unsafe.Pointer(&storageProof))
 		}
