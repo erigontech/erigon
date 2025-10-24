@@ -15,9 +15,9 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
@@ -80,17 +80,11 @@ func (b *Buffer) detachAccounts() {
 
 // Merges the content of another buffer into this one
 func (b *Buffer) merge(other *Buffer) {
-	for addrHash, codeWithHash := range other.codeReads {
-		b.codeReads[addrHash] = codeWithHash
-	}
+	maps.Copy(b.codeReads, other.codeReads)
 
-	for addrHash, code := range other.codeUpdates {
-		b.codeUpdates[addrHash] = code
-	}
+	maps.Copy(b.codeUpdates, other.codeUpdates)
 
-	for address, codeHash := range other.codeSizeReads {
-		b.codeSizeReads[address] = codeHash
-	}
+	maps.Copy(b.codeSizeReads, other.codeSizeReads)
 
 	for addrHash := range other.deleted {
 		b.deleted[addrHash] = other.deleted[addrHash]
@@ -111,21 +105,15 @@ func (b *Buffer) merge(other *Buffer) {
 		}
 		maps.Copy(m, om)
 	}
-	for addrHash, incarnation := range other.storageIncarnation {
-		b.storageIncarnation[addrHash] = incarnation
-	}
+	maps.Copy(b.storageIncarnation, other.storageIncarnation)
 	for storageKey := range other.storageReads {
 		b.storageReads[storageKey] = other.storageReads[storageKey]
 	}
-	for addrHash, accountAddr := range other.accountUpdates {
-		b.accountUpdates[addrHash] = accountAddr
-	}
+	maps.Copy(b.accountUpdates, other.accountUpdates)
 	for addrHash := range other.accountReads {
 		b.accountReads[addrHash] = other.accountReads[addrHash]
 	}
-	for addrHash, incarnation := range other.accountReadsIncarnation {
-		b.accountReadsIncarnation[addrHash] = incarnation
-	}
+	maps.Copy(b.accountReadsIncarnation, other.accountReadsIncarnation)
 }
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
