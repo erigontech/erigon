@@ -157,18 +157,6 @@ func (e *EngineServer) Start(
 		}
 		return err
 	})
-
-	if e.blockDownloader != nil {
-		eg.Go(func() error {
-			defer e.logger.Debug("[EngineServer] engine block downloader goroutine terminated")
-			err := e.blockDownloader.Run(ctx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				e.logger.Error("[EngineServer] block downloader background goroutine failed", "err", err)
-			}
-			return err
-		})
-	}
-
 	return eg.Wait()
 }
 

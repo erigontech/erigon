@@ -65,7 +65,6 @@ type EngineBlockDownloader struct {
 	badHeaders      *lru.Cache[common.Hash, common.Hash]
 	messageListener *p2p.MessageListener
 	peerTracker     *p2p.PeerTracker
-	stopped         atomic.Bool
 }
 
 func NewEngineBlockDownloader(
@@ -107,16 +106,6 @@ func NewEngineBlockDownloader(
 		messageListener: messageListener,
 		peerTracker:     peerTracker,
 	}
-}
-
-func (e *EngineBlockDownloader) Run(ctx context.Context) error {
-	e.logger.Info("[EngineBlockDownloader] running")
-	defer func() {
-		e.logger.Info("[EngineBlockDownloader] stopped")
-		e.stopped.Store(true)
-	}()
-	<-ctx.Done()
-	return nil
 }
 
 func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {
@@ -195,9 +184,6 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 
 func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req BackwardDownloadRequest) error {
 	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
-	if e.stopped.Load() {
-		return errors.New("engine block downloader is stopped")
-	}
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
