@@ -502,7 +502,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		proof.StorageProof[i].Key = getKey(storageKey)
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
-			proof.StorageProof[i].Proof = nil
+			proof.StorageProof[i].Proof = []hexutil.Bytes{}
 			proof.StorageProof[i].Value = new(hexutil.Big)
 			continue
 		}
@@ -525,7 +525,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		proof.StorageProof[i].Value = (*hexutil.Big)(res.ToBig())
 
 		// 0x80 represents RLP encoding of an empty proof slice
-		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
+		proof.StorageProof[i].Proof = []hexutil.Bytes{}
 		if len(storageProof) != 0 {
 			proof.StorageProof[i].Proof = *(*[]hexutil.Bytes)(unsafe.Pointer(&storageProof))
 		}
