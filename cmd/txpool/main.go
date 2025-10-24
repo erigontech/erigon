@@ -122,7 +122,7 @@ var rootCmd = &cobra.Command{
 }
 
 func doTxpool(ctx context.Context, logger log.Logger) error {
-	creds, err := grpcutil.ClientTLS(TLSCACert, TLSCertfile, TLSKeyFile, "")
+	creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 	if err != nil {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
@@ -142,7 +142,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	sentryClients := make([]sentryproto.SentryClient, len(sentryAddr))
 	for i := range sentryAddr {
-		creds, err := grpcutil.ClientTLS(TLSCACert, TLSCertfile, TLSKeyFile, "")
+		creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 		if err != nil {
 			return fmt.Errorf("could not connect to sentry: %w", err)
 		}
