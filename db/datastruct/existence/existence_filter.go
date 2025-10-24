@@ -66,17 +66,18 @@ func NewFilter(keysCount uint64, filePath string, useFuse bool) (*Filter, error)
 	return e, nil
 }
 
-func (b *Filter) AddHash(hash uint64) {
+func (b *Filter) AddHash(hash uint64) error {
 	if b.empty {
-		return
+		return nil
 	}
 	if b.useFuse {
 		if err := b.fuseWriter.AddHash(hash); err != nil {
-			panic(err)
+			return err
 		}
-		return
+		return nil
 	}
 	b.filter.AddHash(hash)
+	return nil
 }
 func (b *Filter) ContainsHash(hashedKey uint64) bool {
 	if b.empty {

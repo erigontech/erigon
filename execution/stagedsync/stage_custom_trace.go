@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -50,7 +49,7 @@ import (
 type CustomTraceCfg struct {
 	tmpdir   string
 	db       kv.TemporalRwDB
-	ExecArgs *exec3.ExecArgs
+	ExecArgs *exec.ExecArgs
 
 	Produce Produce
 }
@@ -90,7 +89,7 @@ func NewProduce(produceList []string) Produce {
 func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader,
 	cc *chain.Config, engine consensus.Engine,
 	genesis *types.Genesis, syncCfg ethconfig.Sync) CustomTraceCfg {
-	execArgs := &exec3.ExecArgs{
+	execArgs := &exec.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
 		ChainConfig: cc,
@@ -206,7 +205,7 @@ Loop:
 	return nil
 }
 
-func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		if err := tx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
@@ -283,7 +282,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	return nil
 }
 
-func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, fromBlock, toBlock uint64) (err error) {
+func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, tx kv.TemporalTx, fromBlock, toBlock uint64) (err error) {
 	if !dbg.AssertEnabled {
 		return
 	}
@@ -293,7 +292,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, 
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
-func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *dbstate.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, tx kv.TemporalRwTx, doms *dbstate.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -305,7 +304,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 	prevTxNumLog := fromTxNum
 
 	var m runtime.MemStats
-	if err := exec3.CustomTraceMapReduce(ctx, fromBlock, toBlock, exec3.TraceConsumerFunc(
+	if err := exec.CustomTraceMapReduce(ctx, fromBlock, toBlock, exec.TraceConsumerFunc(
 		func(blockResult *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
 			if result.Err != nil {
 				return result.Err

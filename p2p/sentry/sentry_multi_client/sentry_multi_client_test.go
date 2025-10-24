@@ -226,7 +226,6 @@ func TestMultiClient_AnnounceBlockRangeLoop_SkipInvalidRanges(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			mockSentry := &mockSentryClient{
 				handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {

@@ -22,6 +22,7 @@ package clique
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -147,9 +148,7 @@ func (api *API) Proposals() map[common.Address]bool {
 	defer api.clique.lock.RUnlock()
 
 	proposals := make(map[common.Address]bool)
-	for address, auth := range api.clique.proposals {
-		proposals[address] = auth
-	}
+	maps.Copy(proposals, api.clique.proposals)
 	return proposals
 }
 
