@@ -125,6 +125,7 @@ type RoDB interface {
 
 	// CHandle pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
 	CHandle() unsafe.Pointer
+	Path() string
 }
 
 type RwDB interface {
@@ -445,11 +446,13 @@ type TemporalDebugTx interface {
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
 	Dirs() datadir.Dirs
+	AllForkableIds() []ForkableId
 }
 
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
+	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
 	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB

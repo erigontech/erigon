@@ -236,6 +236,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		commitmentPos := dataPos
 		blobIdx = 0
 		for commitmentPos < dataPos+dataLen {
+			if blobIdx >= len(slot.BlobBundles) {
+				return 0, fmt.Errorf("%w: more commitments than blobs (%d > %d)", ErrParseTxn, blobIdx+1, len(slot.BlobBundles))
+			}
 			commitmentPos, err = rlp.StringOfLen(payload, commitmentPos, 48)
 			if err != nil {
 				return 0, fmt.Errorf("%w: commitment: %s", ErrParseTxn, err) //nolint
@@ -245,6 +248,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			slot.BlobBundles[blobIdx].Commitment = commitment
 			commitmentPos += 48
 			blobIdx++
+		}
+		if blobIdx != len(slot.BlobBundles) {
+			return 0, fmt.Errorf("%w: fewer commitments than blobs (%d < %d)", ErrParseTxn, blobIdx, len(slot.BlobBundles))
 		}
 		if commitmentPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in commitments", ErrParseTxn)
