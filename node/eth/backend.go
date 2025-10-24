@@ -1065,7 +1065,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			tmpdir,
 			config.Sync,
 			sentryMux(sentries),
-			statusDataProvider,
+			executionMessageListener,
+			executionPeerTracker,
 		),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		config.Miner.EnabledPOS,
