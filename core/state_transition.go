@@ -666,8 +666,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	tipAmount.Mul(tipAmount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, *tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		if rules.IsArbitrum {
+			if err := st.state.AddBalance(coinbase, *tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
 		}
 	}
 	if st.evm.Config().NoBaseFee && msg.FeeCap().Sign() == 0 && msg.TipCap().Sign() == 0 {
