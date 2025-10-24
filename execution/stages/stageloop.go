@@ -379,6 +379,7 @@ type Hook struct {
 	statusDataGetter                    sentry_multi_client.StatusGetter
 	blockRangePublisher                 *execp2p.Publisher
 	lastAnnouncedBlockRangeLatestNumber uint64
+	lastAnnouncedBlockRangeTime         time.Time
 }
 
 func NewHook(
@@ -528,13 +529,19 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 }
 
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
-	if h.blockRangePublisher == nil || h.statusDataGetter == nil || !isSynced {
+	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
 		return
 	}
 
 	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
 	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
 	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
+	timeElapsed := time.Since(h.lastAnnouncedBlockRangeTime)
+	shouldPublishByTime := !isSynced && timeElapsed >= 1*time.Minute
+
+	if !hadUnwind && !isInitialAnnouncement && !progressed && !shouldPublishByTime {
+		return
+	}
 
 	status, err := h.statusDataGetter.GetStatusData(h.ctx)
 	if err != nil {
@@ -553,13 +560,10 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 		return
 	}
 
-	if !hadUnwind && !isInitialAnnouncement && !progressed {
-		return
-	}
-
-	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind)
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind, "isSynced", isSynced, "timeElapsed", timeElapsed)
 	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
 	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
+	h.lastAnnouncedBlockRangeTime = time.Now()
 }
 
 func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
