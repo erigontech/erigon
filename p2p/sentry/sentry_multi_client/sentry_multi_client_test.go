@@ -129,8 +129,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 }
 
 func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	testMinimumBlockHeight := uint64(100)
 	testLatestBlockHeight := uint64(200)
