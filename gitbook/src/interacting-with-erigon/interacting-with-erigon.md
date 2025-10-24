@@ -1,3 +1,9 @@
+---
+description: >-
+  The Erigon RPC Daemon: Enabling JSON-RPC, Transports (HTTP/WS/gRPC), and API
+  Namespaces
+---
+
 # Interacting with Erigon
 
 The RPC daemon is a fundamental component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component.

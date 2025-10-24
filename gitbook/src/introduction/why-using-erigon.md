@@ -4,13 +4,22 @@ Erigon is a cutting-edge Ethereum execution client engineered for **unmatched sp
 
 A core benefit of Erigon is its **dramatically reduced disk footprint** across all available sync modes. This reduction is achieved through advanced compression and efficient state storage, making node operation feasible even on consumer-grade hardware. Furthermore, Erigon features an **integrated Consensus Layer (Caplin)**, which eliminates the need to run and manage separate CL software. Finally, it uses a unique implementation of the **BitTorrent protocol for historical data**, enabling the efficient and quick repair of node snapshots and simplified data distribution.
 
-### Key Architectural & Performance Advantages
+## Key Architectural & Performance Advantages
 
-Erigon's unique architecture provides tangible benefits that translate directly into cost savings, performance, and reliability:
+Erigon's unique architecture provides tangible benefits that translate directly into cost savings, performance, and reliability.
 
-* **Integrated Consensus Layer (Caplin)**: Erigon has a built-in consensus layer client, Caplin, meaning you don't need to run and manage separate software like Lighthouse, which simplifies setup and operation for stakers and node runners.
-* **Superior State Storage (Flat DB)**: Instead of the complex Merkle Patricia Trie (MPT), Erigon uses an efficient flat key-value database. This design simplifies data, speeds up read/write operations, and enables powerful compression, which dramatically shrinks the disk footprint of any node (Full or Archive).
-* **Immutable, Decentralized Data Storage**: Most of Erigon's data resides in immutable files. This design significantly lowers the cost of "Ethereal historical data availability"—making it up to 10x cheaper to backup, distribute, repair, and upgrade your node. Critically, Erigon uses a unique implementation of the BitTorrent protocol to distribute these same files. This creates a decentralized network for re-sync and repair that avoids double-disk usage and complex serialization.
+#### **Integrated Consensus Layer (Caplin)**
+
+Erigon has a built-in consensus layer client, Caplin, meaning you don't need to run and manage separate software like Lighthouse, which simplifies setup and operation for stakers and node runners.
+
+#### **Superior State Storage (Flat DB)**
+
+Instead of the complex Merkle Patricia Trie (MPT), Erigon uses an efficient flat key-value database. This design simplifies data, speeds up read/write operations, and enables powerful compression, which dramatically shrinks the disk footprint of any node (Full or Archive).
+
+**Immutable, Decentralized Data Storage**
+
+Most of Erigon's data resides in immutable files. This design significantly lowers the cost of "Ethereal historical data availability"—making it up to 10x cheaper to backup, distribute, repair, and upgrade your node. Critically, Erigon uses a unique implementation of the BitTorrent protocol to distribute these same files. This creates a decentralized network for re-sync and repair that avoids double-disk usage and complex serialization.
+
 * **Staged Sync:** While Erigon's cutting-edge sync methods efficiently download most of the blockchain data, **Staged Sync** breaks down data handling into distinct, optimized stages, which is crucial for **minimizing random disk I/O** and write amplification. It provides the necessary framework to efficiently process, verify, and integrate the massive datasets (including historical data downloaded via OtterSync) into Erigon's flat database, ensuring **superior performance and resilience** throughout the node's entire lifecycle.
 * **Predictable RPC Performance (No Background Compaction)**: Erigon avoids "background compaction" processes. This eliminates unpredictable resource spikes, resulting in more stable and predictable RPC performance for providers and users.
 * **Modularity**: Erigon's architecture is highly modular, separating components like the core node (execution node), RPC daemon, and transaction pool into independent processes. This design offers several significant advantages:
@@ -39,6 +48,6 @@ Erigon's unique architecture provides tangible benefits that translate directly 
 
 #### Developers
 
-* **Robust Tracing and Historical Data**: Erigon offers full support for the $$ $\text{trace\_}$ $$`trace_` RPC namespace from OpenEthereum, as well as optional historical $$ $\text{eth\_getProof}$ $$`eth_getProof` and historical blobs, providing essential tools for analytics and debugging.
+* **Robust Tracing and Historical Data**: Erigon offers full support for the `trace_` RPC namespace from OpenEthereum, as well as optional historical `eth_getProof` and historical blobs, providing essential tools for analytics and debugging.
 * **Flexible Environment**: The modular design simplifies development, allowing teams to integrate new features or fix bugs within a specific component.
 * **Comprehensive Access**: Full node capabilities by default, fast sync, a gRPC API for low-level data access, and rich debugging features make Erigon the ideal base for building dApps, analytics platforms, and L2 solutions.

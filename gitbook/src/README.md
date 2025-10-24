@@ -1,10 +1,8 @@
 # Introduction
 
-Erigon is an efficient Ethereum implementation designed for speed, modularity, and optimization.
+Erigon is an efficient Ethereum implementation noted for its performance, modularity, and small disk footprint. Key features include modularity (for scalable RPC clusters), a BitTorrent solution for historical data, and OtterSync for quicker node synchronization. This makes it ideal for professionals needing performance, solo stakers on consumer hardware, and developers requiring a flexible, fast-syncing environment.
 
-With Erigon 3 the default configuration shifts from archive node to **full node**, enhancing efficiency, accessibility, and versatility for a wider range of users. Archive nodes remain available for developers and researchers needing full historical data, while the full node offers faster sync times and lower resource usage for everyday operations.
-
-See here [**why you should be using Erigon**](introduction/why-using-erigon.md).
+See here [why you should be using Erigon](introduction/why-using-erigon.md).
 
 ## Topics
 
