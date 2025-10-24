@@ -81,8 +81,8 @@ func init() {
 		WithFn("withdrawals", operationWithdrawalHandler).
 		WithFn("bls_to_execution_change", operationSignedBlsChangeHandler).
 		WithFn("consolidation_request", operationConsolidationRequestHandler).
-		WithFn("deposit_request", operationDepositRequstHandler).
-		WithFn("withdrawal_request", operationWithdrawalRequstHandler)
+		WithFn("deposit_request", operationDepositRequestHandler).
+		WithFn("withdrawal_request", operationWithdrawalRequestHandler)
 	TestFormats.Add("random").
 		With("random", SanityBlocks)
 	TestFormats.Add("rewards").
