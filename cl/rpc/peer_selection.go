@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -31,7 +31,7 @@ var (
 )
 
 type columnDataPeers struct {
-	sentinel      sentinel.SentinelClient
+	sentinel      sentinelproto.SentinelClient
 	beaconConfig  *clparams.BeaconChainConfig
 	ethClock      eth_clock.EthereumClock
 	peerMetaCache *lru.CacheWithTTL[peerDataKey, *peerData]
@@ -43,7 +43,7 @@ type columnDataPeers struct {
 }
 
 func newColumnPeers(
-	sentinel sentinel.SentinelClient,
+	sentinel sentinelproto.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
 	beaconState *state.CachingBeaconState,
@@ -80,7 +80,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		}
 		begin := time.Now()
 		state := "connected"
-		peers, err := c.sentinel.PeersInfo(ctx, &sentinel.PeersInfoRequest{
+		peers, err := c.sentinel.PeersInfo(ctx, &sentinelproto.PeersInfoRequest{
 			State: &state,
 		})
 		if err != nil {
@@ -173,7 +173,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 }
 
 func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic string, respContainer ssz.EncodableSSZ, payload []byte) error {
-	resp, err := c.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
+	resp, err := c.sentinel.SendPeerRequest(ctx, &sentinelproto.RequestDataWithPeer{
 		Pid:   pid,
 		Data:  payload,
 		Topic: topic,

@@ -16,7 +16,7 @@ const (
 type CellsAndKZGProofs = cltypes.CellsAndKZGProofs
 
 // GetCellsAndKZGProofsFromBlobsBundle extracts cells and KZG proofs from a blobs bundle
-func GetCellsAndKZGProofsFromBlobsBundle(blobsBundle *engine_types.BlobsBundleV1) ([]CellsAndKZGProofs, error) {
+func GetCellsAndKZGProofsFromBlobsBundle(blobsBundle *engine_types.BlobsBundle) ([]CellsAndKZGProofs, error) {
 	cellsAndKZGProofs := make([]CellsAndKZGProofs, 0)
 	for i, blob := range blobsBundle.Blobs {
 		cells, proofs, err := ComputeCellsAndKZGProofs(blob)

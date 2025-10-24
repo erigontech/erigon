@@ -15,22 +15,22 @@ concurrency:
 jobs:
   minimal-node-sync-from-scratch-test:
     runs-on: [self-hosted, qa, long-running]
-    timeout-minutes: 740  # 12 hours plus 20 minutes
+    timeout-minutes: 1440  # 24 hours
     strategy:
       fail-fast: false
       matrix:
-        chain: [ mainnet, bor-mainnet ]  # Chain name as specified on the erigon command line
+        chain: [ mainnet, gnosis ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ERIGON_ASSERT: true
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 43200 # 12 hours
+      TOTAL_TIME_SECONDS: 43200 # 18 hours
       CHAIN: ${{ matrix.chain }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Clean Erigon Build & Data Directories
         run: |
@@ -99,7 +99,7 @@ jobs:
           name: test-results-${{ env.CHAIN }}
           path: |
             ${{ github.workspace }}/result-${{ env.CHAIN }}.json
-            ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ github.workspace }}/erigon_data/logs/
 
       - name: Clean up Erigon data directory
         if: always()

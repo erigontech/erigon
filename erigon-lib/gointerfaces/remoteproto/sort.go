@@ -19,10 +19,10 @@ package remoteproto
 import (
 	"strings"
 
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
-func NodeInfoReplyCmp(i, j *types.NodeInfoReply) int {
+func NodeInfoReplyCmp(i, j *typesproto.NodeInfoReply) int {
 	if cmp := strings.Compare(i.Name, j.Name); cmp != 0 {
 		return cmp
 	}

@@ -25,8 +25,8 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 )
 
 func TestStateLogger(t *testing.T) {
@@ -101,7 +101,7 @@ func TestStateLogger(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, tx, _ := NewTestTemporalDb(t)
+			_, tx, _ := NewTestRwTx(t)
 
 			err := rawdbv3.TxNums.Append(tx, 1, 1)
 			require.NoError(t, err)

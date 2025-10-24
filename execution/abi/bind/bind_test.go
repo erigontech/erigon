@@ -20,6 +20,7 @@
 package bind
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -2100,25 +2101,25 @@ func TestGolangBindings(t *testing.T) {
 		}
 	}
 	// Convert the package to go modules and use the current source for go-ethereum
-	moder := exec.Command(gocmd, "mod", "init", "bindtest")
+	moder := exec.CommandContext(context.Background(), gocmd, "mod", "init", "bindtest")
 	moder.Dir = pkg
 	if out, err := moder.CombinedOutput(); err != nil {
 		t.Fatalf("failed to convert binding test to modules: %v\n%s", err, out)
 	}
 	pwd, _ := os.Getwd()
-	replacer := exec.Command(gocmd, "mod", "edit", "-replace", "github.com/erigontech/erigon="+filepath.Join(pwd, "..", "..", "..")) // Repo root
+	replacer := exec.CommandContext(context.Background(), gocmd, "mod", "edit", "-replace", "github.com/erigontech/erigon="+filepath.Join(pwd, "..", "..", "..")) // Repo root
 	replacer.Dir = pkg
 	if out, err := replacer.CombinedOutput(); err != nil {
 		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
 	}
 
-	tidier := exec.Command(gocmd, "mod", "tidy")
+	tidier := exec.CommandContext(context.Background(), gocmd, "mod", "tidy")
 	tidier.Dir = pkg
 	if out, err := tidier.CombinedOutput(); err != nil {
 		t.Fatalf("failed to tidy Go module file: %v\n%s", err, out)
 	}
 	//Test the entire package and report any failures
-	cmd := exec.Command(gocmd, "test", "-v", "-count", "1")
+	cmd := exec.CommandContext(context.Background(), gocmd, "test", "-v", "-count", "1")
 	cmd.Dir = pkg
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to run binding test: %v\n%s", err, out)
@@ -2513,7 +2514,7 @@ public class Test {
 		if err != nil {
 			t.Fatalf("test %d: failed to generate binding: %v", i, err)
 		}
-		// Remove empty lines
+		// RemoveFile empty lines
 		removeEmptys := func(input string) string {
 			lines := strings.Split(input, "\n")
 			var index int

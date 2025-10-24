@@ -24,20 +24,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/eth/tracers"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/nitro-erigon/arbos"
@@ -68,12 +68,7 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	}
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
-	var arbosVersion uint64
-	if cfg.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-
-	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time, arbosVersion)
+	rules := blockContext.Rules(cfg)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)
@@ -123,7 +118,7 @@ func TraceTx(
 		}
 
 		if chainConfig.IsArbitrum() {
-			msg := types.NewMessage(message.From(), message.To(), message.Nonce(), message.Value(), message.Gas(), message.GasPrice(), message.FeeCap(), message.TipCap(), message.Data(), message.AccessList(), true, false, message.MaxFeePerBlobGas())
+			msg := types.NewMessage(message.From(), message.To(), message.Nonce(), message.Value(), message.Gas(), message.GasPrice(), message.FeeCap(), message.TipCap(), message.Data(), message.AccessList(), true, false, false, message.MaxFeePerBlobGas())
 			msg.Tx = tx
 			evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(ibs), msg)
 		}

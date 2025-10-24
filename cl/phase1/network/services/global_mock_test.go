@@ -18,6 +18,7 @@ package services
 
 import (
 	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"go.uber.org/mock/gomock"
 )
 
@@ -47,4 +48,25 @@ func (m *mockFuncs) BlsVerifyMultipleSignatures(pubkey, message, signature [][]b
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
+}
+
+func (m *mockFuncs) VerifyDataColumnSidecarInclusionProof(sidecar *cltypes.DataColumnSidecar) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarInclusionProof", sidecar)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+func (m *mockFuncs) VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarKZGProofs", sidecar)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+func (m *mockFuncs) VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecar", sidecar)
+	ret0, _ := ret[0].(bool)
+	return ret0
 }

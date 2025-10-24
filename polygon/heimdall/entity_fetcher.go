@@ -159,14 +159,19 @@ func (f *EntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntit
 		}
 	}
 
-	slices.SortFunc(entities, func(e1, e2 TEntity) int {
-		n1 := e1.BlockNumRange().Start
-		n2 := e2.BlockNumRange().Start
-		return cmp.Compare(n1, n2)
-	})
-
-	for i, entity := range entities {
-		entity.SetRawId(uint64(i + 1))
+	// Due to Rio/VeBlop hardfork, span.StartBlock is no longer strictly increasing,
+	// so this kind of breaks the "Entity" abstraction.
+	// So for spans we skip the sorting and just rely on span.Id for the ordering.
+	var entity TEntity
+	if _, ok := any(entity).(*Span); !ok {
+		slices.SortFunc(entities, func(e1, e2 TEntity) int {
+			n1 := e1.BlockNumRange().Start
+			n2 := e2.BlockNumRange().Start
+			return cmp.Compare(n1, n2)
+		})
+		for i, entity := range entities {
+			entity.SetRawId(uint64(i + 1))
+		}
 	}
 
 	f.logger.Debug(

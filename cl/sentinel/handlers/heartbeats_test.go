@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -86,7 +86,7 @@ func TestPing(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -141,7 +141,7 @@ func TestGoodbye(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -201,7 +201,7 @@ func TestMetadataV2(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -259,7 +259,7 @@ func TestMetadataV1(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -317,7 +317,7 @@ func TestStatus(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)

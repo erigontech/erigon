@@ -8,10 +8,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/lru"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 type WasmTarget string
@@ -208,7 +209,7 @@ func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
 	if openedArbitrumWasmDB != nil {
 		return openedArbitrumWasmDB
 	}
-	mdbxDB := mdbx.New(kv.ArbWasmDB, log.New()).Path(path).
+	mdbxDB := mdbx.New(dbcfg.ArbWasmDB, log.New()).Path(path).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.ChaindataTablesCfg
 		}).MustOpen()

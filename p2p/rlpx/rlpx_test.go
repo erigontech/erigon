@@ -36,7 +36,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/ecies"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/pipes"
 )
 

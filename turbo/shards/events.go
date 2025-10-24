@@ -22,8 +22,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -34,7 +34,7 @@ type HeaderSubscription func(headerRLP []byte) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
 type PendingTxsSubscription func([]types.Transaction) error
-type LogsSubscription func([]*remote.SubscribeLogsReply) error
+type LogsSubscription func([]*remoteproto.SubscribeLogsReply) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
@@ -46,7 +46,7 @@ type Events struct {
 	pendingLogsSubscriptions    map[int]PendingLogsSubscription
 	pendingBlockSubscriptions   map[int]PendingBlockSubscription
 	pendingTxsSubscriptions     map[int]PendingTxsSubscription
-	logsSubscriptions           map[int]chan []*remote.SubscribeLogsReply
+	logsSubscriptions           map[int]chan []*remoteproto.SubscribeLogsReply
 	hasLogSubscriptions         bool
 	lock                        sync.RWMutex
 }
@@ -57,7 +57,7 @@ func NewEvents() *Events {
 		pendingLogsSubscriptions:    map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions:   map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:     map[int]PendingTxsSubscription{},
-		logsSubscriptions:           map[int]chan []*remote.SubscribeLogsReply{},
+		logsSubscriptions:           map[int]chan []*remoteproto.SubscribeLogsReply{},
 		newSnapshotSubscription:     map[int]chan struct{}{},
 		retirementStartSubscription: map[int]chan bool{},
 		retirementDoneSubscription:  map[int]chan struct{}{},
@@ -116,10 +116,10 @@ func (e *Events) AddRetirementDoneSubscription() (chan struct{}, func()) {
 	}
 }
 
-func (e *Events) AddLogsSubscription() (chan []*remote.SubscribeLogsReply, func()) {
+func (e *Events) AddLogsSubscription() (chan []*remoteproto.SubscribeLogsReply, func()) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	ch := make(chan []*remote.SubscribeLogsReply, 8)
+	ch := make(chan []*remoteproto.SubscribeLogsReply, 8)
 	e.id++
 	id := e.id
 	e.logsSubscriptions[id] = ch
@@ -179,7 +179,7 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 	}
 }
 
-func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
+func (e *Events) OnLogs(logs []*remoteproto.SubscribeLogsReply) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for _, ch := range e.logsSubscriptions {
@@ -255,7 +255,7 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 		}
 
 		var blockNum uint64
-		reply := make([]*remote.SubscribeLogsReply, 0, len(receipts))
+		reply := make([]*remoteproto.SubscribeLogsReply, 0, len(receipts))
 		for _, receipt := range receipts {
 			if receipt == nil {
 				continue
@@ -271,13 +271,13 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 			//}
 
 			for _, l := range receipt.Logs {
-				res := &remote.SubscribeLogsReply{
+				res := &remoteproto.SubscribeLogsReply{
 					Address:          gointerfaces.ConvertAddressToH160(l.Address),
 					BlockHash:        gointerfaces.ConvertHashToH256(receipt.BlockHash),
 					BlockNumber:      blockNum,
 					Data:             l.Data,
 					LogIndex:         uint64(l.Index),
-					Topics:           make([]*types2.H256, 0, len(l.Topics)),
+					Topics:           make([]*typesproto.H256, 0, len(l.Topics)),
 					TransactionHash:  gointerfaces.ConvertHashToH256(receipt.TxHash),
 					TransactionIndex: uint64(l.TxIndex),
 					Removed:          isUnwind,

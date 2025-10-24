@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -14,15 +14,15 @@ import (
 const (
 	batchSignatureVerificationThreshold = 50
 	reservedSize                        = 512
+	batchCheckInterval                  = 500 * time.Millisecond
 )
 
 var (
-	batchCheckInterval          = 500 * time.Millisecond
 	blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
 )
 
 type BatchSignatureVerifier struct {
-	sentinel                   sentinel.SentinelClient
+	sentinel                   sentinelproto.SentinelClient
 	attVerifyAndExecute        chan *AggregateVerificationData
 	aggregateProofVerify       chan *AggregateVerificationData
 	blsToExecutionChangeVerify chan *AggregateVerificationData
@@ -34,7 +34,7 @@ type BatchSignatureVerifier struct {
 
 var ErrInvalidBlsSignature = errors.New("invalid bls signature")
 
-// each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
+// each AggregateVerification request has sentinelproto.SentinelClient and *sentinelproto.GossipData
 // to make sure that we can validate it separately and in case of failure we ban corresponding
 // GossipData.Peer or simply run F and publish GossipData in case signature verification succeeds.
 type AggregateVerificationData struct {
@@ -42,10 +42,10 @@ type AggregateVerificationData struct {
 	SignRoots   [][]byte
 	Pks         [][]byte
 	F           func()
-	SendingPeer *sentinel.Peer
+	SendingPeer *sentinelproto.Peer
 }
 
-func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
+func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.SentinelClient) *BatchSignatureVerifier {
 	return &BatchSignatureVerifier{
 		ctx:                        ctx,
 		sentinel:                   sentinel,

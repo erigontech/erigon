@@ -4,13 +4,13 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/execution/bbd"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-var _ bbd.HeaderReader = (*headerReader)(nil)
+var _ p2p.BbdHeaderReader = (*headerReader)(nil)
 
 type headerReader struct {
 	db          kv.RoDB
