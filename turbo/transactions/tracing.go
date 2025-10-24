@@ -118,7 +118,7 @@ func TraceTx(
 		}
 
 		if chainConfig.IsArbitrum() {
-			msg := types.NewMessage(message.From(), message.To(), message.Nonce(), message.Value(), message.Gas(), message.GasPrice(), message.FeeCap(), message.TipCap(), message.Data(), message.AccessList(), true, false, message.MaxFeePerBlobGas())
+			msg := types.NewMessage(message.From(), message.To(), message.Nonce(), message.Value(), message.Gas(), message.GasPrice(), message.FeeCap(), message.TipCap(), message.Data(), message.AccessList(), true, false, false, message.MaxFeePerBlobGas())
 			msg.Tx = tx
 			evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(ibs), msg)
 		}

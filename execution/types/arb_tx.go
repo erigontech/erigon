@@ -13,7 +13,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	cmath "github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 var (
