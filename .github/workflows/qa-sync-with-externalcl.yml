@@ -46,9 +46,9 @@ jobs:
       - name: Install ${{ matrix.client }} and generate JWT secret
         run: |
           if [ "${{ matrix.client }}" == "lighthouse" ]; then
-            curl -L -o "${{CL_DATA_DIR}}/${{LIGHTHOUSE_FILE}}" "https://github.com/sigp/lighthouse/releases/download/${{LIGHTHOUSE_VERSION}}/${{LIGHTHOUSE_FILE}}"
-            tar -xvf "${{CL_DATA_DIR}}/${{LIGHTHOUSE_FILE}}" -C $CL_DATA_DIR
-            rm "${{CL_DATA_DIR}}/${{LIGHTHOUSE_FILE}}"
+            curl -L -o "$CL_DATA_DIR/$LIGHTHOUSE_FILE" "https://github.com/sigp/lighthouse/releases/download/$LIGHTHOUSE_VERSION/$LIGHTHOUSE_FILE"
+            tar -xvf "$CL_DATA_DIR/$LIGHTHOUSE_FILE" -C $CL_DATA_DIR
+            rm "$CL_DATA_DIR/$LIGHTHOUSE_FILE"
           elif [ "${{ matrix.client }}" == "prysm" ]; then
             curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
             chmod +x $CL_DATA_DIR/prysm.sh
