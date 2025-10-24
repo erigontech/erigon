@@ -48,13 +48,17 @@ jobs:
         run: |
           mkdir -p $CL_DATA_DIR
           if [ "${{ matrix.client }}" == "lighthouse" ]; then
+            echo "Downloading Lighthouse: version $LIGHTHOUSE_VERSION - file $LIGHTHOUSE_FILE"
             curl -LO https://github.com/sigp/lighthouse/releases/download/$LIGHTHOUSE_VERSION/$LIGHTHOUSE_FILE
             tar -xvf $LIGHTHOUSE_FILE -C $CL_DATA_DIR
             rm $LIGHTHOUSE_FILE
           elif [ "${{ matrix.client }}" == "prysm" ]; then
+            echo "Downloading Prysm: automatically using the latest version via the prysm.sh script"
             curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
             chmod +x $CL_DATA_DIR/prysm.sh
           fi
+          
+          echo "Generating JWT secret for communication between Erigon and ${{ matrix.client }}"
           openssl rand -hex 32 > $CL_DATA_DIR/jwt.hex
 
       - name: Build Erigon
