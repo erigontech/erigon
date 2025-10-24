@@ -340,7 +340,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("either remote db or local db must be specified")
 	}
-	creds, err := grpcutil.ClientTLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile, "")
+	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("open tls cert: %w", err)
 	}
