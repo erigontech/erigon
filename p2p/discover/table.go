@@ -158,7 +158,9 @@ func (tab *Table) self() *enode.Node {
 
 func (tab *Table) seedRand() {
 	var b [8]byte
-	crand.Read(b[:])
+	if _, err := crand.Read(b[:]); err != nil {
+		panic("crypto/rand failed in seedRand: " + err.Error())
+	}
 
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
