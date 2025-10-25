@@ -25,7 +25,9 @@ import (
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -78,6 +80,18 @@ func NewBlobSidecarService(
 	}
 	// go b.loop(ctx)
 	return b
+}
+
+func (b *blobSidecarService) IsMyGossipMessage(name string) bool {
+	return gossip.IsTopicBlobSidecar(name)
+}
+
+func (b *blobSidecarService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.BlobSidecar, error) {
+	obj := &cltypes.BlobSidecar{}
+	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 // ProcessMessage processes a blob sidecar message

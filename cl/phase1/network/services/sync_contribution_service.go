@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -85,6 +86,21 @@ func NewSyncContributionService(
 		batchSignatureVerifier:         batchSignatureVerifier,
 		test:                           test,
 	}
+}
+
+func (s *syncContributionService) IsMyGossipMessage(name string) bool {
+	return name == gossip.TopicNameSyncCommitteeContributionAndProof
+}
+
+func (s *syncContributionService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedContributionAndProofForGossip, error) {
+	obj := &SignedContributionAndProofForGossip{
+		Receiver:                   copyOfPeerData(data),
+		SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
+	}
+	if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 // ProcessMessage processes a sync contribution message

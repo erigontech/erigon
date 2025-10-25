@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
@@ -74,6 +75,21 @@ func NewSyncCommitteeMessagesService(
 		batchSignatureVerifier: batchSignatureVerifier,
 		test:                   test,
 	}
+}
+
+func (s *syncCommitteeMessagesService) IsMyGossipMessage(name string) bool {
+	return gossip.IsTopicSyncCommittee(name)
+}
+
+func (s *syncCommitteeMessagesService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SyncCommitteeMessageForGossip, error) {
+	obj := &SyncCommitteeMessageForGossip{
+		Receiver:             copyOfPeerData(data),
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
+	}
+	if err := obj.SyncCommitteeMessage.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 // ProcessMessage processes a sync committee message

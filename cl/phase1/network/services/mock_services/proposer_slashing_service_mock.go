@@ -13,7 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	sentinelproto "github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -39,6 +41,83 @@ func NewMockProposerSlashingService(ctrl *gomock.Controller) *MockProposerSlashi
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockProposerSlashingService) EXPECT() *MockProposerSlashingServiceMockRecorder {
 	return m.recorder
+}
+
+// DecodeGossipMessage mocks base method.
+func (m *MockProposerSlashingService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.ProposerSlashing, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", data, version)
+	ret0, _ := ret[0].(*cltypes.ProposerSlashing)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
+func (mr *MockProposerSlashingServiceMockRecorder) DecodeGossipMessage(data, version any) *MockProposerSlashingServiceDecodeGossipMessageCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockProposerSlashingService)(nil).DecodeGossipMessage), data, version)
+	return &MockProposerSlashingServiceDecodeGossipMessageCall{Call: call}
+}
+
+// MockProposerSlashingServiceDecodeGossipMessageCall wrap *gomock.Call
+type MockProposerSlashingServiceDecodeGossipMessageCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockProposerSlashingServiceDecodeGossipMessageCall) Return(arg0 *cltypes.ProposerSlashing, arg1 error) *MockProposerSlashingServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockProposerSlashingServiceDecodeGossipMessageCall) Do(f func(*sentinelproto.GossipData, clparams.StateVersion) (*cltypes.ProposerSlashing, error)) *MockProposerSlashingServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockProposerSlashingServiceDecodeGossipMessageCall) DoAndReturn(f func(*sentinelproto.GossipData, clparams.StateVersion) (*cltypes.ProposerSlashing, error)) *MockProposerSlashingServiceDecodeGossipMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// IsMyGossipMessage mocks base method.
+func (m *MockProposerSlashingService) IsMyGossipMessage(name string) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsMyGossipMessage", name)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsMyGossipMessage indicates an expected call of IsMyGossipMessage.
+func (mr *MockProposerSlashingServiceMockRecorder) IsMyGossipMessage(name any) *MockProposerSlashingServiceIsMyGossipMessageCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMyGossipMessage", reflect.TypeOf((*MockProposerSlashingService)(nil).IsMyGossipMessage), name)
+	return &MockProposerSlashingServiceIsMyGossipMessageCall{Call: call}
+}
+
+// MockProposerSlashingServiceIsMyGossipMessageCall wrap *gomock.Call
+type MockProposerSlashingServiceIsMyGossipMessageCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockProposerSlashingServiceIsMyGossipMessageCall) Return(arg0 bool) *MockProposerSlashingServiceIsMyGossipMessageCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockProposerSlashingServiceIsMyGossipMessageCall) Do(f func(string) bool) *MockProposerSlashingServiceIsMyGossipMessageCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockProposerSlashingServiceIsMyGossipMessageCall) DoAndReturn(f func(string) bool) *MockProposerSlashingServiceIsMyGossipMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // ProcessMessage mocks base method.

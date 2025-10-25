@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
@@ -63,6 +64,21 @@ func NewBLSToExecutionChangeService(
 		beaconCfg:              beaconCfg,
 		batchSignatureVerifier: batchSignatureVerifier,
 	}
+}
+
+func (s *blsToExecutionChangeService) IsMyGossipMessage(name string) bool {
+	return name == gossip.TopicNameBlsToExecutionChange
+}
+
+func (s *blsToExecutionChangeService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedBLSToExecutionChangeForGossip, error) {
+	obj := &SignedBLSToExecutionChangeForGossip{
+		Receiver:                   copyOfPeerData(data),
+		SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
+	}
+	if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedBLSToExecutionChangeForGossip) error {

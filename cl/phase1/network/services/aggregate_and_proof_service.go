@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -102,6 +103,21 @@ func NewAggregateAndProofService(
 	}
 	go a.loop(ctx)
 	return a
+}
+
+func (a *aggregateAndProofServiceImpl) IsMyGossipMessage(name string) bool {
+	return name == gossip.TopicNameBeaconAggregateAndProof
+}
+
+func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedAggregateAndProofForGossip, error) {
+	obj := &SignedAggregateAndProofForGossip{
+		Receiver:                copyOfPeerData(data),
+		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
+	}
+	if err := obj.SignedAggregateAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func (a *aggregateAndProofServiceImpl) ProcessMessage(
