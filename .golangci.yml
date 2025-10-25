@@ -101,6 +101,14 @@ linters:
         - shadow
         - unsafeptr
   exclusions:
+    paths:
+      - build/
+      - vendor/
+      - third_party$
+      - builtin$
+      - examples$
+      - testdata$
+      - execution-spec-tests$
     generated: lax
     presets:
       - comments
@@ -138,12 +146,6 @@ linters:
           - gocritic
           - gosec
         path: p2p/dnsdisc
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
-      - testdata$
-      - execution-spec-tests$
 formatters:
   enable:
     - gofmt
@@ -151,10 +153,12 @@ formatters:
     gofmt:
       simplify: false
   exclusions:
-    generated: lax
     paths:
+      - build/
+      - vendor/
       - third_party$
       - builtin$
       - examples$
       - testdata$
       - execution-spec-tests$
+    generated: lax
