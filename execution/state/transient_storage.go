@@ -44,7 +44,7 @@ func (t transientStorage) Set(addr common.Address, key common.Hash, value uint25
 func (t transientStorage) Get(addr common.Address, key common.Hash) uint256.Int {
 	val, ok := t[addr]
 	if !ok {
-		return *uint256.NewInt(0)
+		return uint256.Int{}
 	}
 	return val[key]
 }

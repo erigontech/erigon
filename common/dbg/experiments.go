@@ -326,8 +326,11 @@ var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struc
 }()
 
 func TraceAccount(addr common.Address) bool {
-	_, ok := tracedAccounts[addr]
-	return ok
+	if len(tracedAccounts) > 0 {
+		_, ok := tracedAccounts[addr]
+		return ok
+	}
+	return false
 }
 
 func TracingAccounts() bool {

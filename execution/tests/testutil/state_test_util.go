@@ -252,7 +252,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.Json.Env.Coinbase, config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
-		context.BaseFee = new(uint256.Int)
+		context.BaseFee = uint256.Int{}
 		context.BaseFee.SetFromBig(baseFee)
 	}
 	if t.Json.Env.Difficulty != nil {

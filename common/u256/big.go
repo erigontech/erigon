@@ -17,6 +17,8 @@
 package u256
 
 import (
+	"math/bits"
+
 	"github.com/holiman/uint256"
 )
 
@@ -41,3 +43,25 @@ var (
 	Num32 = uint256.NewInt(32)
 	Num35 = uint256.NewInt(35)
 )
+
+// Add sets z to the sum x+y
+// This is a garbage free version of  uint256.Add
+func Add(x, y uint256.Int) (z uint256.Int) {
+	var carry uint64
+	z[0], carry = bits.Add64(x[0], y[0], 0)
+	z[1], carry = bits.Add64(x[1], y[1], carry)
+	z[2], carry = bits.Add64(x[2], y[2], carry)
+	z[3], _ = bits.Add64(x[3], y[3], carry)
+	return z
+}
+
+// Sub sets z to the difference x-y
+// This is a garbage free version of  uint256.Sub
+func Sub(x, y uint256.Int) (z uint256.Int) {
+	var carry uint64
+	z[0], carry = bits.Sub64(x[0], y[0], 0)
+	z[1], carry = bits.Sub64(x[1], y[1], carry)
+	z[2], carry = bits.Sub64(x[2], y[2], carry)
+	z[3], _ = bits.Sub64(x[3], y[3], carry)
+	return z
+}

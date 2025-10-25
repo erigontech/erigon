@@ -145,7 +145,7 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 	a := Account{
 		Initialised: true,
 		Nonce:       0,
-		Balance:     *uint256.NewInt(0),
+		Balance:     uint256.Int{},
 		Root:        common.HexToHash("123"),
 		CodeHash:    common.HexToHash("123"),
 		Incarnation: 1,
@@ -164,7 +164,7 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       0,
-		Balance:     *uint256.NewInt(0),
+		Balance:     uint256.Int{},
 		Incarnation: 1,
 	}
 	encodedAccount := SerialiseV3(&a)

@@ -542,8 +542,8 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	}
 
 	totalLen := kp + kl + val.DoubleRLPLen()
-	var lenPrefix [4]byte
-	pl := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+	var lenPrefix [9]byte
+	pl := rlp.GenerateStructLen(lenPrefix[:], uint64(totalLen))
 	canEmbed := !singleton && totalLen+pl < length.Hash
 	var writer io.Writer
 	if canEmbed {
@@ -659,8 +659,8 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 		kl = 1
 	}
 	totalLen := kp + kl + 33
-	var lenPrefix [4]byte
-	pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+	var lenPrefix [9]byte
+	pt := rlp.GenerateStructLen(lenPrefix[:], uint64(totalLen))
 	hph.keccak.Reset()
 	if _, err := hph.keccak.Write(lenPrefix[:pt]); err != nil {
 		return hashBuf, err
@@ -711,8 +711,8 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int16) int16 
 		}
 		val := rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen])
 		totalLen := kp + kl + val.DoubleRLPLen()
-		var lenPrefix [4]byte
-		pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+		var lenPrefix [9]byte
+		pt := rlp.GenerateStructLen(lenPrefix[:], uint64(totalLen))
 		if totalLen+pt < length.Hash {
 			return int16(totalLen + pt)
 		}
@@ -1806,7 +1806,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 
 		hph.keccak2.Reset()
-		pt := rlp.GenerateStructLen(hph.hashAuxBuffer[:], int(totalBranchLen))
+		pt := rlp.GenerateStructLen(hph.hashAuxBuffer[:], uint64(totalBranchLen))
 		if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
 			return err
 		}

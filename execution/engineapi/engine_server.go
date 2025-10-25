@@ -83,7 +83,7 @@ type EngineServer struct {
 	printPectraBanner bool
 }
 
-const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+const DefaultFcuTimeout = 1 * time.Second
 
 func NewEngineServer(
 	logger log.Logger,
@@ -94,8 +94,12 @@ func NewEngineServer(
 	proposing bool,
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
+	fcuTimeout time.Duration,
 ) *EngineServer {
-	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
+	if fcuTimeout == 0 {
+		fcuTimeout = DefaultFcuTimeout
+	}
+	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
@@ -284,8 +288,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
-		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash(),
-			"payload", req, "parentBeaconBlockRoot", parentBeaconBlockRoot, "requests", executionRequests)
+		s.logger.Error(
+			"[NewPayload] invalid block hash",
+			"stated", blockHash,
+			"actual", header.Hash(),
+			"parentBeaconBlockRoot", parentBeaconBlockRoot,
+			"requests", executionRequests,
+		)
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),

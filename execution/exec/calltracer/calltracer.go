@@ -48,7 +48,7 @@ func (ct *CallTracer) Tracer() *tracers.Tracer {
 		hooks = *ct.hooks
 
 		if ct.hooks.OnEnter != nil {
-			hooks.OnEnter = func(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+			hooks.OnEnter = func(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 				ct.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
 				ct.hooks.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
 			}
@@ -70,7 +70,7 @@ func (ct *CallTracer) Reset() {
 func (ct *CallTracer) Froms() map[common.Address]struct{} { return ct.froms }
 func (ct *CallTracer) Tos() map[common.Address]struct{}   { return ct.tos }
 
-func (ct *CallTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *CallTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if ct.froms == nil {
 		ct.froms = map[common.Address]struct{}{}
 		ct.tos = map[common.Address]struct{}{}
