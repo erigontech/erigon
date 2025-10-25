@@ -582,7 +582,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 			if s.data.CodeHash == empty.CodeHash {
 				return 0, nil
 			}
-			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr))) {
 				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			}
 			readStart := time.Now()
@@ -758,7 +758,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 				// TODO: discuss if we should ignore error
 				prev := new(uint256.Int)
 
-				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr))) {
 					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 				}
 				readStart := time.Now()
@@ -841,7 +841,7 @@ func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage
 	}
 
 	readAccount, source, version, err := versionedRead(sdb, addr, AddressPath, common.Hash{}, false, nil,
-		func(v *accounts.Account) *accounts.Account { return v }, nil)
+		func(v *accounts.Account) *accounts.Account { return v }, nil)q
 
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
@@ -849,7 +849,7 @@ func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage
 
 	if readAccount == nil {
 		if readStorage {
-			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr))) {
 				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			}
 			readStart := time.Now()
@@ -1236,7 +1236,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 		return sdb.stateObjectForAccount(addr, account), nil
 	}
 
-	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr))) {
 		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 	}
 	readStart := time.Now()
@@ -1504,7 +1504,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
 			tracingHooks.OnBalanceChange(stateObject.address, balance, *uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
 		}
-		if dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr)) {
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr))) {
 			fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed)
 		}
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
@@ -1528,7 +1528,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if err := stateObject.updateStorage(stateWriter); err != nil {
 			return err
 		}
-		if dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr)) {
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr))) {
 			fmt.Printf("%d (%d.%d) Update Account Data (%T): %x balance:%d,nonce:%d,codehash:%x\n",
 				stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
 		}
