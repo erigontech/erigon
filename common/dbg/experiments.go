@@ -275,36 +275,42 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 var tracedBlocks map[uint64]struct{}
 var traceAllBlocks bool
 var tracedTxIndexes map[int64]struct{}
+var tracedAccounts map[common.Address]struct{}
+
+var traceInit sync.Once
+
+func initTraceMaps() {
+	tracedBlocks = map[uint64]struct{}{}
+	if len(TraceBlocks) == 1 && TraceBlocks[0] == math.MaxUint64 {
+		traceAllBlocks = true
+	}
+	for _, blockNum := range TraceBlocks {
+		tracedBlocks[blockNum] = struct{}{}
+	}
+	tracedTxIndexes = map[int64]struct{}{}
+	for _, index := range TraceTxIndexes {
+		tracedTxIndexes[index] = struct{}{}
+	}
+	tracedAccounts = map[common.Address]struct{}{}
+	for _, account := range TraceAccounts {
+		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
+		tracedAccounts[common.HexToAddress(account)] = struct{}{}
+	}
+}
 
 func TraceBlock(blockNum uint64) bool {
-	if tracedBlocks == nil {
-		tracedBlocks = map[uint64]struct{}{}
-		if len(TraceBlocks) == 1 && TraceBlocks[0] == math.MaxUint64 {
-			traceAllBlocks = true
-		}
-		for _, blockNum := range TraceBlocks {
-			tracedBlocks[blockNum] = struct{}{}
-		}
-	}
-
+	traceInit.Do(initTraceMaps)
 	if traceAllBlocks {
 		return true
 	}
-
 	_, ok := tracedBlocks[blockNum]
 	return ok
 }
 
 func TraceTx(blockNum uint64, txIndex int) bool {
+	traceInit.Do(initTraceMaps)
 	if !TraceBlock(blockNum) {
 		return false
-	}
-
-	if tracedTxIndexes == nil {
-		tracedTxIndexes = map[int64]struct{}{}
-		for _, index := range TraceTxIndexes {
-			tracedTxIndexes[index] = struct{}{}
-		}
 	}
 
 	if len(tracedTxIndexes) != 0 {
@@ -316,18 +322,13 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 	return true
 }
 
-var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struct{} {
-	ta := map[common.Address]struct{}{}
-	for _, account := range TraceAccounts {
-		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
-		ta[common.HexToAddress(account)] = struct{}{}
-	}
-	return ta
-}()
-
 func TraceAccount(addr common.Address) bool {
-	_, ok := tracedAccounts[addr]
-	return ok
+	traceInit.Do(initTraceMaps)
+	if len(tracedAccounts) != 0 {
+		_, ok := tracedAccounts[addr]
+		return ok
+	}
+	return false
 }
 
 func TracingAccounts() bool {
