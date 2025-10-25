@@ -52,7 +52,6 @@ func TestStateCornerCases(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, cornersDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
-			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
@@ -101,7 +100,6 @@ func TestState(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, dir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
-			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {

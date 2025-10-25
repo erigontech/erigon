@@ -399,8 +399,6 @@ func TestClique(t *testing.T) {
 	}
 	// Run through the scenarios and test them
 	for i, tt := range tests {
-		i := i
-		tt := tt
 
 		t.Run(tt.name, func(t *testing.T) {
 			logger := testlog.Logger(t, log.LvlInfo)
