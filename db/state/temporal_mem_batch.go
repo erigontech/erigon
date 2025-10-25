@@ -112,24 +112,32 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
-	putSize := 0
+	putKeySize := 0
+	putValueSize := 0
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
-			putSize += len(val) - len(old.data)
+			putValueSize += len(val) - len(old.data)
 		} else {
-			putSize += len(key) + len(val)
+			putKeySize += len(key)
+			putValueSize += len(val)
 		}
 
 		sd.metrics.Lock()
 		sd.metrics.CachePutCount++
-		sd.metrics.CachePutSize += putSize
+		sd.metrics.CachePutSize += putKeySize + putValueSize
+		sd.metrics.CachePutKeySize += putKeySize
+		sd.metrics.CachePutValueSize += putValueSize
 		if dm, ok := sd.metrics.Domains[domain]; ok {
 			dm.CachePutCount++
-			dm.CachePutSize += putSize
+			dm.CachePutSize += putKeySize + putValueSize
+			dm.CachePutKeySize += putKeySize
+			dm.CachePutValueSize += putValueSize
 		} else {
 			sd.metrics.Domains[domain] = &DomainIOMetrics{
-				CachePutCount: 1,
-				CachePutSize:  putSize,
+				CachePutCount:     1,
+				CachePutSize:      putKeySize + putValueSize,
+				CachePutKeySize:   putKeySize,
+				CachePutValueSize: putValueSize,
 			}
 		}
 		sd.metrics.Unlock()
@@ -137,24 +145,31 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		putSize += len(val) - len(old.data)
+		putValueSize += len(val) - len(old.data)
 	} else {
-		putSize += len(key) + len(val)
+		putKeySize += len(key)
+		putValueSize += len(val)
 	}
 	sd.domains[domain][key] = valWithPrevStep
 
-	if dm, ok := sd.metrics.Domains[domain]; ok {
-		dm.CachePutCount++
-		dm.CachePutSize += putSize
-	} else {
-		sd.metrics.Domains[domain] = &DomainIOMetrics{
-			CachePutCount: 1,
-			CachePutSize:  putSize,
-		}
-	}
 	sd.metrics.Lock()
 	sd.metrics.CachePutCount++
-	sd.metrics.CachePutSize += putSize
+	sd.metrics.CachePutSize += putValueSize + putKeySize
+	sd.metrics.CachePutKeySize += putKeySize
+	sd.metrics.CachePutValueSize += putValueSize
+	if dm, ok := sd.metrics.Domains[domain]; ok {
+		dm.CachePutCount++
+		dm.CachePutSize += putValueSize + putKeySize
+		dm.CachePutKeySize += putKeySize
+		dm.CachePutValueSize += putValueSize
+	} else {
+		sd.metrics.Domains[domain] = &DomainIOMetrics{
+			CachePutCount:     1,
+			CachePutSize:      putKeySize + putValueSize,
+			CachePutKeySize:   putKeySize,
+			CachePutValueSize: putValueSize,
+		}
+	}
 	sd.metrics.Unlock()
 }
 

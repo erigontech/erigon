@@ -122,7 +122,11 @@ type DomainIOMetrics struct {
 	CacheGetCount     int64
 	CachePutCount     int64
 	CacheGetSize      int
+	CacheGetKeySize   int
+	CacheGetValueSize int
 	CachePutSize      int
+	CachePutKeySize   int
+	CachePutValueSize int
 	DbReadCount       int64
 	DbReadDuration    time.Duration
 	FileReadCount     int64
@@ -366,7 +370,9 @@ func (sd *SharedDomains) LogMetrics() []any {
 
 	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
 		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
-			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"puts", common.PrettyCounter(sd.metrics.CachePutCount),
+			"size", fmt.Sprintf("%s(%s/%s)",
+				common.PrettyCounter(sd.metrics.CachePutSize), common.PrettyCounter(sd.metrics.CachePutKeySize), common.PrettyCounter(sd.metrics.CachePutValueSize)),
 			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
 			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
