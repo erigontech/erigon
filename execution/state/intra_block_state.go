@@ -841,7 +841,7 @@ func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage
 	}
 
 	readAccount, source, version, err := versionedRead(sdb, addr, AddressPath, common.Hash{}, false, nil,
-		func(v *accounts.Account) *accounts.Account { return v }, nil)q
+		func(v *accounts.Account) *accounts.Account { return v }, nil)
 
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
