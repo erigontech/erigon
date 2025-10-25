@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -49,10 +50,12 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/node/silkworm"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 )
 
@@ -137,9 +140,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	for {
 		// run stages first time - it will download blocks
 		if hook != nil {
-			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				err = hook.BeforeRun(tx, false)
-				return err
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				return hook.BeforeRun(tx, false)
 			}); err != nil {
 				return err
 			}
@@ -151,13 +153,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}
 
 		if hook != nil {
-			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+			if err := db.View(ctx, func(tx kv.Tx) error {
 				finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
 				if err != nil {
 					return err
 				}
-				err = hook.AfterRun(tx, finishProgressBefore)
-				return err
+				return hook.AfterRun(tx, finishProgressBefore, false)
 			}); err != nil {
 				return err
 			}
@@ -197,11 +198,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	if hook != nil {
 		var headerStageProgress uint64
-		if err := db.View(ctx, func(tx kv.Tx) (err error) {
-			headerStageProgress, err = stages.GetStageProgress(tx, stages.Headers)
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			progress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
 				return err
 			}
+			headerStageProgress = progress
 			return nil
 		}); err != nil {
 			return err
@@ -282,7 +284,7 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *state.Share
 	}
 
 	// -- send notifications START
-	if err = hook.AfterRun(tx, finishProgressBefore); err != nil {
+	if err = hook.AfterRun(tx, finishProgressBefore, isSynced); err != nil {
 		return false, err
 	}
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
@@ -366,18 +368,44 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, gasUsed uin
 }
 
 type Hook struct {
-	ctx           context.Context
-	notifications *shards.Notifications
-	sync          *stagedsync.Sync
-	chainConfig   *chain.Config
-	logger        log.Logger
-	blockReader   services.FullBlockReader
-	updateHead    func(ctx context.Context)
-	db            kv.RoDB
+	ctx                                 context.Context
+	notifications                       *shards.Notifications
+	sync                                *stagedsync.Sync
+	chainConfig                         *chain.Config
+	logger                              log.Logger
+	blockReader                         services.FullBlockReader
+	updateHead                          func(ctx context.Context)
+	db                                  kv.RoDB
+	statusDataGetter                    sentry_multi_client.StatusGetter
+	blockRangePublisher                 *execp2p.Publisher
+	lastAnnouncedBlockRangeLatestNumber uint64
+	lastAnnouncedBlockRangeTime         time.Time
 }
 
-func NewHook(ctx context.Context, db kv.RoDB, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context)) *Hook {
-	return &Hook{ctx: ctx, db: db, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
+func NewHook(
+	ctx context.Context,
+	db kv.RoDB,
+	notifications *shards.Notifications,
+	sync *stagedsync.Sync,
+	blockReader services.FullBlockReader,
+	chainConfig *chain.Config,
+	logger log.Logger,
+	updateHead func(ctx context.Context),
+	statusDataGetter sentry_multi_client.StatusGetter,
+	blockRangePublisher *execp2p.Publisher,
+) *Hook {
+	return &Hook{
+		ctx:                 ctx,
+		db:                  db,
+		notifications:       notifications,
+		sync:                sync,
+		blockReader:         blockReader,
+		chainConfig:         chainConfig,
+		logger:              logger,
+		updateHead:          updateHead,
+		statusDataGetter:    statusDataGetter,
+		blockRangePublisher: blockRangePublisher,
+	}
 }
 func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	notifications := h.notifications
@@ -405,27 +433,36 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	}
 	return h.beforeRun(tx, inSync)
 }
-func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
+func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
 	if h == nil {
 		return nil
 	}
 	if tx == nil {
-		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore) })
+		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore, isSynced) })
 	}
-	return h.afterRun(tx, finishProgressBefore)
+	return h.afterRun(tx, finishProgressBefore, isSynced)
 }
-func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
+
+func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
 	// Update sentry status for peers to see our sync status
 	if h.updateHead != nil {
 		h.updateHead(h.ctx)
 	}
-	return h.sendNotifications(tx, finishProgressBefore)
+	finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return err
+	}
+
+	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync, isSynced)
+	return h.sendNotifications(tx, finishProgressBefore, finishStageAfterSync)
 
 }
-func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
+func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAfterSync uint64) error {
 	if h.notifications == nil {
 		return nil
 	}
+
+	var err error
 
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
@@ -439,11 +476,6 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 	}
 
 	if h.notifications.Events != nil {
-		finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
-		if err != nil {
-			return err
-		}
-
 		unwindTo := h.sync.PrevUnwindPoint()
 
 		var notifyFrom uint64
@@ -494,6 +526,49 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 		h.notifications.Accumulator.SendAndReset(h.ctx, h.notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil
+}
+
+func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
+	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
+		return
+	}
+
+	// we want to announce BlockRangeUpdate
+	// - after initialization
+	// - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
+	//									case of fast execution due to empty blocks or small SyncLoopBlockLimit
+	// - after sync: every 32 blocks or on unwind of any depth
+	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
+	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
+	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
+	timeElapsed := time.Since(h.lastAnnouncedBlockRangeTime)
+	shouldPublishByTime := !isSynced && timeElapsed >= 1*time.Minute
+
+	if !hadUnwind && !isInitialAnnouncement && !progressed && !shouldPublishByTime {
+		return
+	}
+
+	status, err := h.statusDataGetter.GetStatusData(h.ctx)
+	if err != nil {
+		h.logger.Warn("[hook] block range update skipped; status data unavailable", "err", err)
+		return
+	}
+
+	packet := eth.BlockRangeUpdatePacket{
+		Earliest:   status.MinimumBlockHeight,
+		Latest:     status.MaxBlockHeight,
+		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
+	}
+
+	if err := packet.Validate(); err != nil {
+		h.logger.Warn("[hook] block range update skipped", "err", err)
+		return
+	}
+
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind, "isSynced", isSynced, "timeElapsed", timeElapsed)
+	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
+	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
+	h.lastAnnouncedBlockRangeTime = time.Now()
 }
 
 func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
