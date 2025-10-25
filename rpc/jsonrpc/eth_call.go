@@ -96,6 +96,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	if err != nil {
 		return nil, err
 	}
+
 	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, blockOverrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
@@ -771,7 +772,7 @@ type accessListResult struct {
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
-func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error) {
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error) {
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
@@ -867,6 +868,13 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	for {
 		state := state.New(stateReader)
+		// Override the fields of specified contracts before execution.
+		if overrides != nil {
+			if err := overrides.Override(state); err != nil {
+				return nil, err
+			}
+		}
+
 		// Retrieve the current access list to expand
 		accessList := prevTracer.AccessList()
 		log.Trace("Creating access list", "input", accessList)
