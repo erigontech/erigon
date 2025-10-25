@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -257,12 +258,7 @@ func botState() *astate {
 }
 
 func ExistsIn(values []AbsValue, value AbsValue) bool {
-	for _, v := range values {
-		if value.Eq(v) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(values, value.Eq)
 }
 
 func (state *astate) String(abbrev bool) string {
@@ -422,11 +418,8 @@ func intoAState(ststr [][]string) *astate {
 func Leq(st0 *astate, st1 *astate) bool {
 	for _, stack0 := range st0.stackset {
 		var found bool
-		for _, stack1 := range st1.stackset {
-			if stack0.Eq(stack1) {
-				found = true
-				break
-			}
+		if slices.ContainsFunc(st1.stackset, stack0.Eq) {
+			found = true
 		}
 		if !found {
 			return false

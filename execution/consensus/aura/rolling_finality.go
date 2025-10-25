@@ -20,6 +20,7 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -101,13 +102,7 @@ func (f *RollingFinality) isFinalized() bool {
 	return len(f.signCount)*2 > len(f.signers.validators)
 }
 func (f *RollingFinality) hasSigner(signer common.Address) bool {
-	for j := range f.signers.validators {
-		if f.signers.validators[j] == signer {
-			return true
-
-		}
-	}
-	return false
+	return slices.Contains(f.signers.validators, signer)
 }
 func (f *RollingFinality) addSigners(signers []common.Address) bool {
 	for i := range signers {

@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -602,10 +603,8 @@ func isLocalFs(ctx context.Context, rclient *downloader.RCloneClient, fs string)
 	remotes, _ := rclient.ListRemotes(ctx)
 
 	if remote, _, ok := strings.Cut(fs, ":"); ok {
-		for _, r := range remotes {
-			if remote == r {
-				return false
-			}
+		if slices.Contains(remotes, remote) {
+			return false
 		}
 
 		return filepath.VolumeName(fs) == remote

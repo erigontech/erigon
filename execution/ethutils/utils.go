@@ -19,6 +19,7 @@ package ethutils
 import (
 	"errors"
 	"reflect"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
@@ -51,12 +52,7 @@ func IsLocalBlock(engine consensus.Engine, etherbase common.Address, txPoolLocal
 	}
 	// Check whether the given address is specified by `txpool.local`
 	// CLI flag.
-	for _, account := range txPoolLocals {
-		if account == author {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(txPoolLocals, author)
 }
 
 func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []common.Hash, transactions *[]types.Transaction) error {

@@ -208,14 +208,7 @@ Logs:
 			continue
 		}
 		for i, sub := range topics {
-			match := len(sub) == 0 // empty rule set == wildcard
-			// iterate over the subtopics and look for any match.
-			for _, topic := range sub {
-				if log.Topics[i] == topic {
-					match = true
-					break
-				}
-			}
+			match := slices.Contains(sub, log.Topics[i])
 			// there was no match, so this log is invalid.
 			if !match {
 				continue Logs
