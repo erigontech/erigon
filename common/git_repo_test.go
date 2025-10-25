@@ -35,8 +35,8 @@ func TestNoLargeFilesInRecentGitHistory(t *testing.T) {
 	// - purge `deploy`
 	// - purge `cmd/clef`
 	// - purge `cmd/swarm`
-	// - purge `cmd/*/compiled binaries`
 	// - purge `coverage-test.out`
 	// - purge `ethdb/mdbx/dist`
+	// - purge `cmd/*/compiled binaries`
 	// - to decide about `docs/lmdb` (this folder used by github's wiki)
 }
