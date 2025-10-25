@@ -61,12 +61,17 @@ type UnprefixedAddress Address
 
 // UnmarshalText decodes the address from hex. The 0x prefix is optional.
 func (a *UnprefixedAddress) UnmarshalText(input []byte) error {
-	return hexutil.UnmarshalFixedUnprefixedText("UnprefixedAddress", input, a[:])
+	var addr address
+	if err := hexutil.UnmarshalFixedUnprefixedText("UnprefixedAddress", input, addr[:]); err != nil {
+		return err
+	}
+	*a = UnprefixedAddress(AsAddress(addr))
+	return nil
 }
 
 // MarshalText encodes the address as hex.
 func (a UnprefixedAddress) MarshalText() ([]byte, error) {
-	return []byte(hex.EncodeToString(a[:])), nil
+	return []byte(hex.EncodeToString(Address(a).AsSlice())), nil
 }
 
 // MixedcaseAddress retains the original string, which may or may not be
@@ -92,9 +97,11 @@ func NewMixedcaseAddressFromString(hexaddr string) (*MixedcaseAddress, error) {
 
 // UnmarshalJSON parses MixedcaseAddress
 func (ma *MixedcaseAddress) UnmarshalJSON(input []byte) error {
-	if err := hexutil.UnmarshalFixedJSON(addressT, input, ma.addr[:]); err != nil {
+	var addr address
+	if err := hexutil.UnmarshalFixedJSON(addressT, input, addr[:]); err != nil {
 		return err
 	}
+	ma.addr = AsAddress(addr)
 	return json.Unmarshal(input, &ma.original)
 }
 
@@ -136,7 +143,7 @@ func (addrs Addresses) Len() int {
 	return len(addrs)
 }
 func (addrs Addresses) Less(i, j int) bool {
-	return bytes.Compare(addrs[i][:], addrs[j][:]) == -1
+	return addrs[i].Cmp(addrs[j]) == -1
 }
 func (addrs Addresses) Swap(i, j int) {
 	addrs[i], addrs[j] = addrs[j], addrs[i]

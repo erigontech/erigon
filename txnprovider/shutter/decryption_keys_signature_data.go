@@ -81,7 +81,7 @@ func IdentityPreimageFromBytes(b []byte) (*IdentityPreimage, error) {
 func IdentityPreimageFromSenderPrefix(prefix [32]byte, sender common.Address) *IdentityPreimage {
 	var ip IdentityPreimage
 	copy(ip[:len(prefix)], prefix[:])
-	copy(ip[len(prefix):], sender.Bytes())
+	copy(ip[len(prefix):], sender.AsSlice())
 	return &ip
 }
 

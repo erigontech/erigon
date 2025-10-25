@@ -83,7 +83,7 @@ func (f *callFrame) processOutput(output []byte, err error) {
 	}
 	f.Error = err.Error()
 	if f.Type == vm.CREATE || f.Type == vm.CREATE2 {
-		f.To = common.Address{}
+		f.To = common.ZeroAddress
 	}
 	if !errors.Is(err, vm.ErrExecutionReverted) || len(output) == 0 {
 		return

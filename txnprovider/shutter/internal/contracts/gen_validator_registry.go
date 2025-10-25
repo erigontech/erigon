@@ -46,12 +46,12 @@ var ValidatorRegistryBin = "0x6080604052348015600e575f5ffd5b506105d18061001c5f39
 func DeployValidatorRegistry(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *ValidatorRegistry, error) {
 	parsed, err := abi.JSON(strings.NewReader(ValidatorRegistryABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(ValidatorRegistryBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &ValidatorRegistry{ValidatorRegistryCaller: ValidatorRegistryCaller{contract: contract}, ValidatorRegistryTransactor: ValidatorRegistryTransactor{contract: contract}, ValidatorRegistryFilterer: ValidatorRegistryFilterer{contract: contract}}, nil
 }

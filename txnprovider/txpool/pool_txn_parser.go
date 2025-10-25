@@ -533,7 +533,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err) //nolint
 			}
-			auth.Address = common.Address(payload[p2 : p2+length.Addr])
+			auth.Address = common.NewAddress(payload[p2 : p2+length.Addr]...)
 			p2 += length.Addr
 			p2, auth.Nonce, err = rlp.ParseU64(payload, p2) // nonce
 			if err != nil {
@@ -732,7 +732,7 @@ func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *T
 	}
 	slot.SenderAddress = address
 	if ctx.withSender {
-		copy(sender, address[:])
+		copy(sender, address.AsSlice())
 	}
 
 	slot.SenderValidationData, p, err = getData(payload, p)
@@ -757,7 +757,7 @@ func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *T
 	}
 	slot.Paymaster = address
 	if slot.Paymaster != nil && ctx.withSender {
-		copy(sender, address[:])
+		copy(sender, address.AsSlice())
 	}
 
 	slot.PaymasterData, p, err = getData(payload, p)
@@ -935,10 +935,10 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		deployerData = tx.DeployerData
 	}
 	if tx.Paymaster != nil {
-		paymaster = tx.Paymaster.Bytes()
+		paymaster = tx.Paymaster.AsSlice()
 	}
 	if tx.Deployer != nil {
-		deployer = tx.Deployer.Bytes()
+		deployer = tx.Deployer.AsSlice()
 	}
 
 	return &typesproto.AccountAbstractionTransaction{
@@ -947,7 +947,7 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		Tip:                         tx.Tip.Bytes(),
 		FeeCap:                      tx.FeeCap.Bytes(),
 		Gas:                         tx.Gas,
-		SenderAddress:               tx.SenderAddress.Bytes(),
+		SenderAddress:               tx.SenderAddress.AsSlice(),
 		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
 		Paymaster:                   paymaster,
@@ -1020,7 +1020,7 @@ type Addresses []byte // flatten list of 20-byte addresses
 // AddressAt returns an address at the given index in the flattened list.
 // Use this method if you want to reduce memory allocations
 func (h Addresses) AddressAt(i int) common.Address {
-	return *(*[length.Addr]byte)(h[i*length.Addr : (i+1)*length.Addr])
+	return common.NewAddress(h[i*length.Addr : (i+1)*length.Addr]...)
 }
 
 func (h Addresses) At(i int) []byte {

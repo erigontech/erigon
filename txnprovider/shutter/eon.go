@@ -38,7 +38,7 @@ type Eon struct {
 
 func (e Eon) KeyperAt(index uint64) (common.Address, error) {
 	if index >= uint64(len(e.Members)) {
-		return common.Address{}, fmt.Errorf("%w: %d >= %d", ErrInvalidKeyperIndex, index, len(e.Members))
+		return common.ZeroAddress, fmt.Errorf("%w: %d >= %d", ErrInvalidKeyperIndex, index, len(e.Members))
 	}
 
 	return e.Members[index], nil

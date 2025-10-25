@@ -33,7 +33,7 @@ import (
 func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint, call consensus.Call) (common.Address, error) {
 	//d, err := set.defaultCaller(parent)
 	//if err != nil {
-	//	return common.Address{}, err
+	//	return common.ZeroAddress, err
 	//}
 	return set.getWithCaller(parent, nonce, call)
 }

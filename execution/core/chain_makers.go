@@ -118,7 +118,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		b.beforeAddTx()
 	}
 	if b.gasPool == nil {
-		b.SetCoinbase(common.Address{})
+		b.SetCoinbase(common.ZeroAddress)
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
@@ -134,7 +134,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		b.beforeAddTx()
 	}
 	if b.gasPool == nil {
-		b.SetCoinbase(common.Address{})
+		b.SetCoinbase(common.ZeroAddress)
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})

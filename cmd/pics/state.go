@@ -276,7 +276,7 @@ func initialState1() error {
 		address  = crypto.PubkeyToAddress(key.PublicKey)
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = common.Address{1}
+		theAddr  = common.NewAddress(1)
 		gspec    = &types.Genesis{
 			Config: chain.AllProtocolChanges,
 			Alloc: types.GenesisAlloc{
@@ -348,7 +348,7 @@ func initialState1() error {
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
-				binary.BigEndian.PutUint64(toAddr[:], j)
+				binary.BigEndian.PutUint64(toAddr.AsSlice(), j)
 				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
@@ -375,7 +375,7 @@ func initialState1() error {
 			var j uint64
 			var toAddr common.Address
 			for j = 1; j <= 32; j++ {
-				binary.BigEndian.PutUint64(toAddr[:], j)
+				binary.BigEndian.PutUint64(toAddr.AsSlice(), j)
 				txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 				if err != nil {
 					panic(err)
@@ -385,7 +385,7 @@ func initialState1() error {
 		case 7:
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
-			binary.BigEndian.PutUint64(toAddr[:], 4)
+			binary.BigEndian.PutUint64(toAddr.AsSlice(), 4)
 			txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
@@ -395,7 +395,7 @@ func initialState1() error {
 				panic(err)
 			}
 			txs = append(txs, txn)
-			binary.BigEndian.PutUint64(toAddr[:], 12)
+			binary.BigEndian.PutUint64(toAddr.AsSlice(), 12)
 			txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 			if err != nil {
 				panic(err)

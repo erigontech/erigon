@@ -45,7 +45,7 @@ func ComputeBorTxHash(blockNumber uint64, blockHash common.Hash) common.Hash {
 
 // NewBorTransaction create new bor transaction for bor receipt
 func NewBorTransaction() *types.LegacyTx {
-	return types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 0))
+	return types.NewTransaction(0, common.ZeroAddress, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 0))
 }
 
 // DeriveFieldsForBorReceipt fills the receipts with their computed fields based on consensus

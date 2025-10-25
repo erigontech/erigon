@@ -52,7 +52,7 @@ func (tr *TRand) RandBytes(size int) []byte {
 }
 
 func (tr *TRand) RandAddress() common.Address {
-	return common.Address(tr.RandBytes(20))
+	return common.NewAddress(tr.RandBytes(20)...)
 }
 
 func (tr *TRand) RandHash() common.Hash {
@@ -186,6 +186,7 @@ func randTestingStruct(tr *TRand) *TestingStruct {
 		_bloomSlicePtr[i] = &bloom
 	}
 
+	_addr := tr.RandAddress()
 	enc := TestingStruct{
 		a:  *tr.RandUint64(),
 		aa: tr.RandUint64(),
@@ -196,7 +197,7 @@ func randTestingStruct(tr *TRand) *TestingStruct {
 		d:  types.BlockNonce(tr.RandBytes(8)),
 		dd: (*types.BlockNonce)(tr.RandBytes(8)),
 		e:  tr.RandAddress(),
-		ee: (*common.Address)(tr.RandBytes(20)),
+		ee: &_addr,
 		f:  tr.RandHash(),
 		ff: (*common.Hash)(tr.RandBytes(32)),
 		g:  tr.RandBloom(),

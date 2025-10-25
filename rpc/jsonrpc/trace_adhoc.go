@@ -389,8 +389,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 	if create {
 		trResult := &CreateTraceResult{}
 		trace.Type = CREATE
-		trResult.Address = new(common.Address)
-		copy(trResult.Address[:], to.Bytes())
+		addr := to
+		trResult.Address = &addr
 		trace.Result = trResult
 	} else {
 		trace.Result = &TraceResult{}

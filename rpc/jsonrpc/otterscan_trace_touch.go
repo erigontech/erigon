@@ -17,8 +17,6 @@
 package jsonrpc
 
 import (
-	"bytes"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -47,7 +45,7 @@ func (t *TouchTracer) TracingHooks() *tracing.Hooks {
 }
 
 func (t *TouchTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if !t.Found && (bytes.Equal(t.searchAddr.Bytes(), from.Bytes()) || bytes.Equal(t.searchAddr.Bytes(), to.Bytes())) {
+	if !t.Found && (t.searchAddr == from || t.searchAddr == to) {
 		t.Found = true
 	}
 }

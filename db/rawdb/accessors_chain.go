@@ -604,7 +604,7 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 	}
 	senders := make([]common.Address, len(data)/length.Addr)
 	for i := 0; i < len(senders); i++ {
-		copy(senders[i][:], data[i*length.Addr:])
+		senders[i].SetBytes(data[i*length.Addr:])
 	}
 	return senders, nil
 }
@@ -668,7 +668,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []common.Address) error {
 	data := make([]byte, length.Addr*len(senders))
 	for i, sender := range senders {
-		copy(data[i*length.Addr:], sender[:])
+		copy(data[i*length.Addr:], sender.AsSlice())
 	}
 	if err := db.Put(kv.Senders, dbutils.BlockBodyKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block senders: %w", err)

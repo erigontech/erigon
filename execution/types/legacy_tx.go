@@ -71,7 +71,7 @@ func (ct *CommonTx) GetSender() (common.Address, bool) {
 	if sc := ct.from.Load(); sc != nil {
 		return *sc, true
 	}
-	return common.Address{}, false
+	return common.ZeroAddress, false
 }
 
 func (ct *CommonTx) SetSender(addr common.Address) {
@@ -261,7 +261,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 		return err
 	}
 	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
+		if _, err := w.Write(tx.To.AsSlice()); err != nil {
 			return err
 		}
 	}
@@ -317,8 +317,8 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
 	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
+		to := common.NewAddress(b...)
+		tx.To = &to
 	}
 	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Value: %w", err)
@@ -445,7 +445,7 @@ func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	tx.from.Store(&addr)
 	return addr, nil

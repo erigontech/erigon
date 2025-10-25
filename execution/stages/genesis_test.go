@@ -52,7 +52,7 @@ func TestSetupGenesis(t *testing.T) {
 		customg     = types.Genesis{
 			Config: &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(3)},
 			Alloc: types.GenesisAlloc{
-				{1}: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{1}: {1}}},
+				common.NewAddress(1): {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{1}: {1}}},
 			},
 		}
 		oldcustomg = customg

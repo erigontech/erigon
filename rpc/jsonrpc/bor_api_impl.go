@@ -220,11 +220,11 @@ func (api *BorImpl) GetCurrentProposer() (common.Address, error) {
 	ctx := context.Background()
 	latestBlockNum, err := api.getLatestBlockNum(ctx)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	validatorSet, err := api.spanProducersReader.Producers(ctx, latestBlockNum)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	return validatorSet.Proposer.Address, nil
 }
@@ -306,7 +306,7 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	defer tx.Rollback()
 
@@ -329,12 +329,12 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 	}
 
 	if header == nil || err != nil {
-		return common.Address{}, errUnknownBlock
+		return common.ZeroAddress, errUnknownBlock
 	}
 
 	validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	return validatorSet.GetProposer().Address, nil
 }

@@ -40,12 +40,12 @@ var ChangerBin = "0x6080604052348015600f57600080fd5b50607e8061001e6000396000f3fe
 func DeployChanger(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Changer, error) {
 	parsed, err := abi.JSON(strings.NewReader(ChangerABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(ChangerBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &Changer{ChangerCaller: ChangerCaller{contract: contract}, ChangerTransactor: ChangerTransactor{contract: contract}, ChangerFilterer: ChangerFilterer{contract: contract}}, nil
 }

@@ -72,7 +72,7 @@ type Snapshot struct {
 type SignersAscending []common.Address
 
 func (s SignersAscending) Len() int           { return len(s) }
-func (s SignersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
+func (s SignersAscending) Less(i, j int) bool { return s[i].Cmp(s[j]) < 0 }
 func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This

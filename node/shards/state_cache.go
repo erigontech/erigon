@@ -301,7 +301,7 @@ func (ci *CodeItem) Less(than btree.Item) bool {
 
 func (cwi *CodeWriteItem) Less(than btree.Item) bool {
 	i := than.(*CodeWriteItem)
-	c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
+	c := bytes.Compare(cwi.address.AsSlice(), i.address.AsSlice())
 	if c == 0 {
 		return cwi.ci.incarnation < i.ci.incarnation
 	}
@@ -706,7 +706,7 @@ func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account)
 	h.Sha.Read(ai.addrHash[:])
 	ai.account.Copy(account)
 	var awi AccountWriteItem
-	copy(awi.address[:], address)
+	awi.address.SetBytes(address)
 	awi.ai = &ai
 	sc.setWrite(&ai, &awi, false /* delete */)
 }
@@ -721,7 +721,7 @@ func (sc *StateCache) SetAccountDelete(address []byte) {
 	//nolint:errcheck
 	h.Sha.Read(ai.addrHash[:])
 	var awi AccountWriteItem
-	copy(awi.address[:], address)
+	copy(awi.address.AsSlice(), address)
 	awi.ai = &ai
 	sc.setWrite(&ai, &awi, true /* delete */)
 }
@@ -815,12 +815,12 @@ func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, locat
 	sc.setRead(&si, true /* absent */)
 }
 
-func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, location []byte, value []byte) {
+func (sc *StateCache) SetStorageWrite(address [20]byte, incarnation uint64, location []byte, value []byte) {
 	var si StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	//nolint:errcheck
-	h.Sha.Write(address)
+	h.Sha.Write(address[:])
 	//nolint:errcheck
 	h.Sha.Read(si.addrHash[:])
 	si.incarnation = incarnation
@@ -831,7 +831,7 @@ func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, locati
 	h.Sha.Read(si.locHash[:])
 	si.value.SetBytes(value)
 	var swi StorageWriteItem
-	copy(swi.address[:], address)
+	swi.address.SetBytes(address[:])
 	copy(swi.location[:], location)
 	swi.si = &si
 	sc.setWrite(&si, &swi, false /* delete */)
@@ -852,7 +852,7 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 	//nolint:errcheck
 	h.Sha.Read(si.locHash[:])
 	var swi StorageWriteItem
-	copy(swi.address[:], address)
+	copy(swi.address.AsSlice(), address)
 	copy(swi.location[:], location)
 	swi.si = &si
 	sc.setWrite(&si, &swi, true /* delete */)
@@ -897,7 +897,7 @@ func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []by
 	ci.code = make([]byte, len(code))
 	copy(ci.code, code)
 	var cwi CodeWriteItem
-	copy(cwi.address[:], address)
+	copy(cwi.address.AsSlice(), address)
 	cwi.ci = &ci
 	sc.setWrite(&ci, &cwi, false /* delete */)
 }
@@ -914,7 +914,7 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	ci.incarnation = incarnation
 	ci.code = nil
 	var cwi CodeWriteItem
-	copy(cwi.address[:], address)
+	copy(cwi.address.AsSlice(), address)
 	cwi.ci = &ci
 	sc.setWrite(&ci, &cwi, true /* delete */)
 }
@@ -954,31 +954,31 @@ func WalkWrites(
 			switch it := i.(type) {
 			case *AccountWriteItem:
 				if it.ai.flags&AbsentFlag != 0 {
-					if err = accountDelete(it.address.Bytes(), &it.ai.account); err != nil {
+					if err = accountDelete(it.address.AsSlice(), &it.ai.account); err != nil {
 						return false
 					}
 				} else {
-					if err = accountWrite(it.address.Bytes(), &it.ai.account); err != nil {
+					if err = accountWrite(it.address.AsSlice(), &it.ai.account); err != nil {
 						return false
 					}
 				}
 			case *StorageWriteItem:
 				if it.si.flags&AbsentFlag != 0 {
-					if err = storageDelete(it.address.Bytes(), it.si.incarnation, it.location.Bytes()); err != nil {
+					if err = storageDelete(it.address.AsSlice(), it.si.incarnation, it.location.Bytes()); err != nil {
 						return false
 					}
 				} else {
-					if err = storageWrite(it.address.Bytes(), it.si.incarnation, it.location.Bytes(), it.si.value.Bytes()); err != nil {
+					if err = storageWrite(it.address.AsSlice(), it.si.incarnation, it.location.Bytes(), it.si.value.Bytes()); err != nil {
 						return false
 					}
 				}
 			case *CodeWriteItem:
 				if it.ci.flags&AbsentFlag != 0 {
-					if err = codeDelete(it.address.Bytes(), it.ci.incarnation); err != nil {
+					if err = codeDelete(it.address.AsSlice(), it.ci.incarnation); err != nil {
 						return false
 					}
 				} else {
-					if err = codeWrite(it.address.Bytes(), it.ci.incarnation, it.ci.code); err != nil {
+					if err = codeWrite(it.address.AsSlice(), it.ci.incarnation, it.ci.code); err != nil {
 						return false
 					}
 				}

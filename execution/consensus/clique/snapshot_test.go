@@ -20,7 +20,6 @@
 package clique_test
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"sort"
@@ -67,7 +66,7 @@ func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) 
 	}
 	sort.Sort(clique.SignersAscending(auths))
 	for i, auth := range auths {
-		copy(header.Extra[clique.ExtraVanity+i*length.Addr:], auth.Bytes())
+		copy(header.Extra[clique.ExtraVanity+i*length.Addr:], auth.AsSlice())
 	}
 }
 
@@ -76,7 +75,7 @@ func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) 
 func (ap *testerAccountPool) address(account string) common.Address {
 	// Return the zero account for non-addresses
 	if account == "" {
-		return common.Address{}
+		return common.ZeroAddress
 	}
 	// Ensure we have a persistent key for the account
 	if ap.accounts[account] == nil {
@@ -413,7 +412,7 @@ func TestClique(t *testing.T) {
 			}
 			for j := 0; j < len(signers); j++ {
 				for k := j + 1; k < len(signers); k++ {
-					if bytes.Compare(signers[j][:], signers[k][:]) > 0 {
+					if signers[j].Cmp(signers[k]) > 0 {
 						signers[j], signers[k] = signers[k], signers[j]
 					}
 				}
@@ -424,7 +423,7 @@ func TestClique(t *testing.T) {
 				Config:    chainspec.AllCliqueProtocolChanges,
 			}
 			for j, signer := range signers {
-				copy(genesis.ExtraData[clique.ExtraVanity+j*length.Addr:], signer[:])
+				copy(genesis.ExtraData[clique.ExtraVanity+j*length.Addr:], signer.AsSlice())
 			}
 
 			// Assemble a chain of headers from the cast votes
@@ -546,7 +545,7 @@ func TestClique(t *testing.T) {
 			}
 			for j := 0; j < len(signers); j++ {
 				for k := j + 1; k < len(signers); k++ {
-					if bytes.Compare(signers[j][:], signers[k][:]) > 0 {
+					if signers[j].Cmp(signers[k]) > 0 {
 						signers[j], signers[k] = signers[k], signers[j]
 					}
 				}
@@ -558,7 +557,7 @@ func TestClique(t *testing.T) {
 				return
 			}
 			for j := 0; j < len(result); j++ {
-				if !bytes.Equal(result[j][:], signers[j][:]) {
+				if result[j] != signers[j] {
 					t.Errorf("test %d, signer %d: signer mismatch: have %x, want %x", i, j, result[j], signers[j])
 				}
 			}

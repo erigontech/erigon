@@ -397,7 +397,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64, asc order.By) (res stream.U64, err error) {
 	for _, addr := range addrs {
-		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), asc, kv.Unlim)
+		it, err := tx.IndexRange(kv.LogAddrIdx, addr.AsSlice(), int(from), int(to), asc, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}

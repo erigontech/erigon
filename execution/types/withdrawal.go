@@ -87,7 +87,7 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(obj.Address[:]); err != nil {
+	if _, err := w.Write(obj.Address.AsSlice()); err != nil {
 		return err
 	}
 
@@ -106,7 +106,7 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 	if obj.Validator, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Validator: %w", err)
 	}
-	if err = s.ReadBytes(obj.Address[:]); err != nil {
+	if err = s.ReadBytes(obj.Address.AsSlice()); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
 	if obj.Amount, err = s.Uint(); err != nil {

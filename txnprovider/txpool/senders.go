@@ -227,7 +227,7 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, ui
 	if !ok {
 		panic("must not happen")
 	}
-	encoded, err := cacheView.Get(addr.Bytes())
+	encoded, err := cacheView.Get(addr.AsSlice())
 	if err != nil {
 		return 0, uint256.Int{}, err
 	}

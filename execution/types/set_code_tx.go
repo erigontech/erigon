@@ -161,7 +161,7 @@ func (tx *SetCodeTransaction) Sender(signer Signer) (common.Address, error) {
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	tx.from.Store(&addr)
 	return addr, nil
@@ -256,8 +256,8 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
-	tx.To = &common.Address{}
-	copy((*tx.To)[:], b)
+	to := common.NewAddress(b...)
+	tx.To = &to
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
@@ -365,14 +365,12 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 // ParseDelegation tries to parse the address from a delegation slice.
 func ParseDelegation(code []byte) (common.Address, bool) {
 	if len(code) != DelegateDesignationCodeSize || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
-		return common.Address{}, false
+		return common.ZeroAddress, false
 	}
-	var addr common.Address
-	copy(addr[:], code[len(params.DelegatedDesignationPrefix):])
-	return addr, true
+	return common.NewAddress(code[len(params.DelegatedDesignationPrefix):]...), true
 }
 
 // AddressToDelegation adds the delegation prefix to the specified address.
 func AddressToDelegation(addr common.Address) []byte {
-	return append(params.DelegatedDesignationPrefix, addr.Bytes()...)
+	return append(params.DelegatedDesignationPrefix, addr.AsSlice()...)
 }

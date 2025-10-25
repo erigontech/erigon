@@ -88,10 +88,10 @@ func EncodeRIP7560TransactionEvent(
 ) (topics []common.Hash, data []byte, err error) {
 	id := AccountAbstractionABI.Events["RIP7560TransactionEvent"].ID
 	if paymaster == nil {
-		paymaster = &common.Address{}
+		paymaster = &common.ZeroAddress
 	}
 	if deployer == nil {
-		deployer = &common.Address{}
+		deployer = &common.ZeroAddress
 	}
 	inputs := AccountAbstractionABI.Events["RIP7560TransactionEvent"].Inputs
 	data, err = inputs.NonIndexed().Pack(
@@ -103,24 +103,24 @@ func EncodeRIP7560TransactionEvent(
 		return nil, nil, err
 	}
 	topics = []common.Hash{id, {}, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes(), 32))
-	topics[3] = [32]byte(common.LeftPadBytes(deployer.Bytes(), 32))
+	topics[1] = [32]byte(common.LeftPadBytes(sender.AsSlice(), 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.AsSlice(), 32))
+	topics[3] = [32]byte(common.LeftPadBytes(deployer.AsSlice(), 32))
 	return topics, data, nil
 }
 
 func EncodeRIP7560AccountDeployedEvent(paymaster, deployer, sender *common.Address) (topics []common.Hash, data []byte, err error) {
 	id := AccountAbstractionABI.Events["RIP7560AccountDeployed"].ID
 	if paymaster == nil {
-		paymaster = &common.Address{}
+		paymaster = &common.ZeroAddress
 	}
 	if deployer == nil {
-		deployer = &common.Address{}
+		deployer = &common.ZeroAddress
 	}
 	topics = []common.Hash{id, {}, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes(), 32))
-	topics[3] = [32]byte(common.LeftPadBytes(deployer.Bytes(), 32))
+	topics[1] = [32]byte(common.LeftPadBytes(sender.AsSlice(), 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.AsSlice(), 32))
+	topics[3] = [32]byte(common.LeftPadBytes(deployer.AsSlice(), 32))
 	return topics, make([]byte, 0), nil
 }
 
@@ -141,7 +141,7 @@ func EncodeRIP7560TransactionRevertReasonEvent(
 		return nil, nil, err
 	}
 	topics = []common.Hash{id, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
+	topics[1] = [32]byte(common.LeftPadBytes(sender.AsSlice(), 32))
 	return topics, data, nil
 }
 
@@ -153,7 +153,7 @@ func EncodeRIP7560TransactionPostOpRevertReasonEvent(
 ) (topics []common.Hash, data []byte, err error) {
 	id := AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].ID
 	if paymaster == nil {
-		paymaster = &common.Address{}
+		paymaster = &common.ZeroAddress
 	}
 	inputs := AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].Inputs
 	data, err = inputs.NonIndexed().Pack(
@@ -165,8 +165,8 @@ func EncodeRIP7560TransactionPostOpRevertReasonEvent(
 		return nil, nil, err
 	}
 	topics = []common.Hash{id, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes(), 32))
+	topics[1] = [32]byte(common.LeftPadBytes(sender.AsSlice(), 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.AsSlice(), 32))
 	return topics, data, nil
 }
 

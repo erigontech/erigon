@@ -37,7 +37,7 @@ func (vp *ValidatorParams) SetFeeRecipient(validatorIndex uint64, feeRecipient c
 func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Address, bool) {
 	val, ok := vp.feeRecipients.Load(validatorIndex)
 	if !ok {
-		return common.Address{}, false
+		return common.ZeroAddress, false
 	}
 	return val.(common.Address), true
 }

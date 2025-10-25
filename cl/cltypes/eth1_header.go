@@ -95,7 +95,7 @@ func (e *Eth1Header) IsZero() bool {
 	if e.Extra == nil {
 		e.Extra = solid.NewExtraData()
 	}
-	return e.ParentHash == common.Hash{} && e.FeeRecipient == common.Address{} && e.StateRoot == common.Hash{} &&
+	return e.ParentHash == common.Hash{} && e.FeeRecipient == common.ZeroAddress && e.StateRoot == common.Hash{} &&
 		e.ReceiptsRoot == common.Hash{} && e.LogsBloom == types.Bloom{} && e.PrevRandao == common.Hash{} && e.BlockNumber == 0 &&
 		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && e.Extra.EncodingSizeSSZ() == 0 && e.BaseFeePerGas == [32]byte{} &&
 		e.BlockHash == common.Hash{} && e.TransactionsRoot == common.Hash{} && e.WithdrawalsRoot == common.Hash{} &&
@@ -141,7 +141,7 @@ func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 
 func (h *Eth1Header) getSchema() []interface{} {
 	s := []interface{}{
-		h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
+		h.ParentHash[:], h.FeeRecipient.AsSlice(), h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
 		h.PrevRandao[:], &h.BlockNumber, &h.GasLimit, &h.GasUsed, &h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
 	}
 	if h.version >= clparams.CapellaVersion {

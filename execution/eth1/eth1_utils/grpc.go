@@ -43,7 +43,7 @@ func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
 
 	h := &executionproto.Header{
 		ParentHash:      gointerfaces.ConvertHashToH256(header.ParentHash),
-		Coinbase:        gointerfaces.ConvertAddressToH160(header.Coinbase),
+		Coinbase:        gointerfaces.ConvertAddressToH160(header.Coinbase.AsArray()),
 		StateRoot:       gointerfaces.ConvertHashToH256(header.Root),
 		TransactionHash: gointerfaces.ConvertHashToH256(header.TxHash),
 		LogsBloom:       gointerfaces.ConvertBytesToH2048(header.Bloom[:]),
@@ -212,7 +212,7 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 		out = append(out, &typesproto.Withdrawal{
 			Index:          w.Index,
 			ValidatorIndex: w.Validator,
-			Address:        gointerfaces.ConvertAddressToH160(w.Address),
+			Address:        gointerfaces.ConvertAddressToH160(w.Address.AsArray()),
 			Amount:         w.Amount,
 		})
 	}

@@ -716,8 +716,8 @@ func TestUnmarshal(t *testing.T) {
 		t.Fatal("expected 1 item, got", len(outAddr))
 	}
 
-	if outAddr[0] != (common.Address{1}) {
-		t.Errorf("expected %x, got %x", common.Address{1}, outAddr[0])
+	if outAddr[0] != (common.NewAddress(1)) {
+		t.Errorf("expected %x, got %x", common.NewAddress(1), outAddr[0])
 	}
 
 	// marshal multiple address slice
@@ -743,19 +743,19 @@ func TestUnmarshal(t *testing.T) {
 		t.Fatal("expected 1 item, got", len(outAddrStruct.A))
 	}
 
-	if outAddrStruct.A[0] != (common.Address{1}) {
-		t.Errorf("expected %x, got %x", common.Address{1}, outAddrStruct.A[0])
+	if outAddrStruct.A[0] != (common.NewAddress(1)) {
+		t.Errorf("expected %x, got %x", common.NewAddress(1), outAddrStruct.A[0])
 	}
 
 	if len(outAddrStruct.B) != 2 {
 		t.Fatal("expected 1 item, got", len(outAddrStruct.B))
 	}
 
-	if outAddrStruct.B[0] != (common.Address{2}) {
-		t.Errorf("expected %x, got %x", common.Address{2}, outAddrStruct.B[0])
+	if outAddrStruct.B[0] != (common.NewAddress(2)) {
+		t.Errorf("expected %x, got %x", common.NewAddress(2), outAddrStruct.B[0])
 	}
-	if outAddrStruct.B[1] != (common.Address{3}) {
-		t.Errorf("expected %x, got %x", common.Address{3}, outAddrStruct.B[1])
+	if outAddrStruct.B[1] != (common.NewAddress(3)) {
+		t.Errorf("expected %x, got %x", common.NewAddress(3), outAddrStruct.B[1])
 	}
 
 	// marshal invalid address slice

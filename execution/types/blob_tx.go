@@ -99,7 +99,7 @@ func (stx *BlobTx) Sender(signer Signer) (common.Address, error) {
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	stx.from.Store(&addr)
 	return addr, nil
@@ -228,7 +228,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(stx.To[:]); err != nil {
+	if _, err := w.Write(stx.To.AsSlice()); err != nil {
 		return err
 	}
 	// encode Value
@@ -351,8 +351,8 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
-	stx.To = &common.Address{}
-	copy((*stx.To)[:], b)
+	to := common.NewAddress(b...)
+	stx.To = &to
 
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err

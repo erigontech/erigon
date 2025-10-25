@@ -42,8 +42,8 @@ type StorageEntry struct {
 func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
-	fromKey := append(common.Copy(contractAddress.Bytes()), start...)
-	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
+	fromKey := append(common.Copy(contractAddress.AsSlice()), start...)
+	toKey, _ := kv.NextSubtree(contractAddress.AsSlice())
 
 	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
 	if err != nil {

@@ -78,11 +78,11 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, err
 	}
 
-	from := account[:]
+	from := account.AsSlice()
 	if offset != nil {
 		from = append(from, *offset...)
 	}
-	to, _ := kv.NextSubtree(account[:])
+	to, _ := kv.NextSubtree(account.AsSlice())
 	r, err := tx.RangeAsOf(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
 	if err != nil {
 		return nil, err

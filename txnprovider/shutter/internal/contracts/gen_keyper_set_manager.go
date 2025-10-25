@@ -40,12 +40,12 @@ var KeyperSetManagerBin = "0x6080604052348015600e575f5ffd5b50604051610e203803806
 func DeployKeyperSetManager(auth *bind.TransactOpts, backend bind.ContractBackend, initializer common.Address) (common.Address, types.Transaction, *KeyperSetManager, error) {
 	parsed, err := abi.JSON(strings.NewReader(KeyperSetManagerABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(KeyperSetManagerBin), backend, initializer)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &KeyperSetManager{KeyperSetManagerCaller: KeyperSetManagerCaller{contract: contract}, KeyperSetManagerTransactor: KeyperSetManagerTransactor{contract: contract}, KeyperSetManagerFilterer: KeyperSetManagerFilterer{contract: contract}}, nil
 }

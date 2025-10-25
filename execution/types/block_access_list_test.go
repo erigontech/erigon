@@ -34,10 +34,7 @@ func TestBalanceChangeEncodeRejectsOverflow(t *testing.T) {
 }
 
 func TestBlockAccessListValidateOrdering(t *testing.T) {
-	var addrA, addrB common.Address
-	addrA[19] = 0x02
-	addrB[19] = 0x01
-
+	var addrA, addrB = common.AsAddress([20]byte{19: 0x02}), common.AsAddress([20]byte{19: 0x01})
 	list := BlockAccessList{
 		{Address: addrA},
 		{Address: addrB},
@@ -48,8 +45,7 @@ func TestBlockAccessListValidateOrdering(t *testing.T) {
 }
 
 func TestAccountChangesEncodeRejectsUnsortedReads(t *testing.T) {
-	var addr common.Address
-	addr[19] = 0x01
+	var addr = common.AsAddress([20]byte{19: 0x01})
 	var slotA, slotB common.Hash
 	slotA[31] = 0x02
 	slotB[31] = 0x01

@@ -1168,7 +1168,7 @@ func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf
 	if err != nil {
 		return
 	}
-	txn.SetSender(*(*common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+	txn.SetSender(common.NewAddress(sender...))
 	return
 }
 
@@ -1203,7 +1203,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 			return nil, 0, 0, false, err
 		}
 
-		txn.SetSender((common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+		txn.SetSender(common.NewAddress(sender...))
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
 		blockNum, ok := reader2.Lookup(txnHash[:])

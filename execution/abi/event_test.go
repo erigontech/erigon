@@ -276,7 +276,7 @@ func TestEventTupleUnpack(t *testing.T) {
 		"Can unpack Pledge event into structure",
 	}, {
 		pledgeData1,
-		&[]interface{}{&common.Address{}, &bigint, &[3]byte{}},
+		&[]interface{}{&common.ZeroAddress, &bigint, &[3]byte{}},
 		&[]interface{}{
 			&addr,
 			&bigintExpected2,
@@ -286,7 +286,7 @@ func TestEventTupleUnpack(t *testing.T) {
 		"Can unpack Pledge event into slice",
 	}, {
 		pledgeData1,
-		&[3]interface{}{&common.Address{}, &bigint, &[3]byte{}},
+		&[3]interface{}{&common.ZeroAddress, &bigint, &[3]byte{}},
 		&[3]interface{}{
 			&addr,
 			&bigintExpected2,
@@ -310,7 +310,7 @@ func TestEventTupleUnpack(t *testing.T) {
 		"Can not unpack Pledge event into struct with wrong filed types",
 	}, {
 		pledgeData1,
-		&[]interface{}{common.Address{}, new(big.Int)},
+		&[]interface{}{common.ZeroAddress, new(big.Int)},
 		&[]interface{}{},
 		jsonEventPledge,
 		"abi: insufficient number of arguments for unpack, want 3, got 2",

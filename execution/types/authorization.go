@@ -93,8 +93,7 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 		return nil, errors.New("invalid public key")
 	}
 
-	var authority common.Address
-	copy(authority[:], crypto.Keccak256(pubKey[1:])[12:])
+	var authority = common.NewAddress(crypto.Keccak256(pubKey[1:])[12:]...)
 	return &authority, nil
 }
 

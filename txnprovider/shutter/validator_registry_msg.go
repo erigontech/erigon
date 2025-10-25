@@ -42,7 +42,7 @@ func (m *AggregateRegistrationMessage) Marshal() []byte {
 	b := make([]byte, 0)
 	b = append(b, m.Version)
 	b = binary.BigEndian.AppendUint64(b, m.ChainId)
-	b = append(b, m.ValidatorRegistryAddress.Bytes()...)
+	b = append(b, m.ValidatorRegistryAddress.AsSlice()...)
 	b = binary.BigEndian.AppendUint64(b, m.ValidatorIndex)
 	b = binary.BigEndian.AppendUint32(b, m.Count)
 	b = binary.BigEndian.AppendUint32(b, m.Nonce)
@@ -101,7 +101,7 @@ func (m *LegacyRegistrationMessage) Marshal() []byte {
 	b := make([]byte, 0)
 	b = append(b, m.Version)
 	b = binary.BigEndian.AppendUint64(b, m.ChainId)
-	b = append(b, m.ValidatorRegistryAddress.Bytes()...)
+	b = append(b, m.ValidatorRegistryAddress.AsSlice()...)
 	b = binary.BigEndian.AppendUint64(b, m.ValidatorIndex)
 	b = binary.BigEndian.AppendUint64(b, m.Nonce)
 	if m.IsRegistration {

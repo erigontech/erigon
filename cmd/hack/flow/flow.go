@@ -608,7 +608,7 @@ func (dummyAccount) Value() *big.Int                                     { retur
 func (dummyAccount) SetBalance(*big.Int)                                 {}
 func (dummyAccount) SetNonce(uint64)                                     {}
 func (dummyAccount) Balance() *big.Int                                   { return nil }
-func (dummyAccount) Address() common.Address                             { return common.Address{} }
+func (dummyAccount) Address() common.Address                             { return common.ZeroAddress }
 func (dummyAccount) ReturnGas(*big.Int)                                  {}
 func (dummyAccount) SetCode(common.Hash, []byte)                         {}
 func (dummyAccount) ForEachStorage(cb func(key, value common.Hash) bool) {}

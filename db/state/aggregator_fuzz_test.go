@@ -69,11 +69,11 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
 		for i := 0; i < 1000; i++ {
-			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
+			addrs[i].SetBytes(addrData[i*length.Addr : (i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
 		for i := 0; i < 1000; i++ {
-			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
+			locs[i].SetBytes(locData[i*length.Hash : (i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			acc := accounts.Account{
@@ -83,10 +83,10 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].AsSlice(), buf, txNum, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].AsSlice(), locs[txNum].AsSlice()), []byte{addrs[txNum].AsSlice()[0], locs[txNum].AsSlice()[0]}, txNum, nil, 0)
 			require.NoError(t, err)
 
 			var v [8]byte
@@ -180,11 +180,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
 		for i := 0; i < 1000; i++ {
-			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
+			addrs[i].SetBytes(addrData[i*length.Addr : (i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
 		for i := 0; i < 1000; i++ {
-			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
+			locs[i].SetBytes(locData[i*length.Hash : (i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			acc := accounts.Account{
@@ -194,11 +194,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].AsSlice(), buf, txNum, nil, 0)
 			require.NoError(t, err)
 
-			k := composite(addrs[txNum].Bytes(), locs[txNum].Bytes())
-			v := []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
+			k := composite(addrs[txNum].AsSlice(), locs[txNum].AsSlice())
+			v := []byte{addrs[txNum].AsSlice()[0], locs[txNum].AsSlice()[0]}
 			err = domains.DomainPut(kv.StorageDomain, rwTx, k, v, txNum, nil, 0)
 			require.NoError(t, err)
 
@@ -207,8 +207,8 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				require.NoError(t, err)
 			}
 
-			state[string(addrs[txNum].Bytes())] = buf
-			state[string(addrs[txNum].Bytes())+string(locs[txNum].Bytes())] = []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
+			state[string(addrs[txNum].AsSlice())] = buf
+			state[string(addrs[txNum].AsSlice())+string(locs[txNum].AsSlice())] = []byte{addrs[txNum].AsSlice()[0], locs[txNum].AsSlice()[0]}
 		}
 
 		err = domains.Flush(context.Background(), rwTx)

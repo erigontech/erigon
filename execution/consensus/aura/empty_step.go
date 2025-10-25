@@ -95,16 +95,16 @@ func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
 func (s *EmptyStep) author() (common.Address, error) {
 	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	message := crypto.Keccak256(sRlp)
 	public, err := secp256k1.RecoverPubkey(message, s.signature)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	ecdsa, err := crypto.UnmarshalPubkeyStd(public)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	return crypto.PubkeyToAddress(*ecdsa), nil
 }

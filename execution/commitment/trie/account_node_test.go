@@ -140,9 +140,9 @@ func TestHash(t *testing.T) {
 	trie := New(common.Hash{})
 	trie2 := NewTestRLPTrie(common.Hash{})
 
-	trie.UpdateAccount(addr1.Bytes(), acc1)
-	trie.UpdateAccount(addr2.Bytes(), acc2)
-	trie.UpdateAccount(addr3.Bytes(), acc3)
+	trie.UpdateAccount(addr1.AsSlice(), acc1)
+	trie.UpdateAccount(addr2.AsSlice(), acc2)
+	trie.UpdateAccount(addr3.AsSlice(), acc3)
 
 	b1 := make([]byte, acc1.EncodingLengthForHashing())
 	b2 := make([]byte, acc2.EncodingLengthForHashing())
@@ -150,9 +150,9 @@ func TestHash(t *testing.T) {
 	acc1.EncodeForHashing(b1)
 	acc2.EncodeForHashing(b2)
 	acc3.EncodeForHashing(b3)
-	trie2.Update(addr1.Bytes(), b1)
-	trie2.Update(addr2.Bytes(), b2)
-	trie2.Update(addr3.Bytes(), b3)
+	trie2.Update(addr1.AsSlice(), b1)
+	trie2.Update(addr2.AsSlice(), b2)
+	trie2.Update(addr3.AsSlice(), b3)
 
 	if trie.Hash().String() != trie2.Hash().String() {
 		t.FailNow()
@@ -162,13 +162,13 @@ func TestHash(t *testing.T) {
 func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {
 	key, err := crypto.GenerateKey()
 	if err != nil {
-		return nil, common.Address{}, common.Hash{}, err
+		return nil, common.ZeroAddress, common.Hash{}, err
 	}
 
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	hash, err := hashVal(addr[:])
+	hash, err := hashVal(addr.AsSlice())
 	if err != nil {
-		return nil, common.Address{}, common.Hash{}, err
+		return nil, common.ZeroAddress, common.Hash{}, err
 	}
 	return key, addr, hash, nil
 }

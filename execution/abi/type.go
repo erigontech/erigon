@@ -236,7 +236,7 @@ func (t Type) GetType() reflect.Type {
 	case TupleTy:
 		return t.TupleType
 	case AddressTy:
-		return reflect.TypeOf(common.Address{})
+		return reflect.TypeOf(common.ZeroAddress)
 	case FixedBytesTy:
 		return reflect.ArrayOf(t.Size, reflect.TypeOf(byte(0)))
 	case BytesTy:

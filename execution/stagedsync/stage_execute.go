@@ -231,7 +231,7 @@ func unwindExec3State(ctx context.Context,
 					return fmt.Errorf("%w, %x", err, v)
 				}
 				var address common.Address
-				copy(address[:], k)
+				copy(address.AsSlice(), k)
 
 				if dbg.TraceUnwinds {
 					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
@@ -243,7 +243,7 @@ func unwindExec3State(ctx context.Context,
 				}
 			} else {
 				var address common.Address
-				copy(address[:], k)
+				copy(address.AsSlice(), k)
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
 				}
@@ -256,7 +256,7 @@ func unwindExec3State(ctx context.Context,
 
 		var address common.Address
 		var location common.Hash
-		copy(address[:], k[:length.Addr])
+		copy(address.AsSlice(), k[:length.Addr])
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
 			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))

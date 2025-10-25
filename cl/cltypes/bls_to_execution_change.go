@@ -33,11 +33,11 @@ type BLSToExecutionChange struct {
 }
 
 func (b *BLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.ValidatorIndex, b.From[:], b.To[:])
+	return ssz2.MarshalSSZ(buf, b.ValidatorIndex, b.From[:], b.To.AsSlice())
 }
 
 func (b *BLSToExecutionChange) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(b.ValidatorIndex, b.From[:], b.To[:])
+	return merkle_tree.HashTreeRoot(b.ValidatorIndex, b.From[:], b.To.AsSlice())
 }
 
 func (b *BLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
@@ -46,8 +46,8 @@ func (b *BLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	}
 	b.ValidatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	copy(b.From[:], buf[8:])
-	copy(b.To[:], buf[56:])
-	return ssz2.UnmarshalSSZ(buf, version, &b.ValidatorIndex, b.From[:], b.To[:])
+	b.To.SetBytes(buf[56:])
+	return ssz2.UnmarshalSSZ(buf, version, &b.ValidatorIndex, b.From[:], b.To.AsSlice())
 }
 
 func (*BLSToExecutionChange) EncodingSizeSSZ() int {

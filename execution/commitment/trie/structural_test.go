@@ -192,8 +192,8 @@ func TestV2Resolution(t *testing.T) {
 // In order to prevent the branch node on top of the extension node, we will need to manipulate
 // the `groups` array and truncate it to the level of the accounts
 func TestEmbeddedStorage(t *testing.T) {
-	var accountAddress = common.Address{3, 4, 5, 6}
-	addrHash := crypto.Keccak256(accountAddress[:])
+	var accountAddress = common.NewAddress(3, 4, 5, 6)
+	addrHash := crypto.Keccak256(accountAddress.AsSlice())
 	incarnation := make([]byte, 8)
 	binary.BigEndian.PutUint64(incarnation, uint64(2))
 	var location1 = common.Hash{1}

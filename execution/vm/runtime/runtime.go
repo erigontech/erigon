@@ -156,7 +156,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	cfg.State.SetCode(address, code)
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.ZeroAddress)
 	}
 	ret, _, err := vmenv.Call(
 		sender,
@@ -190,12 +190,12 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		defer db.Close()
 		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
-			return nil, [20]byte{}, 0, err
+			return nil, common.ZeroAddress, 0, err
 		}
 		defer tx.Rollback()
 		sd, err := dbstate.NewSharedDomains(tx, log.New())
 		if err != nil {
-			return nil, [20]byte{}, 0, err
+			return nil, common.ZeroAddress, 0, err
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
@@ -238,7 +238,7 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.ZeroAddress)
 	}
 
 	// Call the code with the given configuration.

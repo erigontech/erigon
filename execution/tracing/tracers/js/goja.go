@@ -246,7 +246,7 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 		return
 	}
 	t.ctx["gasPrice"] = gasPriceBig
-	coinbase, err := t.toBuf(t.vm, env.Coinbase.Bytes())
+	coinbase, err := t.toBuf(t.vm, env.Coinbase.AsSlice())
 	if err != nil {
 		t.err = err
 		return
@@ -277,8 +277,8 @@ func (t *jsTracer) onStart(from common.Address, to common.Address, create bool, 
 	} else {
 		t.ctx["type"] = t.vm.ToValue("CALL")
 	}
-	t.ctx["from"] = t.vm.ToValue(from.Bytes())
-	t.ctx["to"] = t.vm.ToValue(to.Bytes())
+	t.ctx["from"] = t.vm.ToValue(from.AsSlice())
+	t.ctx["to"] = t.vm.ToValue(to.AsSlice())
 	t.ctx["input"] = t.vm.ToValue(input)
 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {
@@ -452,7 +452,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		a = common.BytesToAddress(a).Bytes()
+		a = common.BytesToAddress(a).AsSlice()
 		res, err := t.toBuf(vm, a)
 		if err != nil {
 			vm.Interrupt(err)
@@ -467,7 +467,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return nil
 		}
 		addr := common.BytesToAddress(a)
-		b := types.CreateAddress(addr, uint64(nonce)).Bytes()
+		b := types.CreateAddress(addr, uint64(nonce)).AsSlice()
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -489,7 +489,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		code = common.CopyBytes(code)
 		codeHash := crypto.Keccak256(code)
-		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
+		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).AsSlice()
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -817,7 +817,7 @@ type contractObj struct {
 }
 
 func (co *contractObj) GetCaller() goja.Value {
-	caller := co.scope.Caller().Bytes()
+	caller := co.scope.Caller().AsSlice()
 	res, err := co.toBuf(co.vm, caller)
 	if err != nil {
 		co.vm.Interrupt(err)
@@ -827,7 +827,7 @@ func (co *contractObj) GetCaller() goja.Value {
 }
 
 func (co *contractObj) GetAddress() goja.Value {
-	addr := co.scope.Address().Bytes()
+	addr := co.scope.Address().AsSlice()
 	res, err := co.toBuf(co.vm, addr)
 	if err != nil {
 		co.vm.Interrupt(err)
@@ -883,7 +883,7 @@ func (f *callframe) GetType() string {
 }
 
 func (f *callframe) GetFrom() goja.Value {
-	from := f.from.Bytes()
+	from := f.from.AsSlice()
 	res, err := f.toBuf(f.vm, from)
 	if err != nil {
 		f.vm.Interrupt(err)
@@ -893,7 +893,7 @@ func (f *callframe) GetFrom() goja.Value {
 }
 
 func (f *callframe) GetTo() goja.Value {
-	to := f.to.Bytes()
+	to := f.to.AsSlice()
 	res, err := f.toBuf(f.vm, to)
 	if err != nil {
 		f.vm.Interrupt(err)

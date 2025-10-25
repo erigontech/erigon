@@ -117,7 +117,7 @@ func Ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.
 	}
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < types.ExtraSealLength {
-		return common.Address{}, errMissingSignature
+		return common.ZeroAddress, errMissingSignature
 	}
 
 	signature := header.Extra[len(header.Extra)-types.ExtraSealLength:]
@@ -126,10 +126,10 @@ func Ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.
 	sealHash := SealHash(header, c)
 	pubkey, err := crypto.Ecrecover(sealHash[:], signature)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	var signer common.Address
-	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
+	signer.SetBytes(crypto.Keccak256(pubkey[1:])[12:])
 
 	sigcache.Add(hash, signer)
 
@@ -359,10 +359,10 @@ func New(
 	}
 
 	c.authorizedSigner.Store(&signer{
-		common.Address{},
+		common.ZeroAddress,
 		func(_ common.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: common.Address{}.Bytes()}
+			return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: common.ZeroAddress.AsSlice()}
 		},
 	})
 
@@ -670,7 +670,7 @@ func (c *Bor) verifySeal(chain ChainHeaderReader, header *types.Header, parents 
 
 		difficulty := validatorSet.SafeDifficulty(signer)
 		if header.Difficulty.Uint64() != difficulty {
-			return &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
+			return &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.AsSlice()}
 		}
 	}
 
@@ -681,7 +681,7 @@ func (c *Bor) verifySeal(chain ChainHeaderReader, header *types.Header, parents 
 // header for running the transactions on top.
 func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
-	header.Coinbase = common.Address{}
+	header.Coinbase = common.ZeroAddress
 	header.Nonce = types.BlockNonce{}
 
 	number := header.Number.Uint64()
@@ -771,7 +771,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	var succession int
 	signer := c.authorizedSigner.Load().signer
 	// if signer is not empty
-	if !bytes.Equal(signer.Bytes(), common.Address{}.Bytes()) {
+	if signer != common.ZeroAddress {
 		succession, err = validatorSet.GetSignerSuccessionNumber(signer, number)
 		if err != nil {
 			return err

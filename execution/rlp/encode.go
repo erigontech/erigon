@@ -708,7 +708,7 @@ func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) err
 		return err
 	}
 	if addr != nil {
-		if _, err := w.Write(addr[:]); err != nil {
+		if _, err := w.Write(addr.AsSlice()); err != nil {
 			return err
 		}
 	}

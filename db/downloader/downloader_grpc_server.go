@@ -156,7 +156,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *downloaderproto.Delete
 }
 
 func Proto2InfoHash(in *typesproto.H160) metainfo.Hash {
-	return gointerfaces.ConvertH160toAddress(in)
+	return gointerfaces.ConvertH160toAddress(in).AsArray()
 }
 
 func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *downloaderproto.SetLogPrefixRequest) (*emptypb.Empty, error) {

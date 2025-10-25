@@ -76,7 +76,7 @@ func TestConfigValueLookup(t *testing.T) {
 		22640000: address1,
 		41874000: address2,
 	}
-	assert.Equal(t, common.Address{}, ConfigValueLookup(burntContract, 10000000))
+	assert.Equal(t, common.ZeroAddress, ConfigValueLookup(burntContract, 10000000))
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 22640000))
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 22640000+1))
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 41874000-1))

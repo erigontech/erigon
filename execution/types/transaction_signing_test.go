@@ -147,7 +147,7 @@ func TestChainId(t *testing.T) {
 	t.Parallel()
 	key, _ := defaultTestKey()
 
-	var txn Transaction = NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
+	var txn Transaction = NewTransaction(0, common.ZeroAddress, new(uint256.Int), 0, new(uint256.Int), nil)
 
 	var err error
 	txn, err = SignTx(txn, *LatestSignerForChainID(big.NewInt(1)), key)

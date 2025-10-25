@@ -1719,7 +1719,7 @@ func cellMustEqual(tb testing.TB, first, second *cell) {
 	require.Equal(tb, first.hash[:first.hashLen], second.hash[:second.hashLen])
 	require.Equal(tb, first.accountAddrLen, second.accountAddrLen)
 	require.Equal(tb, first.storageAddrLen, second.storageAddrLen)
-	require.Equal(tb, first.accountAddr[:], second.accountAddr[:])
+	require.Equal(tb, first.accountAddr, second.accountAddr)
 	require.Equal(tb, first.storageAddr[:], second.storageAddr[:])
 	require.Equal(tb, first.extension[:first.extLen], second.extension[:second.extLen])
 	require.Equal(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])

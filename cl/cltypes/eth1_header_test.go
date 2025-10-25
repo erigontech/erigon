@@ -38,7 +38,7 @@ func TestEth1Header(t *testing.T) {
 	header.Deneb()
 	// Create sample data
 	parentHash := common.Hash{}
-	feeRecipient := common.Address{}
+	feeRecipient := common.ZeroAddress
 	stateRoot := common.Hash{}
 	receiptsRoot := common.Hash{}
 	logsBloom := types.Bloom{}

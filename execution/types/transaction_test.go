@@ -348,7 +348,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		for i := 0; i < 25; i++ {
-			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt(100), 100, uint256.NewInt(uint64(start+i)), nil), *signer, key)
+			tx, _ := SignTx(NewTransaction(uint64(start+i), common.ZeroAddress, uint256.NewInt(100), 100, uint256.NewInt(uint64(start+i)), nil), *signer, key)
 
 			j, ok := idx[addr]
 			if ok {
@@ -547,12 +547,12 @@ func randIntInRange(_min, _max int) int {
 	return (rand.Intn(_max-_min) + _min)
 }
 
-func randAddr() *common.Address {
-	var a common.Address
+func randAddr() common.Address {
+	var b [20]byte
 	for j := 0; j < 20; j++ {
-		a[j] = byte(rand.Intn(255))
+		b[j] = byte(rand.Intn(255))
 	}
-	return &a
+	return common.AsAddress(b)
 }
 
 func randHash() common.Hash {
@@ -577,7 +577,7 @@ func randAccessList() AccessList {
 	for i := 0; i < size; i++ {
 		var tup AccessTuple
 
-		tup.Address = *randAddr()
+		tup.Address = randAddr()
 		tup.StorageKeys = append(tup.StorageKeys, randHash())
 		result = append(result, tup)
 	}
@@ -593,11 +593,12 @@ func randData() []byte {
 }
 
 func newRandBlobTx() *BlobTx {
+	to := randAddr()
 	stx := &BlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
 		CommonTx: CommonTx{
 			Nonce:    rand.Uint64(),
 			GasLimit: rand.Uint64(),
-			To:       randAddr(),
+			To:       &to,
 			Value:    uint256.NewInt(rand.Uint64()),
 			Data:     randData(),
 			V:        *uint256.NewInt(0),

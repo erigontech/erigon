@@ -63,7 +63,7 @@ func TestReimportMirroredState(t *testing.T) {
 		},
 		Config: chainspec.AllCliqueProtocolChanges,
 	}
-	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
+	copy(genspec.ExtraData[clique.ExtraVanity:], addr.AsSlice())
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false)
 
 	// Generate a batch of blocks, each properly signed
@@ -84,7 +84,7 @@ func TestReimportMirroredState(t *testing.T) {
 		// first one. The last is needs a state change again to force a reorg.
 		if i != 1 {
 			baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.ZeroAddress, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}

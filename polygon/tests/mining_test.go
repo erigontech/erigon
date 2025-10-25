@@ -229,7 +229,7 @@ func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpoolproto.Txpool
 
 	if creation {
 		var nonceReply *txpoolproto.NonceReply
-		nonceReply, err = txPool.Nonce(context.Background(), &txpoolproto.NonceRequest{Address: gointerfaces.ConvertAddressToH160(addr1)})
+		nonceReply, err = txPool.Nonce(context.Background(), &txpoolproto.NonceRequest{Address: gointerfaces.ConvertAddressToH160(addr1.AsArray())})
 		if err != nil {
 			return nil, err
 		}

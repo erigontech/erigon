@@ -249,7 +249,7 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	payloadAttributes := engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(headPayloadHeader.Time + cfg.beaconCfg.SecondsPerSlot),
 		PrevRandao:            randaoMix,
-		SuggestedFeeRecipient: (common.Address{}), // We can not know this ahead of time
+		SuggestedFeeRecipient: (common.ZeroAddress), // We can not know this ahead of time
 		ParentBeaconBlockRoot: &headRoot,
 		Withdrawals:           withdrawals,
 	}

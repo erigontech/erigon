@@ -389,26 +389,26 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// limit.
 	if depth > int(params.CallCreateDepth) {
 		err = ErrDepth
-		return nil, common.Address{}, gasRemaining, err
+		return nil, common.ZeroAddress, gasRemaining, err
 	}
 	canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value)
 	if err != nil {
-		return nil, common.Address{}, 0, err
+		return nil, common.ZeroAddress, 0, err
 	}
 	if !canTransfer {
 		if !bailout {
 			err = ErrInsufficientBalance
-			return nil, common.Address{}, gasRemaining, err
+			return nil, common.ZeroAddress, gasRemaining, err
 		}
 	}
 	if incrementNonce {
 		nonce, err := evm.intraBlockState.GetNonce(caller.Address())
 		if err != nil {
-			return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			return nil, common.ZeroAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if nonce+1 < nonce {
 			err = ErrNonceUintOverflow
-			return nil, common.Address{}, gasRemaining, err
+			return nil, common.ZeroAddress, gasRemaining, err
 		}
 		evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
 	}
@@ -420,22 +420,22 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// Ensure there's no existing contract already at the designated address
 	contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
 	if err != nil {
-		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return nil, common.ZeroAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	nonce, err := evm.intraBlockState.GetNonce(address)
 	if err != nil {
-		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return nil, common.ZeroAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	hasStorage, err := evm.intraBlockState.HasStorage(address)
 	if err != nil {
-		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return nil, common.ZeroAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != empty.CodeHash) || hasStorage {
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining, 0, tracing.GasChangeCallFailedExecution)
 		}
-		return nil, common.Address{}, 0, err
+		return nil, common.ZeroAddress, 0, err
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
@@ -511,7 +511,7 @@ func (evm *EVM) maxCodeSize() int {
 func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	nonce, err := evm.intraBlockState.GetNonce(caller.Address())
 	if err != nil {
-		return nil, common.Address{}, 0, err
+		return nil, common.ZeroAddress, 0, err
 	}
 	contractAddr = types.CreateAddress(caller.Address(), nonce)
 	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout)

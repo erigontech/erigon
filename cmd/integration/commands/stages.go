@@ -17,7 +17,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -798,7 +797,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 				if err != nil {
 					return err
 				}
-				if !bytes.Equal(from[:], senders[j][:]) {
+				if from != senders[j] {
 					logger.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
 				}
 			}

@@ -634,12 +634,12 @@ func (p *TxPool) getRlpLocked(tx kv.Tx, hash []byte) (rlpTxn []byte, sender comm
 	}
 	v, err := tx.GetOne(kv.PoolTransaction, hash)
 	if err != nil {
-		return nil, common.Address{}, false, err
+		return nil, common.ZeroAddress, false, err
 	}
 	if v == nil {
-		return nil, common.Address{}, false, nil
+		return nil, common.ZeroAddress, false, nil
 	}
-	return v[20:], *(*[20]byte)(v[:20]), txn != nil && txn.subPool&IsLocal > 0, nil
+	return v[20:], common.NewAddress(v[:20]...), txn != nil && txn.subPool&IsLocal > 0, nil
 }
 
 func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
@@ -888,7 +888,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		availableGas -= intrinsicGas
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
-		copy(txns.Senders.At(count), sender.Bytes())
+		copy(txns.Senders.At(count), sender.AsSlice())
 		txns.IsLocal[count] = isLocal
 		if yielded != nil {
 			yielded.Add(mt.TxnSlot.IDHash)
@@ -936,9 +936,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 			return nil, err
 		}
 
-		var sender common.Address
-		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(sender)
+		txn.SetSender(common.NewAddress(txnsRlp.Senders.At(i)...))
 		txns = append(txns, txn)
 	}
 
@@ -1860,7 +1858,7 @@ func (p *TxPool) deleteMinedBlobTxn(hash string) {
 func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	senderID, found := p.senders.getID(addr)
+	senderID, found := p.senders.getID(common.AsAddress(addr))
 	if !found {
 		return 0, false
 	}
@@ -2480,7 +2478,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 			continue
 		}
 
-		copy(v[:20], addr.Bytes())
+		copy(v[:20], addr.AsSlice())
 		copy(v[20:], metaTx.TxnSlot.Rlp)
 
 		has, err := tx.Has(kv.PoolTransaction, []byte(txHash))
@@ -2582,7 +2580,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		}
 		txn.Rlp = nil // means that we don't need store it in db anymore
 
-		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
+		txn.SenderID, txn.Traced = p.senders.getOrCreateID(common.AsAddress(addr), p.logger)
 		isLocalTx := p.isLocalLRU.Contains(string(k))
 
 		if reason := p.validateTx(txn, isLocalTx, cacheView); reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {

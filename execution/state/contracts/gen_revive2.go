@@ -40,12 +40,12 @@ var Revive2Bin = "0x608060405234801561001057600080fd5b5061020c806100206000396000
 func DeployRevive2(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Revive2, error) {
 	parsed, err := abi.JSON(strings.NewReader(Revive2ABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(Revive2Bin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &Revive2{Revive2Caller: Revive2Caller{contract: contract}, Revive2Transactor: Revive2Transactor{contract: contract}, Revive2Filterer: Revive2Filterer{contract: contract}}, nil
 }

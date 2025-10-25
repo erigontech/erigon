@@ -591,8 +591,8 @@ func TestOpTstore(t *testing.T) {
 		stack          = New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
-		caller         = common.Address{}
-		to             = common.Address{1}
+		caller         = common.ZeroAddress
+		to             = common.NewAddress(1)
 		contractRef    = contractRef{caller}
 		contract       = NewContract(contractRef, to, u256.Num0, 0, NewJumpDestCache(16))
 		scopeContext   = ScopeContext{mem, stack, contract}
@@ -711,7 +711,7 @@ func TestCreate2Addreses(t *testing.T) {
 			fmt.Printf("Example %d\n* address `0x%x`\n* salt `0x%x`\n* init_code `0x%x`\n* gas (assuming no mem expansion): `%v`\n* result: `%s`\n\n", i,origin, salt, code, gas, address.String())
 		*/
 		expected := common.BytesToAddress(common.FromHex(tt.expected))
-		if !bytes.Equal(expected.Bytes(), address.Bytes()) {
+		if expected != address {
 			t.Errorf("test %d: expected %s, got %s", i, expected.String(), address.String())
 		}
 	}

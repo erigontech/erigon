@@ -40,12 +40,12 @@ var TokenBin = "0x608060405234801561001057600080fd5b506040516102cd3803806102cd83
 func DeployToken(auth *bind.TransactOpts, backend bind.ContractBackend, _minter common.Address) (common.Address, types.Transaction, *Token, error) {
 	parsed, err := abi.JSON(strings.NewReader(TokenABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(TokenBin), backend, _minter)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &Token{TokenCaller: TokenCaller{contract: contract}, TokenTransactor: TokenTransactor{contract: contract}, TokenFilterer: TokenFilterer{contract: contract}}, nil
 }

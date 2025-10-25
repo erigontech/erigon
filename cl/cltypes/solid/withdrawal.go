@@ -33,11 +33,11 @@ func (p *WithdrawalRequest) EncodingSizeSSZ() int {
 }
 
 func (p *WithdrawalRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
+	return ssz2.MarshalSSZ(buf, p.SourceAddress.AsSlice(), p.ValidatorPubKey[:], &p.Amount)
 }
 
 func (p *WithdrawalRequest) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
+	return ssz2.UnmarshalSSZ(buf, version, p.SourceAddress.AsSlice(), p.ValidatorPubKey[:], &p.Amount)
 }
 
 func (p *WithdrawalRequest) Clone() clonable.Clonable {
@@ -45,7 +45,7 @@ func (p *WithdrawalRequest) Clone() clonable.Clonable {
 }
 
 func (p *WithdrawalRequest) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
+	return merkle_tree.HashTreeRoot(p.SourceAddress.AsSlice(), p.ValidatorPubKey[:], &p.Amount)
 }
 
 func (p *WithdrawalRequest) Static() bool {

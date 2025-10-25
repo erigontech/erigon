@@ -1,7 +1,6 @@
 package aa
 
 import (
-	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -199,7 +198,7 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 	if ept.Input == nil {
 		return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
 	}
-	if !bytes.Equal(ept.From[:], tx.SenderAddress[:]) {
+	if tx.SenderAddress == nil || ept.From != *tx.SenderAddress {
 		return fmt.Errorf("invalid call to EntryPoint contract from a wrong account address, wanted %s got %s", tx.SenderAddress.String(), ept.From)
 	}
 
@@ -218,7 +217,7 @@ func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.
 		return nil, errors.New("paymaster validation did not call the EntryPoint 'acceptPaymaster' callback")
 	}
 
-	if !bytes.Equal(ept.From[:], tx.Paymaster[:]) {
+	if tx.Paymaster == nil || ept.From != *tx.Paymaster {
 		return nil, errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
 	}
 	paymasterValidity, err := types.DecodeAcceptPaymaster(ept.Input) // TODO: find better name

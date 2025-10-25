@@ -1,7 +1,6 @@
 package types
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -433,9 +432,8 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for SenderAddress: %d", len(b))
 	}
-	tx.SenderAddress = &common.Address{}
-	copy((*tx.SenderAddress)[:], b)
-
+	senderAddress := common.NewAddress(b...)
+	tx.SenderAddress = &senderAddress
 	if tx.SenderValidationData, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -445,8 +443,8 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	if len(b) == 20 {
-		tx.Deployer = &common.Address{}
-		copy((*tx.Deployer)[:], b)
+		deployer := common.NewAddress(b...)
+		tx.Deployer = &deployer
 	} else if len(b) != 0 {
 		return fmt.Errorf("wrong size for Deployer: %d", len(b))
 	}
@@ -460,8 +458,8 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	if len(b) == 20 {
-		tx.Paymaster = &common.Address{}
-		copy((*tx.Paymaster)[:], b)
+		paymaster := common.NewAddress(b...)
+		tx.Paymaster = &paymaster
 	} else if len(b) != 0 {
 		return fmt.Errorf("wrong size for Paymaster: %d", len(b))
 	}
@@ -586,8 +584,7 @@ func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte
 }
 
 func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Message, error) {
-	zeroAddress := common.Address{}
-	if tx.Paymaster == nil || bytes.Equal(zeroAddress[:], tx.Paymaster[:]) {
+	if tx.Paymaster == nil || common.ZeroAddress == *tx.Paymaster {
 		return nil, nil
 	}
 
@@ -633,7 +630,7 @@ func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deplo
 }
 
 func (tx *AccountAbstractionTransaction) GasPayer() *common.Address {
-	if tx.Paymaster != nil && tx.Paymaster.Cmp(common.Address{}) != 0 {
+	if tx.Paymaster != nil && tx.Paymaster.Cmp(common.ZeroAddress) != 0 {
 		return tx.Paymaster
 	}
 
@@ -666,11 +663,11 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 
 	paymaster := tx.Paymaster
 	if paymaster == nil {
-		paymaster = &common.Address{}
+		paymaster = &common.ZeroAddress
 	}
 	deployer := tx.Deployer
 	if deployer == nil {
-		deployer = &common.Address{}
+		deployer = &common.ZeroAddress
 	}
 
 	record := &ABIAccountAbstractTxn{

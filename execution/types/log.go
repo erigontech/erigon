@@ -326,7 +326,7 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	err = s.ReadBytes(l.Address[:])
+	err = s.ReadBytes(l.Address.AsSlice())
 	if err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}

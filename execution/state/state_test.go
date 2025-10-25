@@ -85,7 +85,7 @@ func TestTouchDelete(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 
-	state.GetOrNewStateObject(common.Address{})
+	state.GetOrNewStateObject(common.ZeroAddress)
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestTouchDelete(t *testing.T) {
 	state.Reset()
 
 	snapshot := state.Snapshot()
-	state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
+	state.AddBalance(common.ZeroAddress, uint256.Int{}, tracing.BalanceChangeUnspecified)
 
 	if len(state.journal.dirties) != 1 {
 		t.Fatal("expected one dirty state object")

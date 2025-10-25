@@ -40,12 +40,12 @@ var SelfdestructBin = "0x6080604052348015600f57600080fd5b50640100000000600055600
 func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Selfdestruct, error) {
 	parsed, err := abi.JSON(strings.NewReader(SelfdestructABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SelfdestructBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &Selfdestruct{SelfdestructCaller: SelfdestructCaller{contract: contract}, SelfdestructTransactor: SelfdestructTransactor{contract: contract}, SelfdestructFilterer: SelfdestructFilterer{contract: contract}}, nil
 }

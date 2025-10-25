@@ -53,7 +53,7 @@ type revision struct {
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
-var EmptyAddress = common.Address{}
+var EmptyAddress = common.ZeroAddress
 
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first

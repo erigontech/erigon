@@ -59,14 +59,14 @@ func WaitMined(ctx context.Context, b DeployBackend, txn types.Transaction) (*ty
 // contract address when it is mined. It stops waiting when ctx is canceled.
 func WaitDeployed(ctx context.Context, b DeployBackend, txn types.Transaction) (common.Address, error) {
 	if txn.GetTo() != nil {
-		return common.Address{}, errors.New("tx is not contract creation")
+		return common.ZeroAddress, errors.New("tx is not contract creation")
 	}
 	receipt, err := WaitMined(ctx, b, txn)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
-	if receipt.ContractAddress == (common.Address{}) {
-		return common.Address{}, errors.New("zero address")
+	if receipt.ContractAddress == (common.ZeroAddress) {
+		return common.ZeroAddress, errors.New("zero address")
 	}
 	// Check that code has indeed been deployed at the address.
 	// This matters on pre-Homestead chains: OOG in the constructor

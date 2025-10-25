@@ -101,7 +101,7 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(ac.Address[:]); err != nil {
+	if _, err := w.Write(ac.Address.AsSlice()); err != nil {
 		return err
 	}
 
@@ -127,7 +127,7 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("account changes payload exceeds maximum size (%d bytes)", size)
 	}
 
-	if err := s.ReadBytes(ac.Address[:]); err != nil {
+	if err := s.ReadBytes(ac.Address.AsSlice()); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
 
@@ -458,7 +458,7 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		if err = ac.DecodeRLP(s); err != nil {
 			break
 		}
-		if hasPrev && bytes.Compare(prevAddr[:], ac.Address[:]) >= 0 {
+		if hasPrev && prevAddr.Cmp(ac.Address) >= 0 {
 			err = fmt.Errorf("block access list addresses must be strictly increasing (prev=%s current=%s)", prevAddr.Hex(), ac.Address.Hex())
 			break
 		}
@@ -716,7 +716,7 @@ func (bal BlockAccessList) Validate() error {
 		if account == nil {
 			return fmt.Errorf("entry %d is nil", i)
 		}
-		if hasPrev && bytes.Compare(prev[:], account.Address[:]) >= 0 {
+		if hasPrev && prev.Cmp(account.Address) >= 0 {
 			return fmt.Errorf("account addresses must be strictly increasing (index %d)", i)
 		}
 		if err := account.validate(); err != nil {

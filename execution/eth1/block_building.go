@@ -155,7 +155,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	payload := &typesproto.ExecutionPayload{
 		Version:       1,
 		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
-		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase),
+		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase.AsArray()),
 		Timestamp:     header.Time,
 		PrevRandao:    gointerfaces.ConvertHashToH256(header.MixDigest),
 		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),

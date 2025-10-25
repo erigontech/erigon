@@ -271,7 +271,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
-		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, common.Address{})
+		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, common.ZeroAddress)
 	}
 
 	// Execute the message.

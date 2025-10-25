@@ -77,12 +77,12 @@ func TestMethodPack(t *testing.T) {
 		t.Errorf("expected %x got %x", sig, packed)
 	}
 
-	var addrA, addrB = common.Address{1}, common.Address{2}
+	var addrA, addrB = common.NewAddress(1), common.NewAddress(2)
 	sig = abi.Methods["sliceAddress"].ID
 	sig = append(sig, common.LeftPadBytes([]byte{32}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes(addrA[:], 32)...)
-	sig = append(sig, common.LeftPadBytes(addrB[:], 32)...)
+	sig = append(sig, common.LeftPadBytes(addrA.AsSlice(), 32)...)
+	sig = append(sig, common.LeftPadBytes(addrB.AsSlice(), 32)...)
 
 	packed, err = abi.Pack("sliceAddress", []common.Address{addrA, addrB})
 	if err != nil {
@@ -92,16 +92,16 @@ func TestMethodPack(t *testing.T) {
 		t.Errorf("expected %x got %x", sig, packed)
 	}
 
-	var addrC, addrD = common.Address{3}, common.Address{4}
+	var addrC, addrD = common.NewAddress(3), common.NewAddress(4)
 	sig = abi.Methods["sliceMultiAddress"].ID
 	sig = append(sig, common.LeftPadBytes([]byte{64}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{160}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes(addrA[:], 32)...)
-	sig = append(sig, common.LeftPadBytes(addrB[:], 32)...)
+	sig = append(sig, common.LeftPadBytes(addrA.AsSlice(), 32)...)
+	sig = append(sig, common.LeftPadBytes(addrB.AsSlice(), 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes(addrC[:], 32)...)
-	sig = append(sig, common.LeftPadBytes(addrD[:], 32)...)
+	sig = append(sig, common.LeftPadBytes(addrC.AsSlice(), 32)...)
+	sig = append(sig, common.LeftPadBytes(addrD.AsSlice(), 32)...)
 
 	packed, err = abi.Pack("sliceMultiAddress", []common.Address{addrA, addrB}, []common.Address{addrC, addrD})
 	if err != nil {
@@ -132,8 +132,8 @@ func TestMethodPack(t *testing.T) {
 	sig = append(sig, common.LeftPadBytes([]byte{0}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{0xa0}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes(addrC[:], 32)...)
-	sig = append(sig, common.LeftPadBytes(addrD[:], 32)...)
+	sig = append(sig, common.LeftPadBytes(addrC.AsSlice(), 32)...)
+	sig = append(sig, common.LeftPadBytes(addrD.AsSlice(), 32)...)
 	packed, err = abi.Pack("nestedArray", a, []common.Address{addrC, addrD})
 	if err != nil {
 		t.Fatal(err)

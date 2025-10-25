@@ -20,7 +20,6 @@
 package genesiswrite
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -353,7 +352,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
 	if hasConstructorAllocation && g.Config.Aura != nil {
-		statedb.CreateAccount(common.Address{}, false)
+		statedb.CreateAccount(common.ZeroAddress, false)
 	}
 
 	addrs := sortedAllocAddresses(g.Alloc)
@@ -491,7 +490,7 @@ func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
 	}
 
 	sort.Slice(addrs, func(i, j int) bool {
-		return bytes.Compare(addrs[i][:], addrs[j][:]) < 0
+		return addrs[i].Cmp(addrs[j]) < 0
 	})
 	return addrs
 }
@@ -500,7 +499,7 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 	keys := make([]string, len(m))
 	i := 0
 	for k := range m {
-		keys[i] = string(k.Bytes())
+		keys[i] = string(k.AsSlice())
 		i++
 	}
 	slices.Sort(keys)

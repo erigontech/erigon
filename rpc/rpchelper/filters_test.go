@@ -47,7 +47,7 @@ func createLog() *remoteproto.SubscribeLogsReply {
 
 var (
 	address1     = common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
-	address1H160 = gointerfaces.ConvertAddressToH160(address1)
+	address1H160 = gointerfaces.ConvertAddressToH160(address1.AsArray())
 	topic1       = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	topic1H256   = gointerfaces.ConvertHashToH256(topic1)
 )
@@ -219,9 +219,7 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	}
 
 	// now a log that the subscription cares about
-	var a common.Address
-	a.SetBytes(address1.Bytes())
-	log.Address = gointerfaces.ConvertAddressToH160(a)
+	log.Address = gointerfaces.ConvertAddressToH160(address1.AsArray())
 
 	f.OnNewLogs(log)
 

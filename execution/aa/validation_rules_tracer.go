@@ -192,13 +192,13 @@ func (t *ValidationRulesTracer) OnFault(pc uint64, op byte, gas, cost uint64, sc
 
 func (t *ValidationRulesTracer) isAssociatedStorage(slot common.Hash, addr common.Address) bool {
 	// Case 1: The slot value is the address
-	if bytes.Equal(slot.Bytes(), addr.Bytes()) {
+	if bytes.Equal(slot.Bytes(), addr.AsSlice()) {
 		return true
 	}
 
 	// Case 2: The slot value was calculated as keccak(A||x)+n, we test the first 50 slots and 128 offsets
 	buf := make([]byte, 52)
-	copy(buf, addr.Bytes())
+	copy(buf, addr.AsSlice())
 
 	hash := sha3.NewLegacyKeccak256()
 	result := make([]byte, 32)

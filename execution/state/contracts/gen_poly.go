@@ -40,12 +40,12 @@ var PolyBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe608
 func DeployPoly(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Poly, error) {
 	parsed, err := abi.JSON(strings.NewReader(PolyABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(PolyBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &Poly{PolyCaller: PolyCaller{contract: contract}, PolyTransactor: PolyTransactor{contract: contract}, PolyFilterer: PolyFilterer{contract: contract}}, nil
 }

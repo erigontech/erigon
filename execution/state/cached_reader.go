@@ -42,7 +42,7 @@ func (cr *CachedReader) SetTrace(trace bool, tracePrefix string) {
 
 // ReadAccountData is called when an account needs to be fetched from the state
 func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	addrBytes := address.Bytes()
+	addrBytes := address.AsSlice()
 	if a, ok := cr.cache.GetAccount(addrBytes); ok {
 		return a, nil
 	}
@@ -65,7 +65,7 @@ func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accoun
 
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
 func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
-	addrBytes := address.Bytes()
+	addrBytes := address.AsSlice()
 	if s, ok := cr.cache.GetStorage(addrBytes, 1, key.Bytes()); ok {
 		var v uint256.Int
 		(&v).SetBytes(s)
@@ -97,7 +97,7 @@ func (cr *CachedReader) HasStorage(address common.Address) (bool, error) {
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
 func (cr *CachedReader) ReadAccountCode(address common.Address) ([]byte, error) {
-	if c, ok := cr.cache.GetCode(address.Bytes(), 1); ok {
+	if c, ok := cr.cache.GetCode(address.AsSlice(), 1); ok {
 		return c, nil
 	}
 	c, err := cr.r.ReadAccountCode(address)
@@ -105,7 +105,7 @@ func (cr *CachedReader) ReadAccountCode(address common.Address) ([]byte, error) 
 		return nil, err
 	}
 	if cr.cache != nil && len(c) <= 1024 {
-		cr.cache.SetCodeRead(address.Bytes(), 1, c)
+		cr.cache.SetCodeRead(address.AsSlice(), 1, c)
 	}
 	return c, nil
 }
@@ -117,7 +117,7 @@ func (cr *CachedReader) ReadAccountCodeSize(address common.Address) (int, error)
 
 // ReadAccountIncarnation is called when incarnation of the account is required (to create and recreate contract)
 func (cr *CachedReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	deleted := cr.cache.GetDeletedAccount(address.Bytes())
+	deleted := cr.cache.GetDeletedAccount(address.AsSlice())
 	if deleted != nil {
 		return deleted.Incarnation, nil
 	}

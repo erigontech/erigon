@@ -64,7 +64,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	rules := blockCtx.Rules(chainConfig)
 	stateWriter := state.NewNoopWriter()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
-		tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), common.Address{})
+		tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), common.ZeroAddress)
 		res, err := traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, refunds)
 		tracer.OnTxEnd(&types.Receipt{}, err)
 		if err != nil {
@@ -141,7 +141,7 @@ func traceBorStateSyncTxn(
 func initStateSyncTxContext(blockNum uint64, blockHash common.Hash) evmtypes.TxContext {
 	return evmtypes.TxContext{
 		TxHash:   bortypes.ComputeBorTxHash(blockNum, blockHash),
-		Origin:   common.Address{},
+		Origin:   common.ZeroAddress,
 		GasPrice: uint256.NewInt(0),
 	}
 }

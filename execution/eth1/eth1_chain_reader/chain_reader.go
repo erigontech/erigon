@@ -400,7 +400,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 	request := &executionproto.AssembleBlockRequest{
 		Timestamp:             uint64(attributes.Timestamp),
 		PrevRandao:            gointerfaces.ConvertHashToH256(attributes.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient.AsArray()),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsToRpc(attributes.Withdrawals),
 		ParentHash:            gointerfaces.ConvertHashToH256(baseHash),
 	}

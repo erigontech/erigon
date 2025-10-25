@@ -45,7 +45,7 @@ func TestDecryptionKeysSignatureDataWithInvalidPreimagesLength(t *testing.T) {
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
 	_, err = sigData.HashSSZ()
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
-	_, err = sigData.Verify(nil, common.Address{})
+	_, err = sigData.Verify(nil, common.ZeroAddress)
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
 	_, err = sigData.Sign(nil)
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)

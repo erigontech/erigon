@@ -72,7 +72,7 @@ func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList,
 func TestProofRetainerConstruction(t *testing.T) {
 	rl := NewRetainList(0)
 	pr, err := NewProofRetainer(
-		common.Address{0x1},
+		common.NewAddress(0x1),
 		&accounts.Account{
 			Initialised: true,
 			Nonce:       2,

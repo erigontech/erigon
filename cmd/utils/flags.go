@@ -1621,7 +1621,7 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 		cfg.TracedSenders = make([]string, len(senderHexes))
 		for i, senderHex := range senderHexes {
 			sender := common.HexToAddress(senderHex)
-			cfg.TracedSenders[i] = string(sender[:])
+			cfg.TracedSenders[i] = string(sender.AsSlice())
 		}
 	}
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
@@ -1685,7 +1685,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.MiningConfig) {
 	if err != nil {
 		panic(err)
 	}
-	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
+	if cfg.Enabled && len(cfg.Etherbase.AsSlice()) == 0 {
 		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
 	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
@@ -1766,7 +1766,7 @@ func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
 	cfg.Enabled = ctx.Bool(MiningEnabledFlag.Name)
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
-	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
+	if cfg.Enabled && len(cfg.Etherbase.AsSlice()) == 0 {
 		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
 	if ctx.IsSet(MinerNotifyFlag.Name) {
@@ -2072,7 +2072,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	case networkname.Dev:
 		// Create new developer account or reuse existing one
 		developer := cfg.Miner.Etherbase
-		if developer == (common.Address{}) {
+		if developer == (common.ZeroAddress) {
 			Fatalf("Please specify developer account address using --miner.etherbase")
 		}
 		logger.Info("Using developer account", "address", developer)

@@ -134,13 +134,13 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		slot := common.Hash(stackData[stackLen-1].Bytes32())
 		t.lookupStorage(caller, slot)
 	case stackLen >= 1 && (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT):
-		addr := common.Address(stackData[stackLen-1].Bytes20())
+		addr := common.AsAddress(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
 		if op == vm.SELFDESTRUCT {
 			t.deleted[caller] = true
 		}
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
-		addr := common.Address(stackData[stackLen-2].Bytes20())
+		addr := common.AsAddress(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
 	case op == vm.CREATE:
 		nonce, _ := t.env.IntraBlockState.GetNonce(caller)

@@ -387,7 +387,7 @@ func gasCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize
 	var (
 		gas            uint64
 		transfersValue = !stack.Back(2).IsZero()
-		address        = common.Address(stack.Back(1).Bytes20())
+		address        = common.AsAddress(stack.Back(1).Bytes20())
 	)
 	if evm.ChainRules().IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
@@ -533,7 +533,7 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas = params.SelfdestructGasEIP150
-		var address = common.Address(stack.Back(0).Bytes20())
+		var address = common.AsAddress(stack.Back(0).Bytes20())
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

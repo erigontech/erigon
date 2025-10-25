@@ -36,7 +36,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	defer tx.Rollback()
 
 	var acc accounts.Account
-	it, err := tx.IndexRange(kv.AccountsHistoryIdx, addr[:], -1, -1, order.Asc, kv.Unlim)
+	it, err := tx.IndexRange(kv.AccountsHistoryIdx, addr.AsSlice(), -1, -1, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 			continue
 		}
 
-		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
+		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr.AsSlice(), txnID)
 		if err != nil {
 			log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 			return nil, err
@@ -89,7 +89,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID + 1])?
 	idx := sort.Search(int(nextTxnID-prevTxnID+1), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
-		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
+		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr.AsSlice(), txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 			panic(err)

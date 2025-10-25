@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -208,7 +209,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(h.Coinbase[:]); err != nil {
+	if _, err := w.Write(h.Coinbase.AsSlice()); err != nil {
 		return err
 	}
 	b[0] = 128 + 32
@@ -355,9 +356,11 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadBytes(h.UncleHash[:]); err != nil {
 		return fmt.Errorf("read UncleHash: %w", err)
 	}
-	if err = s.ReadBytes(h.Coinbase[:]); err != nil {
+	coinbase := [length.Addr]byte{}
+	if err = s.ReadBytes(coinbase[:]); err != nil {
 		return fmt.Errorf("read Coinbase: %w", err)
 	}
+	h.Coinbase.SetBytes(coinbase[:])
 	if err = s.ReadBytes(h.Root[:]); err != nil {
 		return fmt.Errorf("read Root: %w", err)
 	}

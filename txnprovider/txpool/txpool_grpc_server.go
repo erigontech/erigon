@@ -138,7 +138,7 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpoolproto.AllRequest) (*txpoo
 	reply.Txs = make([]*txpoolproto.AllReply_Tx, 0, 32)
 	s.txPool.deprecatedForEach(ctx, func(rlp []byte, sender common.Address, t SubPoolType) {
 		reply.Txs = append(reply.Txs, &txpoolproto.AllReply_Tx{
-			Sender:  gointerfaces.ConvertAddressToH160(sender),
+			Sender:  gointerfaces.ConvertAddressToH160(sender.AsArray()),
 			TxnType: convertSubPoolType(t),
 			RlpTx:   common.Copy(rlp),
 		})
@@ -320,7 +320,7 @@ func (s *GrpcServer) Status(_ context.Context, _ *txpoolproto.StatusRequest) (*t
 // returns nonce for address
 func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
 	addr := gointerfaces.ConvertH160toAddress(in.Address)
-	nonce, inPool := s.txPool.NonceFromAddress(addr)
+	nonce, inPool := s.txPool.NonceFromAddress(addr.AsArray())
 	return &txpoolproto.NonceReply{
 		Nonce: nonce,
 		Found: inPool,

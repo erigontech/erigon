@@ -45,7 +45,7 @@ type BlockProvider func() (nextBlock uint64, hasMore bool, err error)
 // Standard key format for call from/to indexes [address + block]
 func callIndexKey(addr common.Address, block uint64) []byte {
 	key := make([]byte, length.Addr+8)
-	copy(key[:length.Addr], addr.Bytes())
+	copy(key[:length.Addr], addr.AsSlice())
 	binary.BigEndian.PutUint64(key[length.Addr:], block)
 	return key
 }
@@ -102,7 +102,7 @@ func newCallChunkProvider(cursor kv.Cursor, addr common.Address, navigateForward
 			eof = true
 			return nil, false, err
 		}
-		if !bytes.HasPrefix(k, addr.Bytes()) {
+		if !bytes.HasPrefix(k, addr.AsSlice()) {
 			eof = true
 			return nil, false, nil
 		}

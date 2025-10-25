@@ -21,6 +21,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
@@ -87,12 +88,12 @@ func ConvertHashToH512(hash [64]byte) *typesproto.H512 {
 	return ConvertBytesToH512(hash[:])
 }
 
-func ConvertH160toAddress(h160 *typesproto.H160) [20]byte {
+func ConvertH160toAddress(h160 *typesproto.H160) common.Address {
 	var addr [20]byte
 	binary.BigEndian.PutUint64(addr[0:], h160.Hi.Hi)
 	binary.BigEndian.PutUint64(addr[8:], h160.Hi.Lo)
 	binary.BigEndian.PutUint32(addr[16:], h160.Lo)
-	return addr
+	return common.AsAddress(addr)
 }
 
 func ConvertAddressToH160(addr [20]byte) *typesproto.H160 {

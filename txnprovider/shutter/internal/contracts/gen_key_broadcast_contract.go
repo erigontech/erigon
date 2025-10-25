@@ -40,12 +40,12 @@ var KeyBroadcastContractBin = "0x6080604052348015600e575f5ffd5b5060405161069f380
 func DeployKeyBroadcastContract(auth *bind.TransactOpts, backend bind.ContractBackend, keyperSetManagerAddress common.Address) (common.Address, types.Transaction, *KeyBroadcastContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(KeyBroadcastContractABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(KeyBroadcastContractBin), backend, keyperSetManagerAddress)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &KeyBroadcastContract{KeyBroadcastContractCaller: KeyBroadcastContractCaller{contract: contract}, KeyBroadcastContractTransactor: KeyBroadcastContractTransactor{contract: contract}, KeyBroadcastContractFilterer: KeyBroadcastContractFilterer{contract: contract}}, nil
 }

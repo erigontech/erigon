@@ -79,7 +79,7 @@ func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byt
 // Address + storageLocationHash
 func GenerateStoragePlainKey(address common.Address, storageKey common.Hash) []byte {
 	storagePlainKey := make([]byte, 0, length.Addr+length.Hash)
-	storagePlainKey = append(storagePlainKey, address.Bytes()...)
+	storagePlainKey = append(storagePlainKey, address.AsSlice()...)
 	storagePlainKey = append(storagePlainKey, storageKey.Bytes()...)
 	return storagePlainKey
 }
@@ -146,10 +146,10 @@ func PlainGenerateStoragePrefix(address []byte, incarnation uint64) []byte {
 }
 
 func PlainParseStoragePrefix(prefix []byte) (common.Address, uint64) {
-	var addr common.Address
+	var addr [length.Addr]byte
 	copy(addr[:], prefix[:length.Addr])
 	inc := binary.BigEndian.Uint64(prefix[length.Addr : length.Addr+length.Incarnation])
-	return addr, inc
+	return common.AsAddress(addr), inc
 }
 
 func ParseStoragePrefix(prefix []byte) (common.Hash, uint64) {

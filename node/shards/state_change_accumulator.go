@@ -91,7 +91,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address.AsArray())})
 		a.accountChangeIndex[address] = i
 		delete(a.storageChangeIndex, address)
 	}
@@ -114,7 +114,7 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 	if !ok {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address.AsArray())})
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]
@@ -134,7 +134,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remoteproto.Action_CODE})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address.AsArray()), Action: remoteproto.Action_CODE})
 		a.accountChangeIndex[address] = i
 		delete(a.storageChangeIndex, address)
 	}
@@ -156,7 +156,7 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remoteproto.Action_STORAGE})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address.AsArray()), Action: remoteproto.Action_STORAGE})
 		a.accountChangeIndex[address] = i
 		delete(a.storageChangeIndex, address)
 	}

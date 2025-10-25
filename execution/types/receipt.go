@@ -254,7 +254,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		r.Logs = append(r.Logs, &Log{})
 		log := r.Logs[len(r.Logs)-1]
-		if err = s.ReadBytes(log.Address[:]); err != nil {
+		if err = s.ReadBytes(log.Address.AsSlice()); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
 		if _, err = s.List(); err != nil {

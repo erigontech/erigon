@@ -127,92 +127,92 @@ func (d ContractsDeployer) DeployKeyperSet(
 ) (common.Address, *shuttercontracts.KeyperSet, error) {
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	keyperSetAddr, keyperSetDeployTxn, keyperSet, err := shuttercontracts.DeployKeyperSet(transactOpts, d.contractBackend)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	block, err := d.cl.BuildBlock(ctx)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, keyperSetDeployTxn.Hash())
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	setPublisherTxn, err := keyperSet.SetPublisher(transactOpts, d.address)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	setThresholdTxn, err := keyperSet.SetThreshold(transactOpts, ekg.Threshold)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	addMembersTxn, err := keyperSet.AddMembers(transactOpts, ekg.Members())
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	setFinalizedTxn, err := keyperSet.SetFinalized(transactOpts)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	block, err = d.cl.BuildBlock(ctx)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, setPublisherTxn.Hash(), setThresholdTxn.Hash(), addMembersTxn.Hash(), setFinalizedTxn.Hash())
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	ksm, err := shuttercontracts.NewKeyperSetManager(dep.KsmAddr, d.contractBackend)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	addKeyperSetTxn, err := ksm.AddKeyperSet(transactOpts, ekg.ActivationBlock, keyperSetAddr)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	block, err = d.cl.BuildBlock(ctx)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, addKeyperSetTxn.Hash())
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	keyBroadcast, err := shuttercontracts.NewKeyBroadcastContract(dep.KeyBroadcastAddr, d.contractBackend)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	broadcastKeyTxn, err := keyBroadcast.BroadcastEonKey(transactOpts, uint64(ekg.EonIndex), ekg.EonPublicKey.Marshal())
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	block, err = d.cl.BuildBlock(ctx)
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, broadcastKeyTxn.Hash())
 	if err != nil {
-		return common.Address{}, nil, err
+		return common.ZeroAddress, nil, err
 	}
 
 	return keyperSetAddr, keyperSet, nil

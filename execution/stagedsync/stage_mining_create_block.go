@@ -186,7 +186,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *dbstate.SharedDomains, tx kv
 		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
 	}
 
-	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
+	if cfg.miner.MiningConfig.Etherbase == (common.ZeroAddress) {
 		if cfg.blockBuilderParameters == nil {
 			return errors.New("refusing to mine without etherbase")
 		}

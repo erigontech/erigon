@@ -56,7 +56,7 @@ func TestGetLogs(t *testing.T) {
 		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 			FromBlock: big.NewInt(10),
 			ToBlock:   big.NewInt(10),
-			Addresses: common.Addresses{common.Address{}},
+			Addresses: common.Addresses{common.ZeroAddress},
 		})
 		require.NoError(err)
 		assert.Empty(logs)

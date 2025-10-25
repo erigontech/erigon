@@ -225,7 +225,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		GasLimit:    10000000,
 		Difficulty:  big.NewInt(0x200000),
 		Time:        new(big.Int).SetUint64(0),
-		Coinbase:    common.Address{},
+		Coinbase:    common.ZeroAddress,
 		BlockNumber: new(big.Int).SetUint64(1),
 		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),

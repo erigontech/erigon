@@ -152,9 +152,9 @@ func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error
 	res, err := back.remoteEthBackend.Etherbase(ctx, &remoteproto.EtherbaseRequest{})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
-			return common.Address{}, errors.New(s.Message())
+			return common.ZeroAddress, errors.New(s.Message())
 		}
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 
 	return gointerfaces.ConvertH160toAddress(res.Address), nil

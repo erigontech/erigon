@@ -31,7 +31,7 @@ func CreateAddress(a common.Address, nonce uint64) common.Address {
 	listLen := 21 + rlp.U64Len(nonce)
 	data := make([]byte, listLen+1)
 	pos := rlp.EncodeListPrefix(listLen, data)
-	pos += rlp.EncodeAddress(a[:], data[pos:])
+	pos += rlp.EncodeAddress(a.AsSlice(), data[pos:])
 	rlp.EncodeU64(nonce, data[pos:])
 	return common.BytesToAddress(crypto.Keccak256(data)[12:])
 }
@@ -40,5 +40,5 @@ func CreateAddress(a common.Address, nonce uint64) common.Address {
 // contract code hash and a salt.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func CreateAddress2(b common.Address, salt [32]byte, inithash []byte) common.Address {
-	return common.BytesToAddress(crypto.Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
+	return common.BytesToAddress(crypto.Keccak256([]byte{0xff}, b.AsSlice(), salt[:], inithash)[12:])
 }

@@ -33,11 +33,11 @@ func (p *ConsolidationRequest) EncodingSizeSSZ() int {
 }
 
 func (p *ConsolidationRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
+	return ssz2.MarshalSSZ(buf, p.SourceAddress.AsSlice(), p.SourcePubKey[:], p.TargetPubKey[:])
 }
 
 func (p *ConsolidationRequest) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
+	return ssz2.UnmarshalSSZ(buf, version, p.SourceAddress.AsSlice(), p.SourcePubKey[:], p.TargetPubKey[:])
 }
 
 func (p *ConsolidationRequest) Clone() clonable.Clonable {
@@ -45,7 +45,7 @@ func (p *ConsolidationRequest) Clone() clonable.Clonable {
 }
 
 func (p *ConsolidationRequest) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
+	return merkle_tree.HashTreeRoot(p.SourceAddress.AsSlice(), p.SourcePubKey[:], p.TargetPubKey[:])
 }
 
 func (p *ConsolidationRequest) Static() bool {

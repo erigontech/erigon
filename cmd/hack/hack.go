@@ -656,7 +656,7 @@ func devTx(chaindata string) error {
 	}
 	defer tx.Rollback()
 	cc := tool.ChainConfig(tx)
-	txn := types.NewTransaction(2, common.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
+	txn := types.NewTransaction(2, common.ZeroAddress, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
 	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), core.DevnetSignPrivateKey)
 	tool.Check(err)
 	buf := bytes.NewBuffer(nil)

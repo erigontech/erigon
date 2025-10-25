@@ -106,7 +106,7 @@ func MarshalReceipt(
 	}
 
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
-	if receipt.ContractAddress != (common.Address{}) {
+	if receipt.ContractAddress != (common.ZeroAddress) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
 

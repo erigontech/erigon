@@ -340,12 +340,12 @@ func TestMultipleAuthorizations(t *testing.T) {
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
-		Address: gointerfaces.ConvertAddressToH160(addrA),
+		Address: gointerfaces.ConvertAddressToH160(addrA.AsArray()),
 		Data:    v,
 	})
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
-		Address: gointerfaces.ConvertAddressToH160(addrB),
+		Address: gointerfaces.ConvertAddressToH160(addrB.AsArray()),
 		Data:    v,
 	})
 
@@ -372,7 +372,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			}
 			txnSlot1.IDHash[0] = uint8(idHash)
 			idHash++
-			txnSlots.Append(txnSlot1, c.sender[:], true)
+			txnSlots.Append(txnSlot1, c.sender.AsSlice(), true)
 			reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 			require.NoError(t, err)
 			assert.Equal(t, []txpoolcfg.DiscardReason{c.expectedReason}, reasons)
@@ -1067,7 +1067,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 		Gas:           500000,
 		SenderID:      0,
 		Type:          SetCodeTxnType,
-		AuthAndNonces: []AuthAndNonce{{nonce: 0, authority: common.Address{}.String()}},
+		AuthAndNonces: []AuthAndNonce{{nonce: 0, authority: common.ZeroAddress.String()}},
 	}
 
 	txns := TxnSlots{

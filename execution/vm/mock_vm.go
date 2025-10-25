@@ -68,7 +68,7 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
 		res, err := evm.env.interpreter.Run(NewContract(
 			&dummyContractRef{},
-			common.Address{},
+			common.ZeroAddress,
 			new(uint256.Int),
 			0,
 			evm.env.config.JumpDestCache,
@@ -100,7 +100,7 @@ type dummyContractRef struct {
 }
 
 func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return common.Address{} }
+func (dummyContractRef) Address() common.Address     { return common.ZeroAddress }
 func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
 func (dummyContractRef) SetCode(common.Hash, []byte) {}
 func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {

@@ -245,7 +245,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
+		if _, err := w.Write(tx.To.AsSlice()); err != nil {
 			return err
 		}
 	}
@@ -314,7 +314,7 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		// decode tuple
 		*al = append(*al, AccessTuple{StorageKeys: []common.Hash{}})
 		tuple := &(*al)[len(*al)-1]
-		if err = s.ReadBytes(tuple.Address[:]); err != nil {
+		if err = s.ReadBytes(tuple.Address.AsSlice()); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
 		if _, err = s.List(); err != nil {
@@ -376,8 +376,8 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
 	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
+		to := common.NewAddress(b...)
+		tx.To = &to
 	}
 	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Value: %w", err)
@@ -502,7 +502,7 @@ func (tx *AccessListTx) cachedSender() (sender common.Address, ok bool) {
 	return *s, true
 }
 
-var zeroAddr = common.Address{}
+var zeroAddr = common.ZeroAddress
 
 func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
 	if from := tx.from.Load(); from != nil {
@@ -513,7 +513,7 @@ func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	tx.from.Store(&addr)
 	return addr, nil

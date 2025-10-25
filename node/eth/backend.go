@@ -1239,10 +1239,10 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	etherbase := s.etherbase
 	s.lock.RUnlock()
 
-	if etherbase != (common.Address{}) {
+	if etherbase != (common.ZeroAddress) {
 		return etherbase, nil
 	}
-	return common.Address{}, errors.New("etherbase must be explicitly specified")
+	return common.ZeroAddress, errors.New("etherbase must be explicitly specified")
 }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
@@ -1299,7 +1299,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.TemporalRwDB, stateDif
 
 		if s.chainConfig.ChainName == networkname.BorDevnet && s.config.WithoutHeimdall {
 			borcfg.Authorize(eb, func(addr common.Address, _ string, _ []byte) ([]byte, error) {
-				return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
+				return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: addr.AsSlice()}
 			})
 		}
 

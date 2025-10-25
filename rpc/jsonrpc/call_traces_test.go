@@ -60,7 +60,7 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 func TestCallTraceOneByOne(t *testing.T) {
 	m := mock.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
-		gen.SetCoinbase(common.Address{1})
+		gen.SetCoinbase(common.NewAddress(1))
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
@@ -78,7 +78,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 	stream := jsonstream.Wrap(s)
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
-	toAddress1 := common.Address{1}
+	toAddress1 := common.NewAddress(1)
 	traceReq1 := TraceFilterRequest{
 		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
 		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
@@ -95,16 +95,16 @@ func TestCallTraceUnwind(t *testing.T) {
 	var chainA, chainB *core.ChainPack
 	var err error
 	chainA, err = core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
-		gen.SetCoinbase(common.Address{1})
+		gen.SetCoinbase(common.NewAddress(1))
 	})
 	if err != nil {
 		t.Fatalf("generate chainA: %v", err)
 	}
 	chainB, err = core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, gen *core.BlockGen) {
 		if i < 5 || i >= 10 {
-			gen.SetCoinbase(common.Address{1})
+			gen.SetCoinbase(common.NewAddress(1))
 		} else {
-			gen.SetCoinbase(common.Address{2})
+			gen.SetCoinbase(common.NewAddress(2))
 		}
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	stream := jsonstream.Wrap(s)
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
-	toAddress1 := common.Address{1}
+	toAddress1 := common.NewAddress(1)
 	traceReq1 := TraceFilterRequest{
 		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
 		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
@@ -167,7 +167,7 @@ func TestCallTraceUnwind(t *testing.T) {
 func TestFilterNoAddresses(t *testing.T) {
 	m := mock.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
-		gen.SetCoinbase(common.Address{1})
+		gen.SetCoinbase(common.NewAddress(1))
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
@@ -198,11 +198,11 @@ func TestFilterAddressIntersection(t *testing.T) {
 	m := mock.Mock(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
-	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
+	toAddress1, toAddress2, other := common.NewAddress(1), common.NewAddress(2), common.NewAddress(3)
 
 	once := new(sync.Once)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *core.BlockGen) {
-		once.Do(func() { block.SetCoinbase(common.Address{4}) })
+		once.Do(func() { block.SetCoinbase(common.NewAddress(4)) })
 
 		var rcv common.Address
 		if i < 5 {

@@ -305,7 +305,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 			panic(err)
 		}
 
-		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common.Address{}) {
+		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common.ZeroAddress) {
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, sd *state.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {

@@ -49,7 +49,7 @@ func TestPush(t *testing.T) {
 		{uint256.Int{1, 0, 0, 0}, "6001"},
 		// Addresses
 		{common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), "73deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"},
-		{&common.Address{}, "6000"},
+		{&common.ZeroAddress, "6000"},
 	}
 	for i, tc := range tests {
 		have := New().Push(tc.input).Hex()

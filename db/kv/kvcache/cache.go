@@ -152,7 +152,7 @@ func (c *CoherentView) HasStorage(address common.Address) (bool, error) {
 	// if an account has storage (and that account is newly created and doesn't have storage)
 	// the cache will say that there is no known storage in which case we will still need to
 	// check in the DB to be absolutely sure anyway (this deems such an "optimisation" useless)
-	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
+	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address.AsSlice())
 	return hasStorage, err
 }
 
@@ -291,11 +291,11 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 			case remoteproto.Action_UPSERT:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
-				c.add(addr[:], v, r, id)
+				c.add(addr.AsSlice(), v, r, id)
 			case remoteproto.Action_UPSERT_CODE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
-				c.add(addr[:], v, r, id)
+				c.add(addr.AsSlice(), v, r, id)
 				c.hasher.Reset()
 				c.hasher.Write(sc.Changes[i].Code)
 				k := make([]byte, 32)
@@ -303,7 +303,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				c.addCode(k, sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
-				c.add(addr[:], nil, r, id)
+				c.add(addr.AsSlice(), nil, r, id)
 			case remoteproto.Action_STORAGE:
 				//skip, will check later
 			case remoteproto.Action_CODE:
@@ -320,7 +320,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				for _, change := range sc.Changes[i].StorageChanges {
 					loc := gointerfaces.ConvertH256ToHash(change.Location)
 					k := make([]byte, 20+8+32)
-					copy(k, addr[:])
+					copy(k, addr.AsSlice())
 					binary.BigEndian.PutUint64(k[20:], sc.Changes[i].Incarnation)
 					copy(k[20+8:], loc[:])
 					c.add(k, change.Data, r, id)

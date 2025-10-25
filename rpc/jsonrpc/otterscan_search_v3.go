@@ -117,11 +117,11 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 func createBackwardTxNumIter(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
 	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
 	// results later
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr.AsSlice(), fromTxNum, -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr.AsSlice(), fromTxNum, -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
@@ -160,11 +160,11 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 func createForwardTxNumIter(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
 	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
 	// results later
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr.AsSlice(), fromTxNum, -1, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr.AsSlice(), fromTxNum, -1, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}

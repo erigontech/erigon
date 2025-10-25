@@ -51,7 +51,7 @@ import (
 // Do 1 step to start txPool
 func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
 	chain, err := core.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(common.NewAddress(1))
 	})
 	require.NoError(err)
 

@@ -47,7 +47,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
 
 			// In case the coinbase is not set post Rio, use the default coinbase
-			if beneficiary == (common.Address{}) {
+			if beneficiary == (common.ZeroAddress) {
 				beneficiary, _ = engine.Author(header)
 			}
 		} else {

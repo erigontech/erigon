@@ -281,7 +281,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *m
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(common.NewAddress(1))
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {
 			t.Fatalf("failed to create tx: %v", txErr)

@@ -128,7 +128,7 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 type cell struct {
 	hashedExtension [128]byte
 	extension       [64]byte
-	accountAddr     common.Address                  // account plain key
+	accountAddr     [length.Addr]byte               // account plain key
 	storageAddr     [length.Addr + length.Hash]byte // storage plain key
 	hash            common.Hash                     // cell hash
 	stateHash       common.Hash

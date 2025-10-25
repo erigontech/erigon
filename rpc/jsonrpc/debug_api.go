@@ -360,7 +360,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, err
 	}
 	ttx := tx
-	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], minTxNum+txIndex+1)
+	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address.AsSlice(), minTxNum+txIndex+1)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +377,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash
 
-	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], minTxNum+txIndex)
+	code, _, err := ttx.GetAsOf(kv.CodeDomain, address.AsSlice(), minTxNum+txIndex)
 	if err != nil {
 		return nil, err
 	}

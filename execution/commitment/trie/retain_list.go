@@ -115,7 +115,7 @@ type DefaultProofRetainer struct {
 // set onto the FlatDBTrieLoader via SetProofRetainer before performing its Load
 // operation in order to appropriately collect the proof elements.
 func NewProofRetainer(addr common.Address, a *accounts.Account, storageKeys []common.Hash, rl *RetainList) (*DefaultProofRetainer, error) {
-	addrHash, err := common.HashData(addr[:])
+	addrHash, err := common.HashData(addr.AsSlice())
 	if err != nil {
 		return nil, err
 	}

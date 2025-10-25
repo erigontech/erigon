@@ -36,7 +36,7 @@ type Withdrawal struct {
 func (obj *Withdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
 	buf = append(buf, ssz.Uint64SSZ(obj.Index)...)
 	buf = append(buf, ssz.Uint64SSZ(obj.Validator)...)
-	buf = append(buf, obj.Address[:]...)
+	buf = append(buf, obj.Address.AsSlice()...)
 	buf = append(buf, ssz.Uint64SSZ(obj.Amount)...)
 	return buf, nil
 }
@@ -47,7 +47,7 @@ func (obj *Withdrawal) DecodeSSZ(buf []byte, _ int) error {
 	}
 	obj.Index = ssz.UnmarshalUint64SSZ(buf)
 	obj.Validator = ssz.UnmarshalUint64SSZ(buf[8:])
-	copy(obj.Address[:], buf[16:])
+	obj.Address.SetBytes(buf[16:])
 	obj.Amount = ssz.UnmarshalUint64SSZ(buf[36:])
 	return nil
 }
@@ -58,7 +58,7 @@ func (obj *Withdrawal) EncodingSizeSSZ() int {
 }
 
 func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporary
-	return merkle_tree.HashTreeRoot(obj.Index, obj.Validator, obj.Address[:], obj.Amount)
+	return merkle_tree.HashTreeRoot(obj.Index, obj.Validator, obj.Address.AsSlice(), obj.Amount)
 }
 
 func convertExecutionWithdrawalToConsensusWithdrawal(executionWithdrawal *types.Withdrawal) *Withdrawal {

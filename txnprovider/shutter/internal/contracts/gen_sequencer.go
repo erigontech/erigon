@@ -40,12 +40,12 @@ var SequencerBin = "0x6080604052348015600e575f5ffd5b506104528061001c5f395ff3fe60
 func DeploySequencer(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Sequencer, error) {
 	parsed, err := abi.JSON(strings.NewReader(SequencerABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SequencerBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &Sequencer{SequencerCaller: SequencerCaller{contract: contract}, SequencerTransactor: SequencerTransactor{contract: contract}, SequencerFilterer: SequencerFilterer{contract: contract}}, nil
 }

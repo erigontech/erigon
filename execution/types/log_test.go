@@ -152,12 +152,12 @@ func TestFilterLogsTopics(t *testing.T) {
 		E common.Hash = [32]byte{5}
 		F common.Hash = [32]byte{6}
 
-		a1 common.Address = [20]byte{1}
-		a2 common.Address = [20]byte{2}
-		a3 common.Address = [20]byte{3}
-		a4 common.Address = [20]byte{4}
-		a5 common.Address = [20]byte{5}
-		a6 common.Address = [20]byte{6}
+		a1 common.Address = common.NewAddress(1)
+		a2 common.Address = common.NewAddress(2)
+		a3 common.Address = common.NewAddress(3)
+		a4 common.Address = common.NewAddress(4)
+		a5 common.Address = common.NewAddress(5)
+		a6 common.Address = common.NewAddress(6)
 	)
 
 	type filterLogTest struct {

@@ -198,7 +198,7 @@ type ValidatorSet interface {
 func get(s ValidatorSet, h common.Hash, nonce uint, call consensus.Call) (common.Address, error) {
 	//d, err := s.defaultCaller(h)
 	//if err != nil {
-	//	return common.Address{}, err
+	//	return common.ZeroAddress, err
 	//}
 	return s.getWithCaller(h, nonce, call)
 }
@@ -332,7 +332,7 @@ func (s *SimpleList) defaultCaller(blockHash common.Hash) (Call, error) {
 }
 func (s *SimpleList) getWithCaller(parentHash common.Hash, nonce uint, caller consensus.Call) (common.Address, error) {
 	if len(s.validators) == 0 {
-		return common.Address{}, errors.New("cannot operate with an empty validator set")
+		return common.ZeroAddress, errors.New("cannot operate with an empty validator set")
 	}
 	return s.validators[nonce%uint(len(s.validators))], nil
 }
@@ -613,7 +613,7 @@ func (s *ValidatorSafeContract) getWithCaller(blockHash common.Hash, nonce uint,
 
 	list, ok := s.getList(caller)
 	if !ok {
-		return common.Address{}, nil
+		return common.ZeroAddress, nil
 	}
 	s.validators.Add(blockHash, list)
 	return get(list, blockHash, nonce, caller)

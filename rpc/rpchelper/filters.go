@@ -493,7 +493,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	lfr := ff.logsSubs.createFilterRequest()
 	addresses, topics := ff.logsSubs.getAggMaps()
 	for addr := range addresses {
-		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
+		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr.AsArray()))
 	}
 	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
@@ -532,7 +532,7 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	addresses, topics := ff.logsSubs.getAggMaps()
 
 	for addr := range addresses {
-		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
+		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr.AsArray()))
 	}
 	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))

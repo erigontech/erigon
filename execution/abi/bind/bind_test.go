@@ -51,13 +51,13 @@ var bindTests = []struct {
 		[]string{`[]`},
 		`"github.com/erigontech/erigon/common"`,
 		`
-			if b, err := NewEmpty(common.Address{}, nil); b == nil || err != nil {
+			if b, err := NewEmpty(common.ZeroAddress, nil); b == nil || err != nil {
 				t.Fatalf("combined binding (%v) nil or error (%v) not nil", b, nil)
 			}
-			if b, err := NewEmptyCaller(common.Address{}, nil); b == nil || err != nil {
+			if b, err := NewEmptyCaller(common.ZeroAddress, nil); b == nil || err != nil {
 				t.Fatalf("caller binding (%v) nil or error (%v) not nil", b, nil)
 			}
-			if b, err := NewEmptyTransactor(common.Address{}, nil); b == nil || err != nil {
+			if b, err := NewEmptyTransactor(common.ZeroAddress, nil); b == nil || err != nil {
 				t.Fatalf("transactor binding (%v) nil or error (%v) not nil", b, nil)
 			}
 		`,
@@ -74,7 +74,7 @@ var bindTests = []struct {
 		[]string{`[{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"type":"function"},{"constant":false,"inputs":[{"name":"_from","type":"address"},{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transferFrom","outputs":[{"name":"success","type":"bool"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"},{"constant":false,"inputs":[{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transfer","outputs":[],"type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"},{"name":"_extraData","type":"bytes"}],"name":"approveAndCall","outputs":[{"name":"success","type":"bool"}],"type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"},{"name":"","type":"address"}],"name":"spentAllowance","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"},{"name":"","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"inputs":[{"name":"initialSupply","type":"uint256"},{"name":"tokenName","type":"string"},{"name":"decimalUnits","type":"uint8"},{"name":"tokenSymbol","type":"string"}],"type":"constructor"},{"anonymous":false,"inputs":[{"indexed":true,"name":"from","type":"address"},{"indexed":true,"name":"to","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Transfer","type":"event"}]`},
 		`"github.com/erigontech/erigon/common"`,
 		`
-			if b, err := NewToken(common.Address{}, nil); b == nil || err != nil {
+			if b, err := NewToken(common.ZeroAddress, nil); b == nil || err != nil {
 				t.Fatalf("binding (%v) nil or error (%v) not nil", b, nil)
 			}
 		`,
@@ -90,7 +90,7 @@ var bindTests = []struct {
 		[]string{`[{"constant":false,"inputs":[],"name":"checkGoalReached","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"deadline","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"beneficiary","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":true,"inputs":[],"name":"tokenReward","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":true,"inputs":[],"name":"fundingGoal","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"amountRaised","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"price","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[{"name":"","type":"uint256"}],"name":"funders","outputs":[{"name":"addr","type":"address"},{"name":"amount","type":"uint256"}],"type":"function"},{"inputs":[{"name":"ifSuccessfulSendTo","type":"address"},{"name":"fundingGoalInEthers","type":"uint256"},{"name":"durationInMinutes","type":"uint256"},{"name":"etherCostOfEachToken","type":"uint256"},{"name":"addressOfTokenUsedAsReward","type":"address"}],"type":"constructor"},{"anonymous":false,"inputs":[{"indexed":false,"name":"backer","type":"address"},{"indexed":false,"name":"amount","type":"uint256"},{"indexed":false,"name":"isContribution","type":"bool"}],"name":"FundTransfer","type":"event"}]`},
 		`"github.com/erigontech/erigon/common"`,
 		`
-			if b, err := NewCrowdsale(common.Address{}, nil); b == nil || err != nil {
+			if b, err := NewCrowdsale(common.ZeroAddress, nil); b == nil || err != nil {
 				t.Fatalf("binding (%v) nil or error (%v) not nil", b, nil)
 			}
 		`,
@@ -106,7 +106,7 @@ var bindTests = []struct {
 		[]string{`[{"constant":true,"inputs":[{"name":"","type":"uint256"}],"name":"proposals","outputs":[{"name":"recipient","type":"address"},{"name":"amount","type":"uint256"},{"name":"description","type":"string"},{"name":"votingDeadline","type":"uint256"},{"name":"executed","type":"bool"},{"name":"proposalPassed","type":"bool"},{"name":"numberOfVotes","type":"uint256"},{"name":"currentResult","type":"int256"},{"name":"proposalHash","type":"bytes32"}],"type":"function"},{"constant":false,"inputs":[{"name":"proposalNumber","type":"uint256"},{"name":"transactionBytecode","type":"bytes"}],"name":"executeProposal","outputs":[{"name":"result","type":"int256"}],"type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"}],"name":"memberId","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"numProposals","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[{"name":"","type":"uint256"}],"name":"members","outputs":[{"name":"member","type":"address"},{"name":"canVote","type":"bool"},{"name":"name","type":"string"},{"name":"memberSince","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"debatingPeriodInMinutes","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"minimumQuorum","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"owner","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[{"name":"targetMember","type":"address"},{"name":"canVote","type":"bool"},{"name":"memberName","type":"string"}],"name":"changeMembership","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"majorityMargin","outputs":[{"name":"","type":"int256"}],"type":"function"},{"constant":false,"inputs":[{"name":"beneficiary","type":"address"},{"name":"etherAmount","type":"uint256"},{"name":"JobDescription","type":"string"},{"name":"transactionBytecode","type":"bytes"}],"name":"newProposal","outputs":[{"name":"proposalID","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[{"name":"minimumQuorumForProposals","type":"uint256"},{"name":"minutesForDebate","type":"uint256"},{"name":"marginOfVotesForMajority","type":"int256"}],"name":"changeVotingRules","outputs":[],"type":"function"},{"constant":false,"inputs":[{"name":"proposalNumber","type":"uint256"},{"name":"supportsProposal","type":"bool"},{"name":"justificationText","type":"string"}],"name":"vote","outputs":[{"name":"voteID","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[{"name":"proposalNumber","type":"uint256"},{"name":"beneficiary","type":"address"},{"name":"etherAmount","type":"uint256"},{"name":"transactionBytecode","type":"bytes"}],"name":"checkProposalCode","outputs":[{"name":"codeChecksOut","type":"bool"}],"type":"function"},{"constant":false,"inputs":[{"name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"type":"function"},{"inputs":[{"name":"minimumQuorumForProposals","type":"uint256"},{"name":"minutesForDebate","type":"uint256"},{"name":"marginOfVotesForMajority","type":"int256"},{"name":"congressLeader","type":"address"}],"type":"constructor"},{"anonymous":false,"inputs":[{"indexed":false,"name":"proposalID","type":"uint256"},{"indexed":false,"name":"recipient","type":"address"},{"indexed":false,"name":"amount","type":"uint256"},{"indexed":false,"name":"description","type":"string"}],"name":"ProposalAdded","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"proposalID","type":"uint256"},{"indexed":false,"name":"position","type":"bool"},{"indexed":false,"name":"voter","type":"address"},{"indexed":false,"name":"justification","type":"string"}],"name":"Voted","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"proposalID","type":"uint256"},{"indexed":false,"name":"result","type":"int256"},{"indexed":false,"name":"quorum","type":"uint256"},{"indexed":false,"name":"active","type":"bool"}],"name":"ProposalTallied","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"member","type":"address"},{"indexed":false,"name":"isMember","type":"bool"}],"name":"MembershipChanged","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"minimumQuorum","type":"uint256"},{"indexed":false,"name":"debatingPeriodInMinutes","type":"uint256"},{"indexed":false,"name":"majorityMargin","type":"int256"}],"name":"ChangeOfRules","type":"event"}]`},
 		`"github.com/erigontech/erigon/common"`,
 		`
-			if b, err := NewDAO(common.Address{}, nil); b == nil || err != nil {
+			if b, err := NewDAO(common.ZeroAddress, nil); b == nil || err != nil {
 				t.Fatalf("binding (%v) nil or error (%v) not nil", b, nil)
 			}
 		`,
@@ -133,7 +133,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/common"
 		`,
-		`if b, err := NewInputChecker(common.Address{}, nil); b == nil || err != nil {
+		`if b, err := NewInputChecker(common.ZeroAddress, nil); b == nil || err != nil {
 			 t.Fatalf("binding (%v) nil or error (%v) not nil", b, nil)
 		 } else if false { // Don't run, just compile and test types
 			 var err error
@@ -171,7 +171,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/common"
 		`,
-		`if b, err := NewOutputChecker(common.Address{}, nil); b == nil || err != nil {
+		`if b, err := NewOutputChecker(common.ZeroAddress, nil); b == nil || err != nil {
 			 t.Fatalf("binding (%v) nil or error (%v) not nil", b, nil)
 		 } else if false { // Don't run, just compile and test types
 			 var str1, str2 string
@@ -212,7 +212,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/common"
 		`,
-		`if e, err := NewEventChecker(common.Address{}, nil); e == nil || err != nil {
+		`if e, err := NewEventChecker(common.ZeroAddress, nil); e == nil || err != nil {
 			 t.Fatalf("binding (%v) nil or error (%v) not nil", e, nil)
 		 } else if false { // Don't run, just compile and test types
 			 var (
@@ -223,9 +223,9 @@ var bindTests = []struct {
 				 hash common.Hash
 			 )
 			 _, err = e.FilterEmpty(nil)
-			 _, err = e.FilterIndexed(nil, []common.Address{}, []*big.Int{})
+			 _, err = e.FilterIndexed(nil, []common.ZeroAddress, []*big.Int{})
 
-			 mit, err := e.FilterMixed(nil, []common.Address{})
+			 mit, err := e.FilterMixed(nil, []common.ZeroAddress)
 
 			 res = mit.Next()  // Make sure the iterator has a Next method
 			 err = mit.Error() // Make sure the iterator has an Error method
@@ -243,7 +243,7 @@ var bindTests = []struct {
 			 hash = dit.Event.IdxDat // Make sure indexed bytes turn into hashes
 
 			 sink := make(chan *EventCheckerMixed)
-			 sub, err := e.WatchMixed(nil, sink, []common.Address{})
+			 sub, err := e.WatchMixed(nil, sink, []common.ZeroAddress)
 			 defer sub.Unsubscribe()
 
 			 event := <-sink
@@ -469,10 +469,10 @@ var bindTests = []struct {
 			}
 			sim.Commit()
 
-			if out, err := slicer.EchoAddresses(nil, []common.Address{auth.From, common.Address{}}); err != nil {
+			if out, err := slicer.EchoAddresses(nil, []common.Address{auth.From, common.ZeroAddress}); err != nil {
 					t.Fatalf("Failed to call slice echoer: %v", err)
-			} else if !reflect.DeepEqual(out, []common.Address{auth.From, common.Address{}}) {
-					t.Fatalf("Slice return mismatch: have %v, want %v", out, []common.Address{auth.From, common.Address{}})
+			} else if !reflect.DeepEqual(out, []common.Address{auth.From, common.ZeroAddress}) {
+					t.Fatalf("Slice return mismatch: have %v, want %v", out, []common.Address{auth.From, common.ZeroAddress})
 			}
 		`,
 		nil,
@@ -619,7 +619,7 @@ var bindTests = []struct {
 			sim := backends.NewSimulatedBackend(t, core.GenesisAlloc{}, uint64(10000000000))
 			defer sim.Close()
 
-			nonexistent, err := NewNonExistent(common.Address{}, sim)
+			nonexistent, err := NewNonExistent(common.ZeroAddress, sim)
 			if err != nil {
 				t.Fatalf("Failed to access non-existent contract: %v", err)
 			}
@@ -658,7 +658,7 @@ var bindTests = []struct {
 			sim := backends.NewSimulatedBackend(t, core.GenesisAlloc{}, uint64(10000000000))
 			defer sim.Close()
 
-			nonexistent, err := NewNonExistentStruct(common.Address{}, sim)
+			nonexistent, err := NewNonExistentStruct(common.ZeroAddress, sim)
 			if err != nil {
 				t.Fatalf("Failed to access non-existent contract: %v", err)
 			}
@@ -767,11 +767,11 @@ var bindTests = []struct {
 
 			if res, err := callfrom.CallFrom(nil); err != nil {
 				t.Errorf("Failed to call constant function: %v", err)
-			} else if res != (common.Address{}) {
-				t.Errorf("Invalid address returned, want: %x, got: %x", (common.Address{}), res)
+			} else if res != (common.ZeroAddress) {
+				t.Errorf("Invalid address returned, want: %x, got: %x", (common.ZeroAddress), res)
 			}
 
-			for _, addr := range []common.Address{common.Address{}, common.Address{1}, common.Address{2}} {
+			for _, addr := range []common.Address{common.ZeroAddress, common.NewAddress(1), common.NewAddress(2)} {
 				if res, err := callfrom.CallFrom(&bind.CallOpts{From: addr}); err != nil {
 					t.Fatalf("Failed to call constant function: %v", err)
 				} else if res != addr {
@@ -944,7 +944,7 @@ var bindTests = []struct {
 					sim.Commit()
 				}
 				// Test filtering for certain events and ensure they can be found
-				sit, err := eventer.FilterSimpleEvent(nil, []common.Address{common.Address{1}, common.Address{3}}, [][32]byte{{byte(1)}, {byte(2)}, {byte(3)}}, []bool{true})
+				sit, err := eventer.FilterSimpleEvent(nil, []common.Address{common.NewAddress(1), common.NewAddress(3)}, [][32]byte{{byte(1)}, {byte(2)}, {byte(3)}}, []bool{true})
 				if err != nil {
 					t.Fatalf("failed to filter for simple events: %v", err)
 				}

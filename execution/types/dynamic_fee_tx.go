@@ -300,8 +300,8 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
 	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
+		to := common.NewAddress(b...)
+		tx.To = &to
 	}
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
@@ -429,7 +429,7 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 	tx.from.Store(&addr)
 	return addr, nil

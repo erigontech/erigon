@@ -96,7 +96,7 @@ func BenchmarkJumpDest(b *testing.B) {
 	c := NewJumpDestCache(16)
 
 	for b.Loop() {
-		contract := NewContract(contractRef, common.Address{}, nil, 0, c)
+		contract := NewContract(contractRef, common.ZeroAddress, nil, 0, c)
 		contract.Code = code
 		contract.CodeHash = hash
 

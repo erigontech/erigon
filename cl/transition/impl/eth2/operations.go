@@ -548,7 +548,7 @@ func (I *impl) ProcessBlsToExecutionChange(
 	// Reset the validator's withdrawal credentials.
 	credentials[0] = byte(beaconConfig.ETH1AddressWithdrawalPrefixByte)
 	copy(credentials[1:], make([]byte, 11))
-	copy(credentials[12:], change.To[:])
+	copy(credentials[12:], change.To.AsSlice())
 
 	// Update the state with the modified validator.
 	s.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), credentials)
@@ -1101,7 +1101,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	// Verify withdrawal credentials
 	hasCorrectCredential := state.HasExecutionWithdrawalCredential(validator, s.BeaconConfig())
 	wc := validator.WithdrawalCredentials()
-	isCorrectSourceAddress := bytes.Equal(req.SourceAddress[:], wc[12:])
+	isCorrectSourceAddress := bytes.Equal(req.SourceAddress.AsSlice(), wc[12:])
 	if !(isCorrectSourceAddress && hasCorrectCredential) {
 		return nil
 	}
@@ -1197,7 +1197,7 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 	// Verify source withdrawal credentials
 	hasCorrectCredential := state.HasExecutionWithdrawalCredential(sourceValidator, s.BeaconConfig())
 	sourceWc := sourceValidator.WithdrawalCredentials()
-	isCorrectSourceAddress := bytes.Equal(consolidationRequest.SourceAddress[:], sourceWc[12:])
+	isCorrectSourceAddress := bytes.Equal(consolidationRequest.SourceAddress.AsSlice(), sourceWc[12:])
 	if !(isCorrectSourceAddress && hasCorrectCredential) {
 		return nil
 	}
@@ -1254,7 +1254,7 @@ func isValidSwitchToCompoundingRequest(s abstract.BeaconState, request *solid.Co
 	}
 	// Verify request has been authorized
 	wc := sourceValidator.WithdrawalCredentials()
-	if !bytes.Equal(wc[12:], request.SourceAddress[:]) {
+	if !bytes.Equal(wc[12:], request.SourceAddress.AsSlice()) {
 		return false
 	}
 	// Verify source withdrawal credentials

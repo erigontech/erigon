@@ -178,7 +178,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.TracedSenders = make([]string, len(traceSenders))
 	for i, senderHex := range traceSenders {
 		sender := common.HexToAddress(senderHex)
-		cfg.TracedSenders[i] = string(sender[:])
+		cfg.TracedSenders[i] = string(sender.AsSlice())
 	}
 
 	notifyMiner := func() {}

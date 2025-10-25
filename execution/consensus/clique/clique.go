@@ -157,18 +157,18 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.
 
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < ExtraSeal {
-		return common.Address{}, errMissingSignature
+		return common.ZeroAddress, errMissingSignature
 	}
 	signature := header.Extra[len(header.Extra)-ExtraSeal:]
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(SealHash(header).Bytes(), signature)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 
 	var signer common.Address
-	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
+	signer.SetBytes(crypto.Keccak256(pubkey[1:])[12:])
 
 	sigcache.Add(hash, signer)
 	return signer, nil
@@ -298,7 +298,7 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
-	header.Coinbase = common.Address{}
+	header.Coinbase = common.ZeroAddress
 	header.Nonce = types.BlockNonce{}
 
 	number := header.Number.Uint64()
@@ -342,7 +342,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 	if number%c.config.Epoch == 0 {
 		for _, signer := range snap.GetSigners() {
-			header.Extra = append(header.Extra, signer[:]...)
+			header.Extra = append(header.Extra, signer.AsSlice()...)
 		}
 	}
 	header.Extra = append(header.Extra, make([]byte, ExtraSeal)...)

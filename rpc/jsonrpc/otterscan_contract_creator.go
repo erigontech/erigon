@@ -73,7 +73,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	// so it is optimal to search from the beginning even if the contract has multiple
 	// incarnations.
 	var prevTxnID, nextTxnID uint64
-	it, err := tx.IndexRange(kv.AccountsHistoryIdx, addr[:], 0, -1, order.Asc, kv.Unlim)
+	it, err := tx.IndexRange(kv.AccountsHistoryIdx, addr.AsSlice(), 0, -1, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			continue
 		}
 
-		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
+		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr.AsSlice(), txnID)
 		if err != nil {
 			log.Error("Unexpected error, couldn't find changeset", "txNum", txnID, "addr", addr)
 			return nil, err
@@ -130,7 +130,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 	idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
-		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
+		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr.AsSlice(), txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 			panic(err)

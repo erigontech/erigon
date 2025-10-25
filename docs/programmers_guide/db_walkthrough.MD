@@ -215,7 +215,7 @@ Block with 1 Ethereum transaction in Erigon
 ===============================================
 The first block contains transaction that transfers 0.001 ETH from the account holding 9 ETH to
 a new account with the address `0x0100000000000000000000000000000000000000` (this is what one gets
-specifying `common.Address{1}` in the code).
+specifying `common.NewAddress(1)` in the code).
 This is how the state trie after Block 1 is inserted looks like:
 
 ![block1_state](state_2.png)

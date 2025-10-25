@@ -150,7 +150,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded
 	return &types.Genesis{
 		Config:     &config,
-		ExtraData:  append(append(make([]byte, 32), faucet[:]...), make([]byte, crypto.SignatureLength)...),
+		ExtraData:  append(append(make([]byte, 32), faucet.AsSlice()...), make([]byte, crypto.SignatureLength)...),
 		GasLimit:   11500000,
 		Difficulty: big.NewInt(1),
 		Alloc:      ReadPrealloc(allocs, "allocs/dev.json"),

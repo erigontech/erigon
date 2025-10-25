@@ -83,7 +83,7 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 			Message: &cltypes.BLSToExecutionChange{
 				ValidatorIndex: 1,
 				From:           common.Bytes48{1, 2, 3, 4, 5, 6},
-				To:             common.Address{3, 2, 1},
+				To:             common.NewAddress(3, 2, 1),
 			},
 			Signature: [96]byte{1, 2, 3},
 		},

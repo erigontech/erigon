@@ -203,14 +203,14 @@ func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remoteproto.EtherbaseRequest) (*remoteproto.EtherbaseReply, error) {
-	out := &remoteproto.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.Address{})}
+	out := &remoteproto.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.ZeroAddress.AsArray())}
 
 	base, err := s.eth.Etherbase()
 	if err != nil {
 		return out, err
 	}
 
-	out.Address = gointerfaces.ConvertAddressToH160(base)
+	out.Address = gointerfaces.ConvertAddressToH160(base.AsArray())
 	return out, nil
 }
 
@@ -316,7 +316,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 
 	sendersBytes := make([]byte, 20*len(senders))
 	for i, sender := range senders {
-		copy(sendersBytes[i*20:], sender[:])
+		copy(sendersBytes[i*20:], sender.AsSlice())
 	}
 	return &remoteproto.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
@@ -469,7 +469,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	stateReader.SetTxNum(maxTxNum)
 	ibs := state.New(stateReader)
 
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &common.Address{}, s.chainConfig)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &common.ZeroAddress, s.chainConfig)
 
 	senderCodeSize, err := ibs.GetCodeSize(*aaTxn.SenderAddress)
 	if err != nil {

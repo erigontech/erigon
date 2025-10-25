@@ -65,7 +65,7 @@ func TestGetBurntContract(t *testing.T) {
 func TestCalculateCoinbaseAmoy(t *testing.T) {
 	config := Amoy.Config
 
-	addr0 := common.Address{}
+	addr0 := common.ZeroAddress
 	expectedCoinbaseAddr := common.HexToAddress("0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0")
 	var testCases = []struct {
 		blockNumber uint64

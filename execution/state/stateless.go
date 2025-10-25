@@ -101,13 +101,13 @@ func (s *Stateless) ReadAccountDataForDebug(address common.Address) (*accounts.A
 // ReadAccountData is a part of the StateReader interface
 // This implementation attempts to look up account data in the state trie, and fails if it is not found
 func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return nil, err
 	}
 	acc, ok := s.t.GetAccount(addrHash[:])
 	if s.trace {
-		fmt.Printf("Stateless: ReadAccountData(address=%x) --> %v\n", address.Bytes(), acc)
+		fmt.Printf("Stateless: ReadAccountData(address=%x) --> %v\n", address.AsSlice(), acc)
 	}
 	if ok {
 		return acc, nil
@@ -119,14 +119,14 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 // This implementation attempts to look up the storage in the state trie, and fails if it is not found
 func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	if s.trace {
-		fmt.Printf("Stateless: ReadAccountStorage(address=%x, key=%x)\n", address[:], key[:])
+		fmt.Printf("Stateless: ReadAccountStorage(address=%x, key=%x)\n", address.AsSlice(), key[:])
 	}
 	seckey, err := common.HashData(key[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
 
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -141,7 +141,7 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) 
 }
 
 func (s *Stateless) HasStorage(address common.Address) (bool, error) {
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return false, err
 	}
@@ -170,7 +170,7 @@ func (s *Stateless) ReadAccountCode(address common.Address) (code []byte, err er
 		fmt.Printf("Getting code for address %x\n", address)
 	}
 
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func (s *Stateless) ReadAccountCode(address common.Address) (code []byte, err er
 // This implementation looks the code up in the codeMap, and returns its size
 // It fails if the code is not found in the map
 func (s *Stateless) ReadAccountCodeSize(address common.Address) (codeSize int, err error) {
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return 0, err
 	}
@@ -216,7 +216,7 @@ func (s *Stateless) ReadAccountIncarnation(address common.Address) (uint64, erro
 // UpdateAccountData is a part of the StateWriter interface
 // This implementation registers the account update in the `accountUpdates` map
 func (s *Stateless) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,7 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 // DeleteAccount is a part of the StateWriter interface
 // This implementation registers the deletion of the account in two internal maps
 func (s *Stateless) DeleteAccount(address common.Address, original *accounts.Account) error {
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return err
 	}
@@ -256,7 +256,7 @@ func (s *Stateless) UpdateAccountCode(address common.Address, incarnation uint64
 // WriteAccountStorage is a part of the StateWriter interface
 // This implementation registeres the change of the account's storage in the internal double map `storageUpdates`
 func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint
 // CreateContract is a part of StateWriter interface
 // This implementation registers given address in the internal map `created`
 func (s *Stateless) CreateContract(address common.Address) error {
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := common.HashData(address.AsSlice())
 	if err != nil {
 		return err
 	}

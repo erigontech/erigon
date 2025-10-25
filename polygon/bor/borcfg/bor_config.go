@@ -194,7 +194,7 @@ func (c *BorConfig) CalculateCoinbase(number uint64) common.Address {
 	if c.Coinbase != nil {
 		return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.Coinbase), number)
 	} else {
-		return common.Address{}
+		return common.ZeroAddress
 	}
 }
 

@@ -46,6 +46,6 @@ func (epc *EntryPointTracer) Hooks() *tracing.Hooks {
 
 func (epc *EntryPointTracer) Reset() {
 	epc.Input = nil
-	epc.From = common.Address{}
+	epc.From = common.ZeroAddress
 	epc.Error = nil
 }

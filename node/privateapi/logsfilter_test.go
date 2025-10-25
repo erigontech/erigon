@@ -40,7 +40,7 @@ var (
 func init() {
 	var a common.Address
 	a.SetBytes(address1.Bytes())
-	address160 = gointerfaces.ConvertAddressToH160(a)
+	address160 = gointerfaces.ConvertAddressToH160(a.AsArray())
 	topic1H256 = gointerfaces.ConvertHashToH256(topic1)
 }
 

@@ -111,7 +111,7 @@ func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 		SecureKey: account.SecureKey,
 		Address:   nil,
 	}
-	if addr != (common.Address{}) {
+	if addr != (common.ZeroAddress) {
 		dumpAccount.Address = &addr
 	}
 	//nolint:errcheck
@@ -160,7 +160,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	}
 
 	var nextKey []byte
-	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
+	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress.AsSlice(), nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
 	if err != nil {
 		return nil, err
 	}
@@ -212,8 +212,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		account := accountList[i]
 		if !excludeStorage {
 			t := trie.New(common.Hash{})
-			nextAcc, _ := kv.NextSubtree(addr[:])
-			r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
+			nextAcc, _ := kv.NextSubtree(addr.AsSlice())
+			r, err := ttx.RangeAsOf(kv.StorageDomain, addr.AsSlice(), nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 			}
@@ -247,7 +247,7 @@ func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.DumpToCollector(dump, excludeCode, excludeStorage, common.Address{}, 0)
+	d.DumpToCollector(dump, excludeCode, excludeStorage, common.ZeroAddress, 0)
 	return *dump
 }
 
@@ -264,7 +264,7 @@ func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
+	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, common.ZeroAddress, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key

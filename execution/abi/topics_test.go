@@ -52,7 +52,7 @@ func TestMakeTopics(t *testing.T) {
 		},
 		{
 			"support address types in topics",
-			args{[][]interface{}{{common.Address{1, 2, 3, 4, 5}}}},
+			args{[][]interface{}{{common.NewAddress(1, 2, 3, 4, 5)}}},
 			[][]common.Hash{{common.Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5}}},
 			false,
 		},

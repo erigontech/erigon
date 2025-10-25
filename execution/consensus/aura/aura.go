@@ -583,7 +583,7 @@ func (c *AuRa) VerifySeal(chain consensus.ChainHeaderReader, header *types.Heade
 func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	return nil
 	/// If the block isn't a checkpoint, cast a random vote (good enough for now)
-	//header.Coinbase = common.Address{}
+	//header.Coinbase = common.ZeroAddress
 	//header.Nonce = types.BlockNonce{}
 	//
 	//number := header.Number.Uint64()
@@ -968,7 +968,7 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.BlockWithRec
 func stepProposer(validators ValidatorSet, blockHash common.Hash, step uint64, call consensus.Call) (common.Address, error) {
 	//c, err := validators.defaultCaller(blockHash)
 	//if err != nil {
-	//	return common.Address{}, err
+	//	return common.ZeroAddress, err
 	//}
 	return validators.getWithCaller(blockHash, uint(step), call)
 }

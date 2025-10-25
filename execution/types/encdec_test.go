@@ -71,7 +71,7 @@ func (tr *TRand) RandBytes(size int) []byte {
 }
 
 func (tr *TRand) RandAddress() common.Address {
-	return common.Address(tr.RandBytes(20))
+	return common.NewAddress(tr.RandBytes(20)...)
 }
 
 func (tr *TRand) RandHash() common.Hash {
@@ -151,7 +151,7 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 		case reflect.TypeOf(&common.Hash{}):
 			randHash := tr.RandHash()
 			field.Set(reflect.ValueOf(&randHash))
-		case reflect.TypeOf(common.Address{}):
+		case reflect.TypeOf(common.ZeroAddress):
 			field.Set(reflect.ValueOf(tr.RandAddress()))
 		case reflect.TypeOf(Bloom{}):
 			field.Set(reflect.ValueOf(tr.RandBloom()))

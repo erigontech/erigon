@@ -47,7 +47,7 @@ import (
 // Do 1 step to start txPool
 func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
 	chain, err := core.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(common.NewAddress(1))
 	})
 	require.NoError(err)
 
@@ -91,7 +91,7 @@ func TestSendRawTransaction(t *testing.T) {
 	oneBlockStep(mockSentry, require, t)
 
 	expectedValue := uint64(1234)
-	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	txn, err := types.SignTx(types.NewTransaction(0, common.NewAddress(1), uint256.NewInt(expectedValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
@@ -147,7 +147,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	// Create a legacy signer pre-155
 	unprotectedSigner := types.MakeFrontierSigner()
 
-	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedTxValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *unprotectedSigner, mockSentry.Key)
+	txn, err := types.SignTx(types.NewTransaction(0, common.NewAddress(1), uint256.NewInt(expectedTxValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *unprotectedSigner, mockSentry.Key)
 	require.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
@@ -184,6 +184,6 @@ func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Tra
 }
 
 func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {
-	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
+	tx, _ := types.SignTx(types.NewTransaction(nonce, common.ZeroAddress, uint256.NewInt(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
 	return tx
 }

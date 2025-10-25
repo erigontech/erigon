@@ -60,7 +60,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
 	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
 		reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
-			Address: gointerfaces.ConvertAddressToH160(address),
+			Address: gointerfaces.ConvertAddressToH160(address.AsArray()),
 		}, &grpc.EmptyCallOption{})
 		if err != nil {
 			return nil, err

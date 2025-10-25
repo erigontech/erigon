@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"unique"
 
 	"golang.org/x/crypto/sha3"
 
@@ -29,24 +30,44 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// Address represents the 20 byte address of an Ethereum account.
-type Address [length.Addr]byte
+// address represents the 20 byte address of an Ethereum account.
+type address [length.Addr]byte
+
+type Address unique.Handle[address]
+
+var ZeroAddress Address = Address(unique.Make(address{}))
+
+func NewAddress(b ...byte) Address {
+	var a address
+	switch {
+	case len(b) == 0:
+		return ZeroAddress
+	case len(b) < length.Addr:
+		copy(a[:], b)
+	default:
+		copy(a[:], b[0:length.Addr])
+	}
+
+	return Address(unique.Make(a))
+}
+
+func AsAddress(b [length.Addr]byte) Address {
+	return Address(unique.Make(address(b)))
+}
 
 // BytesToAddress returns Address with value b.
 // If b is larger than len(h), b will be cropped from the left.
 func BytesToAddress(b []byte) Address {
-	var a Address
-	a.SetBytes(b)
-	return a
+	return NewAddress(b...)
 }
 
 // BigToAddress returns Address with byte values of b.
 // If b is larger than len(h), b will be cropped from the left.
-func BigToAddress(b *big.Int) Address { return BytesToAddress(b.Bytes()) }
+func BigToAddress(b *big.Int) Address { return NewAddress(b.Bytes()...) }
 
 // HexToAddress returns Address with byte values of s.
 // If s is larger than len(h), s will be cropped from the left.
-func HexToAddress(s string) Address { return BytesToAddress(hexutil.FromHex(s)) }
+func HexToAddress(s string) Address { return NewAddress(hexutil.FromHex(s)...) }
 
 // IsHexAddress verifies whether a string can represent a valid hex-encoded
 // Ethereum address or not.
@@ -57,11 +78,20 @@ func IsHexAddress(s string) bool {
 	return len(s) == 2*length.Addr && hexutil.IsHex(s)
 }
 
-// Bytes gets the string representation of the underlying address.
-func (a Address) Bytes() []byte { return a[:] }
+// AsArray gets the byte array representation of the underlying address.
+func (a Address) AsArray() [length.Addr]byte { return unique.Handle[address](a).Value() }
+
+// AsBytes gets a slice backed by the byte array representation of the underlying address.
+func (a Address) AsSlice() []byte {
+	b := unique.Handle[address](a).Value()
+	return b[:]
+}
 
 // Hash converts an address to a hash by left-padding it with zeros.
-func (a Address) Hash() Hash { return BytesToHash(a[:]) }
+func (a Address) Hash() Hash {
+	b := a.AsArray()
+	return BytesToHash(b[:])
+}
 
 // Hex returns an EIP55-compliant hex string representation of the address.
 func (a Address) Hex() string {
@@ -97,9 +127,10 @@ func (a *Address) checksumHex() []byte {
 }
 
 func (a Address) hex() []byte {
-	var buf [len(a)*2 + 2]byte
+	var buf [length.Addr*2 + 2]byte
 	copy(buf[:2], "0x")
-	hex.Encode(buf[2:], a[:])
+	b := a.AsArray()
+	hex.Encode(buf[2:], b[:])
 	return buf[:]
 }
 
@@ -125,7 +156,7 @@ func (a Address) Format(s fmt.State, c rune) {
 		}
 		s.Write(hex)
 	case 'd':
-		fmt.Fprint(s, ([len(a)]byte)(a))
+		fmt.Fprint(s, a.AsArray())
 	default:
 		fmt.Fprintf(s, "%%!%c(address=%x)", c, a)
 	}
@@ -134,29 +165,36 @@ func (a Address) Format(s fmt.State, c rune) {
 // SetBytes sets the address to the value of b.
 // If b is larger than len(a), b will be cropped from the left.
 func (a *Address) SetBytes(b []byte) {
-	if len(b) > len(a) {
-		b = b[len(b)-length.Addr:]
-	}
-	copy(a[length.Addr-len(b):], b)
+	*a = NewAddress(b...)
 }
 
 // MarshalText returns the hex representation of a.
 func (a Address) MarshalText() ([]byte, error) {
-	b := a[:]
+	b := a.AsArray()
 	result := make([]byte, len(b)*2+2)
 	copy(result, hexPrefix)
-	hex.Encode(result[2:], b)
+	hex.Encode(result[2:], b[:])
 	return result, nil
 }
 
 // UnmarshalText parses a hash in hex syntax.
 func (a *Address) UnmarshalText(input []byte) error {
-	return hexutil.UnmarshalFixedText("Address", input, a[:])
+	var i address
+	if err := hexutil.UnmarshalFixedText("Address", input, i[:]); err != nil {
+		return err
+	}
+	*a = Address(unique.Make(i))
+	return nil
 }
 
 // UnmarshalJSON parses a hash in hex syntax.
 func (a *Address) UnmarshalJSON(input []byte) error {
-	return hexutil.UnmarshalFixedJSON(addressT, input, a[:])
+	var i address
+	if err := hexutil.UnmarshalFixedJSON(addressT, input, i[:]); err != nil {
+		return err
+	}
+	*a = Address(unique.Make(i))
+	return nil
 }
 
 // Scan implements Scanner for database/sql.
@@ -168,16 +206,19 @@ func (a *Address) Scan(src interface{}) error {
 	if len(srcB) != length.Addr {
 		return fmt.Errorf("can't scan []byte of len %d into Address, want %d", len(srcB), length.Addr)
 	}
-	copy(a[:], srcB)
+	*a = NewAddress(srcB...)
 	return nil
 }
 
 // Value implements valuer for database/sql.
 func (a Address) Value() (driver.Value, error) {
-	return a[:], nil
+	b := a.AsArray()
+	return b[:], nil
 }
 
 // Cmp compares two addresses.
 func (a Address) Cmp(other Address) int {
-	return bytes.Compare(a[:], other[:])
+	ab := a.AsArray()
+	ob := other.AsArray()
+	return bytes.Compare(ab[:], ob[:])
 }

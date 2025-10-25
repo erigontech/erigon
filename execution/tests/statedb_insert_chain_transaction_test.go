@@ -43,7 +43,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -127,7 +127,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -204,7 +204,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -278,7 +278,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	data := getGenesis(big.NewInt(3000))
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -352,7 +352,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	data := getGenesis(big.NewInt(3000))
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
@@ -426,7 +426,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
@@ -531,7 +531,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
@@ -627,7 +627,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
@@ -732,7 +732,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := common.NewAddress(1)
 
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)

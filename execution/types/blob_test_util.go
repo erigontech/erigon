@@ -132,8 +132,9 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []goethkzg.KZGCommitment) {
 }
 
 func MakeWrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
+	to := common.NewAddress(129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215)
 	wrappedTxn := BlobTxWrapper{}
-	wrappedTxn.Tx.To = &common.Address{129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215}
+	wrappedTxn.Tx.To = &to
 	wrappedTxn.Tx.Nonce = 0
 	wrappedTxn.Tx.GasLimit = 100000
 	wrappedTxn.Tx.Value = uint256.NewInt(0)
@@ -179,8 +180,9 @@ func MakeWrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 }
 
 func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
+	to := common.NewAddress(129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215)
 	wrappedTxn := BlobTxWrapper{}
-	wrappedTxn.Tx.To = &common.Address{129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215}
+	wrappedTxn.Tx.To = &to
 	wrappedTxn.Tx.Nonce = 0
 	wrappedTxn.Tx.GasLimit = 100000
 	wrappedTxn.Tx.Value = uint256.NewInt(0)

@@ -99,7 +99,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				if innerErr != nil {
 					return innerErr
 				}
-				err = db.Put(kv.E2AccountsHistory, addr.Bytes(), b)
+				err = db.Put(kv.E2AccountsHistory, addr.AsSlice(), b)
 				if err != nil {
 					return err
 				}

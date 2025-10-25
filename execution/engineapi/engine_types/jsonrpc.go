@@ -273,7 +273,7 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 		out = append(out, &typesproto.Withdrawal{
 			Index:          w.Index,
 			ValidatorIndex: w.Validator,
-			Address:        gointerfaces.ConvertAddressToH160(w.Address),
+			Address:        gointerfaces.ConvertAddressToH160(w.Address.AsArray()),
 			Amount:         w.Amount,
 		})
 	}

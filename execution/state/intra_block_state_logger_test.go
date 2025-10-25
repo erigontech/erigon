@@ -41,8 +41,8 @@ func TestStateLogger(t *testing.T) {
 		{
 			name: "multiple add balance",
 			run: func(state *IntraBlockState) {
-				state.AddBalance(common.Address{}, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.AddBalance(common.Address{}, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+				state.AddBalance(common.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+				state.AddBalance(common.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				if len(stateDB.journal.entries) != 3 {
@@ -58,7 +58,7 @@ func TestStateLogger(t *testing.T) {
 							expectedPrev = uint256.NewInt(2)
 						}
 						if !reflect.DeepEqual(&balanceInc.prev, expectedPrev) {
-							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", common.Address{}, expectedPrev, &balanceInc.prev)
+							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", common.ZeroAddress, expectedPrev, &balanceInc.prev)
 						}
 					case createObjectChange:
 					default:
@@ -66,35 +66,35 @@ func TestStateLogger(t *testing.T) {
 					}
 				}
 
-				so, err := stateDB.GetOrNewStateObject(common.Address{})
+				so, err := stateDB.GetOrNewStateObject(common.ZeroAddress)
 				require.NoError(t, err)
 				balance := so.Balance()
 				if !reflect.DeepEqual(&balance, uint256.NewInt(3)) {
-					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(3), &balance)
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.ZeroAddress, uint256.NewInt(3), &balance)
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{
-				{addr: common.Address{}, prev: *uint256.NewInt(0), new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
-				{addr: common.Address{}, prev: *uint256.NewInt(2), new: *uint256.NewInt(3), reason: tracing.BalanceChangeUnspecified},
+				{addr: common.ZeroAddress, prev: *uint256.NewInt(0), new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
+				{addr: common.ZeroAddress, prev: *uint256.NewInt(2), new: *uint256.NewInt(3), reason: tracing.BalanceChangeUnspecified},
 			},
 		},
 		{
 			name: "sub balance",
 			run: func(state *IntraBlockState) {
-				state.AddBalance(common.Address{}, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.SubBalance(common.Address{}, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+				state.AddBalance(common.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+				state.SubBalance(common.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
-				so, err := stateDB.GetOrNewStateObject(common.Address{})
+				so, err := stateDB.GetOrNewStateObject(common.ZeroAddress)
 				require.NoError(t, err)
 				if !reflect.DeepEqual(so.Balance(), *uint256.NewInt(1)) {
 					balance := so.Balance()
-					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(1), &balance)
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.ZeroAddress, uint256.NewInt(1), &balance)
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{
-				{addr: common.Address{}, prev: *uint256.NewInt(0), new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
-				{addr: common.Address{}, prev: *uint256.NewInt(2), new: *uint256.NewInt(1), reason: tracing.BalanceChangeUnspecified},
+				{addr: common.ZeroAddress, prev: *uint256.NewInt(0), new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
+				{addr: common.ZeroAddress, prev: *uint256.NewInt(2), new: *uint256.NewInt(1), reason: tracing.BalanceChangeUnspecified},
 			},
 		},
 	}

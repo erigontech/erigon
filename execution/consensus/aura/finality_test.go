@@ -26,14 +26,14 @@ import (
 
 func TestRollingFinality(t *testing.T) {
 	t.Run("RejectsUnknownSigners", func(t *testing.T) {
-		f := NewRollingFinality([]common.Address{{1}, {2}, {3}})
-		_, err := f.push(common.Hash{}, 0, []common.Address{{0}, {4}})
+		f := NewRollingFinality([]common.Address{common.NewAddress(1), common.NewAddress(2), common.NewAddress(3)})
+		_, err := f.push(common.Hash{}, 0, []common.Address{common.NewAddress(0), common.NewAddress(4)})
 		assert.Error(t, err)
-		_, err = f.push(common.Hash{}, 0, []common.Address{{0}, {1}, {4}})
+		_, err = f.push(common.Hash{}, 0, []common.Address{common.NewAddress(0), common.NewAddress(1), common.NewAddress(4)})
 		assert.Error(t, err)
 	})
 	t.Run("FinalizeMultiple", func(t *testing.T) {
-		signers := []common.Address{{0}, {1}, {2}, {3}, {4}, {5}}
+		signers := []common.Address{common.NewAddress(0), common.NewAddress(1), common.NewAddress(2), common.NewAddress(3), common.NewAddress(4), common.NewAddress(5)}
 		f := NewRollingFinality(signers)
 		// 3 / 6 signers is < 51% so no finality.
 		for i := 0; i < 6; i++ {
@@ -51,7 +51,7 @@ func TestRollingFinality(t *testing.T) {
 		assert.Len(t, l, 4)
 	})
 	t.Run("FromAncestry", func(t *testing.T) {
-		signers := []common.Address{{0}, {1}, {2}, {3}, {4}, {5}}
+		signers := []common.Address{common.NewAddress(0), common.NewAddress(1), common.NewAddress(2), common.NewAddress(3), common.NewAddress(4), common.NewAddress(5)}
 		f := NewRollingFinality(signers)
 		i := 12
 		get := func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {
@@ -67,7 +67,7 @@ func TestRollingFinality(t *testing.T) {
 		assert.Equal(t, common.Hash{11}, *f.lastPushed)
 	})
 	t.Run("FromAncestryMultipleSigners", func(t *testing.T) {
-		signers := []common.Address{{0}, {1}, {2}, {3}, {4}, {5}}
+		signers := []common.Address{common.NewAddress(0), common.NewAddress(1), common.NewAddress(2), common.NewAddress(3), common.NewAddress(4), common.NewAddress(5)}
 		f := NewRollingFinality(signers)
 		i := 12
 		get := func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {

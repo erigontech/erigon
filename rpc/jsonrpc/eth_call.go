@@ -435,7 +435,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// touch account
-	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
+	sdCtx.TouchKey(kv.AccountsDomain, string(address.AsSlice()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
 	proofTrie, _, err := sdCtx.Witness(ctx, nil, "eth_getProof")
@@ -454,14 +454,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// get account proof
-	accountProof, err := proofTrie.Prove(crypto.Keccak256(address.Bytes()), 0, false)
+	accountProof, err := proofTrie.Prove(crypto.Keccak256(address.AsSlice()), 0, false)
 	if err != nil {
 		return nil, err
 	}
 	proof.AccountProof = *(*[]hexutil.Bytes)(unsafe.Pointer(&accountProof))
 
 	// get account data from the trie
-	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address.Bytes()))
+	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address.AsSlice()))
 	if acc == nil {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
@@ -509,7 +509,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 		// prepare key path (keccak(address) | keccak(key))
 		var fullKey []byte
-		fullKey = append(fullKey, crypto.Keccak256(address.Bytes())...)
+		fullKey = append(fullKey, crypto.Keccak256(address.AsSlice())...)
 		fullKey = append(fullKey, crypto.Keccak256(storageKey.Hash.Bytes())...)
 
 		// get proof for the given key
@@ -822,7 +822,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if args.Nonce == nil {
 			var nonce uint64
 			reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
-				Address: gointerfaces.ConvertAddressToH160(*args.From),
+				Address: gointerfaces.ConvertAddressToH160(args.From.AsArray()),
 			}, &grpc.EmptyCallOption{})
 			if err != nil {
 				return nil, err
@@ -846,7 +846,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	if args.From == nil {
-		args.From = &common.Address{}
+		args.From = &common.ZeroAddress
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list

@@ -249,7 +249,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesFromIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.TracesFromIdx, addr.AsSlice(), int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -260,7 +260,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesToIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.TracesToIdx, addr.AsSlice(), int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, nil, nil, err
 			}

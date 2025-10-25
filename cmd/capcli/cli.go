@@ -1432,7 +1432,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 		}
 	}
 	withdrawalAddress := common.HexToAddress(m.WithdrawalAddress)
-	if withdrawalAddress == (common.Address{}) {
+	if withdrawalAddress == (common.ZeroAddress) {
 		return fmt.Errorf("invalid withdrawal address: %s", m.WithdrawalAddress)
 	}
 
@@ -1448,7 +1448,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 	var credentials common.Hash
 	credentials[0] = 0x2
 	copy(credentials[1:], make([]byte, 11))
-	copy(credentials[12:], withdrawalAddress[:])
+	copy(credentials[12:], withdrawalAddress.AsSlice())
 
 	var genesisForkVersion clparams.ConfigForkVersion
 	var genesisForkVersion4 common.Bytes4

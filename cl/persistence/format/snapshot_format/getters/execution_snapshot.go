@@ -94,7 +94,7 @@ func convertWithdrawalsToBytesSSZ(ws []*types.Withdrawal) []byte {
 		currentPos := i * 44
 		binary.LittleEndian.PutUint64(ret[currentPos:currentPos+8], w.Index)
 		binary.LittleEndian.PutUint64(ret[currentPos+8:currentPos+16], w.Validator)
-		copy(ret[currentPos+16:currentPos+36], w.Address[:])
+		copy(ret[currentPos+16:currentPos+36], w.Address.AsSlice())
 		binary.LittleEndian.PutUint64(ret[currentPos+36:currentPos+44], w.Amount)
 	}
 	return ret

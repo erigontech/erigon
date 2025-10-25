@@ -1043,7 +1043,7 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 
 func (e *remoteConsensusEngine) Author(header *types.Header) (common.Address, error) {
 	if err := e.validateEngineReady(); err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
 
 	return e.engine.Author(header)

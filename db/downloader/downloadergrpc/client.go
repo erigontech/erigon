@@ -84,5 +84,5 @@ func String2Proto(in string) *typesproto.H160 {
 
 func Proto2String(in *typesproto.H160) string {
 	addr := gointerfaces.ConvertH160toAddress(in)
-	return hex.EncodeToString(addr[:])
+	return hex.EncodeToString(addr.AsSlice())
 }

@@ -50,7 +50,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 
 	// Checkpoint blocks need to enforce zero beneficiary
 	checkpoint := (number % c.config.Epoch) == 0
-	if checkpoint && header.Coinbase != (common.Address{}) {
+	if checkpoint && header.Coinbase != (common.ZeroAddress) {
 		return errInvalidCheckpointBeneficiary
 	}
 
@@ -157,7 +157,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	if number%c.config.Epoch == 0 {
 		signers := make([]byte, len(snap.Signers)*length.Addr)
 		for i, signer := range snap.GetSigners() {
-			copy(signers[i*length.Addr:], signer[:])
+			copy(signers[i*length.Addr:], signer.AsSlice())
 		}
 
 		extraSuffix := len(header.Extra) - ExtraSeal
@@ -201,7 +201,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 				signers := make([]common.Address, (len(checkpoint.Extra)-ExtraVanity-ExtraSeal)/length.Addr)
 				for i := 0; i < len(signers); i++ {
-					copy(signers[i][:], checkpoint.Extra[ExtraVanity+i*length.Addr:])
+					signers[i].SetBytes(checkpoint.Extra[ExtraVanity+i*length.Addr:])
 				}
 				snap = newSnapshot(c.config, number, hash, signers)
 				if err := snap.store(c.DB); err != nil {

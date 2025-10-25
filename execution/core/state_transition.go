@@ -183,7 +183,7 @@ func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResul
 // to returns the recipient of the message.
 func (st *StateTransition) to() common.Address {
 	if st.msg == nil || st.msg.To() == nil /* contract creation */ {
-		return common.Address{}
+		return common.ZeroAddress
 	}
 	return *st.msg.To()
 }
@@ -698,7 +698,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			}
 
 			// 7. set authority code
-			if auth.Address == (common.Address{}) {
+			if auth.Address == (common.ZeroAddress) {
 				if err := st.state.SetCode(authority, nil); err != nil {
 					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}

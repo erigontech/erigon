@@ -77,7 +77,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    consensus.Transfer,
-		Coinbase:    common.Address{},
+		Coinbase:    common.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),

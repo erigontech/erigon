@@ -199,7 +199,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		}
 	}
 	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
-		addr := common.Address(stackData[stackLen-1].Bytes20())
+		addr := common.AsAddress(stackData[stackLen-1].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 			if _, ok := a.createdContracts[addr]; !ok {
@@ -208,7 +208,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		}
 	}
 	if (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE) && stackLen >= 5 {
-		addr := common.Address(stackData[stackLen-2].Bytes20())
+		addr := common.AsAddress(stackData[stackLen-2].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 			if _, ok := a.createdContracts[addr]; !ok {

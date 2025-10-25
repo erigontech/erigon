@@ -55,7 +55,7 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 	}
 
 	if overrides.FeeRecipient != nil {
-		context.Coinbase = common.Address(overrides.FeeRecipient.Bytes())
+		context.Coinbase = *overrides.FeeRecipient
 	}
 
 	if overrides.BaseFeePerGas != nil {

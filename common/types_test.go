@@ -119,7 +119,7 @@ func TestAddressUnmarshalJSON(t *testing.T) {
 			if test.ShouldErr {
 				t.Errorf("test #%d: expected error, got none", i)
 			}
-			if got := new(big.Int).SetBytes(v.Bytes()); got.Cmp(test.Output) != 0 {
+			if got := new(big.Int).SetBytes(v.AsSlice()); got.Cmp(test.Output) != 0 {
 				t.Errorf("test #%d: address mismatch: have %v, want %v", i, got, test.Output)
 			}
 		}
@@ -324,17 +324,18 @@ func TestAddress_Scan(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := &Address{}
+			a := Address{}
 			if err := a.Scan(tt.args.src); (err != nil) != tt.wantErr {
 				t.Errorf("Address.Scan() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			if !tt.wantErr {
-				for i := range a {
-					if a[i] != tt.args.src.([]byte)[i] {
+				b := a.AsSlice()
+				for i := range b {
+					if b[i] != tt.args.src.([]byte)[i] {
 						t.Errorf(
 							"Address.Scan() didn't scan the %d src correctly (have %X, want %X)",
-							i, a[i], tt.args.src.([]byte)[i],
+							i, b[i], tt.args.src.([]byte)[i],
 						)
 					}
 				}

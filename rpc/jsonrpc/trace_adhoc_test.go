@@ -83,7 +83,7 @@ func TestCoinbaseBalance(t *testing.T) {
 		t.Errorf("expected array with 2 elements, got %d elements", len(results))
 	}
 	// Expect balance increase of the coinbase (zero address)
-	if _, ok := results[1].StateDiff[common.Address{}]; !ok {
+	if _, ok := results[1].StateDiff[common.ZeroAddress]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
 	}
 }

@@ -294,7 +294,7 @@ func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 }
 
 func (b *Eth1Block) getSchema() []interface{} {
-	s := []interface{}{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+	s := []interface{}{b.ParentHash[:], b.FeeRecipient.AsSlice(), b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
 		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, b.Withdrawals)

@@ -666,7 +666,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 	numBuf := make([]byte, 8)
 	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
-		var sender [20]byte
+		var sender common.Address
 		txn2, err := types.DecodeTransaction(v)
 		if err != nil {
 			return nil, err
@@ -686,7 +686,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 		valueBuf = valueBuf[:0]
 		valueBuf = append(valueBuf, hashFirstByte...)
-		valueBuf = append(valueBuf, sender[:]...)
+		valueBuf = append(valueBuf, sender.AsSlice()...)
 		valueBuf = append(valueBuf, v...)
 		return valueBuf, nil
 	}

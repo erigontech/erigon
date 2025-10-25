@@ -668,7 +668,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
 		Timestamp:             timestamp,
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient.AsArray()),
 	}
 
 	if version >= clparams.CapellaVersion {

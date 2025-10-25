@@ -184,7 +184,7 @@ func TestUnpackIndexedArrayTyLogIntoMap(t *testing.T) {
 
 func TestUnpackIndexedFuncTyLogIntoMap(t *testing.T) {
 	mockAddress := common.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2")
-	addrBytes := mockAddress.Bytes()
+	addrBytes := mockAddress.AsSlice()
 	hash := crypto.Keccak256Hash([]byte("mockFunction(address,uint)"))
 	functionSelector := hash[:4]
 	functionTyBytes := append(addrBytes, functionSelector...)

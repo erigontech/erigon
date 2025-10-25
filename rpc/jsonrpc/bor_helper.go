@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -107,25 +106,22 @@ func getHeaderByHash(ctx context.Context, api *BorImpl, tx kv.Tx, hash common.Ha
 func ecrecover(header *types.Header, c *borcfg.BorConfig) (common.Address, error) {
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
-		return common.Address{}, errMissingSignature
+		return common.ZeroAddress, errMissingSignature
 	}
 	signature := header.Extra[len(header.Extra)-extraSeal:]
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(bor.SealHash(header, c).Bytes(), signature)
 	if err != nil {
-		return common.Address{}, err
+		return common.ZeroAddress, err
 	}
-	var signer common.Address
-	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
-
-	return signer, nil
+	return common.NewAddress(crypto.Keccak256(pubkey[1:])[12:]...), nil
 }
 
 // validatorContains checks for a validator in given validator set
 func validatorContains(a []*heimdall.Validator, x *heimdall.Validator) (*heimdall.Validator, bool) {
 	for _, n := range a {
-		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
+		if n.Address == x.Address {
 			return n, true
 		}
 	}

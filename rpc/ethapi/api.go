@@ -63,7 +63,7 @@ func (args *CallArgs) FromOrEmpty() common.Address {
 // from retrieves the transaction sender address.
 func (args *CallArgs) from() common.Address {
 	if args.From == nil {
-		return common.Address{}
+		return common.ZeroAddress
 	}
 	return *args.From
 }
@@ -647,7 +647,7 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 		Hash:     txHash,
 		Input:    hexutil.Bytes(txn.GetData()),
 		Nonce:    hexutil.Uint64(txn.GetNonce()),
-		From:     common.Address{},
+		From:     common.ZeroAddress,
 		To:       txn.GetTo(),
 		Value:    (*hexutil.Big)(txn.GetValue().ToBig()),
 		V:        (*hexutil.Big)(big.NewInt(0)),

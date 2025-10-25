@@ -342,7 +342,7 @@ func makeBenchBlock() *Block {
 		amount, _ := uint256.FromBig(math.BigPow(2, int64(i)))
 		price := uint256.NewInt(300000)
 		data := make([]byte, 100)
-		tx := NewTransaction(uint64(i), common.Address{}, amount, 123457, price, data)
+		tx := NewTransaction(uint64(i), common.ZeroAddress, amount, 123457, price, data)
 		signedTx, err := SignTx(tx, *signer, key)
 		if err != nil {
 			panic(err)
@@ -370,7 +370,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 			{
 				ParentHash:  common.Hash{},
 				UncleHash:   common.Hash{},
-				Coinbase:    common.Address{},
+				Coinbase:    common.ZeroAddress,
 				Root:        common.Hash{},
 				TxHash:      common.Hash{},
 				ReceiptHash: common.Hash{},

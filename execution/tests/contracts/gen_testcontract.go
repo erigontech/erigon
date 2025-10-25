@@ -40,12 +40,12 @@ var TestcontractBin = "0x608060405234801561001057600080fd5b503360009081526020819
 func DeployTestcontract(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Testcontract, error) {
 	parsed, err := abi.JSON(strings.NewReader(TestcontractABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(TestcontractBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &Testcontract{TestcontractCaller: TestcontractCaller{contract: contract}, TestcontractTransactor: TestcontractTransactor{contract: contract}, TestcontractFilterer: TestcontractFilterer{contract: contract}}, nil
 }

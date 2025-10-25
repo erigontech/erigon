@@ -69,12 +69,12 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	addrHash1, err := common.HashData(addr1[:])
+	addrHash1, err := common.HashData(addr1.AsSlice())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	addrHash2, err := common.HashData(addr2[:])
+	addrHash2, err := common.HashData(addr2.AsSlice())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	addrHash, err := common.HashData(crypto.PubkeyToAddress(key.PublicKey).Bytes())
+	addrHash, err := common.HashData(crypto.PubkeyToAddress(key.PublicKey).AsSlice())
 	if err != nil {
 		t.Fatal(err)
 	}

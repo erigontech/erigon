@@ -287,7 +287,7 @@ func verifyProof(root common.Hash, key []byte, proofs map[common.Hash]Node, used
 }
 
 func VerifyAccountProof(stateRoot common.Hash, proof *accounts.AccProofResult) error {
-	accountKey := crypto.Keccak256Hash(proof.Address[:])
+	accountKey := crypto.Keccak256Hash(proof.Address.AsSlice())
 	return VerifyAccountProofByHash(stateRoot, accountKey, proof)
 }
 

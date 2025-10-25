@@ -241,8 +241,8 @@ func TestDeriveFields(t *testing.T) {
 			if r.GasUsed != txs[i].GetGasLimit() {
 				t.Errorf("receipts[%d].GasUsed = %d, want %d", i, r.GasUsed, txs[i].GetGasLimit())
 			}
-			if txs[i].GetTo() != nil && r.ContractAddress != (common.Address{}) {
-				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.Address{}).String())
+			if txs[i].GetTo() != nil && r.ContractAddress != (common.ZeroAddress) {
+				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.ZeroAddress).String())
 			}
 			from, _ := txs[i].Sender(*signer)
 			contractAddress := CreateAddress(from, txs[i].GetNonce())
@@ -304,8 +304,8 @@ func TestDeriveFields(t *testing.T) {
 	//		if r.GasUsed != txs[i].GetGasLimit() {
 	//			t.Errorf("receipts[%d].GasUsed = %d, want %d", i, r.GasUsed, txs[i].GetGasLimit())
 	//		}
-	//		if txs[i].GetTo() != nil && r.ContractAddress != (common.Address{}) {
-	//			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.Address{}).String())
+	//		if txs[i].GetTo() != nil && r.ContractAddress != (common.ZeroAddress) {
+	//			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.ZeroAddress).String())
 	//		}
 	//		from, _ := txs[i].Sender(*signer)
 	//		contractAddress := crypto.CreateAddress(from, txs[i].GetNonce())
@@ -384,7 +384,7 @@ func clearComputedFieldsOnReceipt(t *testing.T, receipt *Receipt) {
 	receipt.BlockHash = common.Hash{}
 	receipt.BlockNumber = big.NewInt(math.MaxUint32)
 	receipt.TransactionIndex = math.MaxUint32
-	receipt.ContractAddress = common.Address{}
+	receipt.ContractAddress = common.ZeroAddress
 	receipt.GasUsed = 0
 
 	clearComputedFieldsOnLogs(t, receipt.Logs)

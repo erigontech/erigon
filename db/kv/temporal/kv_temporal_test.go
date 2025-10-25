@@ -41,14 +41,14 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
+	storageK1 := append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...)
 	acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
 	acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
-	storageK2 := append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...)
+	storageK2 := append(append([]byte{}, acc2.AsSlice()...), acc2slot2.Bytes()...)
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, firstVal, ok, err := rwTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := rwTtx1.HasPrefix(kv.StorageDomain, acc1.AsSlice())
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -74,7 +74,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		defer c1.Close()
 		k, v, err := c1.Next()
 		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
 		wantValueBytes = append(wantValueBytes, byte(1))       // value we wrote to the storage slot
@@ -94,14 +94,14 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify TemporalTx.HasPrefix returns true
-		firstKey, firstVal, ok, err := roTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := roTtx1.HasPrefix(kv.StorageDomain, acc1.AsSlice())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 
 		// check some other non-existing storages for non-existence after write operation
-		firstKey, firstVal, ok, err = roTtx1.HasPrefix(kv.StorageDomain, acc2.Bytes())
+		firstKey, firstVal, ok, err = roTtx1.HasPrefix(kv.StorageDomain, acc2.AsSlice())
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -144,7 +144,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		defer c2.Close()
 		k, v, err := c2.Next() // acc2 storage from step 2 will be there
 		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc2.AsSlice()...), acc2slot2.Bytes()...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(2)) // step num
 		wantValueBytes = append(wantValueBytes, byte(2))       // value we wrote to the storage slot
@@ -161,10 +161,10 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify TemporalTx.HasPrefix returns true
-		firstKey, firstVal, ok, err := roTtx2.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := roTtx2.HasPrefix(kv.StorageDomain, acc1.AsSlice())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 	}
 
@@ -173,7 +173,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx4, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTtx4.Rollback()
-		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.Bytes(), 3)
+		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.AsSlice(), 3)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx4)
 		require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		defer roTtx3.Rollback()
 
-		firstKey, firstVal, ok, err := roTtx3.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := roTtx3.HasPrefix(kv.StorageDomain, acc1.AsSlice())
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -207,10 +207,10 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		defer roTtx4.Rollback()
 
-		firstKey, firstVal, ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1.AsSlice())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), firstKey)
 		require.Equal(t, []byte{3}, firstVal)
 	}
 }
@@ -231,8 +231,8 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// empty range when nothing has been written yet
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
-	nextSubTree, ok := kv.NextSubtree(acc1.Bytes())
+	storageK1 := append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...)
+	nextSubTree, ok := kv.NextSubtree(acc1.AsSlice())
 	require.True(t, ok)
 
 	// write storage at txn num 1, update it at txn num 2, then delete it at txn num 3, then write to it again
@@ -264,7 +264,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx3.Rollback()
-	err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx3, acc1.Bytes(), 3)
+	err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx3, acc1.AsSlice(), 3)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx3)
 	require.NoError(t, err)
@@ -286,58 +286,58 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	roTtx1, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTtx1.Rollback()
-	it1, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 1, order.Asc, kv.Unlim)
+	it1, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.AsSlice(), nextSubTree, 1, order.Asc, kv.Unlim)
 	require.NoError(t, err)
 	defer it1.Close()
 
 	require.True(t, it1.HasNext())
 	k, v, err := it1.Next()
 	require.NoError(t, err)
-	require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
+	require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), k)
 	require.Len(t, v, 0)
 	require.False(t, it1.HasNext())
 
 	// value 1 at txn num 1
-	it2, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 2, order.Asc, kv.Unlim)
+	it2, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.AsSlice(), nextSubTree, 2, order.Asc, kv.Unlim)
 	require.NoError(t, err)
 	defer it2.Close()
 	require.True(t, it2.HasNext())
 	k, v, err = it2.Next()
 	require.NoError(t, err)
-	require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
+	require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), k)
 	require.Equal(t, []byte{1}, v)
 	require.False(t, it2.HasNext())
 
 	// value 2 at txn num 2
-	it3, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 3, order.Asc, kv.Unlim)
+	it3, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.AsSlice(), nextSubTree, 3, order.Asc, kv.Unlim)
 	require.NoError(t, err)
 	defer it3.Close()
 	require.True(t, it3.HasNext())
 	k, v, err = it3.Next()
 	require.NoError(t, err)
-	require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
+	require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), k)
 	require.Equal(t, []byte{2}, v)
 	require.False(t, it3.HasNext())
 
 	// empty value at txn num 3
-	it4, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 4, order.Asc, kv.Unlim)
+	it4, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.AsSlice(), nextSubTree, 4, order.Asc, kv.Unlim)
 	require.NoError(t, err)
 	defer it4.Close()
 	require.True(t, it4.HasNext())
 	k, v, err = it4.Next()
 	require.NoError(t, err)
-	require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
+	require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), k)
 	require.Len(t, v, 0)
 	require.False(t, it4.HasNext())
 
 	// value 3 at txn num 4 - note under the hood this will use latest vals instead of historical
-	it5, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 5, order.Asc, kv.Unlim)
+	it5, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.AsSlice(), nextSubTree, 5, order.Asc, kv.Unlim)
 	require.NoError(t, err)
 	defer it5.Close()
 	require.True(t, it5.HasNext())
 	k, v, err = it5.Next()
 	require.NoError(t, err)
-	require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
+	require.Equal(t, append(append([]byte{}, acc1.AsSlice()...), acc1slot1.Bytes()...), k)
 	require.Equal(t, []byte{3}, v)
 	require.False(t, it5.HasNext())
 }

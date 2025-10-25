@@ -117,7 +117,7 @@ func unpackDepositLog(data []byte) ([]byte, error) {
 // ParseDepositLogs extracts the EIP-6110 deposit values from logs emitted by
 // BeaconDepositContract and returns a FlatRequest object ptr
 func ParseDepositLogs(logs []*types.Log, depositContractAddress common.Address) (*types.FlatRequest, error) {
-	if depositContractAddress == (common.Address{}) {
+	if depositContractAddress == (common.ZeroAddress) {
 		log.Warn("Error in ParseDepositLogs - depositContractAddress is 0x0")
 	}
 	reqData := make([]byte, 0, len(logs)*types.DepositRequestDataLen)

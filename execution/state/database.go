@@ -89,7 +89,7 @@ func (nw *NoopWriter) DeleteAccount(address common.Address, original *accounts.A
 
 func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if nw.trace {
-		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
+		fmt.Printf("code: %x, %x, valLen: %d\n", address.AsSlice(), codeHash, len(code))
 	}
 	return nil
 }

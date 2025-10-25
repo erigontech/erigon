@@ -146,7 +146,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(obj.e[:]); err != nil {
+	if _, err := w.Write(obj.e.AsSlice()); err != nil {
 		return err
 	}
 	if obj.ee != nil {
@@ -158,7 +158,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	if obj.ee != nil {
-		if _, err := w.Write(obj.ee[:]); err != nil {
+		if _, err := w.Write(obj.ee.AsSlice()); err != nil {
 			return err
 		}
 	}
@@ -263,7 +263,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for i := 0; i < len(obj.k); i++ {
-		if err := rlp.EncodeString(obj.k[i][:], w, b[:]); err != nil {
+		if err := rlp.EncodeString(obj.k[i].AsSlice(), w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -280,7 +280,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	}
 	for i := 0; i < len(obj.kk); i++ {
 		if obj.kk[i] != nil {
-			if err := rlp.EncodeString(obj.kk[i][:], w, b[:]); err != nil {
+			if err := rlp.EncodeString(obj.kk[i].AsSlice(), w, b[:]); err != nil {
 				return err
 			}
 		} else {
@@ -388,15 +388,15 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 	if len(b) > 0 && len(b) != 20 {
 		return fmt.Errorf("error decoded length mismatch, expected: 20, got: %d", len(b))
 	}
-	copy(obj.e[:], b)
+	obj.e.SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("error decoding field ee, err: %w", err)
 	}
 	if len(b) > 0 && len(b) != 20 {
 		return fmt.Errorf("error decoded length mismatch, expected: 20, got: %d", len(b))
 	}
-	obj.ee = &common.Address{}
-	copy((*obj.ee)[:], b)
+	obj.ee = &common.ZeroAddress
+	obj.ee.SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("error decoding field f, err: %w", err)
 	}
@@ -493,7 +493,7 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("error decoded length mismatch, expected: 20, got: %d", len(b))
 		}
 		var s common.Address
-		copy(s[:], b)
+		s.SetBytes(b)
 		obj.k = append(obj.k, s)
 	}
 	if err = s.ListEnd(); err != nil {
@@ -509,7 +509,7 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 		if len(b) > 0 && len(b) != 20 {
 			return fmt.Errorf("error decoded length mismatch, expected: 20, got: %d", len(b))
 		} else if len(b) == 20 {
-			copy(s[:], b)
+			s.SetBytes(b)
 			obj.kk = append(obj.kk, &s)
 		} else if len(b) == 0 {
 			obj.kk = append(obj.kk, nil)

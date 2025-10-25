@@ -202,7 +202,7 @@ func (*snapshotTest) Generate(r *rand.Rand, size int) reflect.Value {
 	// Generate random actions.
 	addrs := make([]common.Address, 50)
 	for i := range addrs {
-		addrs[i][0] = byte(i)
+		addrs[i] = common.NewAddress(byte(i))
 	}
 	actions := make([]testAction, size)
 	for i := range actions {
@@ -402,7 +402,7 @@ func TestTransientStorage(t *testing.T) {
 
 	key := common.Hash{0x01}
 	value := uint256.NewInt(2)
-	addr := common.Address{}
+	addr := common.ZeroAddress
 
 	state.SetTransientState(addr, key, *value)
 	if exp, got := 1, state.journal.length(); exp != got {

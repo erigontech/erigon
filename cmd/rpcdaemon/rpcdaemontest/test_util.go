@@ -158,7 +158,7 @@ func generateChain(
 		address  = addresses.address
 		address1 = addresses.address1
 		address2 = addresses.address2
-		theAddr  = common.Address{1}
+		theAddr  = common.NewAddress(1)
 		chainId  = big.NewInt(1337)
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
@@ -210,7 +210,7 @@ func generateChain(
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
-				binary.BigEndian.PutUint64(toAddr[:], j)
+				binary.BigEndian.PutUint64(toAddr.AsSlice(), j)
 				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1_000_000_000_000_000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
@@ -237,7 +237,7 @@ func generateChain(
 			var j uint64
 			var toAddr common.Address
 			for j = 1; j <= 32; j++ {
-				binary.BigEndian.PutUint64(toAddr[:], j)
+				binary.BigEndian.PutUint64(toAddr.AsSlice(), j)
 				txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 				if err != nil {
 					panic(err)
@@ -247,7 +247,7 @@ func generateChain(
 		case 7:
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
-			binary.BigEndian.PutUint64(toAddr[:], 4)
+			binary.BigEndian.PutUint64(toAddr.AsSlice(), 4)
 			txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
@@ -257,7 +257,7 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
-			binary.BigEndian.PutUint64(toAddr[:], 12)
+			binary.BigEndian.PutUint64(toAddr.AsSlice(), 12)
 			txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 			if err != nil {
 				panic(err)
@@ -432,7 +432,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 	)
 	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(common.NewAddress(1))
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
 			u256.Num0, 50000, u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
@@ -531,7 +531,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	}
 	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(common.NewAddress(1))
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
 			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)

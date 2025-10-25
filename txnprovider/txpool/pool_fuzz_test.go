@@ -492,7 +492,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			EncodeSender(sender.nonce, sender.balance, v)
 			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 				Action:  remoteproto.Action_UPSERT,
-				Address: gointerfaces.ConvertAddressToH160(addr),
+				Address: gointerfaces.ConvertAddressToH160(addr.AsArray()),
 				Data:    v,
 			})
 		}

@@ -54,7 +54,7 @@ func (b *BackendServer) Producers(ctx context.Context, in *remoteproto.BorProduc
 func encodeValidator(v *Validator) *remoteproto.Validator {
 	return &remoteproto.Validator{
 		Id:               v.ID,
-		Address:          gointerfaces.ConvertAddressToH160(v.Address),
+		Address:          gointerfaces.ConvertAddressToH160(v.Address.AsArray()),
 		VotingPower:      v.VotingPower,
 		ProposerPriority: v.ProposerPriority,
 	}

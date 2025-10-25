@@ -40,12 +40,12 @@ var PhoenixBin = "0x6080604052348015600f57600080fd5b5060c48061001e6000396000f3fe
 func DeployPhoenix(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Phoenix, error) {
 	parsed, err := abi.JSON(strings.NewReader(PhoenixABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(PhoenixBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return common.ZeroAddress, nil, nil, err
 	}
 	return address, tx, &Phoenix{PhoenixCaller: PhoenixCaller{contract: contract}, PhoenixTransactor: PhoenixTransactor{contract: contract}, PhoenixFilterer: PhoenixFilterer{contract: contract}}, nil
 }

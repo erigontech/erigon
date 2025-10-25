@@ -279,9 +279,9 @@ func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnS
 
 	var txnSlot txpool.TxnSlot
 	var sender common.Address
-	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], false, true, nil)
+	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender.AsSlice(), false, true, nil)
 	if err != nil {
-		return nil, common.Address{}, err
+		return nil, common.ZeroAddress, err
 	}
 
 	return &txnSlot, sender, nil
