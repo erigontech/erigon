@@ -365,7 +365,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	msg := st.msg
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
-	sender := vm.AccountRef(msg.From())
+	sender := msg.From()
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
@@ -474,7 +474,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	msg := st.msg
-	sender := vm.AccountRef(msg.From())
+	sender := msg.From()
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
@@ -483,7 +483,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
-		nonce, err := st.state.GetNonce(sender.Address())
+		nonce, err := st.state.GetNonce(sender)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
