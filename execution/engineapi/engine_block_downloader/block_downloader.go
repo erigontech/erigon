@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
 const (
@@ -74,25 +73,14 @@ func NewEngineBlockDownloader(
 	blockReader services.FullBlockReader,
 	db kv.RoDB,
 	config *chain.Config,
-	tmpdir string,
 	syncCfg ethconfig.Sync,
-	sentryClient sentryproto.SentryClient,
+	bbd *p2p.BackwardBlockDownloader,
 	messageListener *p2p.MessageListener,
 	peerTracker *p2p.PeerTracker,
 ) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(Idle)
-	peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
-	messageSender := p2p.NewMessageSender(sentryClient)
-	var fetcher p2p.Fetcher
-	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
-	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
-	fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
-	bbd := p2p.NewBackwardBlockDownloader(logger, fetcher, peerPenalizer, peerTracker, tmpdir)
-	badHeaders, err := lru.New[common.Hash, common.Hash](1_000_000) // 64mb
-	if err != nil {
-		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
-	}
+	badHeaders, _ := lru.New[common.Hash, common.Hash](100) // Cache for bad headers
 	return &EngineBlockDownloader{
 		backgroundCtx:   ctx,
 		db:              db,
