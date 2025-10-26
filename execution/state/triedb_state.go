@@ -122,7 +122,7 @@ type TrieDbState struct {
 	tMu               *sync.Mutex
 	StateReader       StateReader
 	rl                *trie.RetainList
-	blockNr           uint64
+	blockNr           atomic.Uint64
 	buffers           []*Buffer
 	aggregateBuffer   *Buffer // Merge of all buffers
 	currentBuffer     *Buffer
@@ -138,11 +138,11 @@ func NewTrieDbState(root common.Hash, blockNr uint64, stateReader StateReader) *
 		t:                 t,
 		tMu:               new(sync.Mutex),
 		StateReader:       stateReader,
-		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Address]uint64),
 	}
+	tds.blockNr.Store(blockNr)
 	return tds
 }
 
@@ -170,10 +170,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	cpy := TrieDbState{
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),
-		blockNr:        n,
 		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[common.Address]uint64),
 	}
+	cpy.blockNr.Store(n)
 	return &cpy
 }
 
@@ -208,7 +208,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 	t := &TrieDbState{
 		t:                 tds.t,
 		tMu:               tds.tMu,
-		blockNr:           tds.getBlockNr(),
 		buffers:           buffers,
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
@@ -217,6 +216,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Address]uint64),
 	}
+	t.blockNr.Store(tds.getBlockNr())
 	tds.tMu.Unlock()
 
 	return t
@@ -228,12 +228,12 @@ func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
 	aggregateBuffer.initialise()
 	currentBuffer := tds.currentBuffer
 	buffers := []*Buffer{currentBuffer}
+	blockNr := tds.getBlockNr()
 	tds.tMu.Unlock()
 
-	return &TrieDbState{
+	res := &TrieDbState{
 		t:                 tds.t,
 		tMu:               tds.tMu,
-		blockNr:           tds.getBlockNr(),
 		buffers:           buffers,
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
@@ -242,6 +242,8 @@ func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Address]uint64),
 	}
+	res.blockNr.Store(blockNr)
+	return res
 }
 
 func (tds *TrieDbState) LastRoot() common.Hash {
@@ -902,11 +904,11 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 }
 
 func (tds *TrieDbState) getBlockNr() uint64 {
-	return atomic.LoadUint64(&tds.blockNr)
+	return tds.blockNr.Load()
 }
 
 func (tds *TrieDbState) setBlockNr(n uint64) {
-	atomic.StoreUint64(&tds.blockNr, n)
+	tds.blockNr.Store(n)
 }
 
 func (tds *TrieDbState) GetTrieHash() common.Hash {
