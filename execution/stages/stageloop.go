@@ -133,11 +133,12 @@ func StageLoop(
 // ProcessFrozenBlocks - withuot global rwtx
 func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
-	initialCycle, firstCycle := true, true
 
 	if err := sync.RunSnapshots(db); err != nil {
 		return err
 	}
+
+	initialCycle, firstCycle := true, false
 
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -180,7 +181,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if err := sync.RunPrune(db, tx, initialCycle); err != nil {
 			return err
 		}
-		firstCycle = false
 
 		var finStageProgress uint64
 		if blockReader.FrozenBlocks() > 0 {

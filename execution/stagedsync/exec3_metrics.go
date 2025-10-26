@@ -271,8 +271,8 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 	fileDuration := metrics.FileReadDuration - prevMetrics.FileReadDuration
 	cachePutCount := metrics.CachePutCount - prevMetrics.CachePutCount
 	cachePutSize := metrics.CachePutSize - prevMetrics.CachePutSize
-	cachePutKeySize := metrics.CachePutValueSize - metrics.CachePutKeySize
-	cachePutValueSize := metrics.CachePutValueSize - metrics.CachePutValueSize
+	cachePutKeySize := metrics.CachePutKeySize - prevMetrics.CachePutKeySize
+	cachePutValueSize := metrics.CachePutValueSize - prevMetrics.CachePutValueSize
 
 	mxExecDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 	mxExecDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
@@ -304,8 +304,8 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		fileDuration := accountMetrics.FileReadDuration - prevAccountMetrics.FileReadDuration
 		cachePutCount := accountMetrics.CachePutCount - prevAccountMetrics.CachePutCount
 		cachePutSize := accountMetrics.CachePutSize - prevAccountMetrics.CachePutSize
-		cachePutKeySize := accountMetrics.CachePutValueSize - accountMetrics.CachePutKeySize
-		cachePutValueSize := accountMetrics.CachePutValueSize - accountMetrics.CachePutValueSize
+		cachePutKeySize := accountMetrics.CachePutKeySize - prevAccountMetrics.CachePutKeySize
+		cachePutValueSize := accountMetrics.CachePutValueSize - prevAccountMetrics.CachePutValueSize
 
 		mxExecAccountDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecAccountDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
@@ -339,8 +339,8 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		fileDuration := storageMetrics.FileReadDuration - prevStorageMetrics.FileReadDuration
 		cachePutCount := storageMetrics.CachePutCount - prevStorageMetrics.CachePutCount
 		cachePutSize := storageMetrics.CachePutSize - prevStorageMetrics.CachePutSize
-		cachePutKeySize := storageMetrics.CachePutValueSize - storageMetrics.CachePutKeySize
-		cachePutValueSize := storageMetrics.CachePutValueSize - storageMetrics.CachePutValueSize
+		cachePutKeySize := storageMetrics.CachePutKeySize - prevStorageMetrics.CachePutKeySize
+		cachePutValueSize := storageMetrics.CachePutValueSize - prevStorageMetrics.CachePutValueSize
 
 		mxExecStorageDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecStorageDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
@@ -374,8 +374,8 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		fileDuration := codeMetrics.FileReadDuration - prevCodeMetrics.FileReadDuration
 		cachePutCount := codeMetrics.CachePutCount - prevCodeMetrics.CachePutCount
 		cachePutSize := codeMetrics.CachePutSize - prevCodeMetrics.CachePutSize
-		cachePutKeySize := codeMetrics.CachePutValueSize - codeMetrics.CachePutKeySize
-		cachePutValueSize := codeMetrics.CachePutValueSize - codeMetrics.CachePutValueSize
+		cachePutKeySize := codeMetrics.CachePutKeySize - prevCodeMetrics.CachePutKeySize
+		cachePutValueSize := codeMetrics.CachePutValueSize - prevCodeMetrics.CachePutValueSize
 
 		mxExecCodeDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecCodeDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
@@ -409,7 +409,7 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		fileDuration := commitmentMetrics.FileReadDuration - prevCommitmentMetrics.FileReadDuration
 		cachePutCount := commitmentMetrics.CachePutCount - prevCommitmentMetrics.CachePutCount
 		cachePutSize := commitmentMetrics.CachePutSize - prevCommitmentMetrics.CachePutSize
-		cachePutKeySize := commitmentMetrics.CachePutValueSize - prevCommitmentMetrics.CachePutKeySize
+		cachePutKeySize := commitmentMetrics.CachePutKeySize - prevCommitmentMetrics.CachePutKeySize
 		cachePutValueSize := commitmentMetrics.CachePutValueSize - prevCommitmentMetrics.CachePutValueSize
 
 		mxCommitmentDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
