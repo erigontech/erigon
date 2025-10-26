@@ -277,7 +277,7 @@ loop:
 				d.dialPeers++
 			}
 			id := c.node.ID()
-			d.peers[id] = connFlag(atomic.LoadInt32((*int32)(&c.flags)))
+			d.peers[id] = connFlag(c.flags.Load())
 			// Remove from static pool because the node is now connected.
 			task := d.static[id]
 			if task != nil && task.staticPoolIndex >= 0 {
