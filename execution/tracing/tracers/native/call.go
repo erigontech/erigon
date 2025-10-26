@@ -111,8 +111,8 @@ type callTracer struct {
 	config      callTracerConfig
 	gasLimit    uint64
 	depth       int
-	interrupt   uint32 // Atomic flag to signal execution interruption
-	reason      error  // Textual reason for the interruption
+	interrupt   atomic.Bool // Atomic flag to signal execution interruption
+	reason      error       // Textual reason for the interruption
 	logIndex    uint64
 	logGaps     map[uint64]int
 	precompiles []bool // keep track of whether scopes are for pre-compiles or not
@@ -200,7 +200,7 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 		return
 	}
 	// Skip if tracing was interrupted
-	if atomic.LoadUint32(&t.interrupt) > 0 {
+	if t.interrupt.Load() {
 		return
 	}
 
@@ -301,7 +301,7 @@ func (t *callTracer) OnLog(log *types.Log) {
 		return
 	}
 	// Skip if tracing was interrupted
-	if atomic.LoadUint32(&t.interrupt) > 0 {
+	if t.interrupt.Load() {
 		return
 	}
 	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: t.logIndex, Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
@@ -330,7 +330,7 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *callTracer) Stop(err error) {
 	t.reason = err
-	atomic.StoreUint32(&t.interrupt, 1)
+	t.interrupt.Store(true)
 }
 
 // clearFailedLogs clears the logs of a callframe and all its children
