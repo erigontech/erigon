@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -262,13 +263,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								logCommitted := func(commitProgress commitment.CommitProgress) {
 									// this is an approximation of blcok prgress - it assumnes an
 									// even distribution of keys to blocks
-									if commitProgress.KeyIndex > 0 {
+									if commitProgress.KeyIndex > 0 && commitProgress.KeyIndex < commitProgress.UpdateCount {
 										progress := float64(commitProgress.KeyIndex) / float64(commitProgress.UpdateCount)
-										committedGas := uint64(float64(uncommittedGas) * progress)
-										committedTransactions := uint64(float64(uncommittedTransactions) * progress)
-										commitedBlocks := uint64(float64(uncommittedBlocks) * progress)
+										committedGas := uint64(math.Round(float64(uncommittedGas) * progress))
+										committedTransactions := uint64(math.Round(float64(uncommittedTransactions) * progress))
+										commitedBlocks := uint64(math.Round(float64(uncommittedBlocks) * progress))
 
-										if committedTransactions-prevCommittedTransactions > 0 {
+										if commitedBlocks > prevCommitedBlocks {
 											pe.LogCommitted(commitStart,
 												commitedBlocks-prevCommitedBlocks,
 												committedTransactions-prevCommittedTransactions,
@@ -339,7 +340,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 								return handleIncorrectRootHashError(
 									applyResult.BlockNum, applyResult.BlockHash, applyResult.ParentHash,
-									rwTx, pe.cfg, execStage, maxBlockNum, pe.logger, u)
+									rwTx, pe.cfg, execStage, pe.logger, u)
 							}
 							// fix these here - they will contain estimates after commit logging
 							pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
@@ -408,7 +409,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	err := execStage.Update(rwTx, pe.lastCommittedBlockNum)
-
 	if err != nil {
 		return nil, rwTx, err
 	}

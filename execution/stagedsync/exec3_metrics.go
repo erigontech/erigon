@@ -439,7 +439,7 @@ func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMe
 		initialTxNum:          initialTxNum,
 		initialBlockNum:       initialBlockNum,
 		prevExecTime:          now,
-		prevExecutedBlockNum:  initialBlockNum,
+		prevExecutedBlockNum:  int64(initialBlockNum) - 1, // exec is inclusive of first bloc no
 		prevExecutedTxNum:     initialTxNum,
 		prevCommitTime:        now,
 		prevCommittedBlockNum: initialBlockNum,
@@ -454,7 +454,7 @@ type Progress struct {
 	initialTxNum                   uint64
 	initialBlockNum                uint64
 	prevExecTime                   time.Time
-	prevExecutedBlockNum           uint64
+	prevExecutedBlockNum           int64
 	prevExecutedTxNum              uint64
 	prevExecutedGas                int64
 	prevExecCount                  uint64
@@ -715,7 +715,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	if te.lastExecutedBlockNum.Load() > 0 {
 		p.prevExecutedTxNum = uint64(te.lastExecutedTxNum.Load())
 		p.prevExecutedGas = te.executedGas.Load()
-		p.prevExecutedBlockNum = uint64(te.lastExecutedBlockNum.Load())
+		p.prevExecutedBlockNum = te.lastExecutedBlockNum.Load()
 	}
 }
 
@@ -848,7 +848,7 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 	if lastTxNum > p.initialTxNum {
 		txSec = uint64((float64(lastTxNum) - float64(p.initialTxNum)) / interval.Seconds())
 	}
-	diffBlocks := max(int64(lastBlockNum)-int64(p.initialBlockNum), 0)
+	diffBlocks := max(int64(lastBlockNum)-int64(p.initialBlockNum)+1, 0)
 
 	p.log("done", suffix, te, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, 0, stepsInDb, nil)
 }

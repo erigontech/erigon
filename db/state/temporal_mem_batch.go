@@ -208,11 +208,15 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
-	sd.metrics.CachePutSize = 0
 	sd.metrics.CachePutCount = 0
+	sd.metrics.CachePutSize = 0
+	sd.metrics.CachePutKeySize = 0
+	sd.metrics.CachePutValueSize = 0
 	for _, dm := range sd.metrics.Domains {
 		dm.CachePutCount = 0
 		dm.CachePutSize = 0
+		dm.CachePutKeySize = 0
+		dm.CachePutValueSize = 0
 	}
 }
 

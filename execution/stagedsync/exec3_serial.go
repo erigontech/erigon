@@ -220,7 +220,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				pruneDuration time.Duration
 			)
 
-			ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, b.NumberU64(), false, se.logger, u, se.inMemExec)
+			ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.inMemExec)
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {

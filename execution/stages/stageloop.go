@@ -70,7 +70,7 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, logger); err != nil {
 		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
 		}
@@ -131,9 +131,13 @@ func StageLoop(
 }
 
 // ProcessFrozenBlocks - withuot global rwtx
-func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
 	initialCycle, firstCycle := true, true
+
+	if err := sync.RunSnapshots(db); err != nil {
+		return err
+	}
 
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -143,7 +147,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		tx.Commit()
 	}()
 
-	doms, err := state.NewSharedDomains(tx, log.New())
+	doms, err := state.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}

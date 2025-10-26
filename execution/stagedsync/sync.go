@@ -284,6 +284,16 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialC
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 
+func (s *Sync) RunSnapshots(db kv.RwDB) error {
+	for _, stage := range s.stages {
+		if stage.ID == stages.Snapshots {
+			_, err := s.runStage(stage, db, nil, nil, true, true, false)
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Sync) RunUnwind(db kv.RwDB, sd *state.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
