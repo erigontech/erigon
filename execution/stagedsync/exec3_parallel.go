@@ -163,6 +163,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 		blockUpdateCount := 0
 		blockApplyCount := 0
+		hasLoggedExecution := false
 
 		for {
 			select {
@@ -260,6 +261,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								var prevCommittedTransactions uint64
 								var prevCommitedGas uint64
 
+								hasLoggedCommittments := false
+
 								logCommitted := func(commitProgress commitment.CommitProgress) {
 									// this is an approximation of blcok prgress - it assumnes an
 									// even distribution of keys to blocks
@@ -270,6 +273,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										commitedBlocks := uint64(math.Round(float64(uncommittedBlocks) * progress))
 
 										if commitedBlocks > prevCommitedBlocks {
+											hasLoggedCommittments = true
 											pe.LogCommitted(commitStart,
 												commitedBlocks-prevCommitedBlocks,
 												committedTransactions-prevCommittedTransactions,
@@ -293,7 +297,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										return
 									case progress, ok := <-commitProgress:
 										if !ok {
-											if time.Since(lastCommitedLog) > logInterval/20 {
+											if !hasLoggedCommittments || time.Since(lastCommitedLog) > logInterval/20 {
 												logCommitted(lastProgress)
 											}
 											return
@@ -307,7 +311,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								}
 							}()
 
-							if time.Since(lastExecutedLog) > logInterval/50 {
+							if !hasLoggedExecution || time.Since(lastExecutedLog) > logInterval/50 {
 								pe.LogExecuted()
 								lastExecutedLog = time.Now()
 							}
@@ -386,6 +390,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				return ctx.Err()
 			case <-logEvery.C:
 				if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
+					hasLoggedExecution = true
 					lastExecutedLog = time.Now()
 					pe.LogExecuted()
 					if pe.agg.HasBackgroundFilesBuild() {
