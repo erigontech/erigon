@@ -103,9 +103,9 @@ func TestFairMixOnce(t *testing.T) {
 
 func testMixerFairness(t *testing.T) {
 	mix := NewFairMix(1 * time.Second)
-	mix.AddSource(&genIter{index: 1})
-	mix.AddSource(&genIter{index: 2})
-	mix.AddSource(&genIter{index: 3})
+	mix.AddSource(newGenIter(1))
+	mix.AddSource(newGenIter(2))
+	mix.AddSource(newGenIter(3))
 	defer mix.Close()
 
 	nodes := ReadNodes(mix, 500)
@@ -125,7 +125,7 @@ func testMixerFairness(t *testing.T) {
 // the 'fair' choice doesn't return a node within the timeout.
 func TestFairMixNextFromAll(t *testing.T) {
 	mix := NewFairMix(1 * time.Millisecond)
-	mix.AddSource(&genIter{index: 1})
+	mix.AddSource(newGenIter(1))
 	mix.AddSource(CycleNodes(nil))
 	defer mix.Close()
 
@@ -253,12 +253,20 @@ func approxEqual(x, y, epsilon int) bool {
 
 // genIter creates fake nodes with numbered IDs based on 'index' and 'gen'
 type genIter struct {
-	node       *Node
-	index, gen uint32
+	node  *Node
+	index atomic.Uint32
+	gen   uint32
+}
+
+// newGenIter returns a genIter with its index initialized to the given value.
+func newGenIter(initial uint32) *genIter {
+	g := &genIter{}
+	g.index.Store(initial)
+	return g
 }
 
 func (s *genIter) Next() bool {
-	index := atomic.LoadUint32(&s.index)
+	index := s.index.Load()
 	if index == ^uint32(0) {
 		s.node = nil
 		return false
@@ -273,7 +281,7 @@ func (s *genIter) Node() *Node {
 }
 
 func (s *genIter) Close() {
-	atomic.StoreUint32(&s.index, ^uint32(0))
+	s.index.Store(^uint32(0))
 }
 
 func testNode(id, seq uint64) *Node {

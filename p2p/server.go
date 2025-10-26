@@ -267,7 +267,7 @@ type conn struct {
 	fd net.Conn
 	transport
 	node   *enode.Node
-	flags  connFlag
+	flags  atomic.Int32
 	cont   chan error // The run loop uses cont to signal errors to SetupConn.
 	caps   []Cap      // valid after the protocol handshake
 	name   string     // valid after the protocol handshake
@@ -318,20 +318,20 @@ func (f connFlag) String() string {
 }
 
 func (c *conn) is(f connFlag) bool {
-	flags := connFlag(atomic.LoadInt32((*int32)(&c.flags)))
+	flags := connFlag(c.flags.Load())
 	return flags&f != 0
 }
 
 func (c *conn) set(f connFlag, val bool) {
 	for {
-		oldFlags := connFlag(atomic.LoadInt32((*int32)(&c.flags)))
+		oldFlags := connFlag(c.flags.Load())
 		flags := oldFlags
 		if val {
 			flags |= f
 		} else {
 			flags &= ^f
 		}
-		if atomic.CompareAndSwapInt32((*int32)(&c.flags), int32(oldFlags), int32(flags)) {
+		if c.flags.CompareAndSwap(int32(oldFlags), int32(flags)) {
 			return
 		}
 	}
