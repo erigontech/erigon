@@ -548,8 +548,8 @@ func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateK
 func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address, common.Address) {
 	var (
 		seed            = int64(12345)
-		rng             = rand.New(rand.NewSource(seed)) // accounts to fill up MPT
-		nFillerAccounts = 400
+		rng             = rand.New(rand.NewSource(seed)) // rng for filler accounts
+		nFillerAccounts = 400                            // nr. of accounts to fill up MPT
 		signer          = types.LatestSignerForChainID(nil)
 		bankKey, _      = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		bankAddress     = crypto.PubkeyToAddress(bankKey.PublicKey)
