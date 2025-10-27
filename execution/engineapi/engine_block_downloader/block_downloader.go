@@ -52,18 +52,16 @@ const (
 
 // EngineBlockDownloader is responsible to download blocks in reverse, and then insert them in the database.
 type EngineBlockDownloader struct {
-	backgroundCtx   context.Context
-	status          atomic.Value // current Status of the downloading process, aka: is it doing anything
-	blockReader     services.FullBlockReader
-	db              kv.RoDB
-	chainRW         eth1_chain_reader.ChainReaderWriterEth1
-	syncCfg         ethconfig.Sync
-	lock            sync.Mutex
-	logger          log.Logger
-	bbd             *p2p.BackwardBlockDownloader
-	badHeaders      *lru.Cache[common.Hash, common.Hash]
-	messageListener *p2p.MessageListener
-	peerTracker     *p2p.PeerTracker
+	backgroundCtx context.Context
+	status        atomic.Value // current Status of the downloading process, aka: is it doing anything
+	blockReader   services.FullBlockReader
+	db            kv.RoDB
+	chainRW       eth1_chain_reader.ChainReaderWriterEth1
+	syncCfg       ethconfig.Sync
+	lock          sync.Mutex
+	logger        log.Logger
+	bbd           *p2p.BackwardBlockDownloader
+	badHeaders    *lru.Cache[common.Hash, common.Hash]
 }
 
 func NewEngineBlockDownloader(
@@ -75,24 +73,20 @@ func NewEngineBlockDownloader(
 	config *chain.Config,
 	syncCfg ethconfig.Sync,
 	bbd *p2p.BackwardBlockDownloader,
-	messageListener *p2p.MessageListener,
-	peerTracker *p2p.PeerTracker,
 ) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(Idle)
 	badHeaders, _ := lru.New[common.Hash, common.Hash](100) // Cache for bad headers
 	return &EngineBlockDownloader{
-		backgroundCtx:   ctx,
-		db:              db,
-		status:          s,
-		syncCfg:         syncCfg,
-		logger:          logger,
-		blockReader:     blockReader,
-		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
-		bbd:             bbd,
-		badHeaders:      badHeaders,
-		messageListener: messageListener,
-		peerTracker:     peerTracker,
+		backgroundCtx: ctx,
+		db:            db,
+		status:        s,
+		syncCfg:       syncCfg,
+		logger:        logger,
+		blockReader:   blockReader,
+		chainRW:       eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		bbd:           bbd,
+		badHeaders:    badHeaders,
 	}
 }
 
