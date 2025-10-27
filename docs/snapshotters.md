@@ -44,3 +44,12 @@ MANUAL interventions on the snapshotters:
 "INFO" stuff:
 - talk a bit about integrity checks, where to find it, purpose, encourage to think and add integrity check.
 - link to Michele's presentations
+
+
+---
+outline:
+
+- new chain has come, what changes in related scripts can help setup a snapshotter and automated release off that server?
+- other less involved stuff: existing snapshotter recycled for new release - what steps needed then? Or new chain and it's snapshottter is ready, what steps needed then?
+- what kind of errors float up when snap release is triggered? Document tools that can be used to regen files, check integrity, safely manipulate files and db, debug etc.
+- point to appropriate presentations/documentations/code...
