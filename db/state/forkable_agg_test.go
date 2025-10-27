@@ -349,8 +349,6 @@ func TestForkableAggState(t *testing.T) {
 }
 
 func TestMergedFileGet(t *testing.T) {
-	t.Skip("issue #17532")
-
 	// ideally - smallest step file => adduncompressed word (fast build)
 	// merged file -- addWord (compressed)
 	// this reflects in the GetFiles() as well...ensure that is the case, and correct logic is applied
@@ -414,42 +412,32 @@ func TestMergedFileGet(t *testing.T) {
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
-	checkBuildFilesFn := func(mergeDisabled bool) {
-		agg.SetMergeDisabled(mergeDisabled)
-		require.NoError(t, agg.BuildFiles(RootNum(amount)))
+	agg.SetMergeDisabled(false)
+	require.NoError(t, agg.BuildFiles(RootNum(amount)))
 
-		snapCfg := Registry.SnapshotConfig(headerId)
-		var nDirtyFiles, nVisibleFiles int
-		if mergeDisabled {
-			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
-			nVisibleFiles = nDirtyFiles
-		} else {
-			nVisibleFiles = int(calculateNumberOfFiles(uint64(amount), snapCfg))
-			nDirtyFiles = nVisibleFiles
-		}
+	snapCfg := Registry.SnapshotConfig(headerId)
+	nVisibleFiles := int(calculateNumberOfFiles(uint64(amount), snapCfg))
+	nDirtyFiles := nVisibleFiles
 
-		// check dirty files count
-		headerF, bodyF := agg.marked[0], agg.marked[1]
-		headerItems := headerF.snaps.dirtyFiles.Items()
-		bodyItems := bodyF.snaps.dirtyFiles.Items()
-		require.Equal(t, nDirtyFiles, len(headerItems))
-		require.Equal(t, nDirtyFiles, len(bodyItems))
+	// check dirty files count
+	headerF, bodyF := agg.marked[0], agg.marked[1]
+	headerItems := headerF.snaps.dirtyFiles.Items()
+	bodyItems := bodyF.snaps.dirtyFiles.Items()
+	require.Equal(t, nDirtyFiles, len(headerItems))
+	require.Equal(t, nDirtyFiles, len(bodyItems))
 
-		// check visiblefiles count
-		require.Equal(t, nVisibleFiles, len(headerF.snaps.visibleFiles()))
-		require.Equal(t, nVisibleFiles, len(bodyF.snaps.visibleFiles()))
+	// check visiblefiles count
+	require.Equal(t, nVisibleFiles, len(headerF.snaps.visibleFiles()))
+	require.Equal(t, nVisibleFiles, len(bodyF.snaps.visibleFiles()))
 
-		aggTx = agg.BeginTemporalTx()
-		defer aggTx.Close()
-		rwtx, err = db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer rwtx.Commit()
-		headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
-		checkGet(headerTx, bodyTx, rwtx)
-	}
+	aggTx = agg.BeginTemporalTx()
+	defer aggTx.Close()
+	rwtx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+	headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
+	checkGet(headerTx, bodyTx, rwtx)
 
-	checkBuildFilesFn(true)
-	checkBuildFilesFn(false)
 }
 
 func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {

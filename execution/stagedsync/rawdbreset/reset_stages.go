@@ -112,7 +112,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 
 func ResetSenders(ctx context.Context, tx kv.RwTx) error {
 	if err := backup.ClearTables(ctx, tx, kv.Senders); err != nil {
-		return nil
+		return fmt.Errorf("clearing senders table: %w", err)
 	}
 	return clearStageProgress(tx, stages.Senders)
 }
@@ -130,7 +130,7 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 		}
 
 		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
-			return nil
+			return fmt.Errorf("clearing exec state tables: %w", err)
 		}
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil

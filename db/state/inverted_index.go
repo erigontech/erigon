@@ -288,27 +288,7 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 }
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
-	protectFiles := make(map[string]struct{}, len(fNames))
-	for _, f := range fNames {
-		protectFiles[f] = struct{}{}
-	}
-	var toClose []*FilesItem
-	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
-					continue
-				}
-			}
-
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		item.closeFiles()
-		ii.dirtyFiles.Delete(item)
-	}
+	closeWhatNotInList(ii.dirtyFiles, fNames)
 }
 
 func (ii *InvertedIndex) Tables() []string { return []string{ii.KeysTable, ii.ValuesTable} }

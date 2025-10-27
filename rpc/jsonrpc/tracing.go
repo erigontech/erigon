@@ -65,6 +65,11 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 
+	if (blockNrOrHash.BlockHash == nil && hash == common.Hash{}) {
+		stream.WriteNil()
+		return fmt.Errorf("block #%d not found", *blockNrOrHash.BlockNumber)
+	}
+
 	if blockNumber == 0 {
 		stream.WriteNil()
 		return fmt.Errorf("genesis is not traceable")

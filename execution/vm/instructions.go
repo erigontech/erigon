@@ -1365,14 +1365,8 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 		codeLen := len(scope.Contract.Code)
 
-		startMin := int(pc + 1)
-		if startMin >= codeLen {
-			startMin = codeLen
-		}
-		endMin := startMin + pushByteSize
-		if startMin+pushByteSize >= codeLen {
-			endMin = codeLen
-		}
+		startMin := min(int(pc+1), codeLen)
+		endMin := min(startMin+pushByteSize, codeLen)
 
 		integer := new(uint256.Int)
 		scope.Stack.push(*integer.SetBytes(common.RightPadBytes(
@@ -1388,14 +1382,8 @@ func makePushStringer(size uint64, pushByteSize int) stringer {
 	return func(pc uint64, scope *CallContext) string {
 		codeLen := len(scope.Contract.Code)
 
-		startMin := int(pc + 1)
-		if startMin >= codeLen {
-			startMin = codeLen
-		}
-		endMin := startMin + pushByteSize
-		if startMin+pushByteSize >= codeLen {
-			endMin = codeLen
-		}
+		startMin := min(int(pc+1), codeLen)
+		endMin := min(startMin+pushByteSize, codeLen)
 
 		integer := new(uint256.Int)
 		integer.SetBytes(common.RightPadBytes(scope.Contract.Code[startMin:endMin], pushByteSize))

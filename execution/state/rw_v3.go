@@ -143,7 +143,6 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 	var acc accounts.Account
 	emptyRemoval := rules.IsSpuriousDragon
 	for addr, increase := range balanceIncreases {
-		increase := increase
 		addrBytes := addr.Bytes()
 		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, roTx, addrBytes)
 		if err != nil {
