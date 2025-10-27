@@ -547,6 +547,9 @@ func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateK
 
 func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address, common.Address) {
 	var (
+		seed            = int64(12345)
+		rng             = rand.New(rand.NewSource(seed)) // accounts to fill up MPT
+		nFillerAccounts = 400
 		signer          = types.LatestSignerForChainID(nil)
 		bankKey, _      = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		bankAddress     = crypto.PubkeyToAddress(bankKey.PublicKey)
@@ -560,11 +563,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 			//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
 		}
 	)
-
-	seed := int64(12345) // Your fixed seed
-	rng := rand.New(rand.NewSource(seed))
 	// accounts to fill up MPT
-	nFillerAccounts := 400
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
@@ -617,7 +616,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 			require.NoError(t, err)
 			block.AddTx(txn)
 		case 4:
-			//empty block
+			// empty block
 		case 5:
 			// empty block
 		}
