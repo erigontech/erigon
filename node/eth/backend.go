@@ -920,7 +920,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger, stages.ModeBlockProduction)
 
 	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
+	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
