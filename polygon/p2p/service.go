@@ -42,7 +42,7 @@ func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sd
 	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
 	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
 	fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
-	publisher := NewPublisher(logger, messageSender, peerTracker)
+	publisher := p2p.NewPublisher(logger, messageSender, peerTracker)
 	bbd := p2p.NewBackwardBlockDownloader(logger, fetcher, peerPenalizer, peerTracker, tmpDir)
 	return &Service{
 		logger:          logger,
@@ -62,7 +62,7 @@ type Service struct {
 	messageListener *p2p.MessageListener
 	peerPenalizer   *p2p.PeerPenalizer
 	peerTracker     *p2p.PeerTracker
-	publisher       *Publisher
+	publisher       *p2p.Publisher
 	bbd             *p2p.BackwardBlockDownloader
 	maxPeers        int
 }

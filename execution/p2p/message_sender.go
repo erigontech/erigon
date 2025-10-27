@@ -21,7 +21,11 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -55,6 +59,22 @@ func (ms *MessageSender) SendNewBlock(ctx context.Context, peerId *PeerId, req e
 	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_NEW_BLOCK_66, req, peerId)
 }
 
+func (ms *MessageSender) SendBlockRangeUpdate(ctx context.Context, req eth.BlockRangeUpdatePacket) error {
+	return ms.sendMessageAllPeers(ctx, sentryproto.MessageId_BLOCK_RANGE_UPDATE_69, req)
+}
+
+func (ms *MessageSender) SupportsBlockRangeUpdate(ctx context.Context) (bool, error) {
+	reply, err := ms.sentryClient.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		return false, err
+	}
+	version, ok := direct.ProtocolToUintMap[reply.Protocol]
+	if !ok {
+		return false, fmt.Errorf("unknown sentry protocol %q", reply.Protocol.String())
+	}
+	return version >= direct.ETH69, nil
+}
+
 func (ms *MessageSender) sendMessageToPeer(ctx context.Context, messageId sentryproto.MessageId, data any, peerId *PeerId) error {
 	rlpData, err := rlp.EncodeToBytes(data)
 	if err != nil {
@@ -79,4 +99,18 @@ func (ms *MessageSender) sendMessageToPeer(ctx context.Context, messageId sentry
 	}
 
 	return nil
+}
+
+func (ms *MessageSender) sendMessageAllPeers(ctx context.Context, messageId sentryproto.MessageId, data any) error {
+	rlpData, err := rlp.EncodeToBytes(data)
+	if err != nil {
+		return err
+	}
+
+	_, err = ms.sentryClient.SendMessageToAll(ctx, &sentryproto.OutboundMessageData{
+		Id:   messageId,
+		Data: rlpData,
+	})
+
+	return err
 }
