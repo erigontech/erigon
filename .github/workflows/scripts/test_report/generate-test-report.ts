@@ -24,7 +24,6 @@ const acceptedWorkflows = [
     '.github/workflows/qa-txpool-performance-test.yml',
     '.github/workflows/test-all-erigon-race.yml',
     //'.github/workflows/test-all-erigon.yml',
-    //'.github/workflows/test-erigon-is-library.yml',
     '.github/workflows/test-hive-eest.yml',
     '.github/workflows/test-hive.yml',
     '.github/workflows/test-integration-caplin.yml',

@@ -195,9 +195,6 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-ext:
-	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
-
 ## test-short:                run short tests with a 10m timeout
 test-short:
 	@{ \
