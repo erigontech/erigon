@@ -1402,11 +1402,11 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		zombieDies := chainRules.IsSpuriousDragon
+		zombieDies := chainRules.IsSpuriousDragon // for arbitrum chains after Spurious Dragon empty accounts preserved as escrow addresses
 		if chainRules.IsArbitrum {
 			// TODO (awskii): review this condition, possibly not required at all.
 			// Somewhy this change is required only for arb1 chain.
-			// zombieDies = chainRules.ArbOSVersion < chain.ArbosVersion_30
+			// zombieDies = chainRules.ArbOSVersion < chain.rrbosVersion_30
 			if bi, exists := sdb.balanceInc[addr]; exists && bi.isEscrow {
 				zombieDies = false
 			}
