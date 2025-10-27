@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state_test
+package test
 
 import (
 	"context"
@@ -62,7 +62,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	logger := log.New()
 	stepSize := uint64(100)
 	ctx := context.Background()
-	db, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), stepSize)
 	dirs := agg.Dirs()
 
 	tx, err := db.BeginTemporalRw(context.Background())
@@ -112,7 +112,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
 			encodedState, err := cs.Encode()
 			require.NoError(t, err)
-			err = domains.DomainPut(kv.CommitmentDomain, tx, KeyCommitmentState, encodedState, txNum, nil, 0)
+			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil, 0)
 			require.NoError(t, err)
 		}
 	}
@@ -198,7 +198,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	ctx := context.Background()
 	aggStep := uint64(20)
 
-	db, _ := testDbAndAggregatorv3(t, aggStep)
+	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -296,7 +296,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	}
 
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, 10)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), 10)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -450,7 +450,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 
 	t.Parallel()
 	aggStep := uint64(2)
-	db, agg := testDbAndAggregatorv3(t, aggStep)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -576,7 +576,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(5)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), stepSize)
 
 	ctx := context.Background()
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -650,7 +650,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	}
 
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, 5)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), 5)
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -815,15 +815,6 @@ func generateSharedDomainsUpdates(t *testing.T, domains *execctx.SharedDomains, 
 		}
 	}
 	return usedKeys
-}
-
-func generateRandomKey(r *rndGen, size uint64) string {
-	return string(generateRandomKeyBytes(r, size))
-}
-func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
-	key := make([]byte, size)
-	r.Read(key)
-	return key
 }
 
 func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalTx, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
