@@ -470,10 +470,7 @@ func (s *sharedUDPConn) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err err
 	if !ok {
 		return 0, nil, errors.New("connection was closed")
 	}
-	l := len(packet.Data)
-	if l > len(b) {
-		l = len(b)
-	}
+	l := min(len(packet.Data), len(b))
 	copy(b[:l], packet.Data[:l])
 	return l, packet.Addr, nil
 }
