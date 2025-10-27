@@ -721,9 +721,6 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	receiptClient.SetRequestLimit(rate.Limit(900), 5)
-	client.SetRequestLimit(rate.Limit(5000), 50)
-
 	const batchSize = 20
 	return GetAndCommitBlocks(context.Background(), db, client, receiptClient, start, latestBlock.Uint64(), batchSize, verification, isArbitrum, noWrite)
 }
@@ -743,6 +740,9 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *
 	)
 
 	defer logEvery.Stop()
+
+	receiptClient.SetRequestLimit(rate.Limit(900), 5)
+	client.SetRequestLimit(rate.Limit(5000), 50)
 
 	prevReceiptTime.Store(uint64(time.Now().Unix()))
 
