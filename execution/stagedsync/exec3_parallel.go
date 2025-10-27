@@ -122,15 +122,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	pe.resetWorkers(ctx, pe.rs, rwTx)
 
-	maxExecBlockNum := maxBlockNum
+	var maxExecBlockNum uint64
+	if blockLimit > 0 {
+		maxExecBlockNum = min(startBlockNum+blockLimit-1, maxBlockNum)
+	} else {
+		maxExecBlockNum = maxBlockNum
+	}
 
 	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
-		var errExhausted *ErrLoopExhausted
-		if errors.As(err, &errExhausted) {
-			maxExecBlockNum = errExhausted.To
-		} else {
-			return nil, rwTx, err
-		}
+		return nil, rwTx, err
 	}
 
 	var lastExecutedLog time.Time
