@@ -167,7 +167,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlp.RlpSerializable) e
 
 func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
-	pt := rlp.GenerateStructLen(hb.lenPrefix[:], uint64(totalLen))
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalLen)
 
 	var writer io.Writer
 	var reader io.Reader
@@ -451,7 +451,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		kl = 1
 	}
 	totalLen := kp + kl + 33
-	pt := rlp.GenerateStructLen(hb.lenPrefix[:], uint64(totalLen))
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalLen)
 	hb.sha.Reset()
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
@@ -560,7 +560,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	hb.sha.Reset()
-	pt := rlp.GenerateStructLen(hb.lenPrefix[:], uint64(totalSize))
+	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalSize)
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
