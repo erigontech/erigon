@@ -20,17 +20,14 @@
 package vm
 
 import (
+	"maps"
+	"slices"
 	"testing"
-
-	"github.com/erigontech/erigon/common"
 )
 
 func FuzzPrecompiledContracts(f *testing.F) {
 	// Create list of addresses
-	var addrs []common.Address
-	for k := range allPrecompiles {
-		addrs = append(addrs, k)
-	}
+	addrs := slices.Collect(maps.Keys(allPrecompiles))
 	f.Fuzz(func(t *testing.T, addr uint8, input []byte) {
 		a := addrs[int(addr)%len(addrs)]
 		p := allPrecompiles[a]
