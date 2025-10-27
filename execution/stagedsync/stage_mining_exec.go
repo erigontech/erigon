@@ -57,7 +57,7 @@ type MiningExecCfg struct {
 	blockReader services.FullBlockReader
 	vmConfig    *vm.Config
 	tmpdir      string
-	interrupt   *int32
+	interrupt   *atomic.Bool
 	payloadId   uint64
 	txnProvider txnprovider.TxnProvider
 }
@@ -70,7 +70,7 @@ func StageMiningExecCfg(
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	tmpdir string,
-	interrupt *int32,
+	interrupt *atomic.Bool,
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
@@ -175,7 +175,7 @@ func SpawnMiningExecStage(s *StageState, sd *execctx.SharedDomains, tx kv.Tempor
 
 			// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
 			if len(txns) < amount {
-				if interrupt != nil && atomic.LoadInt32(interrupt) == 0 {
+				if interrupt != nil && !interrupt.Load() {
 					// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 					// since there may be new txns that can arrive
 					time.Sleep(50 * time.Millisecond)
@@ -437,7 +437,7 @@ func addTransactionsToMiningBlock(
 	txns types.Transactions,
 	coinbase common.Address,
 	ibs *state.IntraBlockState,
-	interrupt *int32,
+	interrupt *atomic.Bool,
 	payloadId uint64,
 	logger log.Logger,
 ) (types.Logs, bool, error) {
@@ -522,7 +522,7 @@ LOOP:
 			return nil, true, err
 		}
 
-		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil {
+		if interrupt != nil && interrupt.Load() && stopped == nil {
 			logger.Debug("Transaction adding was requested to stop", "payload", payloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)

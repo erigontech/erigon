@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -471,7 +472,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	mock.PendingBlocks = miner.PendingResultCh
 	mock.MinedBlocks = miner.MiningResultCh
 	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
+	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&cfg.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
@@ -799,7 +800,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		ms.ReceiveWg.Add(1)
 	}
 	initialCycle, firstCycle := MockInsertAsInitialCycle, false
-	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
+	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil, nil, nil)
 
 	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, nil, nil, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
