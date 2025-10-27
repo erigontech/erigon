@@ -86,6 +86,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
+	startTime := time.Now()
 	blockRoot := cfg.startingRoot
 	currentSlot := cfg.startingSlot
 
@@ -192,7 +193,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	isBackfilling := atomic.Bool{}
 
 	go func() {
-		startTime := time.Now()
 		initialProgress := cfg.downloader.Progress()
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
@@ -210,7 +210,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
-				speed := float64(cfg.downloader.Progress()-initialProgress) / time.Since(startTime).Seconds()
+				speed := float64(initialProgress-currProgress) / time.Since(startTime).Seconds()
 
 				if speed == 0 || initialBeaconBlock == nil {
 					continue
@@ -256,9 +256,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					remaining := float64(highestBlockSeen - lowestBlockToReach)
+					toprocess := highestBlockSeen - lowestBlockToReach
+					processed := highestBlockSeen - uint64(currEth1Progress.Load())
+					remaining := float64(toprocess - processed)
 					log.Info("Downloading Execution History", "progress",
-						fmt.Sprintf("%d/%d", highestBlockSeen-uint64(currEth1Progress.Load()), highestBlockSeen-lowestBlockToReach),
+						fmt.Sprintf("%d/%d", processed, toprocess),
 						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {

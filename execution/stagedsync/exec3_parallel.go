@@ -298,7 +298,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									case progress, ok := <-commitProgress:
 										if !ok {
 											if !hasLoggedCommittments || time.Since(lastCommitedLog) > logInterval/20 {
-												logCommitted(lastProgress)
+												pe.LogCommitted(commitStart,
+													uint64(uncommittedBlocks), uncommittedTransactions,
+													uint64(uncommittedGas), stepsInDb, lastProgress)
 											}
 											return
 										}
