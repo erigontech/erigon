@@ -147,7 +147,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			g.Reset(offset)
 			for i := 0; i < hi.hc.h.HistoryValuesOnCompressedPage && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
+				histKey := historyKeyInDB(txNum, hi.nextKey, hi.hc.stepSize, nil)
 				if bytes.Equal(histKey, k) {
 					hi.nextVal = v
 					break
@@ -441,7 +441,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			g.Reset(offset)
 			for i := 0; i < hi.hc.h.HistoryValuesOnCompressedPage && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
+				histKey := historyKeyInDB(txNum, hi.nextKey, hi.hc.h.stepSize, nil)
 				if bytes.Equal(histKey, k) {
 					hi.nextVal = v
 					break
@@ -490,6 +490,10 @@ type HistoryChangesIterDB struct {
 	valsTable       string
 	limit, endTxNum int
 	startTxKey      [8]byte
+
+	startTxNumBytes [8]byte
+	step            uint64
+	stepSize        uint64
 
 	nextKey, nextVal []byte
 	k, v             []byte
