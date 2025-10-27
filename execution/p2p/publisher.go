@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package polygonp2p
+package p2p
 
 import (
 	"context"
@@ -26,12 +26,11 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-func NewPublisher(logger log.Logger, messageSender *p2p.MessageSender, peerTracker *p2p.PeerTracker) *Publisher {
+func NewPublisher(logger log.Logger, messageSender *MessageSender, peerTracker *PeerTracker) *Publisher {
 	return &Publisher{
 		logger:        logger,
 		messageSender: messageSender,
@@ -53,8 +52,8 @@ func NewPublisher(logger log.Logger, messageSender *p2p.MessageSender, peerTrack
 // then newly enqueued publish tasks will get dropped.
 type Publisher struct {
 	logger        log.Logger
-	messageSender *p2p.MessageSender
-	peerTracker   *p2p.PeerTracker
+	messageSender *MessageSender
+	peerTracker   *PeerTracker
 	tasks         chan publishTask
 }
 
@@ -70,6 +69,14 @@ func (p Publisher) PublishNewBlockHashes(block *types.Block) {
 	p.enqueueTask(publishTask{
 		taskType: newBlockHashesPublishTask,
 		block:    block,
+	})
+}
+
+func (p Publisher) PublishBlockRangeUpdate(packet eth.BlockRangeUpdatePacket) {
+	packetCopy := packet
+	p.enqueueTask(publishTask{
+		taskType:         blockRangeUpdatePublishTask,
+		blockRangeUpdate: &packetCopy,
 	})
 }
 
@@ -108,6 +115,8 @@ func (p Publisher) processPublishTask(ctx context.Context, t publishTask) {
 		p.processNewBlocksPublishTask(ctx, t)
 	case newBlockHashesPublishTask:
 		p.processNewBlockHashesPublishTask(ctx, t)
+	case blockRangeUpdatePublishTask:
+		p.processBlockRangeUpdatePublishTask(ctx, t)
 	default:
 		panic(fmt.Sprintf("unknown task type: %v", t.taskType))
 	}
@@ -186,9 +195,10 @@ func (p Publisher) processNewBlockHashesPublishTask(ctx context.Context, t publi
 }
 
 type publishTask struct {
-	taskType publishTaskType
-	block    *types.Block
-	td       *big.Int
+	taskType         publishTaskType
+	block            *types.Block
+	td               *big.Int
+	blockRangeUpdate *eth.BlockRangeUpdatePacket
 }
 
 type publishTaskType int
@@ -196,4 +206,33 @@ type publishTaskType int
 const (
 	newBlockHashesPublishTask publishTaskType = iota
 	newBlockPublishTask
+	blockRangeUpdatePublishTask
 )
+
+func (p Publisher) processBlockRangeUpdatePublishTask(ctx context.Context, t publishTask) {
+	if t.blockRangeUpdate == nil {
+		return
+	}
+
+	supported, err := p.messageSender.SupportsBlockRangeUpdate(ctx)
+	if err != nil {
+		p.logger.Warn(
+			"[p2p-publisher] could not determine block range support",
+			"err", err,
+		)
+		return
+	}
+	if !supported {
+		return
+	}
+
+	packet := *t.blockRangeUpdate
+	if err := p.messageSender.SendBlockRangeUpdate(ctx, packet); err != nil {
+		p.logger.Warn(
+			"[p2p-publisher] could not publish block range update to peer",
+			"earliest", packet.Earliest,
+			"latest", packet.Latest,
+			"err", err,
+		)
+	}
+}
