@@ -715,6 +715,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.executionP2PPeerTracker = executionPeerTracker
 	backend.executionP2PPublisher = executionPublisher
 
+	var executionFetcher execp2p.Fetcher
+	executionFetcher = execp2p.NewFetcher(logger, executionMessageListener, executionMessageSender)
+	executionFetcher = execp2p.NewPenalizingFetcher(logger, executionFetcher, executionPeerPenalizer)
+	executionFetcher = execp2p.NewTrackingFetcher(executionFetcher, executionPeerTracker)
+	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, executionPeerPenalizer, executionPeerTracker, tmpdir)
+
 	// limit "new block" broadcasts to at most 10 random peers at time
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
 
@@ -914,7 +920,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger, stages.ModeBlockProduction)
 
 	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
+	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
@@ -1062,11 +1068,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			blockReader,
 			backend.chainDB,
 			chainConfig,
-			tmpdir,
 			config.Sync,
-			sentryMux(sentries),
-			executionMessageListener,
-			executionPeerTracker,
+			bbd,
 		),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		config.Miner.EnabledPOS,
@@ -1697,26 +1700,27 @@ func (s *Ethereum) Start() error {
 
 	if s.executionP2PMessageListener != nil && s.executionP2PPeerTracker != nil && s.executionP2PPublisher != nil {
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[execution-p2p] message listener goroutine terminated")
+			defer s.logger.Info("[p2p] MessageListener goroutine terminated")
 			err := s.executionP2PMessageListener.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("[execution-p2p] message listener failed", "err", err)
+				s.logger.Error("[p2p] MessageListener failed", "err", err)
 			}
 			return err
 		})
+
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[execution-p2p] peer tracker goroutine terminated")
+			defer s.logger.Info("[p2p] PeerTracker goroutine terminated")
 			err := s.executionP2PPeerTracker.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("[execution-p2p] peer tracker failed", "err", err)
+				s.logger.Error("[p2p] PeerTracker failed", "err", err)
 			}
 			return err
 		})
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[execution-p2p] publisher goroutine terminated")
+			defer s.logger.Info("[p2p] publisher goroutine terminated")
 			err := s.executionP2PPublisher.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("[execution-p2p] publisher failed", "err", err)
+				s.logger.Error("[p2p] publisher failed", "err", err)
 			}
 			return err
 		})
