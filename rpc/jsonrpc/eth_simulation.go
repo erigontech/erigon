@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -148,7 +148,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := dbstate.NewSharedDomains(tx, api.logger)
+	sharedDomains, err := execctx.NewSharedDomains(tx, api.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +376,7 @@ func (s *simulator) simulateBlock(
 	ctx context.Context,
 	tx kv.TemporalTx,
 	txNumReader rawdbv3.TxNumsReader,
-	sharedDomains *dbstate.SharedDomains,
+	sharedDomains *execctx.SharedDomains,
 	bsc *SimulatedBlock,
 	header *types.Header,
 	parent *types.Header,
