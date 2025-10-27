@@ -16,7 +16,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -59,11 +58,17 @@ var Arbitrum = cli.BoolFlag{
 	Value: false,
 }
 
+var ReceiptRpcAddr = cli.StringFlag{
+	Name:  "l2rpc.receipt",
+	Usage: "Separate RPC address to fetch receipts from (if different from rpcaddr)",
+	Value: "",
+}
+
 var Command = cli.Command{
 	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
 	Name:        "genfromrpc",
 	Usage:       "genfromrpc utilities",
-	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock, &Arbitrum},
+	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock, &Arbitrum, &ReceiptRpcAddr},
 	Description: ``,
 }
 
@@ -680,15 +685,15 @@ func genFromRPc(cliCtx *cli.Context) error {
 	verification := cliCtx.Bool(Verify.Name)
 	isArbitrum := cliCtx.Bool(Arbitrum.Name)
 
-	urlReciept := dbg.EnvString("ERIGON_ARB_RECEIPT_URL", "")
+	receiptRpcAddr := cliCtx.String(ReceiptRpcAddr.Name)
 	var receiptClient *rpc.Client
-	if isArbitrum && urlReciept != "" {
-		receiptClient, err = rpc.Dial(urlReciept, log.Root())
+	if isArbitrum && receiptRpcAddr != "" {
+		receiptClient, err = rpc.Dial(receiptRpcAddr, log.Root())
 		if err != nil {
-			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
+			log.Warn("Error connecting to receipt RPC", "err", err, "url", receiptRpcAddr)
 			return err
 		}
-		log.Info("Connected to receipt RPC", "url", urlReciept)
+		log.Info("Connected to receipt RPC", "url", receiptRpcAddr)
 	}
 
 	db := mdbx.MustOpen(dirs.Chaindata)

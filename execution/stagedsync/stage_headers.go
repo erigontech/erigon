@@ -75,7 +75,8 @@ type HeadersCfg struct {
 
 	syncConfig ethconfig.Sync
 
-	L2RPCAddr string // L2 RPC address for Arbitrum
+	L2RPCAddr      string // L2 RPC address for Arbitrum
+	ReceiptRPCAddr string // L2 RPC address for fetching receipts (if different from L2RPCAddr)
 }
 
 func StageHeadersCfg(
@@ -93,7 +94,8 @@ func StageHeadersCfg(
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
-	L2RPCAddr string, // L2 RPC address for Arbitrum
+	L2RPCAddr string,
+	ReceiptRPCAddr string,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -111,6 +113,7 @@ func StageHeadersCfg(
 		blockWriter:       blockWriter,
 		notifications:     notifications,
 		L2RPCAddr:         L2RPCAddr,
+		ReceiptRPCAddr:    ReceiptRPCAddr,
 	}
 }
 
@@ -148,12 +151,11 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return err
 	}
 
-	urlReciept := dbg.EnvString("ERIGON_ARB_RECEIPT_URL", "")
 	var receiptClient *rpc.Client
-	if urlReciept != "" {
-		receiptClient, err = rpc.Dial(urlReciept, log.Root())
+	if cfg.ReceiptRPCAddr != "" {
+		receiptClient, err = rpc.Dial(cfg.ReceiptRPCAddr, log.Root())
 		if err != nil {
-			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
+			log.Warn("Error connecting to receipt RPC", "err", err, "url", cfg.ReceiptRPCAddr)
 			return err
 		}
 	}
