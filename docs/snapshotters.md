@@ -27,7 +27,6 @@ What to write about?
 SETUP:
 - what are the steps to setup a new snapshotter for a new chain or release (assume not recycling the same server)?
 - some repo from which erigon start flags were been downloaded (and what flags must be there)?
-- INFO: talk a bit about integrity checks, where to find it, purpose, encourage to think and add integrity check.
 
 MANUAL interventions on the snapshotters:
 - get pem from Olex to get into the server
@@ -42,3 +41,6 @@ MANUAL interventions on the snapshotters:
 - compact_domains optimization
 
 
+"INFO" stuff:
+- talk a bit about integrity checks, where to find it, purpose, encourage to think and add integrity check.
+- link to Michele's presentations
