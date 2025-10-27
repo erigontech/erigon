@@ -214,6 +214,8 @@ type HistoryRangeAsOfDB struct {
 	startTxNum uint64
 	startTxKey [8]byte
 
+	step uint64
+
 	k, v, kBackup, vBackup []byte
 	err                    error
 
