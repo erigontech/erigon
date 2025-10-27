@@ -18,6 +18,7 @@ package state
 
 import (
 	"math/big"
+	"unique"
 
 	"github.com/holiman/uint256"
 
@@ -67,4 +68,28 @@ type TxContext struct {
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
+}
+
+type Address unique.Handle[common.Address]
+
+func InternAddress(a common.Address) Address {
+	return Address(unique.Make(a))
+}
+
+func (a Address) Value() common.Address {
+	return unique.Handle[common.Address](a).Value()
+}
+
+func (a Address) Handle() unique.Handle[common.Address] {
+	return unique.Handle[common.Address](a)
+}
+
+type StorageKey unique.Handle[common.Hash]
+
+func InternKey(k common.Hash) StorageKey {
+	return StorageKey(unique.Make(k))
+}
+
+func (k StorageKey) Value() common.Hash {
+	return unique.Handle[common.Hash](k).Value()
 }

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
@@ -316,16 +317,16 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 	return true
 }
 
-var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struct{} {
-	ta := map[common.Address]struct{}{}
+var tracedAccounts map[unique.Handle[common.Address]]struct{} = func() map[unique.Handle[common.Address]]struct{} {
+	ta := map[unique.Handle[common.Address]]struct{}{}
 	for _, account := range TraceAccounts {
 		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
-		ta[common.HexToAddress(account)] = struct{}{}
+		ta[unique.Make(common.HexToAddress(account))] = struct{}{}
 	}
 	return ta
 }()
 
-func TraceAccount(addr common.Address) bool {
+func TraceAccount(addr unique.Handle[common.Address]) bool {
 	_, ok := tracedAccounts[addr]
 	return ok
 }
