@@ -349,8 +349,6 @@ func TestForkableAggState(t *testing.T) {
 }
 
 func TestMergedFileGet(t *testing.T) {
-	t.Skip("issue #17532")
-
 	// ideally - smallest step file => adduncompressed word (fast build)
 	// merged file -- addWord (compressed)
 	// this reflects in the GetFiles() as well...ensure that is the case, and correct logic is applied
