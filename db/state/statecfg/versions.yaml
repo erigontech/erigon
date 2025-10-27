@@ -186,7 +186,7 @@ bodies:
     block:
         seg:
             current: v1.1
-            min: v1.1
+            min: v1.0
         idx:
             current: v1.1
             min: v1.0

@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 type serialExecutor struct {
