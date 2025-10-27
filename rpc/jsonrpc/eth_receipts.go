@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/RoaringBitmap/roaring/v2"
 
@@ -140,6 +141,34 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			return nil, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
 		}
 		end = latest
+	}
+
+	// Wait for execution to catch up to the requested block range.
+	// This prevents returning empty results when blocks exist but haven't been executed yet.
+	const maxWait = 10 * time.Second
+	startTime := time.Now()
+
+	for {
+		latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		if end <= latestExecuted {
+			break
+		}
+
+		if time.Since(startTime) >= maxWait {
+			return nil, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing, timed out after %v)",
+				begin, end, latestExecuted, maxWait)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			// Continue polling immediately (no sleep interval)
+		}
 	}
 
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit)
