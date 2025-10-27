@@ -292,11 +292,7 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 		i++
 	}
 
-	end := i
-
-	if i > len(name) {
-		end = len(name)
-	}
+	end := min(i, len(name))
 
 	block, err = strconv.ParseUint(name[start:end], 10, 64)
 	if err != nil {
