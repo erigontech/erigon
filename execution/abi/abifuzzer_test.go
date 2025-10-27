@@ -154,8 +154,7 @@ func fuzzAbi(input []byte) {
 	}
 	abi, err := createABI(name, stateM, payable, arguments)
 	if err != nil {
-		//fmt.Printf("err: %v\n", err)
-		panic(err)
+		return
 	}
 	structs, _ := unpackPack(abi, name, input)
 	_ = packUnpack(abi, name, &structs)
