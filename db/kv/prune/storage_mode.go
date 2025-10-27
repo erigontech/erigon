@@ -156,7 +156,6 @@ type BlockAmount interface {
 	Enabled() bool
 	toValue() uint64
 	dbType() []byte
-	useDefaultValue() bool
 }
 
 // Distance amount of blocks to keep in DB
@@ -168,10 +167,9 @@ type BlockAmount interface {
 // may delete whole db - because of uint64 underflow when pruningDistance > currentStageProgress
 type Distance uint64
 
-func (p Distance) Enabled() bool         { return p != math.MaxUint64 }
-func (p Distance) toValue() uint64       { return uint64(p) }
-func (p Distance) useDefaultValue() bool { return uint64(p) == config3.FullImmutabilityThreshold }
-func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
+func (p Distance) Enabled() bool   { return p != math.MaxUint64 }
+func (p Distance) toValue() uint64 { return uint64(p) }
+func (p Distance) dbType() []byte  { return kv.PruneTypeOlder }
 
 func (p Distance) PruneTo(stageHead uint64) uint64 {
 	if uint64(p) > stageHead {

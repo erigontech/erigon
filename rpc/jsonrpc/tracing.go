@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
@@ -63,6 +63,11 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return err
+	}
+
+	if (blockNrOrHash.BlockHash == nil && hash == common.Hash{}) {
+		stream.WriteNil()
+		return fmt.Errorf("block #%d not found", *blockNrOrHash.BlockNumber)
 	}
 
 	if blockNumber == 0 {

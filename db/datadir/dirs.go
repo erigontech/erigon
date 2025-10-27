@@ -19,7 +19,6 @@ package datadir
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 // Dirs is the file system folder the node should use for any data storage

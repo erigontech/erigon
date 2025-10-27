@@ -38,13 +38,11 @@ import (
 
 func TestParseTransactionRLP(t *testing.T) {
 	for _, testSet := range allNetsTestCases {
-		testSet := testSet
 		t.Run(strconv.Itoa(int(testSet.chainID.Uint64())), func(t *testing.T) {
 			require := require.New(t)
 			ctx := NewTxnParseContext(testSet.chainID)
 			txn, txnSender := &TxnSlot{}, [20]byte{}
 			for i, tt := range testSet.tests {
-				tt := tt
 				t.Run(strconv.Itoa(i), func(t *testing.T) {
 					payload := hexutil.MustDecodeHex(tt.PayloadStr)
 					parseEnd, err := ctx.ParseTransaction(payload, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
@@ -515,6 +513,46 @@ func TestInvalidWrapperVersionAcceptance(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	baseWrapper := types.MakeWrappedBlobTxn(chainID)
+
+	baseBuf := &bytes.Buffer{}
+	require.NoError(t, baseWrapper.MarshalBinaryWrapped(baseBuf))
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.withSender = false
+
+	// Sanity-check baseline payload parses successfully.
+	var validSlot TxnSlot
+	_, err := ctx.ParseTransaction(baseBuf.Bytes(), 0, &validSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.NoError(t, err)
+
+	// Commitments > blobs.
+	moreCommitmentsWrapper := types.MakeWrappedBlobTxn(chainID)
+	moreCommitmentsWrapper.Commitments = append(moreCommitmentsWrapper.Commitments, types.KZGCommitment{})
+
+	moreBuf := &bytes.Buffer{}
+	require.NoError(t, moreCommitmentsWrapper.MarshalBinaryWrapped(moreBuf))
+
+	var moreSlot TxnSlot
+	_, err = ctx.ParseTransaction(moreBuf.Bytes(), 0, &moreSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "more commitments than blobs")
+
+	// Commitments < blobs.
+	fewerCommitmentsWrapper := types.MakeWrappedBlobTxn(chainID)
+	fewerCommitmentsWrapper.Commitments = fewerCommitmentsWrapper.Commitments[:len(fewerCommitmentsWrapper.Commitments)-1]
+
+	fewerBuf := &bytes.Buffer{}
+	require.NoError(t, fewerCommitmentsWrapper.MarshalBinaryWrapped(fewerBuf))
+
+	var fewerSlot TxnSlot
+	_, err = ctx.ParseTransaction(fewerBuf.Bytes(), 0, &fewerSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "fewer commitments than blobs")
 }
 
 func TestSetCodeAuthSignatureRecover(t *testing.T) {

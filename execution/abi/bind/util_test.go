@@ -62,8 +62,6 @@ func TestWaitDeployed(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	for name, test := range waitDeployedTests {
-		name := name
-		test := test
 
 		t.Run(name, func(t *testing.T) {
 			backend := backends.NewSimulatedBackend(t,

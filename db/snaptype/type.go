@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -351,14 +352,7 @@ func (s snapType) IdxFileName(ver version.Version, from uint64, to uint64, index
 		index = []Index{s.indexes[0]}
 	} else {
 		i := index[0]
-		found := false
-
-		for _, index := range s.indexes {
-			if i == index {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(s.indexes, i)
 
 		if !found {
 			return ""
