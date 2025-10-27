@@ -813,7 +813,8 @@ Loop:
 		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
 		if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
 			if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
-				return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+				errExhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+				break
 			}
 		}
 	}
