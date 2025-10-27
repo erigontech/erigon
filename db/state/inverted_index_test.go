@@ -773,9 +773,9 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		}).MustOpen()
 		tb.Cleanup(db.Close)
 		salt := uint32(1)
-		cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, Version: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+		cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 		cfg.Accessors = statecfg.AccessorHashMap
-		ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
+		ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 		require.NoError(tb, err)
 		ii.DisableFsync()
 		ii.salt.Store(&salt)
