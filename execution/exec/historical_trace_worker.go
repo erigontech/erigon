@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package exec3
+package exec
 
 import (
 	"context"
@@ -39,8 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
+	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -51,8 +50,8 @@ import (
 
 type HistoricalTraceWorker struct {
 	consumer TraceConsumer
-	in       *exec.QueueWithRetry
-	out      *exec.ResultsQueue
+	in       *QueueWithRetry
+	out      *ResultsQueue
 
 	stateReader *state.HistoryReaderV3
 	ibs         *state.IntraBlockState
@@ -81,20 +80,20 @@ type HistoricalTraceWorker struct {
 
 type TraceConsumer interface {
 	//Reduce receiving results of execution. They are sorted and have no gaps.
-	Reduce(br *exec.BlockResult, task *exec.TxResult, tx kv.TemporalTx) error
+	Reduce(br *BlockResult, task *TxResult, tx kv.TemporalTx) error
 }
 
-type TraceConsumerFunc func(br *exec.BlockResult, task *exec.TxResult, tx kv.TemporalTx) error
+type TraceConsumerFunc func(br *BlockResult, task *TxResult, tx kv.TemporalTx) error
 
-func (f TraceConsumerFunc) Reduce(br *exec.BlockResult, task *exec.TxResult, tx kv.TemporalTx) error {
+func (f TraceConsumerFunc) Reduce(br *BlockResult, task *TxResult, tx kv.TemporalTx) error {
 	return f(br, task, tx)
 }
 
 func NewHistoricalTraceWorker(
 	ctx context.Context,
 	consumer TraceConsumer,
-	in *exec.QueueWithRetry,
-	out *exec.ResultsQueue,
+	in *QueueWithRetry,
+	out *ResultsQueue,
 	background bool,
 	execArgs *ExecArgs,
 	logger log.Logger,
@@ -132,7 +131,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 	}()
 	defer rw.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
-		result := rw.RunTxTask(txTask.(*exec.TxTask))
+		result := rw.RunTxTask(txTask.(*TxTask))
 		if err := rw.out.Add(rw.ctx, result); err != nil {
 			return err
 		}
@@ -140,8 +139,8 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 	return nil
 }
 
-func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
-	var result = exec.TxResult{
+func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
+	var result = TxResult{
 		Task: txTask,
 	}
 
@@ -255,15 +254,15 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 	return &result
 }
 
-func (rw *HistoricalTraceWorker) execAATxn(txTask *exec.TxTask, tracer *calltracer.CallTracer) *exec.TxResult {
-	result := &exec.TxResult{}
+func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.CallTracer) *TxResult {
+	result := &TxResult{}
 
 	if !txTask.InBatch {
 		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
 		startIdx := uint64(txTask.TxIndex)
 		endIdx := startIdx + txTask.AAValidationBatchSize
 
-		validationResults := make([]exec.AAValidationResult, txTask.AAValidationBatchSize+1)
+		validationResults := make([]AAValidationResult, txTask.AAValidationBatchSize+1)
 		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
 		var outerErr error
@@ -282,7 +281,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *exec.TxTask, tracer *calltrac
 					break
 				}
 
-				validationResults[i-startIdx] = exec.AAValidationResult{
+				validationResults[i-startIdx] = AAValidationResult{
 					PaymasterContext: paymasterContext,
 					GasUsed:          validationGasUsed,
 				}
@@ -350,13 +349,13 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *exec.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
+func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
 	g, ctx := errgroup.WithContext(ctx)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
 	resultChannelLimit := workerCount * 128
 	heapLimit := workerCount * 128
-	out := exec.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
+	out := NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
 
 	g.Go(func() (err error) {
 		defer func() {
@@ -380,7 +379,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	return g
 }
 
-func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, toTxNum uint64, outputTxNum *atomic.Uint64, out *exec.ResultsQueue, logger log.Logger) error {
+func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, toTxNum uint64, outputTxNum *atomic.Uint64, out *ResultsQueue, logger log.Logger) error {
 	tx, err := cfg.ChainDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -416,7 +415,7 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 	return nil
 }
 
-func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in *exec.QueueWithRetry, workerCount int, out *exec.ResultsQueue, logger log.Logger) error {
+func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in *QueueWithRetry, workerCount int, out *ResultsQueue, logger log.Logger) error {
 	workers := make([]*HistoricalTraceWorker, workerCount)
 	mapGroup, ctx := errgroup.WithContext(ctx)
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
@@ -438,16 +437,16 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 }
 
 type historicalResultProcessor struct {
-	blockResult exec.BlockResult
+	blockResult BlockResult
 }
 
-func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *ExecArgs, rws *exec.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool, logger log.Logger) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
+func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *ExecArgs, rws *ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool, logger log.Logger) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 
 	outputTxNum = outputTxNumIn
 	for rwsIt.Has(outputTxNum) {
 		result := rwsIt.PopNext()
-		txTask := result.Task.(*exec.TxTask)
+		txTask := result.Task.(*TxTask)
 		outputTxNum++
 
 		hooks := result.TracingHooks()
@@ -510,7 +509,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		}
 
 		if result.IsBlockEnd() {
-			p.blockResult = exec.BlockResult{}
+			p.blockResult = BlockResult{}
 			stopedAtBlockEnd = true
 			if forceStopAtBlockEnd {
 				break
@@ -547,7 +546,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 
 	// "Map-Reduce on history" is conflict-free - means we don't need "Retry" feature.
 	// But still can use this data-type as simple queue.
-	in := exec.NewQueueWithRetry(10_000)
+	in := NewQueueWithRetry(10_000)
 	defer in.Close()
 
 	var WorkerCount = estimate.AlmostAllCPUs()
@@ -631,7 +630,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
-			txTask := &exec.TxTask{
+			txTask := &TxTask{
 				Header:          header,
 				Uncles:          b.Uncles(),
 				Txs:             txs,

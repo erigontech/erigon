@@ -157,18 +157,6 @@ func (e *EngineServer) Start(
 		}
 		return err
 	})
-
-	if e.blockDownloader != nil {
-		eg.Go(func() error {
-			defer e.logger.Debug("[EngineServer] engine block downloader goroutine terminated")
-			err := e.blockDownloader.Run(ctx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				e.logger.Error("[EngineServer] block downloader background goroutine failed", "err", err)
-			}
-			return err
-		})
-	}
-
 	return eg.Wait()
 }
 
@@ -360,7 +348,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, nil)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {

@@ -64,7 +64,6 @@ func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.Statu
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, client := range m.clients {
-		client := client
 
 		client.RLock()
 		protocol := client.protocol
@@ -91,7 +90,6 @@ func (m *sentryMultiplexer) PenalizePeer(ctx context.Context, in *sentryproto.Pe
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			_, err := client.PenalizePeer(gctx, in, opts...)
@@ -106,7 +104,6 @@ func (m *sentryMultiplexer) SetPeerLatestBlock(ctx context.Context, in *sentrypr
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			_, err := client.SetPeerLatestBlock(gctx, in, opts...)
@@ -121,7 +118,6 @@ func (m *sentryMultiplexer) SetPeerMinimumBlock(ctx context.Context, in *sentryp
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			_, err := client.SetPeerMinimumBlock(gctx, in, opts...)
@@ -136,7 +132,6 @@ func (m *sentryMultiplexer) SetPeerBlockRange(ctx context.Context, in *sentrypro
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			_, err := client.SetPeerBlockRange(gctx, in, opts...)
@@ -147,7 +142,7 @@ func (m *sentryMultiplexer) SetPeerBlockRange(ctx context.Context, in *sentrypro
 	return &emptypb.Empty{}, g.Wait()
 }
 
-// Handshake is not performed on the multi-client level
+// HandShake is not performed on the multi-client level
 func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
@@ -155,34 +150,38 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 	var mu sync.Mutex
 
 	for _, client := range m.clients {
-		client := client
 
 		client.RLock()
-		protocol := client.protocol
+		clientProtocol := client.protocol
 		client.RUnlock()
 
-		if protocol < 0 {
-			g.Go(func() error {
-				reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-
-				if err != nil {
-					return err
-				}
-
-				mu.Lock()
-				defer mu.Unlock()
-
-				if reply.Protocol > protocol {
-					protocol = reply.Protocol
-				}
-
-				client.Lock()
-				client.protocol = protocol
-				client.Unlock()
-
-				return nil
-			})
+		if clientProtocol >= 0 {
+			mu.Lock()
+			if clientProtocol > protocol {
+				protocol = clientProtocol
+			}
+			mu.Unlock()
+			continue
 		}
+
+		g.Go(func() error {
+			reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+			if err != nil {
+				return err
+			}
+
+			mu.Lock()
+			if reply.Protocol > protocol {
+				protocol = reply.Protocol
+			}
+			mu.Unlock()
+
+			client.Lock()
+			client.protocol = reply.Protocol
+			client.Unlock()
+
+			return nil
+		})
 	}
 
 	err := g.Wait()
@@ -343,7 +342,6 @@ func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *se
 	}
 
 	for _, peer := range peers {
-		peer := peer
 
 		g.Go(func() error {
 			sentPeers, err := m.clients[peer.clientIndex].SendMessageById(gctx, &sentryproto.SendMessageByIdRequest{
@@ -410,7 +408,6 @@ func (m *sentryMultiplexer) SendMessageToAll(ctx context.Context, in *sentryprot
 	var allSentMutex sync.RWMutex
 
 	for _, peer := range peers {
-		peer := peer
 
 		g.Go(func() error {
 			sentPeers, err := m.clients[peer.clientIndex].SendMessageById(gctx, &sentryproto.SendMessageByIdRequest{
@@ -513,7 +510,6 @@ func (m *sentryMultiplexer) Messages(ctx context.Context, in *sentryproto.Messag
 		defer close(ch)
 
 		for _, client := range m.clients {
-			client := client
 
 			g.Go(func() error {
 				messages, err := client.Messages(gctx, in, opts...)
@@ -556,12 +552,10 @@ func (m *sentryMultiplexer) Messages(ctx context.Context, in *sentryproto.Messag
 func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentryproto.Protocol, opts ...grpc.CallOption) ([]*sentryproto.PeersReply, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
-	var allReplies []*sentryproto.PeersReply = make([]*sentryproto.PeersReply, len(m.clients))
+	var allReplies = make([]*sentryproto.PeersReply, len(m.clients))
 	var allMutex sync.RWMutex
 
 	for i, client := range m.clients {
-		i := i
-		client := client
 
 		client.RLock()
 		protocol := client.protocol
@@ -619,7 +613,6 @@ func (m *sentryMultiplexer) PeerCount(ctx context.Context, in *sentryproto.PeerC
 	var allMutex sync.RWMutex
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			peerCount, err := client.PeerCount(gctx, in, opts...)
@@ -655,7 +648,6 @@ func (m *sentryMultiplexer) PeerById(ctx context.Context, in *sentryproto.PeerBy
 	var peerMutex sync.RWMutex
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			reply, err := client.PeerById(gctx, in, opts...)
@@ -697,7 +689,6 @@ func (m *sentryMultiplexer) PeerEvents(ctx context.Context, in *sentryproto.Peer
 		defer close(ch)
 
 		for _, client := range m.clients {
-			client := client
 
 			g.Go(func() error {
 				messages, err := client.PeerEvents(gctx, in, opts...)
@@ -744,7 +735,6 @@ func (m *sentryMultiplexer) AddPeer(ctx context.Context, in *sentryproto.AddPeer
 	var successMutex sync.RWMutex
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			result, err := client.AddPeer(gctx, in, opts...)
@@ -781,7 +771,6 @@ func (m *sentryMultiplexer) RemovePeer(ctx context.Context, in *sentryproto.Remo
 	var successMutex sync.RWMutex
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			result, err := client.RemovePeer(gctx, in, opts...)
@@ -822,7 +811,6 @@ func (m *sentryMultiplexer) NodeInfos(ctx context.Context, opts ...grpc.CallOpti
 	var allMutex sync.RWMutex
 
 	for _, client := range m.clients {
-		client := client
 
 		g.Go(func() error {
 			info, err := client.NodeInfo(gctx, &emptypb.Empty{}, opts...)

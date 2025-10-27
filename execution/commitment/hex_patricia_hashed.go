@@ -2043,7 +2043,7 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, error) {
 // but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `triedeprecated.Trie`.
 // All the individual tries are combined to create the final witness trie.
 // Because the grid is lacking information about the code in smart contract accounts which is also part of the witness, we need to provide that as an input parameter to this function (`codeReads`)
-func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2156,13 +2156,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 	witnessTrieRootHash := witnessTrie.Root()
 
-	// fmt.Printf("mergedTrieRootHash = %x\n", witnessTrieRootHash)
-
-	if !bytes.Equal(witnessTrieRootHash, expectedRootHash) {
-		return nil, nil, fmt.Errorf("root hash mismatch witnessTrieRootHash(%x)!=expectedRootHash(%x)", witnessTrieRootHash, expectedRootHash)
-	}
-
-	return witnessTrie, rootHash, nil
+	return witnessTrie, witnessTrieRootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
