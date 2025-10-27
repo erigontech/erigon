@@ -366,10 +366,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we need to skip that check for the first block, if we find half-executed data (startTxIndex>0).
-		startTxIndex = tasks[0].(*exec.TxTask).TxIndex
-		if startTxIndex < 0 {
-			startTxIndex = 0
-		}
+		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
 	var gasPool *core.GasPool
