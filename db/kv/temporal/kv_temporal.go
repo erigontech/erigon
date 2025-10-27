@@ -233,6 +233,9 @@ func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
+	return tx.aggtx.StepsInFiles(entitySet...)
+}
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }
