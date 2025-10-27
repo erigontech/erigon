@@ -76,7 +76,7 @@ func NewEngineBlockDownloader(
 ) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(Idle)
-	badHeaders, err := lru.New[common.Hash, common.Hash](1_000_000) // 64mb
+	badHeaders, err := lru.New[common.Hash, common.Hash](1_000) // 6.4mb
 	if err != nil {
 		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
 	}
