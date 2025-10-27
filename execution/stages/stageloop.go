@@ -484,10 +484,7 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 			notifyFrom = *unwindTo
 			isUnwind = true
 		} else {
-			heightSpan := finishStageAfterSync - finishStageBeforeSync
-			if heightSpan > 1024 {
-				heightSpan = 1024
-			}
+			heightSpan := min(finishStageAfterSync-finishStageBeforeSync, 1024)
 			notifyFrom = finishStageAfterSync - heightSpan
 		}
 		notifyFrom++
