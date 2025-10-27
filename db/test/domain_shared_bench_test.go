@@ -24,7 +24,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -33,9 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -61,26 +57,6 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *s
 	dirs := datadir.New(b.TempDir())
 	db := temporaltest.NewTestDBWithStepSize(b, dirs, aggStep)
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
-}
-
-func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
-	return state.New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0)
-}
-
-func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
-	tb.Helper()
-	logger := log.New()
-	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	tb.Cleanup(db.Close)
-
-	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
-	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder()
-	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg, nil)
-	require.NoError(tb, err)
-	return tdb
 }
 
 func composite(k, k2 []byte) []byte {

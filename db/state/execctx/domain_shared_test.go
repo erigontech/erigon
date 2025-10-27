@@ -20,23 +20,52 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand/v2"
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/test"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
+	return state.New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0)
+}
+
+func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
+	tb.Helper()
+	logger := log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
+
+	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	tb.Cleanup(agg.Close)
+	err := agg.OpenFolder()
+	require.NoError(tb, err)
+	tdb, err := temporal.New(db, agg, nil)
+	require.NoError(tb, err)
+	return tdb
+}
+
+func composite(k, k2 []byte) []byte {
+	return append(common.Copy(k), k2...)
+}
 
 func TestSharedDomain_Unwind(t *testing.T) {
 	if testing.Short() {
@@ -46,7 +75,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(100)
-	db := test.newTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
 	ctx := context.Background()
@@ -64,7 +93,6 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
 	count := 10
-	rnd := test.newRnd(0)
 
 	err = rwTx.Commit()
 	require.NoError(t, err)
@@ -115,7 +143,7 @@ Loop:
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 
-	unwindTo := uint64(commitStep * rnd.IntN(int(maxTx)/commitStep))
+	unwindTo := uint64(commitStep * rand.IntN(int(maxTx)/commitStep))
 	//domains.currentChangesAccumulator = nil
 
 	var a [kv.DomainLen][]kv.DomainEntryDiff
@@ -148,7 +176,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 
 	stepSize := uint64(4)
-	db := test.newTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
 	ctx := context.Background()
@@ -194,7 +222,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 				pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, rwTx, test.composite(k0, l0), l0[24:], txNum, pv, step)
+				err = domains.DomainPut(kv.StorageDomain, rwTx, composite(k0, l0), l0[24:], txNum, pv, step)
 				require.NoError(t, err)
 			}
 		}
@@ -291,7 +319,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 	stepSize := uint64(8)
 	require := require.New(t)
-	db := test.newTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 
 	ctx := context.Background()
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -334,7 +362,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil, 0); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainPut(kv.StorageDomain, rwTx, test.composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
+		if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
 			panic(err)
 		}
 	}
@@ -370,7 +398,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 			if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil, 0); err != nil {
 				panic(err)
 			}
-			if err = domains.DomainPut(kv.StorageDomain, rwTx, test.composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
+			if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
 				panic(err)
 			}
 		}
@@ -459,7 +487,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	t.Cleanup(cancel)
 
 	stepSize := uint64(1)
-	db := test.newTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 
 	rwTtx1, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
