@@ -29,8 +29,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	dbstate "github.com/erigontech/erigon/db/state/execctx"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/vm"
@@ -95,7 +94,7 @@ var eip2200Tests = []struct {
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
 }
 
-func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *dbstate.SharedDomains) {
+func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	dirs := datadir.New(t.TempDir())
 
 	db := temporaltest.NewTestDB(t, dirs)
@@ -103,7 +102,7 @@ func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *dbstate.SharedDomains) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
+	sd, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -174,7 +173,7 @@ func TestCreateGas(t *testing.T) {
 	for i, tt := range createGasTests {
 		address := common.BytesToAddress([]byte("contract"))
 
-		domains, err := dbstate.NewSharedDomains(tx, log.New())
+		domains, err := execctx.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 

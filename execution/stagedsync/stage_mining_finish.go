@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -59,7 +59,7 @@ func StageMiningFinishCfg(
 	}
 }
 
-func SpawnMiningFinishStage(s *StageState, sd *dbstate.SharedDomains, tx kv.TemporalRwTx, cfg MiningFinishCfg, quit <-chan struct{}, logger log.Logger) error {
+func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningFinishCfg, quit <-chan struct{}, logger log.Logger) error {
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 

@@ -24,12 +24,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	dbstate "github.com/erigontech/erigon/db/state/execctx"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -81,7 +80,7 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *dbstate.SharedDomains, accounts types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
+func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.SharedDomains, accounts types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
 	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {

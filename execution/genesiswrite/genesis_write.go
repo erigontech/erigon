@@ -32,8 +32,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
-	sd2 "github.com/erigontech/erigon/db/state/execctx"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -45,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -331,7 +330,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer tx.Rollback()
 
-	sd, err := sd2.NewSharedDomains(tx, logger)
+	sd, err := execctx.NewSharedDomains(tx, logger)
 	if err != nil {
 		return nil, nil, err
 	}

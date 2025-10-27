@@ -35,8 +35,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
-	dbstate "github.com/erigontech/erigon/db/state/execctx"
-
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -47,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/state"
@@ -187,7 +186,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := dbstate.NewSharedDomains(tx, log.Root())
+	sd, err := execctx.NewSharedDomains(tx, log.Root())
 	if err != nil {
 		return err
 	}

@@ -13,10 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
@@ -29,6 +25,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 //Sqeeze: ForeignKeys-aware compression of file
