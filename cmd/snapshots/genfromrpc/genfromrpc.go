@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -127,6 +128,14 @@ func getUint256FromField(rawTx map[string]interface{}, field string) *uint256.In
 		return i
 	}
 	return nil
+}
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "429") || strings.Contains(strings.ToLower(errStr), "internal server")
 }
 
 // buildDynamicFeeFields sets the common dynamic fee fields from rawTx.
@@ -946,12 +955,27 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				}
 
 				receiptQueries.Add(1)
-				err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
+
+				maxRetries := 4
+				backoff := time.Millisecond * 150
+
+				for attempt := 0; attempt < maxRetries; attempt++ {
+					err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
+					if err == nil || !isRetryableError(err) {
+						break
+					}
+
+					if attempt < maxRetries-1 {
+						time.Sleep(backoff)
+						backoff *= 2
+					}
+				}
+
 				if err != nil {
 					started := time.Unix(int64(prevReceiptTime.Load()), 0)
 					spent := time.Since(started)
 					log.Info("receipt queries", "total", receiptQueries.Load(), "spent", spent, "avg rate", float64(receiptQueries.Load())/spent.Seconds())
-					return fmt.Errorf("failed to get receipt for tx %s: %w", txData["hash"], err)
+					return fmt.Errorf("failed to get receipt for tx %s after %d attempts: %w", txData["hash"], maxRetries, err)
 				}
 
 				tx.SetTimeboosted(&receipts[idx].timeboosted)
@@ -977,8 +1001,6 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 	return txs, nil
 }
 
-//var blockLimiter = rate.NewLimiter(10000, 100) // limits block fetches
-
 // FetchBlocksBatch fetches multiple blocks concurrently and returns them sorted by block number
 func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]*types.Block, error) {
 	if startBlock >= endBlock {
@@ -996,10 +1018,6 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 	for i := uint64(0); i < actualBatchSize; i++ {
 		idx := i
 		blockNum := startBlock + i
-
-		//if err := blockLimiter.Wait(context.Background()); err != nil {
-		//	return nil, fmt.Errorf("block rate limiter error: %w", err)
-		//}
 
 		eg.Go(func() error {
 			blockNumber := new(big.Int).SetUint64(blockNum)
