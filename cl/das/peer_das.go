@@ -469,6 +469,27 @@ var (
 
 // DownloadMissingColumns downloads the missing columns for the given blocks but not recover the blobs
 func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
+	blocksToProcess := []*cltypes.SignedBlindedBeaconBlock{}
+	for _, block := range blocks {
+		if block.Version() < clparams.FuluVersion {
+			continue
+		}
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			log.Warn("failed to get block root", "err", err)
+			continue
+		}
+		available, err := d.IsDataAvailable(block.Block.Slot, root)
+		if err != nil {
+			log.Warn("failed to check if data is available", "err", err)
+			continue
+		}
+		if !available {
+			continue
+		}
+		blocksToProcess = append(blocksToProcess, block)
+	}
+
 	custodyColumns, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return err
@@ -486,8 +507,8 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 
 	batchBlcokSize := 4
 	wg := sync.WaitGroup{}
-	for i := 0; i < len(blocks); i += batchBlcokSize {
-		blocks := blocks[i:min(i+batchBlcokSize, len(blocks))]
+	for i := 0; i < len(blocksToProcess); i += batchBlcokSize {
+		blocks := blocksToProcess[i:min(i+batchBlcokSize, len(blocksToProcess))]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -633,6 +654,14 @@ mainloop:
 					// no need to schedule recovery for this block because someone else will do it
 					req.removeBlock(entry.slot, entry.blockRoot)
 				}
+				/*available, err := d.IsDataAvailable(entry.slot, entry.blockRoot)
+				if err != nil {
+					log.Debug("failed to check if data is available", "err", err)
+					continue
+				}
+				if available {
+					req.removeBlock(entry.slot, entry.blockRoot)
+				}*/
 			}
 			if req.requestData().Len() == 0 {
 				break mainloop
