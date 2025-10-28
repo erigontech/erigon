@@ -755,7 +755,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *
 
 	defer logEvery.Stop()
 
-	receiptClient.SetRequestLimit(rate.Limit(900), 5)
+	receiptClient.SetRequestLimit(rate.Limit(2), 2)
 	client.SetRequestLimit(rate.Limit(5000), 50)
 
 	prevReceiptTime.Store(uint64(time.Now().Unix()))
