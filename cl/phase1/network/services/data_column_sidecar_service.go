@@ -91,6 +91,8 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return fmt.Errorf("failed to get block root: %v", err)
 	}
 
+	log.Debug("[dataColumnSidecarService] Processing data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
+
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
 		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
 			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
@@ -180,7 +182,7 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
 	}
-	log.Trace("[dataColumnSidecarService] processed data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
+	log.Debug("[dataColumnSidecarService] processed data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
 	return nil
 }
 
