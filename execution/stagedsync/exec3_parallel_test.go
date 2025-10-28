@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -493,7 +494,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -611,7 +612,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 

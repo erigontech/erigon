@@ -14,11 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state_test
+package test
 
 import (
 	"context"
 	"encoding/binary"
+	randOld "math/rand"
+	"math/rand/v2"
 	"sort"
 	"testing"
 
@@ -28,10 +30,38 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
+
+type rndGen struct {
+	*rand.Rand
+	oldGen *randOld.Rand
+}
+
+func newRnd(seed uint64) *rndGen {
+	return &rndGen{
+		Rand:   rand.New(rand.NewChaCha8([32]byte{byte(seed)})),
+		oldGen: randOld.New(randOld.NewSource(int64(seed))),
+	}
+}
+func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
+func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
+
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
+	b.Helper()
+	dirs := datadir.New(b.TempDir())
+	db := temporaltest.NewTestDBWithStepSize(b, dirs, aggStep)
+	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
+}
+
+func composite(k, k2 []byte) []byte {
+	return append(common.Copy(k), k2...)
+}
 
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	stepSize := uint64(100)
@@ -42,7 +72,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -125,7 +155,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
