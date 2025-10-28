@@ -659,10 +659,21 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 				inputTxNum++
 			}
 
+			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
+
+			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
+			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
+			var exhausted *ErrLoopExhausted
+			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
+				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
+					exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+				}
+			}
+
 			te.execRequests <- &execRequest{
 				b.Number().Uint64(), b.Hash(),
 				core.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				txTasks, applyResults, false,
+				txTasks, applyResults, false, exhausted,
 			}
 
 			mxExecBlocks.Add(1)
@@ -671,15 +682,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 				// after history execution no offset will be required
 				offsetFromBlockBeginning = 0
 			}
-
-			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
-
-			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
-			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
-			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
-					return &ErrLoopExhausted{From: blockNum, To: blockNum, Reason: "block limit reached"}
-				}
+			if exhausted != nil {
+				break
 			}
 		}
 
