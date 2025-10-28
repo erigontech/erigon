@@ -484,11 +484,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 			return err
 		}
 		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
-			logger.Debug(
+			logger.Warn(
 				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
 				"duration", duration,
 				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 				"externalTx", useExternalTx,
+				"stack", dbg.Stack(),
 			)
 		}
 	}
@@ -498,11 +499,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		return err
 	}
 	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
-		logger.Debug(
+		logger.Warn(
 			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
 			"duration", duration,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 			"externalTx", useExternalTx,
+			"stack", dbg.Stack(),
 		)
 	}
 
@@ -514,5 +516,6 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 			return err
 		}
 	}
+
 	return nil
 }
