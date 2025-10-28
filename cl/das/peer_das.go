@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -472,6 +473,16 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 	if err != nil {
 		return err
 	}
+
+	// print the custody columns
+	ccs := []uint64{}
+	for column := range custodyColumns {
+		ccs = append(ccs, uint64(column))
+	}
+	sort.Slice(ccs, func(i, j int) bool {
+		return ccs[i] < ccs[j]
+	})
+	log.Debug("DownloadOnlyCustodyColumns", "custody columns", ccs, "count", len(ccs))
 
 	batchBlcokSize := 4
 	wg := sync.WaitGroup{}
