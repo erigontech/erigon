@@ -21,6 +21,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/erigontech/erigon/common"
@@ -311,3 +312,72 @@ func toStringZeroCopy(v []byte) string {
 }
 
 func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+
+type DomainIOMetrics struct {
+	CacheReadCount    int64
+	CacheReadDuration time.Duration
+	CacheGetCount     int64
+	CachePutCount     int64
+	CacheGetSize      int
+	CachePutSize      int
+	DbReadCount       int64
+	DbReadDuration    time.Duration
+	FileReadCount     int64
+	FileReadDuration  time.Duration
+}
+type DomainMetrics struct {
+	sync.RWMutex
+	DomainIOMetrics
+	Domains map[kv.Domain]*DomainIOMetrics
+}
+
+func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.CacheReadCount++
+	readDuration := time.Since(start)
+	dm.CacheReadDuration += readDuration
+	if d, ok := dm.Domains[domain]; ok {
+		d.CacheReadCount++
+		d.CacheReadDuration += readDuration
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{
+			CacheReadCount:    1,
+			CacheReadDuration: readDuration,
+		}
+	}
+}
+
+func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.DbReadCount++
+	readDuration := time.Since(start)
+	dm.DbReadDuration += readDuration
+	if d, ok := dm.Domains[domain]; ok {
+		d.DbReadCount++
+		d.DbReadDuration += readDuration
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{
+			DbReadCount:    1,
+			DbReadDuration: readDuration,
+		}
+	}
+}
+
+func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.FileReadCount++
+	readDuration := time.Since(start)
+	dm.FileReadDuration += readDuration
+	if d, ok := dm.Domains[domain]; ok {
+		d.FileReadCount++
+		d.FileReadDuration += readDuration
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{
+			FileReadCount:    1,
+			FileReadDuration: readDuration,
+		}
+	}
+}
