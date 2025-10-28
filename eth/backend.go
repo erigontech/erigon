@@ -362,14 +362,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var chainConfig *chain.Config
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		chainConfig = chainspec.ChainConfigByChainName("arb1")
-
-		genesis = rawdb.ReadBlock(tx, arbchain.Arb1GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum)
-		if genesis == nil {
-			log.Info("db genesis block is nil")
-			genesis = arbchain.Arb1GenesisBlock()
+		arbOne := chainspec.ChainConfigByChainName("arb1")
+		if config.NetworkID == arbOne.ChainID.Uint64() {
+			chainConfig = arbOne
+			genesis = rawdb.ReadBlock(tx, arbchain.Arb1GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum)
+			if genesis == nil {
+				log.Info("db genesis block is nil")
+				genesis = arbchain.Arb1GenesisBlock()
+			}
+			return nil
 		}
-		return nil
 
 		genesisConfig, err := core.ReadGenesis(tx)
 		if err != nil {
