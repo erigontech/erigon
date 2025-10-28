@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -32,23 +33,25 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
-	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
-	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
-	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
-	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
-	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
-	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
-	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
-	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
-	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
-	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
+	ParentHash          common.Hash                          `json:"parentHash"    gencodec:"required"`
+	FeeRecipient        common.Address                       `json:"feeRecipient"  gencodec:"required"`
+	StateRoot           common.Hash                          `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot        common.Hash                          `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom           hexutil.Bytes                        `json:"logsBloom"     gencodec:"required"`
+	PrevRandao          common.Hash                          `json:"prevRandao"    gencodec:"required"`
+	BlockNumber         hexutil.Uint64                       `json:"blockNumber"   gencodec:"required"`
+	GasLimit            hexutil.Uint64                       `json:"gasLimit"      gencodec:"required"`
+	GasUsed             hexutil.Uint64                       `json:"gasUsed"       gencodec:"required"`
+	Timestamp           hexutil.Uint64                       `json:"timestamp"     gencodec:"required"`
+	ExtraData           hexutil.Bytes                        `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas       *hexutil.Big                         `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash           common.Hash                          `json:"blockHash"     gencodec:"required"`
+	Transactions        []hexutil.Bytes                      `json:"transactions"  gencodec:"required"`
+	Withdrawals         []*types.Withdrawal                  `json:"withdrawals"`
+	BlobGasUsed         *hexutil.Uint64                      `json:"blobGasUsed"`
+	ExcessBlobGas       *hexutil.Uint64                      `json:"excessBlobGas"`
+	BlockAccessListHash *common.Hash                         `json:"blockAccessListHash,omitempty"`
+	BlockAccessList     []*typesproto.BlockAccessListAccount `json:"blockAccessList,omitempty"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -202,6 +205,18 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
+	if header.BlockAccessListHash != nil {
+		converted := gointerfaces.ConvertH256ToHash(header.BlockAccessListHash)
+		hash := common.Hash(converted)
+		res.BlockAccessListHash = &hash
+	}
+	if body.BlockAccessList != nil {
+		if bal, err := eth1_utils.ConvertBlockAccessListFromExecutionProto(body.BlockAccessList); err == nil {
+			res.BlockAccessList = eth1_utils.ConvertBlockAccessListToTypesProto(bal)
+		} else {
+			res.BlockAccessList = make([]*typesproto.BlockAccessListAccount, 0)
+		}
+	}
 	return res
 }
 
@@ -239,6 +254,14 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
 		excessBlobGas := *payload.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
+	}
+	if payload.BlockAccessListHash != nil {
+		converted := gointerfaces.ConvertH256ToHash(payload.BlockAccessListHash)
+		hash := common.Hash(converted)
+		res.BlockAccessListHash = &hash
+	}
+	if payload.BlockAccessList != nil {
+		res.BlockAccessList = payload.BlockAccessList
 	}
 	return res
 }

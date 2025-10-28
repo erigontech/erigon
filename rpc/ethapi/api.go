@@ -453,6 +453,9 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.RequestsHash != nil {
 		result["requestsHash"] = head.RequestsHash
 	}
+	if head.BlockAccessListHash != nil {
+		result["blockAccessListHash"] = head.BlockAccessListHash
+	}
 
 	// For Gnosis only
 	if head.AuRaSeal != nil {
@@ -516,7 +519,92 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		fields["withdrawals"] = block.Withdrawals()
 	}
 
+	if block.BlockAccessList() != nil {
+		fields["blockAccessList"] = rpcMarshalBlockAccessList(block.BlockAccessList())
+	}
+
 	return fields, nil
+}
+
+func rpcMarshalBlockAccessList(list types.BlockAccessList) []rpcBlockAccessAccount {
+	if list == nil {
+		return nil
+	}
+	accounts := make([]rpcBlockAccessAccount, 0, len(list))
+	for _, account := range list {
+		if account == nil {
+			continue
+		}
+		acc := rpcBlockAccessAccount{Address: account.Address}
+		if len(account.StorageChanges) > 0 {
+			acc.StorageChanges = make([]rpcBlockAccessSlotChanges, 0, len(account.StorageChanges))
+			for _, slot := range account.StorageChanges {
+				if slot == nil {
+					continue
+				}
+				slotOut := rpcBlockAccessSlotChanges{Slot: slot.Slot}
+				if len(slot.Changes) > 0 {
+					slotOut.Changes = make([]rpcBlockAccessStorageChange, 0, len(slot.Changes))
+					for _, change := range slot.Changes {
+						if change == nil {
+							continue
+						}
+						slotOut.Changes = append(slotOut.Changes, rpcBlockAccessStorageChange{
+							Index: hexutil.Uint64(change.Index),
+							Value: change.Value,
+						})
+					}
+				}
+				acc.StorageChanges = append(acc.StorageChanges, slotOut)
+			}
+		}
+		if len(account.StorageReads) > 0 {
+			acc.StorageReads = make([]common.Hash, len(account.StorageReads))
+			copy(acc.StorageReads, account.StorageReads)
+		}
+		if len(account.BalanceChanges) > 0 {
+			acc.BalanceChanges = make([]rpcBlockAccessBalanceChange, 0, len(account.BalanceChanges))
+			for _, change := range account.BalanceChanges {
+				if change == nil {
+					continue
+				}
+				val := new(big.Int)
+				if change.Value != nil {
+					val.Set(change.Value)
+				}
+				acc.BalanceChanges = append(acc.BalanceChanges, rpcBlockAccessBalanceChange{
+					Index: hexutil.Uint64(change.Index),
+					Value: (*hexutil.Big)(val),
+				})
+			}
+		}
+		if len(account.NonceChanges) > 0 {
+			acc.NonceChanges = make([]rpcBlockAccessNonceChange, 0, len(account.NonceChanges))
+			for _, change := range account.NonceChanges {
+				if change == nil {
+					continue
+				}
+				acc.NonceChanges = append(acc.NonceChanges, rpcBlockAccessNonceChange{
+					Index: hexutil.Uint64(change.Index),
+					Value: hexutil.Uint64(change.Value),
+				})
+			}
+		}
+		if len(account.CodeChanges) > 0 {
+			acc.CodeChanges = make([]rpcBlockAccessCodeChange, 0, len(account.CodeChanges))
+			for _, change := range account.CodeChanges {
+				if change == nil {
+					continue
+				}
+				acc.CodeChanges = append(acc.CodeChanges, rpcBlockAccessCodeChange{
+					Index: hexutil.Uint64(change.Index),
+					Data:  hexutil.Bytes(change.Data),
+				})
+			}
+		}
+		accounts = append(accounts, acc)
+	}
+	return accounts
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
@@ -544,6 +632,40 @@ type RPCTransaction struct {
 	YParity              *hexutil.Big               `json:"yParity,omitempty"`
 	R                    *hexutil.Big               `json:"r"`
 	S                    *hexutil.Big               `json:"s"`
+}
+
+type rpcBlockAccessStorageChange struct {
+	Index hexutil.Uint64 `json:"index"`
+	Value common.Hash    `json:"value"`
+}
+
+type rpcBlockAccessSlotChanges struct {
+	Slot    common.Hash                   `json:"slot"`
+	Changes []rpcBlockAccessStorageChange `json:"changes,omitempty"`
+}
+
+type rpcBlockAccessBalanceChange struct {
+	Index hexutil.Uint64 `json:"index"`
+	Value *hexutil.Big   `json:"value"`
+}
+
+type rpcBlockAccessNonceChange struct {
+	Index hexutil.Uint64 `json:"index"`
+	Value hexutil.Uint64 `json:"value"`
+}
+
+type rpcBlockAccessCodeChange struct {
+	Index hexutil.Uint64 `json:"index"`
+	Data  hexutil.Bytes  `json:"data"`
+}
+
+type rpcBlockAccessAccount struct {
+	Address        common.Address                `json:"address"`
+	StorageChanges []rpcBlockAccessSlotChanges   `json:"storageChanges,omitempty"`
+	StorageReads   []common.Hash                 `json:"storageReads,omitempty"`
+	BalanceChanges []rpcBlockAccessBalanceChange `json:"balanceChanges,omitempty"`
+	NonceChanges   []rpcBlockAccessNonceChange   `json:"nonceChanges,omitempty"`
+	CodeChanges    []rpcBlockAccessCodeChange    `json:"codeChanges,omitempty"`
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC

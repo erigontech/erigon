@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -238,6 +239,33 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
 	}
+	isGlamsterdam := s.config.IsGlamsterdam(header.Time)
+	var blockAccessList types.BlockAccessList
+	if isGlamsterdam {
+		if req.BlockAccessListHash == nil {
+			return nil, &rpc.InvalidParamsError{Message: "missing block access list hash"}
+		}
+		if req.BlockAccessList == nil {
+			return nil, &rpc.InvalidParamsError{Message: "missing block access list"}
+		}
+		var err error
+		blockAccessList, err = eth1_utils.ConvertBlockAccessListFromTypesProto(req.BlockAccessList)
+		if err != nil {
+			return nil, err
+		}
+		computedHash := blockAccessList.Hash()
+		if computedHash != *req.BlockAccessListHash {
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("invalid block access list hash"),
+			}, nil
+		}
+		header.BlockAccessListHash = req.BlockAccessListHash
+	} else {
+		if req.BlockAccessListHash != nil || (req.BlockAccessList != nil && len(req.BlockAccessList) > 0) {
+			return nil, &rpc.InvalidParamsError{Message: "block access list before Glamsterdam"}
+		}
+	}
 
 	var withdrawals types.Withdrawals
 	if version >= clparams.CapellaVersion {
@@ -360,7 +388,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, nil)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, blockAccessList)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {

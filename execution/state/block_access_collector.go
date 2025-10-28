@@ -288,7 +288,7 @@ func (sdb *IntraBlockState) BuildBlockAccessList() (types.BlockAccessList, error
 	}
 
 	if len(aggregated) == 0 {
-		return nil, nil
+		return make(types.BlockAccessList, 0), nil
 	}
 
 	addresses := make([]common.Address, 0, len(aggregated))

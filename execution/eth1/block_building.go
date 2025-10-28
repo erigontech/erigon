@@ -169,9 +169,22 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
 		Transactions:  encodedTransactions,
 	}
+	if header.BlockAccessListHash != nil {
+		payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
+	}
+	if block.BlockAccessList() != nil {
+		payload.BlockAccessList = eth1_utils.ConvertBlockAccessListToTypesProto(block.BlockAccessList())
+	}
 	if block.Withdrawals() != nil {
 		payload.Version = 2
 		payload.Withdrawals = eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals())
+	}
+
+	if block.Header().BlockAccessListHash != nil {
+		payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(*block.Header().BlockAccessListHash)
+	}
+	if block.BlockAccessList() != nil {
+		payload.BlockAccessList = eth1_utils.ConvertBlockAccessListToTypesProto(block.BlockAccessList())
 	}
 
 	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {

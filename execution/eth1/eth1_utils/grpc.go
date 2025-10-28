@@ -219,17 +219,380 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 	return out
 }
 
+func convertBlockAccessListToProto(list types.BlockAccessList) []*executionproto.BlockAccessListAccount {
+	if list == nil {
+		return nil
+	}
+	out := make([]*executionproto.BlockAccessListAccount, 0, len(list))
+	for _, account := range list {
+		if account == nil {
+			continue
+		}
+		protoAccount := &executionproto.BlockAccessListAccount{
+			Address: gointerfaces.ConvertAddressToH160(account.Address),
+		}
+		if len(account.StorageChanges) > 0 {
+			protoAccount.StorageChanges = make([]*executionproto.BlockAccessListSlotChanges, 0, len(account.StorageChanges))
+			for _, slot := range account.StorageChanges {
+				if slot == nil {
+					continue
+				}
+				slotProto := &executionproto.BlockAccessListSlotChanges{
+					Slot: gointerfaces.ConvertHashToH256(slot.Slot),
+				}
+				if len(slot.Changes) > 0 {
+					slotProto.Changes = make([]*executionproto.BlockAccessListStorageChange, 0, len(slot.Changes))
+					for _, change := range slot.Changes {
+						if change == nil {
+							continue
+						}
+						slotProto.Changes = append(slotProto.Changes, &executionproto.BlockAccessListStorageChange{
+							Index: uint32(change.Index),
+							Value: gointerfaces.ConvertHashToH256(change.Value),
+						})
+					}
+				}
+				protoAccount.StorageChanges = append(protoAccount.StorageChanges, slotProto)
+			}
+		}
+		if len(account.StorageReads) > 0 {
+			protoAccount.StorageReads = make([]*typesproto.H256, 0, len(account.StorageReads))
+			for _, read := range account.StorageReads {
+				hash := read
+				protoAccount.StorageReads = append(protoAccount.StorageReads, gointerfaces.ConvertHashToH256(hash))
+			}
+		}
+		if len(account.BalanceChanges) > 0 {
+			protoAccount.BalanceChanges = make([]*executionproto.BlockAccessListBalanceChange, 0, len(account.BalanceChanges))
+			for _, change := range account.BalanceChanges {
+				if change == nil {
+					continue
+				}
+				val := new(uint256.Int)
+				if change.Value != nil {
+					val.SetFromBig(change.Value)
+				}
+				protoAccount.BalanceChanges = append(protoAccount.BalanceChanges, &executionproto.BlockAccessListBalanceChange{
+					Index: uint32(change.Index),
+					Value: gointerfaces.ConvertUint256IntToH256(val),
+				})
+			}
+		}
+		if len(account.NonceChanges) > 0 {
+			protoAccount.NonceChanges = make([]*executionproto.BlockAccessListNonceChange, 0, len(account.NonceChanges))
+			for _, change := range account.NonceChanges {
+				if change == nil {
+					continue
+				}
+				protoAccount.NonceChanges = append(protoAccount.NonceChanges, &executionproto.BlockAccessListNonceChange{
+					Index: uint32(change.Index),
+					Value: change.Value,
+				})
+			}
+		}
+		if len(account.CodeChanges) > 0 {
+			protoAccount.CodeChanges = make([]*executionproto.BlockAccessListCodeChange, 0, len(account.CodeChanges))
+			for _, change := range account.CodeChanges {
+				if change == nil {
+					continue
+				}
+				protoAccount.CodeChanges = append(protoAccount.CodeChanges, &executionproto.BlockAccessListCodeChange{
+					Index: uint32(change.Index),
+					Data:  change.Data,
+				})
+			}
+		}
+		out = append(out, protoAccount)
+	}
+	return out
+}
+
+func convertBlockAccessListFromProto(list []*executionproto.BlockAccessListAccount) (types.BlockAccessList, error) {
+	if list == nil {
+		return nil, nil
+	}
+	out := make(types.BlockAccessList, 0, len(list))
+	for _, account := range list {
+		if account == nil {
+			continue
+		}
+		ac := &types.AccountChanges{
+			Address: gointerfaces.ConvertH160toAddress(account.Address),
+		}
+		if len(account.StorageChanges) > 0 {
+			ac.StorageChanges = make([]*types.SlotChanges, 0, len(account.StorageChanges))
+			for _, slot := range account.StorageChanges {
+				if slot == nil {
+					continue
+				}
+				slotChanges := &types.SlotChanges{
+					Slot: gointerfaces.ConvertH256ToHash(slot.Slot),
+				}
+				if len(slot.Changes) > 0 {
+					slotChanges.Changes = make([]*types.StorageChange, 0, len(slot.Changes))
+					for _, change := range slot.Changes {
+						if change == nil {
+							continue
+						}
+						slotChanges.Changes = append(slotChanges.Changes, &types.StorageChange{
+							Index: uint16(change.Index),
+							Value: gointerfaces.ConvertH256ToHash(change.Value),
+						})
+					}
+				}
+				ac.StorageChanges = append(ac.StorageChanges, slotChanges)
+			}
+		}
+		if len(account.StorageReads) > 0 {
+			ac.StorageReads = make([]common.Hash, 0, len(account.StorageReads))
+			for _, read := range account.StorageReads {
+				ac.StorageReads = append(ac.StorageReads, gointerfaces.ConvertH256ToHash(read))
+			}
+		}
+		if len(account.BalanceChanges) > 0 {
+			ac.BalanceChanges = make([]*types.BalanceChange, 0, len(account.BalanceChanges))
+			for _, change := range account.BalanceChanges {
+				if change == nil {
+					continue
+				}
+				var val *big.Int
+				if change.Value != nil {
+					val = gointerfaces.ConvertH256ToUint256Int(change.Value).ToBig()
+				} else {
+					val = new(big.Int)
+				}
+				ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
+					Index: uint16(change.Index),
+					Value: val,
+				})
+			}
+		}
+		if len(account.NonceChanges) > 0 {
+			ac.NonceChanges = make([]*types.NonceChange, 0, len(account.NonceChanges))
+			for _, change := range account.NonceChanges {
+				if change == nil {
+					continue
+				}
+				ac.NonceChanges = append(ac.NonceChanges, &types.NonceChange{
+					Index: uint16(change.Index),
+					Value: change.Value,
+				})
+			}
+		}
+		if len(account.CodeChanges) > 0 {
+			ac.CodeChanges = make([]*types.CodeChange, 0, len(account.CodeChanges))
+			for _, change := range account.CodeChanges {
+				if change == nil {
+					continue
+				}
+				ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
+					Index: uint16(change.Index),
+					Data:  change.Data,
+				})
+			}
+		}
+		out = append(out, ac)
+	}
+	return out, nil
+}
+
+func ConvertBlockAccessListToTypesProto(list types.BlockAccessList) []*typesproto.BlockAccessListAccount {
+	if list == nil {
+		return nil
+	}
+	out := make([]*typesproto.BlockAccessListAccount, 0, len(list))
+	for _, account := range list {
+		if account == nil {
+			continue
+		}
+		protoAccount := &typesproto.BlockAccessListAccount{
+			Address: gointerfaces.ConvertAddressToH160(account.Address),
+		}
+		if len(account.StorageChanges) > 0 {
+			protoAccount.StorageChanges = make([]*typesproto.BlockAccessListSlotChanges, 0, len(account.StorageChanges))
+			for _, slot := range account.StorageChanges {
+				if slot == nil {
+					continue
+				}
+				slotProto := &typesproto.BlockAccessListSlotChanges{
+					Slot: gointerfaces.ConvertHashToH256(slot.Slot),
+				}
+				if len(slot.Changes) > 0 {
+					slotProto.Changes = make([]*typesproto.BlockAccessListStorageChange, 0, len(slot.Changes))
+					for _, change := range slot.Changes {
+						if change == nil {
+							continue
+						}
+						slotProto.Changes = append(slotProto.Changes, &typesproto.BlockAccessListStorageChange{
+							Index: uint32(change.Index),
+							Value: gointerfaces.ConvertHashToH256(change.Value),
+						})
+					}
+				}
+				protoAccount.StorageChanges = append(protoAccount.StorageChanges, slotProto)
+			}
+		}
+		if len(account.StorageReads) > 0 {
+			protoAccount.StorageReads = make([]*typesproto.H256, 0, len(account.StorageReads))
+			for _, read := range account.StorageReads {
+				hash := read
+				protoAccount.StorageReads = append(protoAccount.StorageReads, gointerfaces.ConvertHashToH256(hash))
+			}
+		}
+		if len(account.BalanceChanges) > 0 {
+			protoAccount.BalanceChanges = make([]*typesproto.BlockAccessListBalanceChange, 0, len(account.BalanceChanges))
+			for _, change := range account.BalanceChanges {
+				if change == nil {
+					continue
+				}
+				val := new(uint256.Int)
+				if change.Value != nil {
+					val.SetFromBig(change.Value)
+				}
+				protoAccount.BalanceChanges = append(protoAccount.BalanceChanges, &typesproto.BlockAccessListBalanceChange{
+					Index: uint32(change.Index),
+					Value: gointerfaces.ConvertUint256IntToH256(val),
+				})
+			}
+		}
+		if len(account.NonceChanges) > 0 {
+			protoAccount.NonceChanges = make([]*typesproto.BlockAccessListNonceChange, 0, len(account.NonceChanges))
+			for _, change := range account.NonceChanges {
+				if change == nil {
+					continue
+				}
+				protoAccount.NonceChanges = append(protoAccount.NonceChanges, &typesproto.BlockAccessListNonceChange{
+					Index: uint32(change.Index),
+					Value: change.Value,
+				})
+			}
+		}
+		if len(account.CodeChanges) > 0 {
+			protoAccount.CodeChanges = make([]*typesproto.BlockAccessListCodeChange, 0, len(account.CodeChanges))
+			for _, change := range account.CodeChanges {
+				if change == nil {
+					continue
+				}
+				protoAccount.CodeChanges = append(protoAccount.CodeChanges, &typesproto.BlockAccessListCodeChange{
+					Index: uint32(change.Index),
+					Data:  change.Data,
+				})
+			}
+		}
+		out = append(out, protoAccount)
+	}
+	return out
+}
+
+func ConvertBlockAccessListFromTypesProto(list []*typesproto.BlockAccessListAccount) (types.BlockAccessList, error) {
+	if list == nil {
+		return nil, nil
+	}
+	out := make(types.BlockAccessList, 0, len(list))
+	for _, account := range list {
+		if account == nil {
+			continue
+		}
+		ac := &types.AccountChanges{
+			Address: gointerfaces.ConvertH160toAddress(account.Address),
+		}
+		if len(account.StorageChanges) > 0 {
+			ac.StorageChanges = make([]*types.SlotChanges, 0, len(account.StorageChanges))
+			for _, slot := range account.StorageChanges {
+				if slot == nil {
+					continue
+				}
+				slotChanges := &types.SlotChanges{
+					Slot: gointerfaces.ConvertH256ToHash(slot.Slot),
+				}
+				if len(slot.Changes) > 0 {
+					slotChanges.Changes = make([]*types.StorageChange, 0, len(slot.Changes))
+					for _, change := range slot.Changes {
+						if change == nil {
+							continue
+						}
+						slotChanges.Changes = append(slotChanges.Changes, &types.StorageChange{
+							Index: uint16(change.Index),
+							Value: gointerfaces.ConvertH256ToHash(change.Value),
+						})
+					}
+				}
+				ac.StorageChanges = append(ac.StorageChanges, slotChanges)
+			}
+		}
+		if len(account.StorageReads) > 0 {
+			ac.StorageReads = make([]common.Hash, 0, len(account.StorageReads))
+			for _, read := range account.StorageReads {
+				ac.StorageReads = append(ac.StorageReads, gointerfaces.ConvertH256ToHash(read))
+			}
+		}
+		if len(account.BalanceChanges) > 0 {
+			ac.BalanceChanges = make([]*types.BalanceChange, 0, len(account.BalanceChanges))
+			for _, change := range account.BalanceChanges {
+				if change == nil {
+					continue
+				}
+				var val *big.Int
+				if change.Value != nil {
+					val = gointerfaces.ConvertH256ToUint256Int(change.Value).ToBig()
+				} else {
+					val = new(big.Int)
+				}
+				ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
+					Index: uint16(change.Index),
+					Value: val,
+				})
+			}
+		}
+		if len(account.NonceChanges) > 0 {
+			ac.NonceChanges = make([]*types.NonceChange, 0, len(account.NonceChanges))
+			for _, change := range account.NonceChanges {
+				if change == nil {
+					continue
+				}
+				ac.NonceChanges = append(ac.NonceChanges, &types.NonceChange{
+					Index: uint16(change.Index),
+					Value: change.Value,
+				})
+			}
+		}
+		if len(account.CodeChanges) > 0 {
+			ac.CodeChanges = make([]*types.CodeChange, 0, len(account.CodeChanges))
+			for _, change := range account.CodeChanges {
+				if change == nil {
+					continue
+				}
+				ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
+					Index: uint16(change.Index),
+					Data:  change.Data,
+				})
+			}
+		}
+		out = append(out, ac)
+	}
+	return out, nil
+}
+
+func ConvertBlockAccessListToExecutionProto(list types.BlockAccessList) []*executionproto.BlockAccessListAccount {
+	return convertBlockAccessListToProto(list)
+}
+
+func ConvertBlockAccessListFromExecutionProto(list []*executionproto.BlockAccessListAccount) (types.BlockAccessList, error) {
+	return convertBlockAccessListFromProto(list)
+}
+
 func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash common.Hash) *executionproto.BlockBody {
 	if in == nil {
 		return nil
 	}
 
 	return &executionproto.BlockBody{
-		BlockNumber:  blockNumber,
-		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
-		Transactions: in.Transactions,
-		Uncles:       HeadersToHeadersRPC(in.Uncles),
-		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
+		BlockNumber:     blockNumber,
+		BlockHash:       gointerfaces.ConvertHashToH256(blockHash),
+		Transactions:    in.Transactions,
+		Uncles:          HeadersToHeadersRPC(in.Uncles),
+		Withdrawals:     ConvertWithdrawalsToRpc(in.Withdrawals),
+		BlockAccessList: convertBlockAccessListToProto(in.BlockAccessList),
 	}
 }
 
@@ -250,10 +613,15 @@ func ConvertRawBlockBodyFromRpc(in *executionproto.BlockBody) (*types.RawBody, e
 	if err != nil {
 		return nil, err
 	}
+	blockAccessList, err := convertBlockAccessListFromProto(in.BlockAccessList)
+	if err != nil {
+		return nil, err
+	}
 	return &types.RawBody{
-		Transactions: in.Transactions,
-		Uncles:       uncles,
-		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
+		Transactions:    in.Transactions,
+		Uncles:          uncles,
+		Withdrawals:     ConvertWithdrawalsFromRpc(in.Withdrawals),
+		BlockAccessList: blockAccessList,
 	}, nil
 }
 
