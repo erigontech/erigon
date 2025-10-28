@@ -239,8 +239,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
 							commitProgress := make(chan *commitment.CommitProgress, 100)
-
+							logCommittedDone := make(chan struct{})
 							go func() {
+								defer close(logCommittedDone)
 								logEvery := time.NewTicker(20 * time.Second)
 								commitStart := time.Now()
 
@@ -334,6 +335,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									rwTx, pe.cfg, execStage, maxBlockNum, pe.logger, u)
 							}
 							// fix these here - they will contain estimates after commit logging
+							select {
+							case <-logCommittedDone: // make sure no async mutations by LogCommitted can happen at this point
+							}
 							pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
 							pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
 							uncommittedBlocks = 0
