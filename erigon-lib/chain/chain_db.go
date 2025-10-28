@@ -81,10 +81,14 @@ func ArbitrumOneParams() types.ArbitrumChainParams {
 func GetConfig(db kv.Getter, buf []byte) (*Config, error) {
 	hash, err := CanonicalHash(db, 0, buf)
 	if err != nil {
-		return ArbitrumOneChainConfig(), nil
-		// TODO need a better check
+		cfg := ArbitrumOneChainConfig()
+		var err2 error
+		hash, err2 = CanonicalHash(db, cfg.ArbitrumChainParams.GenesisBlockNum, buf)
+		if err2 != nil {
+			return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+		}
+		err = nil
 
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
 	if hash == nil {
 		return nil, nil
