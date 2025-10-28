@@ -203,11 +203,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	// compute blob fee for eip-4844 data blobs if any
 	blobGasVal := &uint256.Int{}
 	if st.evm.ChainRules().IsCancun {
-		blobGasPrice := st.evm.Context.BlobBaseFee
-		if blobGasPrice.IsZero() {
-			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is 0", ErrInternalFailure)
-		}
-		blobGasVal, overflow = blobGasVal.MulOverflow(&blobGasPrice, new(uint256.Int).SetUint64(st.msg.BlobGas()))
+		blobGasVal, overflow = blobGasVal.MulOverflow(&st.evm.Context.BlobBaseFee, new(uint256.Int).SetUint64(st.msg.BlobGas()))
 		if overflow {
 			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, blobGasVal)
 		}
@@ -336,9 +332,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
-		if blobGasPrice.IsZero() {
-			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is 0", ErrInternalFailure)
-		}
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
 		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
