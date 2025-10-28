@@ -332,7 +332,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			cur.key, _ = g.Next(cur.key[:0])
 
 			if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
-				//g.Skip()
+				g.Skip()
 				l++
 				continue
 			}
