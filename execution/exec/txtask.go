@@ -25,8 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -203,15 +201,14 @@ type ApplyMessage func(evm *vm.EVM, msg core.Message, gp *core.GasPool, refunds 
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
-	TxNum              uint64
-	TxIndex            int // -1 for block initialisation
-	Header             *types.Header
-	Txs                types.Transactions
-	Uncles             []*types.Header
-	Withdrawals        types.Withdrawals
-	EvmBlockContext    evmtypes.BlockContext
-	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[common.Address]uint256.Int
+	TxNum            uint64
+	TxIndex          int // -1 for block initialisation
+	Header           *types.Header
+	Txs              types.Transactions
+	Uncles           []*types.Header
+	Withdrawals      types.Withdrawals
+	EvmBlockContext  evmtypes.BlockContext
+	HistoryExecution bool // use history reader for that txn instead of state reader
 
 	Incarnation           int
 	Tracer                *calltracer.CallTracer
@@ -418,7 +415,6 @@ func (t *TxTask) IsHistoric() bool {
 }
 
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
-	t.BalanceIncreaseSet = nil
 	ibs.Reset()
 	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
 
@@ -556,11 +552,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
-		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		for addr, bal := range txTask.BalanceIncreaseSet {
-			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		}
-
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
 		}

@@ -65,8 +65,6 @@ func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
 	)
 }
 
-func (hr *HistoryReaderV3) DiscardReadList() {}
-
 func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address[:], hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {

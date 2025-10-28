@@ -57,7 +57,7 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, rules *chain.Rules) error {
+func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates) error {
 	domains := rs.domains
 	if stateUpdates.BTreeG != nil {
 		var err error
@@ -140,32 +140,6 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 		}
 	}
 
-	var acc accounts.Account
-	emptyRemoval := rules.IsSpuriousDragon
-	for addr, increase := range balanceIncreases {
-		addrBytes := addr.Bytes()
-		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, roTx, addrBytes)
-		if err != nil {
-			return err
-		}
-		acc.Reset()
-		if len(enc0) > 0 {
-			if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
-				return err
-			}
-		}
-		acc.Balance.Add(&acc.Balance, &increase)
-		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrBytes, txNum, enc0, step0); err != nil {
-				return err
-			}
-		} else {
-			enc1 := accounts.SerialiseV3(&acc)
-			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrBytes, enc1, txNum, enc0, step0); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -183,20 +157,18 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	blockNum uint64,
 	txNum uint64,
 	accountUpdates StateUpdates,
-	balanceIncreases map[common.Address]uint256.Int,
 	receipt *types.Receipt,
 	logs []*types.Log,
 	traceFroms map[common.Address]struct{},
 	traceTos map[common.Address]struct{},
 	config *chain.Config,
-	rules *chain.Rules,
 	historyExecution bool) error {
 	if historyExecution {
 		return nil
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyUpdates(roTx, blockNum, txNum, accountUpdates, balanceIncreases, rules); err != nil {
+	if err := rs.applyUpdates(roTx, blockNum, txNum, accountUpdates); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 
@@ -410,10 +382,6 @@ func (w *BufferedWriter) WriteSet() StateUpdates {
 	return w.writeSet
 }
 
-func (w *BufferedWriter) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
-	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
-}
-
 func (w *BufferedWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("BufferedWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
@@ -576,10 +544,6 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 
 func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
 
-func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
-	return nil, nil, nil, nil
-}
-
 func (w *Writer) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
@@ -686,7 +650,6 @@ func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()      {}
 func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
@@ -964,44 +927,4 @@ func (r *bufferedReader) ReadAccountIncarnation(address common.Address) (uint64,
 
 func (r *bufferedReader) SetGetter(getter kv.TemporalGetter) {
 	r.reader.getter = getter
-}
-
-func (r *bufferedReader) DiscardReadList() {
-	r.reader.DiscardReadList()
-}
-
-type ReadLists map[string]*dbstate.KvList
-
-func (v ReadLists) Return() {
-	returnReadList(v)
-}
-
-var readListPool = sync.Pool{
-	New: func() any {
-		return ReadLists{
-			kv.AccountsDomain.String(): {},
-			kv.CodeDomain.String():     {},
-			kv.StorageDomain.String():  {},
-		}
-	},
-}
-
-func newReadList() ReadLists {
-	v := readListPool.Get().(ReadLists)
-	for _, tbl := range v {
-		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	}
-	return v
-	//return readListPool.Get().(map[string]*state.KvList)
-}
-func returnReadList(v ReadLists) {
-	if v == nil {
-		return
-	}
-	//for _, tbl := range v {
-	//	clear(tbl.Keys)
-	//	clear(tbl.Vals)
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
-	readListPool.Put(v)
 }

@@ -96,7 +96,6 @@ type IntraBlockState struct {
 	nextRevisionId int
 	trace          bool
 	tracingHooks   *tracing.Hooks
-	balanceInc     map[common.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
@@ -125,7 +124,6 @@ func New(stateReader StateReader) *IntraBlockState {
 		journal:           newJournal(),
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
-		balanceInc:        map[common.Address]*BalanceIncrease{},
 		txIndex:           0,
 		trace:             false,
 		dep:               UnknownDep,
@@ -284,7 +282,6 @@ func (sdb *IntraBlockState) Reset() {
 		clear(sdb.logs[i]) // free p¬ointers
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
-	sdb.balanceInc = map[common.Address]*BalanceIncrease{}
 	sdb.journal.Reset()
 	sdb.nextRevisionId = 0
 	sdb.validRevisions = sdb.validRevisions[:0]
@@ -740,47 +737,6 @@ func (sdb *IntraBlockState) ReadVersion(addr common.Address, path AccountPath, k
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if sdb.versionMap == nil {
-		// If this account has not been read, add to the balance increment map
-		if _, needAccount := sdb.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
-			sdb.journal.append(balanceIncrease{
-				account:  &addr,
-				increase: amount,
-			})
-
-			bi, ok := sdb.balanceInc[addr]
-			if !ok {
-				bi = &BalanceIncrease{}
-				sdb.balanceInc[addr] = bi
-			}
-
-			if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
-				// TODO: discuss if we should ignore error
-				prev := new(uint256.Int)
-
-				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
-					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
-				}
-				readStart := time.Now()
-				account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
-				sdb.accountReadDuration += time.Since(readStart)
-				sdb.accountReadCount++
-				sdb.stateReader.SetTrace(false, "")
-				if account != nil {
-					prev.Add(&account.Balance, &bi.increase)
-				} else {
-					prev.Add(prev, &bi.increase)
-				}
-
-				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
-			}
-
-			bi.increase.Add(&bi.increase, &amount)
-			bi.count++
-			return nil
-		}
-	}
-
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
@@ -1219,14 +1175,6 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 		return so, nil
 	}
 
-	// Load the object from the database.
-	if _, ok := sdb.nilAccounts[addr]; ok {
-		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
-			return sdb.createObject(addr, nil), nil
-		}
-		return nil, nil
-	}
-
 	account, _, _, err := sdb.getVersionedAccount(addr, false)
 	if err != nil {
 		return nil, err
@@ -1273,9 +1221,6 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 			}
 		} else {
 			sdb.nilAccounts[addr] = struct{}{}
-			if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
-				return sdb.createObject(addr, nil), nil
-			}
 			return nil, nil
 		}
 	}
@@ -1302,11 +1247,6 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 }
 
 func (sdb *IntraBlockState) setStateObject(addr common.Address, object *stateObject) {
-	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
-		object.data.Balance.Add(&object.data.Balance, &bi.increase)
-		bi.transferred = true
-		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
-	}
 	sdb.stateObjects[addr] = object
 }
 
@@ -1559,11 +1499,6 @@ func printAccount(EIP161Enabled bool, addr common.Address, stateObject *stateObj
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr, bi := range sdb.balanceInc {
-		if !bi.transferred {
-			sdb.getStateObject(addr)
-		}
-	}
 	for addr := range sdb.journal.dirties {
 		so, exist := sdb.stateObjects[addr]
 		if !exist {
@@ -1612,22 +1547,7 @@ func (sdb *IntraBlockState) SoftFinalise() {
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr, bi := range sdb.balanceInc {
-		if !bi.transferred {
-			sdb.getStateObject(addr)
-		}
-	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)
-}
-
-func (sdb *IntraBlockState) BalanceIncreaseSet() map[common.Address]uint256.Int {
-	s := make(map[common.Address]uint256.Int, len(sdb.balanceInc))
-	for addr, bi := range sdb.balanceInc {
-		if !bi.transferred {
-			s[addr] = bi.increase
-		}
-	}
-	return s
 }
 
 func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {

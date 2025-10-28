@@ -51,8 +51,6 @@ IntraBlockState does commit changes to lower-abstraction-level by method `ibs.Ma
 - BufferedWriter - txs which executed by parallel workers can conflict with each-other.
 This writer does accumulate updates and then send them to conflict-resolution.
 Until conflict-resolution succeed - none of execution updates must pass to lower-abstraction-level.
-Object TxTask it's just set of small buffers (readset + writeset) for each transaction.
-Write to TxTask happens by code like `txTask.ReadLists = rw.stateReader.ReadSet()`.
 
 - TxTask - objects coming from parallel-workers to conflict-resolution goroutine (ApplyLoop and method ReadsValid).
 Flush of data to lower-level-of-abstraction is done by method `agg.ApplyState` (method agg.ApplyHistory exists
@@ -178,8 +176,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					}
 					blockUpdateCount += applyResult.stateUpdates.UpdateCount()
 					err := pe.rs.ApplyTxState(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
-						nil, applyResult.receipt, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-						pe.cfg.chainConfig, applyResult.rules, false)
+						applyResult.receipt, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+						pe.cfg.chainConfig, false)
 					blockApplyCount += applyResult.stateUpdates.UpdateCount()
 					pe.rs.SetTrace(false)
 					if err != nil {

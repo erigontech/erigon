@@ -115,13 +115,6 @@ type (
 		prev        uint256.Int
 		wasCommited bool
 	}
-	balanceIncrease struct {
-		account  *common.Address
-		increase uint256.Int
-	}
-	balanceIncreaseTransfer struct {
-		bi *BalanceIncrease
-	}
 	nonceChange struct {
 		account     *common.Address
 		prev        uint64
@@ -292,30 +285,6 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 
 func (ch balanceChange) dirtied() *common.Address {
 	return ch.account
-}
-
-func (ch balanceIncrease) revert(s *IntraBlockState) error {
-	if bi, ok := s.balanceInc[*ch.account]; ok {
-		bi.increase.Sub(&bi.increase, &ch.increase)
-		bi.count--
-		if bi.count == 0 {
-			delete(s.balanceInc, *ch.account)
-		}
-	}
-	return nil
-}
-
-func (ch balanceIncrease) dirtied() *common.Address {
-	return ch.account
-}
-
-func (ch balanceIncreaseTransfer) dirtied() *common.Address {
-	return nil
-}
-
-func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
-	ch.bi.transferred = false
-	return nil
 }
 func (ch nonceChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(*ch.account)

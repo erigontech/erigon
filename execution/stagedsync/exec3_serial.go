@@ -569,8 +569,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
-			txTask.BalanceIncreaseSet, applyReceipt, result.Logs, result.TraceFroms, result.TraceTos,
-			se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
+			applyReceipt, result.Logs, result.TraceFroms, result.TraceTos,
+			se.cfg.chainConfig, txTask.HistoryExecution); err != nil {
 			return false, err
 		}
 
