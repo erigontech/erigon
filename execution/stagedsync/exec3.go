@@ -509,9 +509,12 @@ Loop:
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 
-		// TODO add check on arbitrum at all
-		arbosv := types.GetArbOSVersion(header, chainConfig)
-		signer := *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
+		var arbosv uint64
+		signer := *types.LatestSignerForChainID(chainConfig.ChainID)
+		if chainConfig.IsArbitrum() {
+			signer = *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
+			arbosv = types.GetArbOSVersion(header, chainConfig)
+		}
 
 		getHashFnMute := &sync.Mutex{}
 		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {

@@ -79,8 +79,6 @@ func ArbitrumOneParams() types.ArbitrumChainParams {
 
 // GetConfig retrieves the consensus settings based on the given genesis hash.
 func GetConfig(db kv.Getter, buf []byte) (*Config, error) {
-	return ArbitrumOneChainConfig(), nil
-
 	hash, err := CanonicalHash(db, 0, buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
