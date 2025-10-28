@@ -774,6 +774,7 @@ func runBn254Pairing(input []byte) ([]byte, error) {
 	if success {
 		return true32Byte, nil
 	}
+
 	return false32Byte, nil
 }
 

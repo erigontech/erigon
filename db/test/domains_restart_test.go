@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -74,12 +75,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	blockSize := uint64(10) // lets say that each block contains 10 tx, after each block we do commitment
 	ctx := context.Background()
 
-	db, agg, datadir := testDbAndAggregatorv3(t, "", aggStep)
+	db, agg, datadir := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	blockNum, txNum := uint64(0), uint64(0)
@@ -192,7 +193,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -223,7 +224,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	writer = state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
@@ -289,7 +290,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	ctx := context.Background()
 
-	db, agg, datadir := testDbAndAggregatorv3(t, "", aggStep)
+	db, agg, datadir := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	blockNum, txNum := uint64(0), uint64(0)
 	testStartedFromTxNum := uint64(1)
 
@@ -298,7 +299,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domains, err := state.NewSharedDomains(tx, log.New())
+		domains, err := execctx.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 		rnd := rand.New(rand.NewSource(time.Now().Unix()))
@@ -370,7 +371,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domains, err := state.NewSharedDomains(tx, log.New())
+		domains, err := execctx.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 
@@ -387,7 +388,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		tx, err = db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		domains, err = state.NewSharedDomains(tx, log.New())
+		domains, err = execctx.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 
@@ -450,12 +451,12 @@ func TestCommit(t *testing.T) {
 	aggStep := uint64(100)
 
 	ctx := context.Background()
-	db, _, _ := testDbAndAggregatorv3(t, "", aggStep)
+	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	blockNum, txNum := uint64(0), uint64(0)
