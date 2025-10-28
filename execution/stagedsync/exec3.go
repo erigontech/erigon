@@ -512,8 +512,8 @@ Loop:
 		var arbosv uint64
 		signer := *types.LatestSignerForChainID(chainConfig.ChainID)
 		if chainConfig.IsArbitrum() {
-			signer = *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
 			arbosv = types.GetArbOSVersion(header, chainConfig)
+			signer = *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
 		}
 
 		getHashFnMute := &sync.Mutex{}
