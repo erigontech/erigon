@@ -51,12 +51,12 @@ func (s Storage) Copy() Storage {
 
 // LogConfig are the configuration options for structured logger the EVM
 type LogConfig struct {
-	DisableMemory     bool // disable memory capture
-	DisableStack      bool // disable stack capture
-	DisableStorage    bool // disable storage capture
-	DisableReturnData bool // disable return data capture
-	Debug             bool // print output during capture end
-	Limit             int  // maximum length of output, but zero means unlimited
+	DisableMemory     bool `json:"disableMemory"`     // disable memory capture
+	DisableStack      bool `json:"disableStack"`      // disable stack capture
+	DisableStorage    bool `json:"disableStorage"`    // disable storage capture
+	DisableReturnData bool `json:"disableReturnData"` // disable return data capture
+	Debug             bool `json:"debug"`             // print output during capture end
+	Limit             int  `json:"limit"`             // maximum length of output, but zero means unlimited
 	// Chain overrides, can be used to execute a trace using future fork rules
 	Overrides *chain.Config `json:"overrides,omitempty"`
 }
@@ -425,12 +425,12 @@ func (t *mdLogger) captureStartOrEnter(from, to common.Address, create bool, inp
 `)
 }
 
-func (t *mdLogger) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *mdLogger) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if depth != 0 {
 		return
 	}
 	create := vm.OpCode(typ) == vm.CREATE
-	t.captureStartOrEnter(from, to, create, input, gas, value)
+	t.captureStartOrEnter(from, to, create, input, gas, &value)
 }
 
 func (t *mdLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {

@@ -1076,6 +1076,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Miner.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
+		config.FcuTimeout,
 	)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.

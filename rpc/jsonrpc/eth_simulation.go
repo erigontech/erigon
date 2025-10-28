@@ -441,7 +441,7 @@ func (s *simulator) simulateBlock(
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
 	if bsc.BlockOverrides.BlobBaseFee != nil {
-		blockCtx.BlobBaseFee = bsc.BlockOverrides.BlobBaseFee.ToUint256()
+		blockCtx.BlobBaseFee = *bsc.BlockOverrides.BlobBaseFee.ToUint256()
 	}
 	rules := blockCtx.Rules(s.chainConfig)
 
@@ -576,14 +576,14 @@ func (s *simulator) simulateCall(
 	}
 
 	// Prepare the transaction message
-	msg, err := call.ToMessage(s.gasPool.Gas(), blockCtx.BaseFee)
+	msg, err := call.ToMessage(s.gasPool.Gas(), &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	msg.SetCheckGas(s.validation)
 	msg.SetCheckNonce(s.validation)
 	txCtx := core.NewEVMTxContext(msg)
-	txn, err := call.ToTransaction(s.gasPool.Gas(), blockCtx.BaseFee)
+	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}

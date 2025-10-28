@@ -79,7 +79,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			acc := accounts.Account{
 				Nonce:       1,
-				Balance:     *uint256.NewInt(0),
+				Balance:     uint256.Int{},
 				CodeHash:    common.Hash{},
 				Incarnation: 0,
 			}
