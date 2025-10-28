@@ -142,7 +142,7 @@ func (m *sentryMultiplexer) SetPeerBlockRange(ctx context.Context, in *sentrypro
 	return &emptypb.Empty{}, g.Wait()
 }
 
-// Handshake is not performed on the multi-client level
+// HandShake is not performed on the multi-client level
 func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
@@ -152,31 +152,36 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 	for _, client := range m.clients {
 
 		client.RLock()
-		protocol := client.protocol
+		clientProtocol := client.protocol
 		client.RUnlock()
 
-		if protocol < 0 {
-			g.Go(func() error {
-				reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-
-				if err != nil {
-					return err
-				}
-
-				mu.Lock()
-				defer mu.Unlock()
-
-				if reply.Protocol > protocol {
-					protocol = reply.Protocol
-				}
-
-				client.Lock()
-				client.protocol = protocol
-				client.Unlock()
-
-				return nil
-			})
+		if clientProtocol >= 0 {
+			mu.Lock()
+			if clientProtocol > protocol {
+				protocol = clientProtocol
+			}
+			mu.Unlock()
+			continue
 		}
+
+		g.Go(func() error {
+			reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+			if err != nil {
+				return err
+			}
+
+			mu.Lock()
+			if reply.Protocol > protocol {
+				protocol = reply.Protocol
+			}
+			mu.Unlock()
+
+			client.Lock()
+			client.protocol = reply.Protocol
+			client.Unlock()
+
+			return nil
+		})
 	}
 
 	err := g.Wait()
@@ -547,7 +552,7 @@ func (m *sentryMultiplexer) Messages(ctx context.Context, in *sentryproto.Messag
 func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentryproto.Protocol, opts ...grpc.CallOption) ([]*sentryproto.PeersReply, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
-	var allReplies []*sentryproto.PeersReply = make([]*sentryproto.PeersReply, len(m.clients))
+	var allReplies = make([]*sentryproto.PeersReply, len(m.clients))
 	var allMutex sync.RWMutex
 
 	for i, client := range m.clients {

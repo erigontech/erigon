@@ -515,7 +515,7 @@ func TestAnchorReplace2(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
+	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
 	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}

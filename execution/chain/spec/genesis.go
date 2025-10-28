@@ -57,7 +57,6 @@ var (
 	// to preserve same pointer in genesis.Config and Spec.Config, init once and reuse configs
 
 	mainnetChainConfig = ReadChainConfig(chainspecs, "chainspecs/mainnet.json")
-	holeskyChainConfig = ReadChainConfig(chainspecs, "chainspecs/holesky.json")
 	sepoliaChainConfig = ReadChainConfig(chainspecs, "chainspecs/sepolia.json")
 	hoodiChainConfig   = ReadChainConfig(chainspecs, "chainspecs/hoodi.json")
 	gnosisChainConfig  = ReadChainConfig(chainspecs, "chainspecs/gnosis.json")
@@ -73,18 +72,6 @@ func MainnetGenesisBlock() *types.Genesis {
 		GasLimit:   5000,
 		Difficulty: big.NewInt(17179869184),
 		Alloc:      ReadPrealloc(allocs, "allocs/mainnet.json"),
-	}
-}
-
-// HoleskyGenesisBlock returns the Holesky main net genesis block.
-func HoleskyGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     holeskyChainConfig,
-		Nonce:      4660,
-		GasLimit:   25000000,
-		Difficulty: big.NewInt(1),
-		Timestamp:  1695902100,
-		Alloc:      ReadPrealloc(allocs, "allocs/holesky.json"),
 	}
 }
 
