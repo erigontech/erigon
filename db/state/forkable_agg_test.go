@@ -448,9 +448,9 @@ func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
+func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (kv.ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
-	headerId := ForkableId(1)
+	headerId := kv.ForkableId(1)
 	cfg := registerEntity(dirs, "headers", headerId)
 
 	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.Headers, ValuesOnCompressedPage: 1}
@@ -477,9 +477,9 @@ func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	return headerId, ma
 }
 
-func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
+func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (kv.ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
-	bodyId := ForkableId(2)
+	bodyId := kv.ForkableId(2)
 	cfg := registerEntity(dirs, "bodies", bodyId)
 
 	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.BlockBody, ValuesOnCompressedPage: 1}
@@ -504,7 +504,7 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	return bodyId, ma
 }
 
-func registerEntity(dirs datadir.Dirs, name string, id ForkableId) *SnapshotConfig {
+func registerEntity(dirs datadir.Dirs, name string, id kv.ForkableId) *SnapshotConfig {
 	stepSize := uint64(10)
 	schema := NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)
 
@@ -518,7 +518,7 @@ func registerEntity(dirs datadir.Dirs, name string, id ForkableId) *SnapshotConf
 	return snapCfg
 }
 
-func registerEntityWithSnapshotConfig(dirs datadir.Dirs, id ForkableId, name string, cfg *SnapshotConfig) {
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, id kv.ForkableId, name string, cfg *SnapshotConfig) {
 	RegisterForkable(name, id, dirs, nil, WithSnapshotConfig(cfg))
 }
 

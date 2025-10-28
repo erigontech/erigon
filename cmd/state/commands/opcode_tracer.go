@@ -577,7 +577,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			lsp := len(chanSegPrefix)
 			lsd := len(chanSegDump)
 			if lsp > 0 || lsd > 0 {
-				panic(fmt.Sprintf("Bblock channels not empty at the end: sp=%d sd=%d", lsp, lsd))
+				panic(fmt.Sprintf("Bblock channels not empty at the end: sp=%d execctx=%d", lsp, lsd))
 			}
 		}()
 	}
@@ -639,7 +639,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 			if saveBblocks {
 				sd := bblockDump{t.TxHash, &t.TxnAddr, t.CodeHash, &t.Bblocks, &t.OpcodeFault, &t.Fault, t.Create, t.CodeSize}
-				//fsegEnc.Encode(sd)
+				//fsegEnc.Encode(execctx)
 				chanBblocksIsBlocking = len(chanSegDump) == cap(chanSegDump)-1
 				chanSegDump <- sd
 			}
