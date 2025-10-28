@@ -189,6 +189,10 @@ func withL2RPCaddress(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&cli.L2RPCAddrFlag.Name, cli.L2RPCAddrFlag.Name, "", cli.L2RPCAddrFlag.Usage)
 }
 
+func withL2RPCReceiptAddress(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&cli.L2RPCReceiptAddrFlag.Name, cli.L2RPCReceiptAddrFlag.Name, "", cli.L2RPCReceiptAddrFlag.Usage)
+}
+
 func withArbInitJson(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&cli.ArbInitJsonFlag.Name, cli.ArbInitJsonFlag.Name, "", cli.ArbInitJsonFlag.Usage)
 }

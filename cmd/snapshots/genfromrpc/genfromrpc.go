@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	turbocli "github.com/erigontech/erigon/turbo/cli"
 )
 
 // CLI flags
@@ -58,17 +59,11 @@ var Arbitrum = cli.BoolFlag{
 	Value: false,
 }
 
-var ReceiptRpcAddr = cli.StringFlag{
-	Name:  "l2rpc.receipt",
-	Usage: "Separate RPC address to fetch receipts from (if different from rpcaddr)",
-	Value: "",
-}
-
 var Command = cli.Command{
 	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
 	Name:        "genfromrpc",
 	Usage:       "genfromrpc utilities",
-	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock, &Arbitrum, &ReceiptRpcAddr},
+	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock, &Arbitrum, &turbocli.L2RPCReceiptAddrFlag},
 	Description: ``,
 }
 
@@ -685,7 +680,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 	verification := cliCtx.Bool(Verify.Name)
 	isArbitrum := cliCtx.Bool(Arbitrum.Name)
 
-	receiptRpcAddr := cliCtx.String(ReceiptRpcAddr.Name)
+	receiptRpcAddr := cliCtx.String(turbocli.L2RPCReceiptAddrFlag.Name)
 	var receiptClient *rpc.Client
 	if isArbitrum && receiptRpcAddr != "" {
 		receiptClient, err = rpc.Dial(receiptRpcAddr, log.Root())
