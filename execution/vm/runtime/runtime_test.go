@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -152,12 +152,12 @@ func testTemporalDB(t testing.TB) kv.TemporalRwDB {
 	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 }
 
-func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *dbstate.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
+	sd, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -189,7 +189,7 @@ func BenchmarkCall(b *testing.B) {
 	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
-	//cfg.w = state.NewWriter(sd, nil)
+	//cfg.w = state.NewWriter(execctx, nil)
 	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
