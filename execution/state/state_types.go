@@ -72,6 +72,8 @@ type TxContext struct {
 
 type Address unique.Handle[common.Address]
 
+var ZeroAddress = InternAddress(common.Address{})
+
 func InternAddress(a common.Address) Address {
 	return Address(unique.Make(a))
 }
