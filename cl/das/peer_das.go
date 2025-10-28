@@ -485,9 +485,12 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 			continue
 		}
 		if !available {
-			continue
+			blocksToProcess = append(blocksToProcess, block)
 		}
-		blocksToProcess = append(blocksToProcess, block)
+	}
+
+	if len(blocksToProcess) == 0 {
+		return nil
 	}
 
 	custodyColumns, err := d.state.GetMyCustodyColumns()
