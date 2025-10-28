@@ -81,6 +81,9 @@ func ArbitrumOneParams() types.ArbitrumChainParams {
 func GetConfig(db kv.Getter, buf []byte) (*Config, error) {
 	hash, err := CanonicalHash(db, 0, buf)
 	if err != nil {
+		return ArbitrumOneChainConfig(), nil
+		// TODO need a better check
+
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
 	if hash == nil {
