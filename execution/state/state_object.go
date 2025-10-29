@@ -64,7 +64,7 @@ func (s Storage) Copy() Storage {
 // First you need to obtain a state object.
 // Account values can be accessed and modified through the object.
 type stateObject struct {
-	address  types.Address
+	address  accounts.Address
 	data     accounts.Account
 	original accounts.Account
 	db       *IntraBlockState
@@ -108,7 +108,7 @@ func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
 }
 
 // newObject creates a state object.
-func newObject(db *IntraBlockState, address types.Address, data, original *accounts.Account) *stateObject {
+func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
 	var so = stateObject{
 		db:                 db,
 		address:            address,
@@ -339,7 +339,7 @@ func (so *stateObject) setIncarnation(incarnation uint64) {
 //
 
 // Returns the address of the contract/account
-func (so *stateObject) Address() types.Address {
+func (so *stateObject) Address() accounts.Address {
 	return so.address
 }
 

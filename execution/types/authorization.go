@@ -14,11 +14,12 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type Authorization struct {
 	ChainID uint256.Int
-	Address common.Address
+	Address accounts.Address
 	Nonce   uint64
 	YParity uint8
 	R       uint256.Int
@@ -54,7 +55,12 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 		return nil, err
 	}
 
-	if err := rlp.EncodeOptionalAddress(&ath.Address, data, buf); err != nil {
+	var addr *common.Address
+	if !ath.Address.IsNil() {
+		value := ath.Address.Value()
+		addr = &value
+	}
+	if err := rlp.EncodeOptionalAddress(addr, data, buf); err != nil {
 		return nil, err
 	}
 
@@ -141,7 +147,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		if len(b) != 20 {
 			return fmt.Errorf("wrong size for Address: %d", len(b))
 		}
-		auth.Address = common.BytesToAddress(b)
+		auth.Address = InternAddress(common.BytesToAddress(b))
 
 		// nonce
 		if auth.Nonce, err = s.Uint(); err != nil {
@@ -198,7 +204,12 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 			return err
 		}
 		// 2. encode Address
-		if err := rlp.EncodeOptionalAddress(&authorizations[i].Address, w, b); err != nil {
+		var addr *common.Address
+		if !authorizations[i].Address.IsNil() {
+			value := authorizations[i].Address.Value()
+			addr = &value
+		}
+		if err := rlp.EncodeOptionalAddress(addr, w, b); err != nil {
 			return err
 		}
 		// 3. encode Nonce

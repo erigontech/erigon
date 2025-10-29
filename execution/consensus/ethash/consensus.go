@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Ethash proof-of-work protocol constants.
@@ -626,11 +627,11 @@ func (ethash *Ethash) CalculateRewards(config *chain.Config, header *types.Heade
 ) ([]consensus.Reward, error) {
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	rewards := make([]consensus.Reward, 1+len(uncles))
-	rewards[0].Beneficiary = header.Coinbase
+	rewards[0].Beneficiary = accounts.InternAddress(header.Coinbase)
 	rewards[0].Kind = consensus.RewardAuthor
 	rewards[0].Amount = minerReward
 	for i, uncle := range uncles {
-		rewards[i+1].Beneficiary = uncle.Coinbase
+		rewards[i+1].Beneficiary = accounts.InternAddress(uncle.Coinbase)
 		rewards[i+1].Kind = consensus.RewardUncle
 		rewards[i+1].Amount = uncleRewards[i]
 	}
@@ -673,8 +674,8 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
 		if i < len(uncleRewards) {
-			state.AddBalance(uncle.Coinbase, uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
+			state.AddBalance(accounts.InternAddress(uncle.Coinbase), uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
 		}
 	}
-	state.AddBalance(header.Coinbase, minerReward, tracing.BalanceIncreaseRewardMineBlock)
+	state.AddBalance(accounts.InternAddress(header.Coinbase), minerReward, tracing.BalanceIncreaseRewardMineBlock)
 }

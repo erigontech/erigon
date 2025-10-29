@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
@@ -95,7 +95,7 @@ func BenchmarkJumpDest(b *testing.B) {
 	c := NewJumpDestCache(16)
 
 	for b.Loop() {
-		contract := NewContract(types.ZeroAddress, types.ZeroAddress, types.ZeroAddress, uint256.Int{}, c)
+		contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}, c)
 		contract.Code = code
 		contract.CodeHash = hash
 

@@ -67,7 +67,7 @@ func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
 
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
-func (hr *HistoryReaderV3) ReadAccountData(address types.Address) (*accounts.Account, error) {
+func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addressValue := address.Value()
 	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
@@ -88,11 +88,11 @@ func (hr *HistoryReaderV3) ReadAccountData(address types.Address) (*accounts.Acc
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
-func (hr *HistoryReaderV3) ReadAccountDataForDebug(address types.Address) (*accounts.Account, error) {
+func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return hr.ReadAccountData(address)
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address types.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
 	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)
@@ -107,7 +107,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address types.Address, key types.S
 	return res, ok, err
 }
 
-func (hr *HistoryReaderV3) HasStorage(address types.Address) (bool, error) {
+func (hr *HistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	addressValue := address.Value()
 	to, ok := kv.NextSubtree(addressValue[:])
 	if !ok {
@@ -138,7 +138,7 @@ func (hr *HistoryReaderV3) HasStorage(address types.Address) (bool, error) {
 	return false, nil
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address types.Address) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	addressValue := address.Value()
@@ -149,13 +149,13 @@ func (hr *HistoryReaderV3) ReadAccountCode(address types.Address) ([]byte, error
 	return code, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address types.Address) (int, error) {
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	addressValue := address.Value()
 	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, addressValue[:], hr.txNum)
 	return len(enc), err
 }
 
-func (hr *HistoryReaderV3) ReadAccountIncarnation(address types.Address) (uint64, error) {
+func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	addressValue := address.Value()
 	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {

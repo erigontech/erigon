@@ -249,7 +249,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		}
 		oldBalance := oldAcc.Balance
 
-		address := common.BytesToAddress(addressBytes)
+		address := accounts.InternAddress(common.BytesToAddress(addressBytes))
 		newAcc, err := latestState.ReadAccountData(address)
 		if err != nil {
 			return nil, err

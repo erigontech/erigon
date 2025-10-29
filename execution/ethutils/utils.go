@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var (
@@ -39,7 +40,7 @@ var (
 //
 // We regard two types of accounts as local miner account: etherbase
 // and accounts specified via `txpool.locals` flag.
-func IsLocalBlock(engine consensus.Engine, etherbase common.Address, txPoolLocals []common.Address, header *types.Header) bool {
+func IsLocalBlock(engine consensus.Engine, etherbase accounts.Address, txPoolLocals []accounts.Address, header *types.Header) bool {
 	author, err := engine.Author(header)
 	if err != nil {
 		log.Warn("Failed to retrieve block author", "number", header.Number, "header_hash", header.Hash(), "err", err)

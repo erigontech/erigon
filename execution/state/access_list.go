@@ -19,14 +19,17 @@
 
 package state
 
-import "github.com/erigontech/erigon/execution/types"
+import (
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
 
 type accessList struct {
-	addresses map[types.Address]map[types.StorageKey]struct{}
+	addresses map[accounts.Address]map[types.StorageKey]struct{}
 }
 
 // ContainsAddress returns true if the address is in the access list.
-func (al *accessList) ContainsAddress(address types.Address) bool {
+func (al *accessList) ContainsAddress(address accounts.Address) bool {
 	_, ok := al.addresses[address]
 	return ok
 }
@@ -40,7 +43,7 @@ func (al *accessList) ContainsAddress(address types.Address) bool {
 
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
-func (al *accessList) Contains(address types.Address, slot types.StorageKey) (addressPresent bool, slotPresent bool) {
+func (al *accessList) Contains(address accounts.Address, slot types.StorageKey) (addressPresent bool, slotPresent bool) {
 	slots, ok := al.addresses[address]
 	if !ok {
 		// no such address (and hence zero slots)
@@ -57,7 +60,7 @@ func (al *accessList) Contains(address types.Address, slot types.StorageKey) (ad
 // newAccessList creates a new accessList.
 func newAccessList() *accessList {
 	return &accessList{
-		addresses: map[types.Address]map[types.StorageKey]struct{}{},
+		addresses: map[accounts.Address]map[types.StorageKey]struct{}{},
 	}
 }
 
@@ -86,7 +89,7 @@ func (al *accessList) Copy() *accessList {
 
 // AddAddress adds an address to the access list, and returns 'true' if the operation
 // caused a change (addr was not previously in the list).
-func (al *accessList) AddAddress(address types.Address) bool {
+func (al *accessList) AddAddress(address accounts.Address) bool {
 	if _, present := al.addresses[address]; present {
 		return false
 	}
@@ -99,7 +102,7 @@ func (al *accessList) AddAddress(address types.Address) bool {
 // - address added
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
-func (al *accessList) AddSlot(address types.Address, slot types.StorageKey) (addrChange bool, slotChange bool) {
+func (al *accessList) AddSlot(address accounts.Address, slot types.StorageKey) (addrChange bool, slotChange bool) {
 	slots, addrPresent := al.addresses[address]
 	if !addrPresent || slots == nil {
 		// Address not present, or addr present but no slots there
@@ -119,7 +122,7 @@ func (al *accessList) AddSlot(address types.Address, slot types.StorageKey) (add
 // This operation needs to be performed in the same order as the addition happened.
 // This method is meant to be used  by the journal, which maintains ordering of
 // operations.
-func (al *accessList) DeleteSlot(address types.Address, slot types.StorageKey) {
+func (al *accessList) DeleteSlot(address accounts.Address, slot types.StorageKey) {
 	slots, addrOk := al.addresses[address]
 	// There are two ways this can fail
 	if !addrOk {
@@ -138,7 +141,7 @@ func (al *accessList) DeleteSlot(address types.Address, slot types.StorageKey) {
 // needs to be performed in the same order as the addition happened.
 // This method is meant to be used  by the journal, which maintains ordering of
 // operations.
-func (al *accessList) DeleteAddress(address types.Address) {
+func (al *accessList) DeleteAddress(address accounts.Address) {
 	slots, addrOk := al.addresses[address]
 	if !addrOk {
 		panic("reverting address change, address not present in list")

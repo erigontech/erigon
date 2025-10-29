@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // AccountRef is a reference to an account address.
@@ -37,10 +37,10 @@ import (
 // it's primary use is to fetch addresses. Removing this object
 // proves difficult because of the cached jump destinations which
 // are fetched from the parent contract (i.e. the caller).
-type AccountRef types.Address
+type AccountRef accounts.Address
 
 // Address casts AccountRef to a Address
-func (ar AccountRef) Address() types.Address { return (types.Address)(ar) }
+func (ar AccountRef) Address() accounts.Address { return (accounts.Address)(ar) }
 
 // Contract represents an ethereum contract in the state database. It contains
 // the contract code, calling arguments. Contract implements ContractRef
@@ -48,8 +48,8 @@ type Contract struct {
 	// caller is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
-	caller    types.Address
-	addr      types.Address
+	caller    accounts.Address
+	addr      accounts.Address
 	jumpdests *JumpDestCache // Aggregated result of JUMPDEST analysis.
 	analysis  bitvec         // Locally cached result of JUMPDEST analysis
 
@@ -86,7 +86,7 @@ func (c *JumpDestCache) LogStats() {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller types.Address, callerAddress types.Address, addr types.Address, value uint256.Int, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
 		caller:    callerAddress,
 		addr:      addr,
@@ -158,12 +158,12 @@ func (c *Contract) GetOp(n uint64) OpCode {
 //
 // Caller will recursively set to the caller's caller when
 // the contract is a delegate call, including that of caller's caller.
-func (c *Contract) Caller() types.Address {
+func (c *Contract) Caller() accounts.Address {
 	return c.caller
 }
 
 // Address returns the contracts address
-func (c *Contract) Address() types.Address {
+func (c *Contract) Address() accounts.Address {
 	return c.addr
 }
 

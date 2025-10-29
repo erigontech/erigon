@@ -20,7 +20,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -36,7 +35,7 @@ func NewCachedWriter(w StateWriter, cache *shards.StateCache) *CachedWriter {
 	return &CachedWriter{w: w, cache: cache}
 }
 
-func (cw *CachedWriter) UpdateAccountData(address types.Address, original, account *accounts.Account) error {
+func (cw *CachedWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if err := cw.w.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}
@@ -44,7 +43,7 @@ func (cw *CachedWriter) UpdateAccountData(address types.Address, original, accou
 	return nil
 }
 
-func (cw *CachedWriter) UpdateAccountCode(address types.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (cw *CachedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if err := cw.w.UpdateAccountCode(address, 1, codeHash, code); err != nil {
 		return err
 	}
@@ -52,7 +51,7 @@ func (cw *CachedWriter) UpdateAccountCode(address types.Address, incarnation uin
 	return nil
 }
 
-func (cw *CachedWriter) DeleteAccount(address types.Address, original *accounts.Account) error {
+func (cw *CachedWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	if err := cw.w.DeleteAccount(address, original); err != nil {
 		return err
 	}
@@ -60,7 +59,7 @@ func (cw *CachedWriter) DeleteAccount(address types.Address, original *accounts.
 	return nil
 }
 
-func (cw *CachedWriter) WriteAccountStorage(address types.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+func (cw *CachedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	if err := cw.w.WriteAccountStorage(address, 1, key, original, value); err != nil {
 		return err
 	}
@@ -75,6 +74,6 @@ func (cw *CachedWriter) WriteAccountStorage(address types.Address, incarnation u
 	return nil
 }
 
-func (cw *CachedWriter) CreateContract(address types.Address) error {
+func (cw *CachedWriter) CreateContract(address accounts.Address) error {
 	return cw.w.CreateContract(address)
 }

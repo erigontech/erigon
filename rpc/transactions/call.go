@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -92,7 +93,7 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 		blockCtx.BaseFee = *o.BaseFee
 	}
 	if o.Coinbase != nil {
-		blockCtx.Coinbase = *o.Coinbase
+		blockCtx.Coinbase = accounts.InternAddress(*o.Coinbase)
 	}
 	if o.Difficulty != nil {
 		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
@@ -198,7 +199,7 @@ func DoCall(
 func NewEVMBlockContextWithOverrides(ctx context.Context, engine consensus.EngineReader, header *types.Header, tx kv.Getter,
 	reader services.CanonicalReader, config *chain.Config, blockOverrides *BlockOverrides, blockHashOverrides BlockHashOverrides) evmtypes.BlockContext {
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
-	blockContext := core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
+	blockContext := core.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 	if blockOverrides != nil {
 		blockOverrides.OverrideBlockContext(&blockContext, blockHashOverrides)
 	}
@@ -208,7 +209,7 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine consensus.Engin
 func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
 	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
-	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
+	return core.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 }
 
 type BlockHashProvider func(blockNum uint64) (common.Hash, error)

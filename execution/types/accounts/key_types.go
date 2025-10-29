@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package types
+package accounts
 
 import (
 	"fmt"
@@ -34,6 +34,10 @@ func InternAddress(a common.Address) Address {
 
 func (a Address) IsNil() bool {
 	return a == NilAddress
+}
+
+func (a Address) IsZero() bool {
+	return a == NilAddress || a == ZeroAddress
 }
 
 func (a Address) Value() common.Address {
@@ -56,6 +60,34 @@ func (a Address) Format(s fmt.State, c rune) {
 		s.Write([]byte("<nil>"))
 	}
 	a.Value().Format(s, c)
+}
+
+// MarshalText returns the hex representation of a.
+func (a Address) MarshalText() ([]byte, error) {
+	if a.IsNil() {
+		return nil, nil
+	}
+	return a.Value().MarshalText()
+}
+
+// UnmarshalText parses a hash in hex syntax.
+func (a *Address) UnmarshalText(input []byte) error {
+	var value common.Address
+	if err := value.UnmarshalText(input); err != nil {
+		return err
+	}
+	*a = InternAddress(value)
+	return nil
+}
+
+// UnmarshalJSON parses a hash in hex syntax.
+func (a *Address) UnmarshalJSON(input []byte) error {
+	var value common.Address
+	if err := value.UnmarshalJSON(input); err != nil {
+		return err
+	}
+	*a = InternAddress(value)
+	return nil
 }
 
 func (a Address) Cmp(o Address) int {

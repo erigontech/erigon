@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var (
@@ -377,8 +378,8 @@ func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
-	to               *common.Address
-	from             common.Address
+	to               accounts.Address
+	from             accounts.Address
 	nonce            uint64
 	amount           uint256.Int
 	gasLimit         uint64
@@ -400,9 +401,16 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
+	var toaddr accounts.Address
+	if to != nil {
+		toaddr = accounts.InternAddress(*to)
+	} else {
+		toaddr = accounts.NilAddress
+	}
+
 	m := Message{
-		from:             from,
-		to:               to,
+		from:             accounts.InternAddress(from),
+		to:               toaddr,
 		nonce:            nonce,
 		amount:           *amount,
 		gasLimit:         gasLimit,
@@ -428,8 +436,8 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 	return &m
 }
 
-func (m *Message) From() common.Address            { return m.from }
-func (m *Message) To() *common.Address             { return m.to }
+func (m *Message) From() accounts.Address          { return m.from }
+func (m *Message) To() accounts.Address            { return m.to }
 func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
 func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
 func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }

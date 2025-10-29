@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
@@ -39,7 +39,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		// Gas sentry honoured, do the actual gas calculation based on the stored value
 		var (
 			y, x    = callContext.Stack.Back(1), callContext.Stack.peek()
-			slot    = types.InternKey(x.Bytes32())
+			slot    = accounts.InternKey(x.Bytes32())
 			current uint256.Int
 			cost    = uint64(0)
 		)
@@ -58,7 +58,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			return cost + params.WarmStorageReadCostEIP2929, nil // SLOAD_GAS
 		}
 		var original uint256.Int
-		slotCommited := types.InternKey(x.Bytes32())
+		slotCommited := accounts.InternKey(x.Bytes32())
 		evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited, &original)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
@@ -107,7 +107,7 @@ func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, memory
 	loc := callContext.Stack.peek()
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), types.InternKey(loc.Bytes32())); slotMod {
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), accounts.InternKey(loc.Bytes32())); slotMod {
 		return params.ColdSloadCostEIP2929, nil
 	}
 	return params.WarmStorageReadCostEIP2929, nil
@@ -124,7 +124,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 	if err != nil {
 		return 0, err
 	}
-	addr := types.InternAddress(callContext.Stack.peek().Bytes20())
+	addr := accounts.InternAddress(callContext.Stack.peek().Bytes20())
 	// Check slot presence in the access list
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		var overflow bool
@@ -145,7 +145,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 // - extcodesize,
 // - (ext) balance
 func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-	addr := types.InternAddress(callContext.Stack.peek().Bytes20())
+	addr := accounts.InternAddress(callContext.Stack.peek().Bytes20())
 	// If the caller cannot afford the cost, this change will be rolled back
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas
@@ -156,7 +156,7 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64,
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-		addr := types.InternAddress(callContext.Stack.Back(1).Bytes20())
+		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -223,7 +223,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	gasFunc := func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
 		var (
 			gas     uint64
-			address = types.InternAddress(callContext.Stack.peek().Bytes20())
+			address = accounts.InternAddress(callContext.Stack.peek().Bytes20())
 		)
 		// If the caller cannot afford the cost, this change will be rolled back
 		if evm.IntraBlockState().AddAddressToAccessList(address) {
@@ -262,7 +262,7 @@ var (
 
 func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-		addr := types.InternAddress(callContext.Stack.Back(1).Bytes20())
+		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 		// Check slot presence in the access list
 		var dynCost uint64
 		if evm.intraBlockState.AddAddressToAccessList(addr) {

@@ -56,7 +56,7 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[types.Address]uint256.Int, rules *chain.Rules) error {
+func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules) error {
 	domains := rs.domains
 	if stateUpdates.BTreeG != nil {
 		var err error
@@ -190,11 +190,11 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	blockNum uint64,
 	txNum uint64,
 	accountUpdates StateUpdates,
-	balanceIncreases map[types.Address]uint256.Int,
+	balanceIncreases map[accounts.Address]uint256.Int,
 	receipt *types.Receipt,
 	logs []*types.Log,
-	traceFroms map[types.Address]struct{},
-	traceTos map[types.Address]struct{},
+	traceFroms map[accounts.Address]struct{},
+	traceTos map[accounts.Address]struct{},
 	config *chain.Config,
 	rules *chain.Rules,
 	historyExecution bool) error {
@@ -224,7 +224,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, logs []*types.Log, traceFroms map[types.Address]struct{}, traceTos map[types.Address]struct{}) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}) error {
 	domains := rs.domains
 	for addr := range traceFroms {
 		addrValue := addr.Value()
@@ -284,7 +284,7 @@ type bufferedAccount struct {
 
 type stateUpdate struct {
 	*bufferedAccount
-	address       types.Address
+	address       accounts.Address
 	deleteAccount bool
 }
 
@@ -367,14 +367,14 @@ func (v StateUpdates) UpdateCount() int {
 
 type StateV3Buffered struct {
 	*StateV3
-	accounts      map[types.Address]*bufferedAccount
+	accounts      map[accounts.Address]*bufferedAccount
 	accountsMutex *sync.RWMutex
 }
 
 func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	bufferedState := &StateV3Buffered{
 		StateV3:       state,
-		accounts:      map[types.Address]*bufferedAccount{},
+		accounts:      map[accounts.Address]*bufferedAccount{},
 		accountsMutex: &sync.RWMutex{},
 	}
 	return bufferedState
@@ -424,7 +424,7 @@ func (w *BufferedWriter) PrevAndDels() (map[string][]byte, map[string]*accounts.
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
-func (w *BufferedWriter) UpdateAccountData(address types.Address, original, account *accounts.Account) error {
+func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("BufferedWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
@@ -459,7 +459,7 @@ func (w *BufferedWriter) UpdateAccountData(address types.Address, original, acco
 	return nil
 }
 
-func (w *BufferedWriter) UpdateAccountCode(address types.Address, incarnation uint64, codeHash types.StorageKey, code []byte) error {
+func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash types.StorageKey, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
@@ -485,7 +485,7 @@ func (w *BufferedWriter) UpdateAccountCode(address types.Address, incarnation ui
 	return nil
 }
 
-func (w *BufferedWriter) DeleteAccount(address types.Address, original *accounts.Account) error {
+func (w *BufferedWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
@@ -513,7 +513,7 @@ func (w *BufferedWriter) DeleteAccount(address types.Address, original *accounts
 	return nil
 }
 
-func (w *BufferedWriter) WriteAccountStorage(address types.Address, incarnation uint64, key types.StorageKey, original, value uint256.Int) error {
+func (w *BufferedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key types.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -559,7 +559,7 @@ func (w *BufferedWriter) WriteAccountStorage(address types.Address, incarnation 
 	return nil
 }
 
-func (w *BufferedWriter) CreateContract(address types.Address) error {
+func (w *BufferedWriter) CreateContract(address accounts.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
@@ -590,7 +590,7 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 	return nil, nil, nil, nil
 }
 
-func (w *Writer) UpdateAccountData(address types.Address, original, account *accounts.Account) error {
+func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
@@ -615,7 +615,7 @@ func (w *Writer) UpdateAccountData(address types.Address, original, account *acc
 	return nil
 }
 
-func (w *Writer) UpdateAccountCode(address types.Address, incarnation uint64, codeHash types.StorageKey, code []byte) error {
+func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash types.StorageKey, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
@@ -629,7 +629,7 @@ func (w *Writer) UpdateAccountCode(address types.Address, incarnation uint64, co
 	return nil
 }
 
-func (w *Writer) DeleteAccount(address types.Address, original *accounts.Account) error {
+func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
@@ -650,7 +650,7 @@ func (w *Writer) DeleteAccount(address types.Address, original *accounts.Account
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(address types.Address, incarnation uint64, key types.StorageKey, original, value uint256.Int) error {
+func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint64, key types.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -673,7 +673,7 @@ func (w *Writer) WriteAccountStorage(address types.Address, incarnation uint64, 
 
 var fastCreate = dbg.EnvBool("FAST_CREATE", false)
 
-func (w *Writer) CreateContract(address types.Address) error {
+func (w *Writer) CreateContract(address accounts.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
@@ -712,18 +712,18 @@ func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.tracePrefix = tracePrefix
 }
 
-func (r *ReaderV3) HasStorage(address types.Address) (bool, error) {
+func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	value := address.Value()
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
 	return hasStorage, err
 }
 
-func (r *ReaderV3) ReadAccountData(address types.Address) (*accounts.Account, error) {
+func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
 	return acc, err
 }
 
-func (r *ReaderV3) readAccountData(address types.Address) ([]byte, *accounts.Account, error) {
+func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
 	value := address.Value()
 	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:])
 	if err != nil {
@@ -746,11 +746,11 @@ func (r *ReaderV3) readAccountData(address types.Address) ([]byte, *accounts.Acc
 	return enc, &acc, nil
 }
 
-func (r *ReaderV3) ReadAccountDataForDebug(address types.Address) (*accounts.Account, error) {
+func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(address)
 }
 
-func (r *ReaderV3) ReadAccountStorage(address types.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
 	var composite [20 + 32]byte
 	addressValue := address.Value()
 	keyValue := key.Value()
@@ -778,7 +778,7 @@ func (r *ReaderV3) ReadAccountStorage(address types.Address, key types.StorageKe
 	return res, ok, err
 }
 
-func (r *ReaderV3) ReadAccountCode(address types.Address) ([]byte, error) {
+func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addressValue := address.Value()
 	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	if err != nil {
@@ -790,7 +790,7 @@ func (r *ReaderV3) ReadAccountCode(address types.Address) ([]byte, error) {
 	return enc, nil
 }
 
-func (r *ReaderV3) ReadAccountCodeSize(address types.Address) (int, error) {
+func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	addressValue := address.Value()
 	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	if err != nil {
@@ -803,7 +803,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address types.Address) (int, error) {
 	return size, nil
 }
 
-func (r *ReaderV3) ReadAccountIncarnation(address types.Address) (uint64, error) {
+func (r *ReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	return 0, nil
 }
 
@@ -820,7 +820,7 @@ func (r *bufferedReader) SetTrace(trace bool, tracePrefix string) {
 	r.reader.SetTrace(trace, tracePrefix)
 }
 
-func (r *bufferedReader) ReadAccountData(address types.Address) (*accounts.Account, error) {
+func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	var data *accounts.Account
 
 	r.bufferedState.accountsMutex.RLock()
@@ -847,7 +847,7 @@ func (r *bufferedReader) ReadAccountData(address types.Address) (*accounts.Accou
 	return r.reader.ReadAccountData(address)
 }
 
-func (r *bufferedReader) ReadAccountDataForDebug(address types.Address) (*accounts.Account, error) {
+func (r *bufferedReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	var data *accounts.Account
 
 	r.bufferedState.accountsMutex.RLock()
@@ -867,7 +867,7 @@ func (r *bufferedReader) ReadAccountDataForDebug(address types.Address) (*accoun
 	return r.reader.ReadAccountDataForDebug(address)
 }
 
-func (r *bufferedReader) ReadAccountStorage(address types.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 
@@ -898,7 +898,7 @@ func (r *bufferedReader) ReadAccountStorage(address types.Address, key types.Sto
 	return r.reader.ReadAccountStorage(address, key)
 }
 
-func (r *bufferedReader) HasStorage(address types.Address) (bool, error) {
+func (r *bufferedReader) HasStorage(address accounts.Address) (bool, error) {
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 
@@ -919,7 +919,7 @@ func (r *bufferedReader) HasStorage(address types.Address) (bool, error) {
 	return r.reader.HasStorage(address)
 }
 
-func (r *bufferedReader) ReadAccountCode(address types.Address) ([]byte, error) {
+func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var code []byte
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
@@ -942,7 +942,7 @@ func (r *bufferedReader) ReadAccountCode(address types.Address) ([]byte, error) 
 	return r.reader.ReadAccountCode(address)
 }
 
-func (r *bufferedReader) ReadAccountCodeSize(address types.Address) (int, error) {
+func (r *bufferedReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var code []byte
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
@@ -966,7 +966,7 @@ func (r *bufferedReader) ReadAccountCodeSize(address types.Address) (int, error)
 	return r.reader.ReadAccountCodeSize(address)
 }
 
-func (r *bufferedReader) ReadAccountIncarnation(address types.Address) (uint64, error) {
+func (r *bufferedReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	var incarnation uint64
 
 	r.bufferedState.accountsMutex.RLock()

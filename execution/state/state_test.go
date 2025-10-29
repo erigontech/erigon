@@ -56,7 +56,7 @@ func TestNull(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 
-	address := types.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
+	address := accounts.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
 	state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int

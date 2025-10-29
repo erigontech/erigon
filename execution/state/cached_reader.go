@@ -41,7 +41,7 @@ func (cr *CachedReader) SetTrace(trace bool, tracePrefix string) {
 }
 
 // ReadAccountData is called when an account needs to be fetched from the state
-func (cr *CachedReader) ReadAccountData(address types.Address) (*accounts.Account, error) {
+func (cr *CachedReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addrValue := address.Value()
 	if a, ok := cr.cache.GetAccount(addrValue[:]); ok {
 		return a, nil
@@ -59,12 +59,12 @@ func (cr *CachedReader) ReadAccountData(address types.Address) (*accounts.Accoun
 }
 
 // ReadAccountDataForDebug is called when an account needs to be fetched from the state
-func (cr *CachedReader) ReadAccountDataForDebug(address types.Address) (*accounts.Account, error) {
+func (cr *CachedReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return cr.ReadAccountData(address)
 }
 
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
-func (cr *CachedReader) ReadAccountStorage(address types.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (cr *CachedReader) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
 	addrValue := address.Value()
 	keyValue := key.Value()
 	if s, ok := cr.cache.GetStorage(addrValue[:], 1, keyValue[:]); ok {
@@ -77,14 +77,14 @@ func (cr *CachedReader) ReadAccountStorage(address types.Address, key types.Stor
 		return uint256.Int{}, false, err
 	}
 	if !ok {
-		cr.cache.SetStorageAbsent(addrValue[:], 1,keyValue[:])
+		cr.cache.SetStorageAbsent(addrValue[:], 1, keyValue[:])
 	} else {
 		cr.cache.SetStorageRead(addrValue[:], 1, keyValue[:], v.Bytes())
 	}
 	return v, ok, nil
 }
 
-func (cr *CachedReader) HasStorage(address types.Address) (bool, error) {
+func (cr *CachedReader) HasStorage(address accounts.Address) (bool, error) {
 	// note: theoretically we could try to use the cache here using cr.cache.StorageTree
 	// to traverse the cached storage, however that will be only useful in case of a
 	// collision (ie creating an account which already has storage as per eip-7610) which
@@ -97,7 +97,7 @@ func (cr *CachedReader) HasStorage(address types.Address) (bool, error) {
 
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
-func (cr *CachedReader) ReadAccountCode(address types.Address) ([]byte, error) {
+func (cr *CachedReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addrValue := address.Value()
 	if c, ok := cr.cache.GetCode(addrValue[:], 1); ok {
 		return c, nil
@@ -112,13 +112,13 @@ func (cr *CachedReader) ReadAccountCode(address types.Address) ([]byte, error) {
 	return c, nil
 }
 
-func (cr *CachedReader) ReadAccountCodeSize(address types.Address) (int, error) {
+func (cr *CachedReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	c, err := cr.ReadAccountCode(address)
 	return len(c), err
 }
 
 // ReadAccountIncarnation is called when incarnation of the account is required (to create and recreate contract)
-func (cr *CachedReader) ReadAccountIncarnation(address types.Address) (uint64, error) {
+func (cr *CachedReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	addrValue := address.Value()
 	deleted := cr.cache.GetDeletedAccount(addrValue[:])
 	if deleted != nil {

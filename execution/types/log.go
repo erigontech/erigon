@@ -36,7 +36,7 @@ import (
 type Log struct {
 	// Consensus fields:
 	// address of the contract that generated the event
-	Address Address `json:"address" gencodec:"required" codec:"1"`
+	Address common.Address `json:"address" gencodec:"required" codec:"1"`
 	// list of topics provided by the contract.
 	Topics []common.Hash `json:"topics" gencodec:"required" codec:"2"`
 	// supplied by the contract, usually ABI-encoded

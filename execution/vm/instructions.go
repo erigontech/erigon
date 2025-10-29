@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func opAdd(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
@@ -380,7 +381,7 @@ func opAddress(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint
 
 func opBalance(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
-	address := types.InternAddress(slot.Bytes20())
+	address := accounts.InternAddress(slot.Bytes20())
 	balance, err := interpreter.evm.IntraBlockState().GetBalance(address)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -530,7 +531,7 @@ func stReturnDataCopy(_ uint64, scope *CallContext) string {
 
 func opExtCodeSize(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
-	addr := types.InternAddress(slot.Bytes20())
+	addr := accounts.InternAddress(slot.Bytes20())
 	codeSize, err := interpreter.evm.IntraBlockState().GetCodeSize(addr)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -569,7 +570,7 @@ func opExtCodeCopy(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (
 		codeOffset = stack.pop()
 		length     = stack.pop()
 	)
-	addr := types.InternAddress(a.Bytes20())
+	addr := accounts.InternAddress(a.Bytes20())
 	len64 := length.Uint64()
 
 	code, err := interpreter.evm.IntraBlockState().GetCode(addr)
@@ -621,7 +622,7 @@ func opExtCodeCopy(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (
 // equal the result of calling extcodehash on the account directly.
 func opExtCodeHash(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
-	address := types.InternAddress(slot.Bytes20())
+	address := accounts.InternAddress(slot.Bytes20())
 
 	empty, err := interpreter.evm.IntraBlockState().Empty(address)
 	if err != nil {
@@ -759,7 +760,7 @@ func opMstore8(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint
 
 func opSload(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), types.InternKey(loc.Bytes32()))
+	*loc, err = interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), accounts.InternKey(loc.Bytes32()))
 	return pc, nil, err
 }
 
@@ -774,7 +775,7 @@ func opSstore(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 	}
 	loc := scope.Stack.pop()
 	val := scope.Stack.pop()
-	return pc, nil, interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), types.InternKey(loc.Bytes32()), val)
+	return pc, nil, interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), accounts.InternKey(loc.Bytes32()), val)
 }
 
 func stSstore(_ uint64, scope *CallContext) string {
@@ -1059,7 +1060,7 @@ func opCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64,
 	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := types.InternAddress(addr.Bytes20())
+	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1107,7 +1108,7 @@ func opCallCode(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uin
 	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := types.InternAddress(addr.Bytes20())
+	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1151,7 +1152,7 @@ func opDelegateCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := types.InternAddress(addr.Bytes20())
+	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1191,7 +1192,7 @@ func opStaticCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (u
 	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := types.InternAddress(addr.Bytes20())
+	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1249,7 +1250,7 @@ func opSelfdestruct(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 	}
 	beneficiary := scope.Stack.pop()
 	callerAddr := scope.Contract.Address()
-	beneficiaryAddr := types.InternAddress(beneficiary.Bytes20())
+	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
 	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	if err != nil {
 		return pc, nil, err
@@ -1272,7 +1273,7 @@ func opSelfdestruct6780(pc uint64, interpreter *EVMInterpreter, scope *CallConte
 	}
 	beneficiary := scope.Stack.pop()
 	callerAddr := scope.Contract.Address()
-	beneficiaryAddr := types.InternAddress(beneficiary.Bytes20())
+	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
 	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	if err != nil {
 		return pc, nil, err
@@ -1307,7 +1308,7 @@ func makeLog(size int) executionFunc {
 
 		d := scope.Memory.GetCopy(mStart.Uint64(), mSize.Uint64())
 		interpreter.evm.IntraBlockState().AddLog(&types.Log{
-			Address: scope.Contract.Address(),
+			Address: scope.Contract.Address().Value(),
 			Topics:  topics,
 			Data:    d,
 			// This is a non-consensus field, but assigned here because

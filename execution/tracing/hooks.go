@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // OpContext provides the context at which the opcode is being
@@ -34,8 +35,8 @@ import (
 type OpContext interface {
 	MemoryData() []byte
 	StackData() []uint256.Int
-	Caller() types.Address
-	Address() types.Address
+	Caller() accounts.Address
+	Address() accounts.Address
 	CallValue() uint256.Int
 	CallInput() []byte
 	Code() []byte
@@ -44,17 +45,17 @@ type OpContext interface {
 
 // IntraBlockState gives tracers access to the whole state.
 type IntraBlockState interface {
-	GetBalance(types.Address) (uint256.Int, error)
-	GetNonce(types.Address) (uint64, error)
-	GetCode(types.Address) ([]byte, error)
-	GetState(addr types.Address, key types.StorageKey) (uint256.Int, error)
-	Exist(types.Address) (bool, error)
+	GetBalance(accounts.Address) (uint256.Int, error)
+	GetNonce(accounts.Address) (uint64, error)
+	GetCode(accounts.Address) ([]byte, error)
+	GetState(addr accounts.Address, key types.StorageKey) (uint256.Int, error)
+	Exist(accounts.Address) (bool, error)
 	GetRefund() uint64
 }
 
 // VMContext provides the context for the EVM execution.
 type VMContext struct {
-	Coinbase    types.Address
+	Coinbase    accounts.Address
 	BlockNumber uint64
 	Time        uint64
 	Random      *common.Hash
@@ -83,13 +84,13 @@ type (
 	// TxStartHook is called before the execution of a transaction starts.
 	// Call simulations don't come with a valid signature. `from` field
 	// to be used for address of the caller.
-	TxStartHook = func(vm *VMContext, txn types.Transaction, from types.Address) // i think txn should be message, we can get rid of `ToTransaction` in callargs (api.go)
+	TxStartHook = func(vm *VMContext, txn types.Transaction, from accounts.Address) // i think txn should be message, we can get rid of `ToTransaction` in callargs (api.go)
 
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
 
 	// EnterHook is invoked when the processing of a message starts.
-	EnterHook = func(depth int, typ byte, from types.Address, to types.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte)
+	EnterHook = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte)
 
 	// ExitHook is invoked when the processing of a message ends.
 	// `revert` is true when there was an error during the execution.
@@ -146,16 +147,16 @@ type (
 	*/
 
 	// BalanceChangeHook is called when the balance of an account changes.
-	BalanceChangeHook = func(addr types.Address, prev, new uint256.Int, reason BalanceChangeReason)
+	BalanceChangeHook = func(addr accounts.Address, prev, new uint256.Int, reason BalanceChangeReason)
 
 	// NonceChangeHook is called when the nonce of an account changes.
-	NonceChangeHook = func(addr types.Address, prev, new uint64)
+	NonceChangeHook = func(addr accounts.Address, prev, new uint64)
 
 	// CodeChangeHook is called when the code of an account changes.
-	CodeChangeHook = func(addr types.Address, prevCodeHash common.Hash, prevCode []byte, codeHash common.Hash, code []byte)
+	CodeChangeHook = func(addr accounts.Address, prevCodeHash common.Hash, prevCode []byte, codeHash common.Hash, code []byte)
 
 	// StorageChangeHook is called when the storage of an account changes.
-	StorageChangeHook = func(addr types.Address, slot types.StorageKey, prev, new uint256.Int)
+	StorageChangeHook = func(addr accounts.Address, slot types.StorageKey, prev, new uint256.Int)
 
 	// LogHook is called when a log is emitted.
 	LogHook = func(log *types.Log)

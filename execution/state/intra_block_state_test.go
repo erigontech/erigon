@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestSnapshotRandom(t *testing.T) {
@@ -72,10 +73,10 @@ func TestSnapshotRandom(t *testing.T) {
 // accessor methods on the reverted state must match the return value of the equivalent
 // methods on the replayed state.
 type snapshotTest struct {
-	addrs     []types.Address // all account addresses
-	actions   []testAction     // modifications to the state
-	snapshots []int            // actions indexes at which snapshot is taken
-	err       error            // failure details are reported through this field
+	addrs     []accounts.Address // all account addresses
+	actions   []testAction       // modifications to the state
+	snapshots []int              // actions indexes at which snapshot is taken
+	err       error              // failure details are reported through this field
 }
 
 type testAction struct {
@@ -86,7 +87,7 @@ type testAction struct {
 }
 
 // newTestAction creates a random action that changes state.
-func newTestAction(addr types.Address, r *rand.Rand) testAction {
+func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 	actions := []testAction{
 		{
 			name: "SetBalance",
@@ -200,7 +201,7 @@ func newTestAction(addr types.Address, r *rand.Rand) testAction {
 // derived from r.
 func (*snapshotTest) Generate(r *rand.Rand, size int) reflect.Value {
 	// Generate random actions.
-	addrs := make([]types.Address, 50)
+	addrs := make([]accounts.Address, 50)
 	for i := range addrs {
 		addrs[i][0] = byte(i)
 	}
@@ -402,7 +403,7 @@ func TestTransientStorage(t *testing.T) {
 
 	key := common.Hash{0x01}
 	value := uint256.NewInt(2)
-	addr := types.Address{}
+	addr := accounts.Address{}
 
 	state.SetTransientState(addr, key, *value)
 	if exp, got := 1, state.journal.length(); exp != got {
@@ -813,7 +814,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx3 read
 	// we need to flush the local state objects as we're not
 	// resetting the state - which is artificial for the test
-	states[3].stateObjects = map[types.Address]*stateObject{}
+	states[3].stateObjects = map[accounts.Address]*stateObject{}
 	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, uint256.Int{}, v)
