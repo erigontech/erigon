@@ -175,7 +175,7 @@ jobs:
           find . -type f -ls
 
       - name: Upload artifact -- linux/arm64
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
@@ -184,7 +184,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
@@ -193,7 +193,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
@@ -288,7 +288,7 @@ jobs:
 
       - name: Upload Downloader Torrent Client Status
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: torrent-client-status-${{ matrix.artifact }}
           path: torrent-client-status.txt
