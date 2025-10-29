@@ -539,7 +539,9 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 			return fmt.Errorf("unexpected block access list hash before Glamsterdam")
 		}
 		if len(blockAccessList) != 0 {
-			return fmt.Errorf("unexpected block access list payload before Glamsterdam")
+			if !chainConfig.ExperimentalBAL {
+				return fmt.Errorf("unexpected block access list payload before Glamsterdam")
+			}
 		}
 	}
 
