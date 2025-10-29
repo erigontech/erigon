@@ -258,15 +258,15 @@ func convertToCamelCase(input string) string {
 		return input
 	}
 
-	var result string
+	var result strings.Builder
 
 	for _, part := range parts {
 		if len(part) > 0 && part != parts[len(parts)-1] {
-			result += makeFirstCharCap(part)
+			result.WriteString(makeFirstCharCap(part))
 		}
 	}
 
-	return result
+	return result.String()
 }
 
 func (p *Peer) run() (peerErr *PeerError) {

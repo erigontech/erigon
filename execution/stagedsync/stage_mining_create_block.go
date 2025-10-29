@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -161,7 +161,7 @@ func StageMiningCreateBlockCfg(
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, sd *dbstate.SharedDomains, tx kv.TemporalRwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
 	*current = MiningBlock{}          // always start with a clean state
 	var txPoolLocals []common.Address //txPoolV2 has no concept of local addresses (yet?)
