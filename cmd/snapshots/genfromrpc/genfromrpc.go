@@ -750,10 +750,8 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *
 
 	defer logEvery.Stop()
 
-	receiptClient.SetRequestLimit(rate.Limit(2), 2)
-	client.SetRequestLimit(rate.Limit(5000), 50)
-
-	prevReceiptTime.Store(uint64(time.Now().Unix()))
+	receiptClient.SetRequestLimit(rate.Limit(40), 1)
+	client.SetRequestLimit(rate.Limit(5000), 10)
 
 	for prev := startBlockNum; prev < endBlockNum; {
 		blocks, err := FetchBlocksBatch(client, receiptClient, prev, endBlockNum, batchSize, verify, isArbitrum)
@@ -972,15 +970,12 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				}
 
 				if err != nil {
-					started := time.Unix(int64(prevReceiptTime.Load()), 0)
-					spent := time.Since(started)
-					log.Info("receipt queries", "total", receiptQueries.Load(), "spent", spent, "avg rate", float64(receiptQueries.Load())/spent.Seconds())
+					log.Info("receipt queries", "total", receiptQueries.Load())
 					return fmt.Errorf("failed to get receipt for tx %s after %d attempts: %w", txData["hash"], maxRetries, err)
 				}
 
 				tx.SetTimeboosted(&receipts[idx].timeboosted)
-
-				if typeTx == "0x69" {
+				if tx.Type() == types.ArbitrumSubmitRetryableTxType {
 					if egu := receipt.GasUsed.Uint64(); egu > 0 {
 						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
 							srtx.EffectiveGasUsed = egu
