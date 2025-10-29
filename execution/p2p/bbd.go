@@ -24,8 +24,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -259,7 +259,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		connectionPoint = initialHeader
 	}
 	// if not, then continue fetching headers backwards until we find a connecting point
-	for connectionPoint == nil && lastHeader.Number.Uint64() > 0 {
+	for connectionPoint == nil && lastHeader.Number.Sign() > 0 {
 		if chainLen > config.chainLengthLimit {
 			return nil, fmt.Errorf(
 				"%w: num=%d, hash=%s, len=%d, limit=%d",

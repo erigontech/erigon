@@ -25,7 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -116,17 +116,18 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
-		nonce:      tx.Nonce,
-		gasLimit:   tx.GasLimit,
-		gasPrice:   *tx.FeeCap,
-		tipCap:     *tx.TipCap,
-		feeCap:     *tx.FeeCap,
-		to:         tx.To,
-		amount:     *tx.Value,
-		data:       tx.Data,
-		accessList: tx.AccessList,
-		checkNonce: true,
-		checkGas:   true,
+		nonce:            tx.Nonce,
+		gasLimit:         tx.GasLimit,
+		gasPrice:         *tx.FeeCap,
+		tipCap:           *tx.TipCap,
+		feeCap:           *tx.FeeCap,
+		to:               tx.To,
+		amount:           *tx.Value,
+		data:             tx.Data,
+		accessList:       tx.AccessList,
+		checkNonce:       true,
+		checkTransaction: true,
+		checkGas:         true,
 	}
 	if !rules.IsPrague {
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")

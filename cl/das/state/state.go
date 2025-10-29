@@ -5,10 +5,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )

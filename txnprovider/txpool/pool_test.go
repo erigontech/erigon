@@ -29,17 +29,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -925,7 +925,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			tx, err := coreDB.BeginTemporalRw(ctx)
 			defer tx.Rollback()
 			asrt.NoError(err)
-			sd, err := state.NewSharedDomains(tx, logger)
+			sd, err := execctx.NewSharedDomains(tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
@@ -1049,7 +1049,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginTemporalRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
-	sd, err := state.NewSharedDomains(tx.(kv.TemporalTx), logger)
+	sd, err := execctx.NewSharedDomains(tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
 

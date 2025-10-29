@@ -38,29 +38,30 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/time/rate"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/crypto"
-	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p"
@@ -68,8 +69,8 @@ import (
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
@@ -918,21 +919,6 @@ var (
 		Value: 25,
 	}
 
-	DiagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.addr",
-		Usage: "Address of the diagnostics system provided by the support team",
-	}
-
-	DiagnosticsInsecureFlag = cli.BoolFlag{
-		Name:  "diagnostics.insecure",
-		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
-	}
-
-	DiagnosticsSessionsFlag = cli.StringSliceFlag{
-		Name:  "diagnostics.ids",
-		Usage: "Comma separated list of support session ids to connect to",
-	}
-
 	SilkwormExecutionFlag = cli.BoolFlag{
 		Name:  "silkworm.exec",
 		Usage: "Enable Silkworm block execution",
@@ -1086,26 +1072,6 @@ var (
 		Usage: "set the custom genesis for caplin",
 		Value: "",
 	}
-	DiagDisabledFlag = cli.BoolFlag{
-		Name:  "diagnostics.disabled",
-		Usage: "Disable diagnostics",
-		Value: true,
-	}
-	DiagEndpointAddrFlag = cli.StringFlag{
-		Name:  "diagnostics.endpoint.addr",
-		Usage: "Diagnostics HTTP server listening interface",
-		Value: "127.0.0.1",
-	}
-	DiagEndpointPortFlag = cli.UintFlag{
-		Name:  "diagnostics.endpoint.port",
-		Usage: "Diagnostics HTTP server listening port",
-		Value: 6062,
-	}
-	DiagSpeedTestFlag = cli.BoolFlag{
-		Name:  "diagnostics.speedtest",
-		Usage: "Enable speed test",
-		Value: false,
-	}
 	ChaosMonkeyFlag = cli.BoolFlag{
 		Name:  "chaos.monkey",
 		Usage: "Enable 'chaos monkey' to generate spontaneous network/consensus/etc failures. Use ONLY for testing",
@@ -1150,11 +1116,21 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history"},
 	}
+
+	// ErigonDB geometry settings
+	ErigonDBStepSizeFlag = cli.Uint64Flag{
+		Name:  "erigondb.override.stepsize",
+		Usage: "Override the number of transactions per step; may lead to a corrupted database if used incorrectly",
+		Value: config3.DefaultStepSize,
+	}
+	ErigonDBStepsInFrozenFileFlag = cli.Uint64Flag{
+		Name:  "erigondb.override.stepsinfrozenfile",
+		Usage: "Override the number of steps in frozen snapshot files; may lead to a corrupted database if used incorrectly",
+		Value: config3.DefaultStepsInFrozenFile,
+	}
 )
 
-var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
-
-var DiagnosticsFlags = []cli.Flag{&DiagnosticsURLFlag, &DiagnosticsURLFlag, &DiagnosticsSessionsFlag}
+var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
 
 // setNodeKey loads a node key from command line flags if provided,
 // otherwise it tries to load it from datadir,
@@ -2016,6 +1992,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		// cfg.ExperimentalConcurrentCommitment = true
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
+
+	cfg.ErigonDBStepSize = ctx.Int(ErigonDBStepSizeFlag.Name)
+	cfg.ErigonDBStepsInFrozenFile = ctx.Int(ErigonDBStepsInFrozenFileFlag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)

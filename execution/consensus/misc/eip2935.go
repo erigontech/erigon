@@ -19,9 +19,9 @@ package misc
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
 

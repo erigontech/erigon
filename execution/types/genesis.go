@@ -27,9 +27,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -66,6 +66,7 @@ type Genesis struct {
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
+	BlockAccessListHash   *common.Hash `json:"blockAccessListHash"`   // EIP-7928
 }
 
 type AuRaSeal struct {

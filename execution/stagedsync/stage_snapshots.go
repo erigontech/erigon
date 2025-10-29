@@ -27,9 +27,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -44,14 +45,13 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/node/silkworm"
 )
 
 type SnapshotsCfg struct {
@@ -200,6 +200,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
+		agg.StepSize(),
 	); err != nil {
 		return err
 	}
@@ -227,6 +228,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
+		agg.StepSize(),
 	); err != nil {
 		return err
 	}

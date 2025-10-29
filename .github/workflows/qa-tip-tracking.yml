@@ -141,7 +141,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: torrent-client-status
         path: torrent-client-status.txt
@@ -169,21 +169,21 @@ jobs:
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: erigon-logs
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
@@ -240,14 +240,14 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status of the downgrade test
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: torrent-client-status-downgrade-test
         path: torrent-client-status.txt
 
     - name: Upload erigon logs of the downgrade test
       if: steps.downgrade_test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: erigon-logs-downgrade-test
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
@@ -267,8 +267,14 @@ jobs:
     - name: Action for Not Success
       if: ${{ always() }}
       run: |
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during upgrade & tip-tracking test"
+        fi
+        if [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during downgrade & tip-tracking test"
+        fi
         if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]] || \
            [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
-          echo "::error::Error detected during tests"
           exit 1
-        fi 
+        fi
+        

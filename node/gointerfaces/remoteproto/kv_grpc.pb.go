@@ -21,19 +21,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KV_Version_FullMethodName          = "/remote.KV/Version"
-	KV_Tx_FullMethodName               = "/remote.KV/Tx"
-	KV_StateChanges_FullMethodName     = "/remote.KV/StateChanges"
-	KV_Snapshots_FullMethodName        = "/remote.KV/Snapshots"
-	KV_Range_FullMethodName            = "/remote.KV/Range"
-	KV_Sequence_FullMethodName         = "/remote.KV/Sequence"
-	KV_GetLatest_FullMethodName        = "/remote.KV/GetLatest"
-	KV_HistorySeek_FullMethodName      = "/remote.KV/HistorySeek"
-	KV_IndexRange_FullMethodName       = "/remote.KV/IndexRange"
-	KV_HistoryRange_FullMethodName     = "/remote.KV/HistoryRange"
-	KV_RangeAsOf_FullMethodName        = "/remote.KV/RangeAsOf"
-	KV_HasPrefix_FullMethodName        = "/remote.KV/HasPrefix"
-	KV_HistoryStartFrom_FullMethodName = "/remote.KV/HistoryStartFrom"
+	KV_Version_FullMethodName              = "/remote.KV/Version"
+	KV_Tx_FullMethodName                   = "/remote.KV/Tx"
+	KV_StateChanges_FullMethodName         = "/remote.KV/StateChanges"
+	KV_Snapshots_FullMethodName            = "/remote.KV/Snapshots"
+	KV_Range_FullMethodName                = "/remote.KV/Range"
+	KV_Sequence_FullMethodName             = "/remote.KV/Sequence"
+	KV_GetLatest_FullMethodName            = "/remote.KV/GetLatest"
+	KV_HistorySeek_FullMethodName          = "/remote.KV/HistorySeek"
+	KV_IndexRange_FullMethodName           = "/remote.KV/IndexRange"
+	KV_HistoryRange_FullMethodName         = "/remote.KV/HistoryRange"
+	KV_RangeAsOf_FullMethodName            = "/remote.KV/RangeAsOf"
+	KV_HasPrefix_FullMethodName            = "/remote.KV/HasPrefix"
+	KV_HistoryStartFrom_FullMethodName     = "/remote.KV/HistoryStartFrom"
+	KV_CurrentDomainVersion_FullMethodName = "/remote.KV/CurrentDomainVersion"
+	KV_StepSize_FullMethodName             = "/remote.KV/StepSize"
 )
 
 // KVClient is the client API for KV service.
@@ -67,6 +69,8 @@ type KVClient interface {
 	RangeAsOf(ctx context.Context, in *RangeAsOfReq, opts ...grpc.CallOption) (*Pairs, error)
 	HasPrefix(ctx context.Context, in *HasPrefixReq, opts ...grpc.CallOption) (*HasPrefixReply, error)
 	HistoryStartFrom(ctx context.Context, in *HistoryStartFromReq, opts ...grpc.CallOption) (*HistoryStartFromReply, error)
+	CurrentDomainVersion(ctx context.Context, in *CurrentDomainVersionReq, opts ...grpc.CallOption) (*CurrentDomainVersionReply, error)
+	StepSize(ctx context.Context, in *StepSizeReq, opts ...grpc.CallOption) (*StepSizeReply, error)
 }
 
 type kVClient struct {
@@ -219,6 +223,26 @@ func (c *kVClient) HistoryStartFrom(ctx context.Context, in *HistoryStartFromReq
 	return out, nil
 }
 
+func (c *kVClient) CurrentDomainVersion(ctx context.Context, in *CurrentDomainVersionReq, opts ...grpc.CallOption) (*CurrentDomainVersionReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CurrentDomainVersionReply)
+	err := c.cc.Invoke(ctx, KV_CurrentDomainVersion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVClient) StepSize(ctx context.Context, in *StepSizeReq, opts ...grpc.CallOption) (*StepSizeReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StepSizeReply)
+	err := c.cc.Invoke(ctx, KV_StepSize_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KVServer is the server API for KV service.
 // All implementations must embed UnimplementedKVServer
 // for forward compatibility.
@@ -250,6 +274,8 @@ type KVServer interface {
 	RangeAsOf(context.Context, *RangeAsOfReq) (*Pairs, error)
 	HasPrefix(context.Context, *HasPrefixReq) (*HasPrefixReply, error)
 	HistoryStartFrom(context.Context, *HistoryStartFromReq) (*HistoryStartFromReply, error)
+	CurrentDomainVersion(context.Context, *CurrentDomainVersionReq) (*CurrentDomainVersionReply, error)
+	StepSize(context.Context, *StepSizeReq) (*StepSizeReply, error)
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -298,6 +324,12 @@ func (UnimplementedKVServer) HasPrefix(context.Context, *HasPrefixReq) (*HasPref
 }
 func (UnimplementedKVServer) HistoryStartFrom(context.Context, *HistoryStartFromReq) (*HistoryStartFromReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HistoryStartFrom not implemented")
+}
+func (UnimplementedKVServer) CurrentDomainVersion(context.Context, *CurrentDomainVersionReq) (*CurrentDomainVersionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CurrentDomainVersion not implemented")
+}
+func (UnimplementedKVServer) StepSize(context.Context, *StepSizeReq) (*StepSizeReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StepSize not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 func (UnimplementedKVServer) testEmbeddedByValue()            {}
@@ -536,6 +568,42 @@ func _KV_HistoryStartFrom_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KV_CurrentDomainVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CurrentDomainVersionReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).CurrentDomainVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_CurrentDomainVersion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).CurrentDomainVersion(ctx, req.(*CurrentDomainVersionReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_StepSize_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepSizeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).StepSize(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_StepSize_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).StepSize(ctx, req.(*StepSizeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KV_ServiceDesc is the grpc.ServiceDesc for KV service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -586,6 +654,14 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HistoryStartFrom",
 			Handler:    _KV_HistoryStartFrom_Handler,
+		},
+		{
+			MethodName: "CurrentDomainVersion",
+			Handler:    _KV_CurrentDomainVersion_Handler,
+		},
+		{
+			MethodName: "StepSize",
+			Handler:    _KV_StepSize_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

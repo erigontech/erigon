@@ -282,19 +282,19 @@ Each service has own `./cmd/*/README.md` file.
 
 ### Embedded Consensus Layer
 
-Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Hoodi, Gnosis, Chiado.
+Built-in consensus for Ethereum Mainnet, Sepolia, Hoodi, Gnosis, Chiado.
 To use external Consensus Layer: `--externalcl`.
 
 ### Testnets
 
-If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, Holesky (or Amoy).
+If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, Hoodi (or Chiado).
 It syncs much quicker, and does not take so much disk space:
 
 ```sh
 git clone https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir=<your_datadir> --chain=holesky --prune.mode=full
+./build/bin/erigon --datadir=<your_datadir> --chain=hoodi --prune.mode=full
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location. Name of the
@@ -449,7 +449,6 @@ FAQ
 
 ```
 # please use git branch name (or commit hash). don't use git tags
-go mod edit -replace github.com/erigontech/erigon-lib=github.com/erigontech/erigon/erigon-lib@5498f854e44df5c8f0804ff4f0747c0dec3caad5
 go get github.com/erigontech/erigon@main
 go mod tidy
 ```
@@ -575,6 +574,12 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - don't add `admin` in `--http.api` list
 - `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
 - protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
+
+### Why doesn't my full node have earlier blocks data?
+
+- `prune.mode=full` no longer downloads pre-merge blocks (see [partial history expiry](https://blog.ethereum.org/2025/07/08/partial-history-exp)).
+   Now it only stores post-merge blocks data (i.e. blocks and transactions)
+- To include pre-merge blocks data, use `--prune.mode=blocks` (all blocks data + only recent state data) or `--prune.mode=archive` (all data)
 
 ### RaspberryPI
 

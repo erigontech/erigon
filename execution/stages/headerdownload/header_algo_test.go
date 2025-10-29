@@ -22,8 +22,8 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -97,7 +97,6 @@ func TestSideChainInsert(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		for i, h := range tc.chain {
 			data, _ := rlp.EncodeToBytes(h)
 			if _, err = hi.FeedHeaderPoW(tx, br, h, data, h.Hash(), uint64(i+1)); err != nil {

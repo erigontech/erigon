@@ -14,14 +14,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/genesiswrite"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -187,8 +187,7 @@ func TestHandShake69_ETH69ToETH69(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Sentry 1 (initiator)
 	sentry1RW := NewMockMsgReadWriter()
@@ -278,8 +277,7 @@ func TestHandShake69_ETH69ToETH68(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Sentry 1 (ETH69 initiator)
 	sentry1RW := NewMockMsgReadWriter()
@@ -411,8 +409,7 @@ func TestHandShake69_ETH69ToETH69_WithRLP(t *testing.T) {
 	t.Parallel()
 	assert := assert.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Sentry 1 (initiator)
 	sentry1RW := NewRLPReadWriter()
@@ -483,8 +480,7 @@ func TestHandShake_ETH69ToETH68_WithRLP(t *testing.T) {
 	t.Parallel()
 	assert := assert.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Sentry 1 (ETH69 initiator)
 	sentry1RW := NewRLPReadWriter()

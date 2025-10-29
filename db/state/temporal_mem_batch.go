@@ -21,12 +21,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"time"
 	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
@@ -54,18 +53,19 @@ type TemporalMemBatch struct {
 	domains         [kv.DomainLen]map[string]dataWithPrevStep
 	storage         *btree2.Map[string, dataWithPrevStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
-	domainWriters [kv.DomainLen]*DomainBufferedWriter
-	iiWriters     []*InvertedIndexBufferedWriter
+	domainWriters   [kv.DomainLen]*DomainBufferedWriter
+	iiWriters       []*InvertedIndexBufferedWriter
+	forkableWriters map[kv.ForkableId]kv.BufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
-	metrics                   *DomainMetrics
+	metrics                   *changeset.DomainMetrics
 }
 
-func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
-		metrics: metrics,
+		metrics: ioMetrics.(*changeset.DomainMetrics),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -79,6 +79,11 @@ func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemB
 	for id, d := range aggTx.d {
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
+	}
+
+	sd.forkableWriters = make(map[kv.ForkableId]kv.BufferedWriter)
+	for _, id := range tx.Debug().AllForkableIds() {
+		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter()
 	}
 
 	return sd
@@ -120,7 +125,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			dm.CachePutCount++
 			dm.CachePutSize += putSize
 		} else {
-			sd.metrics.Domains[domain] = &DomainIOMetrics{
+			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
 				CachePutCount: 1,
 				CachePutSize:  putSize,
 			}
@@ -140,7 +145,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		dm.CachePutCount++
 		dm.CachePutSize += putSize
 	} else {
-		sd.metrics.Domains[domain] = &DomainIOMetrics{
+		sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
 			CachePutCount: 1,
 			CachePutSize:  putSize,
 		}
@@ -249,6 +254,14 @@ func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uin
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
+func (sd *TemporalMemBatch) PutForkable(id kv.ForkableId, num kv.Num, v []byte) error {
+	f, ok := sd.forkableWriters[id]
+	if !ok {
+		return fmt.Errorf("forkable not found: %s", Registry.Name(id))
+	}
+	return f.Put(num, v)
+}
+
 func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
 		d.Close()
@@ -256,9 +269,11 @@ func (sd *TemporalMemBatch) Close() {
 	for _, iiWriter := range sd.iiWriters {
 		iiWriter.close()
 	}
+	for _, fWriter := range sd.forkableWriters {
+		fWriter.Close()
+	}
 }
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
-	defer mxFlushTook.ObserveDuration(time.Now())
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
@@ -300,6 +315,15 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		w.close()
+	}
+	for _, w := range sd.forkableWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
+		}
+		w.Close()
 	}
 	return nil
 }

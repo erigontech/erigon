@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/execution/chain/params"
 )
 
@@ -70,10 +70,11 @@ type Config struct {
 	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime   *big.Int `json:"cancunTime,omitempty"`
-	PragueTime   *big.Int `json:"pragueTime,omitempty"`
-	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
+	ShanghaiTime    *big.Int `json:"shanghaiTime,omitempty"`
+	CancunTime      *big.Int `json:"cancunTime,omitempty"`
+	PragueTime      *big.Int `json:"pragueTime,omitempty"`
+	OsakaTime       *big.Int `json:"osakaTime,omitempty"`
+	GlamsterdamTime *big.Int `json:"glamsterdamTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -164,6 +165,7 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
+		GlamsterdamTime:               big.NewInt(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
@@ -336,6 +338,11 @@ func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
 }
 
+// IsGlamsterdam returns whether time is either equal to the Glamsterdam fork time or greater.
+func (c *Config) IsGlamsterdam(time uint64) bool {
+	return isForked(c.GlamsterdamTime, time)
+}
+
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
@@ -365,7 +372,7 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
 		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
-			0: {},
+			0: nil,
 		}
 		if c.CancunTime != nil {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
@@ -416,7 +423,10 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Max
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.Max
+	}
+	return 0
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
@@ -424,11 +434,17 @@ func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
 }
 
 func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Target
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.Target
+	}
+	return 0
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
-	return c.GetBlobConfig(time).BaseFeeUpdateFraction
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.BaseFeeUpdateFraction
+	}
+	return 0
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
@@ -446,22 +462,6 @@ func (c *Config) SecondsPerSlot() uint64 {
 		return 5 // Gnosis
 	}
 	return 12 // Ethereum
-}
-
-func (c *Config) SlotsPerEpoch() uint64 {
-	if c.Bor != nil {
-		// Polygon does not have slots, this is such that block range is updated ~5 minutes similar to Ethereum
-		return 192
-	}
-	if c.Aura != nil {
-		return 16 // Gnosis
-	}
-	return 32 // Ethereum
-}
-
-// EpochDuration returns the duration of one epoch in seconds
-func (c *Config) EpochDuration() time.Duration {
-	return time.Duration(c.SecondsPerSlot()*c.SlotsPerEpoch()) * time.Second
 }
 
 func (c *Config) SystemContracts(time uint64) map[string]common.Address {
@@ -701,7 +701,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka                                 bool
+	IsPrague, IsOsaka, IsGlamsterdam                  bool
 	IsAura                                            bool
 }
 

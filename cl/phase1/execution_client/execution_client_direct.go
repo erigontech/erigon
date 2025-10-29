@@ -24,11 +24,11 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/types"
@@ -78,7 +78,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startInsertBlockAndWait := time.Now()
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, nil)); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}

@@ -27,9 +27,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
@@ -62,8 +62,6 @@ func TestWaitDeployed(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	for name, test := range waitDeployedTests {
-		name := name
-		test := test
 
 		t.Run(name, func(t *testing.T) {
 			backend := backends.NewSimulatedBackend(t,

@@ -24,7 +24,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -381,6 +381,16 @@ type ReceiptsRLPPacket66 struct {
 type BlockRangeUpdatePacket struct {
 	Earliest, Latest uint64
 	LatestHash       common.Hash
+}
+
+func (packet *BlockRangeUpdatePacket) Validate() error {
+	if packet.Earliest > packet.Latest {
+		return fmt.Errorf("invalid block range: earliest (%d) > latest (%d)", packet.Earliest, packet.Latest)
+	}
+	if packet.LatestHash == (common.Hash{}) {
+		return fmt.Errorf("invalid block range: latest block hash is zero")
+	}
+	return nil
 }
 
 func (*StatusPacket) Name() string { return "Status" }

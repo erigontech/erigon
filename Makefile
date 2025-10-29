@@ -5,6 +5,7 @@ GOBIN := $(CURDIR)/$(GOBINREL)
 GOARCH ?= $(shell go env GOHOSTARCH)
 UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
+DOCKER_BINARIES ?= "erigon"
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
@@ -21,11 +22,11 @@ DOCKER_TAG ?= erigontech/erigon:latest
 # Pipe error below to /dev/null since Makefile structure kind of expects
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
-CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
+#CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
+#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
 #CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
-CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
+#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
 
 CGO_CFLAGS += -D__BLST_PORTABLE__
@@ -46,9 +47,15 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
+CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
+ifeq ($(CGO_CXXFLAGS),)
+	CGO_CXXFLAGS += -g
+	CGO_CXXFLAGS += -O2
+endif
+
 BUILD_TAGS =
 
-ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
+ifneq ($(shell "$(CURDIR)/node/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
@@ -68,7 +75,7 @@ GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLA
 GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
 DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
 GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
-GOTEST = $(GO_BUILD_ENV) GODEBUG=cgocheck=0 GOTRACEBACK=1 GOEXPERIMENT=synctest $(GO) test $(GO_FLAGS) ./...
+GOTEST = $(GO_BUILD_ENV) CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GODEBUG=cgocheck=0 GOTRACEBACK=1 GOEXPERIMENT=synctest $(GO) test $(GO_FLAGS) ./...
 
 GOINSTALL = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go install -trimpath
 
@@ -115,6 +122,7 @@ docker:
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
+		--build-arg BINARIES="${DOCKER_BINARIES}" \
 		${DOCKER_FLAGS} \
 		.
 
@@ -187,20 +195,8 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-lib-short:
-	@cd erigon-lib && $(MAKE) test-short
-
-test-erigon-lib-all:
-	@cd erigon-lib && $(MAKE) test-all
-
-test-erigon-lib-all-race:
-	@cd erigon-lib && $(MAKE) test-all-race
-
-test-erigon-ext:
-	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
-
 ## test-short:                run short tests with a 10m timeout
-test-short: test-erigon-lib-short
+test-short:
 	@{ \
 		$(GOTEST) -short > run.log 2>&1; \
 		STATUS=$$?; \
@@ -209,7 +205,7 @@ test-short: test-erigon-lib-short
 	}
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all
+test-all:
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
 		STATUS=$$?; \
@@ -218,7 +214,7 @@ test-all: test-erigon-lib-all
 	}
 
 ## test-all-race:             run all tests with the race flag
-test-all-race: test-erigon-lib-all-race
+test-all-race:
 	@{ \
 		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
 		STATUS=$$?; \
@@ -264,7 +260,7 @@ endef
 
 hive-local:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
-	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
+	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/hive-local-$(SHORT_COMMIT)" && mkdir "temp/hive-local-$(SHORT_COMMIT)"
 	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
@@ -331,22 +327,19 @@ kurtosis-cleanup:
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
-	@cd erigon-lib && $(MAKE) lint-deps
+	@./tools/golangci_lint.sh --install-deps
 
 ## lintci:                            run golangci-lint linters
 lintci:
-	@cd erigon-lib && $(MAKE) lintci
-	@./erigon-lib/tools/golangci_lint.sh
+	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
 ## lint:                              run all linters
-lint:
-	@cd erigon-lib && $(MAKE) lint
-	@./erigon-lib/tools/golangci_lint.sh
-	@./erigon-lib/tools/mod_tidy_check.sh
+lint: 
+	@./tools/golangci_lint.sh
+	@./tools/mod_tidy_check.sh
 
 ## tidy:                              `go mod tidy`
 tidy:
-	cd erigon-lib && go mod tidy
 	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
@@ -467,7 +460,7 @@ gen:
 ## bindings:                          generate test contracts and core contracts
 bindings:
 	PATH=$(GOBIN):$(PATH) go generate ./execution/tests/contracts/
-	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/state/contracts/
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
@@ -491,7 +484,7 @@ DIST ?= $(CURDIR)/build/dist
 .PHONY: install
 install:
 	mkdir -p "$(DIST)"
-	cp -f "$$($(CURDIR)/turbo/silkworm/silkworm_lib_path.sh)" "$(DIST)"
+	cp -f "$$($(CURDIR)/node/silkworm/silkworm_lib_path.sh)" "$(DIST)"
 	cp -f "$(GOBIN)/"* "$(DIST)"
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"
