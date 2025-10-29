@@ -113,8 +113,8 @@ func (ethash *Ethash) Type() chain.ConsensusName {
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-work verified author of the block.
 // This is thread-safe (only access the header.Coinbase)
-func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
-	return header.Coinbase, nil
+func (ethash *Ethash) Author(header *types.Header) (accounts.Address, error) {
+	return accounts.InternAddress(header.Coinbase), nil
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules of the
@@ -619,7 +619,7 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	return hash
 }
 
-func (ethash *Ethash) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+func (ethash *Ethash) IsServiceTransaction(sender accounts.Address, syscall consensus.SystemCall) bool {
 	return false
 }
 

@@ -23,15 +23,16 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 	t.Helper()
 	// convert to common.Address form
-	addresses := make([]common.Address, 0, len(astrings))
-	var addressMap = make(map[common.Address]struct{})
+	addresses := make([]accounts.Address, 0, len(astrings))
+	var addressMap = make(map[accounts.Address]struct{})
 	for _, astring := range astrings {
-		address := common.HexToAddress(astring)
+		address := accounts.InternAddress(common.HexToAddress(astring))
 		addresses = append(addresses, address)
 		addressMap[address] = struct{}{}
 	}
@@ -50,10 +51,10 @@ func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 }
 
 func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotStrings ...string) {
-	if !s.AddressInAccessList(common.HexToAddress(addrString)) {
+	if !s.AddressInAccessList(accounts.InternAddress(common.HexToAddress(addrString))) {
 		t.Fatalf("scope missing address/slots %v", addrString)
 	}
-	var address = common.HexToAddress(addrString)
+	var address = accounts.InternAddress(common.HexToAddress(addrString))
 	// convert to common.Hash form
 	slots := make([]common.Hash, 0, len(slotStrings))
 	var slotMap = make(map[common.Hash]struct{})

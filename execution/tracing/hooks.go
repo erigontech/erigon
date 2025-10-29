@@ -48,7 +48,7 @@ type IntraBlockState interface {
 	GetBalance(accounts.Address) (uint256.Int, error)
 	GetNonce(accounts.Address) (uint64, error)
 	GetCode(accounts.Address) ([]byte, error)
-	GetState(addr accounts.Address, key types.StorageKey) (uint256.Int, error)
+	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
 	Exist(accounts.Address) (bool, error)
 	GetRefund() uint64
 }
@@ -156,7 +156,7 @@ type (
 	CodeChangeHook = func(addr accounts.Address, prevCodeHash common.Hash, prevCode []byte, codeHash common.Hash, code []byte)
 
 	// StorageChangeHook is called when the storage of an account changes.
-	StorageChangeHook = func(addr accounts.Address, slot types.StorageKey, prev, new uint256.Int)
+	StorageChangeHook = func(addr accounts.Address, slot accounts.StorageKey, prev, new uint256.Int)
 
 	// LogHook is called when a log is emitted.
 	LogHook = func(log *types.Log)

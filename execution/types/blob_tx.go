@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var ErrNilToFieldTx = errors.New("txn: field 'To' can not be 'nil'")
@@ -49,13 +50,19 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 }
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	var stxTo accounts.Address
+	if stx.To == nil {
+		stxTo = accounts.NilAddress
+	} else {
+		stxTo = accounts.InternAddress(*stx.To)
+	}
 	msg := Message{
 		nonce:            stx.Nonce,
 		gasLimit:         stx.GasLimit,
 		gasPrice:         *stx.FeeCap,
 		tipCap:           *stx.TipCap,
 		feeCap:           *stx.FeeCap,
-		to:               stx.To,
+		to:               stxTo,
 		amount:           *stx.Value,
 		data:             stx.Data,
 		accessList:       stx.AccessList,
@@ -76,11 +83,14 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 	if msg.gasPrice.Gt(stx.FeeCap) {
 		msg.gasPrice.Set(stx.FeeCap)
 	}
-	var err error
-	msg.from, err = stx.Sender(s)
+	if msgFrom, err := stx.Sender(s); err != nil {
+		return nil, err
+	} else {
+		msg.from = accounts.InternAddress(msgFrom)
+	}
 	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
-	return &msg, err
+	return &msg, nil
 }
 
 func (stx *BlobTx) cachedSender() (sender common.Address, ok bool) {

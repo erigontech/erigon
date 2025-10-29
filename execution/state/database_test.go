@@ -1622,7 +1622,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
 		}
 
-		st.GetState(phoenixAddress, key0, &check0)
+		check0, _ := st.GetState(phoenixAddress, key0)
 		if check0.Cmp(uint256.NewInt(2)) != 0 {
 			t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
 		}

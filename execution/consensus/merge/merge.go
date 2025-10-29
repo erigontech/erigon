@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -89,11 +90,11 @@ func (s *Merge) Type() chain.ConsensusName {
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
 // This is thread-safe (only access the header.Coinbase or the underlying engine's thread-safe method)
-func (s *Merge) Author(header *types.Header) (common.Address, error) {
+func (s *Merge) Author(header *types.Header) (accounts.Address, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Author(header)
 	}
-	return header.Coinbase, nil
+	return accounts.InternAddress(header.Coinbase), nil
 }
 
 func (s *Merge) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
@@ -357,7 +358,7 @@ func (s *Merge) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types
 	return nil
 }
 
-func (s *Merge) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+func (s *Merge) IsServiceTransaction(sender accounts.Address, syscall consensus.SystemCall) bool {
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 

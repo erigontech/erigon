@@ -94,7 +94,7 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 	// convert to message
 	for _, event := range events {
 		msg := types.NewMessage(
-			state.SystemAddress,
+			state.SystemAddress.Value(),
 			&r.stateClientAddress,
 			0, u256.Num0,
 			core.SysCallGasLimit,
@@ -130,7 +130,7 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 	// convert to message
 	for _, event := range events {
 		msg := types.NewMessage(
-			state.SystemAddress,
+			state.SystemAddress.Value(),
 			&r.stateClientAddress,
 			0, u256.Num0,
 			core.SysCallGasLimit,
@@ -226,7 +226,7 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 
 func messageFromData(to common.Address, data []byte) *types.Message {
 	msg := types.NewMessage(
-		state.SystemAddress,
+		state.SystemAddress.Value(),
 		&to,
 		0, u256.Num0,
 		core.SysCallGasLimit,
@@ -248,7 +248,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 	msgs := make([]*types.Message, len(stateSyncEvents))
 	for i, event := range stateSyncEvents {
 		msg := types.NewMessage(
-			state.SystemAddress, // from
+			state.SystemAddress.Value(), // from
 			stateReceiverContract,
 			0,         // nonce
 			u256.Num0, // amount

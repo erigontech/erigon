@@ -458,7 +458,7 @@ func (t *Tracer) OnCodeChange(address accounts.Address, prevCodeHash common.Hash
 	})
 }
 
-func (t *Tracer) OnStorageChange(address accounts.Address, slot types.StorageKey, prev, new uint256.Int) {
+func (t *Tracer) OnStorageChange(address accounts.Address, slot accounts.StorageKey, prev, new uint256.Int) {
 	if t.recordOptions.DisableOnStorageChangeRecording {
 		return
 	}

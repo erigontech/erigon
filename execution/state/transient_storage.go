@@ -20,7 +20,6 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 )
@@ -34,7 +33,7 @@ func newTransientStorage() transientStorage {
 }
 
 // Set sets the transient-storage `value` for `key` at the given `addr`.
-func (t transientStorage) Set(addr accounts.Address, key types.StorageKey, value uint256.Int) {
+func (t transientStorage) Set(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
 	if _, ok := t[addr]; !ok {
 		t[addr] = make(Storage)
 	}
@@ -42,7 +41,7 @@ func (t transientStorage) Set(addr accounts.Address, key types.StorageKey, value
 }
 
 // Get gets the transient storage for `key` at the given `addr`.
-func (t transientStorage) Get(addr accounts.Address, key types.StorageKey) uint256.Int {
+func (t transientStorage) Get(addr accounts.Address, key accounts.StorageKey) uint256.Int {
 	val, ok := t[addr]
 	if !ok {
 		return uint256.Int{}

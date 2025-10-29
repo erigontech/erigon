@@ -20,12 +20,11 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type accessList struct {
-	addresses map[accounts.Address]map[types.StorageKey]struct{}
+	addresses map[accounts.Address]map[accounts.StorageKey]struct{}
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -43,7 +42,7 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
-func (al *accessList) Contains(address accounts.Address, slot types.StorageKey) (addressPresent bool, slotPresent bool) {
+func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
 	slots, ok := al.addresses[address]
 	if !ok {
 		// no such address (and hence zero slots)
@@ -60,7 +59,7 @@ func (al *accessList) Contains(address accounts.Address, slot types.StorageKey) 
 // newAccessList creates a new accessList.
 func newAccessList() *accessList {
 	return &accessList{
-		addresses: map[accounts.Address]map[types.StorageKey]struct{}{},
+		addresses: map[accounts.Address]map[accounts.StorageKey]struct{}{},
 	}
 }
 
@@ -76,7 +75,7 @@ func (al *accessList) Copy() *accessList {
 		if v == nil {
 			cp.addresses[k] = v
 		} else {
-			slots := map[types.StorageKey]struct{}{}
+			slots := map[accounts.StorageKey]struct{}{}
 			for k := range v {
 				slots[k] = struct{}{}
 			}
@@ -102,11 +101,11 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - address added
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
-func (al *accessList) AddSlot(address accounts.Address, slot types.StorageKey) (addrChange bool, slotChange bool) {
+func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
 	slots, addrPresent := al.addresses[address]
 	if !addrPresent || slots == nil {
 		// Address not present, or addr present but no slots there
-		al.addresses[address] = map[types.StorageKey]struct{}{slot: {}}
+		al.addresses[address] = map[accounts.StorageKey]struct{}{slot: {}}
 		return !addrPresent, true
 	}
 	if _, ok := slots[slot]; !ok {
@@ -122,7 +121,7 @@ func (al *accessList) AddSlot(address accounts.Address, slot types.StorageKey) (
 // This operation needs to be performed in the same order as the addition happened.
 // This method is meant to be used  by the journal, which maintains ordering of
 // operations.
-func (al *accessList) DeleteSlot(address accounts.Address, slot types.StorageKey) {
+func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.StorageKey) {
 	slots, addrOk := al.addresses[address]
 	// There are two ways this can fail
 	if !addrOk {

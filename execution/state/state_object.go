@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -44,7 +43,7 @@ func (c Code) String() string {
 	return string(c) //strings.Join(Disassemble(c), " ")
 }
 
-type Storage map[types.StorageKey]uint256.Int
+type Storage map[accounts.StorageKey]uint256.Int
 
 func (s Storage) String() (str string) {
 	for key, value := range s {
@@ -141,7 +140,7 @@ func (so *stateObject) markSelfdestructed() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key types.StorageKey) (uint256.Int, bool) {
+func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool) {
 	// If the fake storage is set, only lookup the state here (in the debugging mode)
 	if so.fakeStorage != nil {
 		return so.fakeStorage[key], false
@@ -156,7 +155,7 @@ func (so *stateObject) GetState(key types.StorageKey) (uint256.Int, bool) {
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
-func (so *stateObject) GetCommittedState(key types.StorageKey) (uint256.Int, error) {
+func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, error) {
 	// If the fake storage is set, only lookup the state here (in the debugging mode)
 	if so.fakeStorage != nil {
 		return so.fakeStorage[key], nil
@@ -196,7 +195,7 @@ func (so *stateObject) GetCommittedState(key types.StorageKey) (uint256.Int, err
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key types.StorageKey, value uint256.Int, force bool) bool {
+func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool) bool {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
@@ -261,7 +260,7 @@ func (so *stateObject) SetStorage(storage Storage) {
 	}
 }
 
-func (so *stateObject) setState(key types.StorageKey, value uint256.Int) {
+func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
 	so.dirtyStorage[key] = value
 }
 
@@ -296,7 +295,7 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 			fmt.Printf("%d (%d.%d) Update Storage (%T): %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version,
 				stateWriter, so.address, key, blockOriginValue.Hex(), value.Hex())
 		}
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key.Value(), blockOriginValue, value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, blockOriginValue, value); err != nil {
 			return err
 		}
 		so.originStorage[key] = value

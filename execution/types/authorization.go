@@ -147,7 +147,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		if len(b) != 20 {
 			return fmt.Errorf("wrong size for Address: %d", len(b))
 		}
-		auth.Address = InternAddress(common.BytesToAddress(b))
+		auth.Address = accounts.InternAddress(common.BytesToAddress(b))
 
 		// nonce
 		if auth.Nonce, err = s.Uint(); err != nil {

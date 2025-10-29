@@ -562,7 +562,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case kv.StorageDomain.String():
 		for _, addr := range addrs {
-			a, s := accounts.InternAddress(common.BytesToAddress(addr[:length.Addr])), common.BytesToHash(addr[length.Addr:])
+			a, s := accounts.InternAddress(common.BytesToAddress(addr[:length.Addr])), accounts.InternKey(common.BytesToHash(addr[length.Addr:]))
 			st, _, err := r.ReadAccountStorage(a, s)
 			if err != nil {
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)

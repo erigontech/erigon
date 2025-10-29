@@ -41,6 +41,7 @@ func CreateAddress(a accounts.Address, nonce uint64) accounts.Address {
 // CreateAddress2 creates an ethereum address given the address bytes, initial
 // contract code hash and a salt.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress2(b Address, salt [32]byte, inithash []byte) Address {
-	return common.BytesToAddress(crypto.Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
+func CreateAddress2(b accounts.Address, salt [32]byte, inithash []byte) accounts.Address {
+	bv := b.Value()
+	return accounts.InternAddress(common.BytesToAddress(crypto.Keccak256([]byte{0xff}, bv[:], salt[:], inithash)[12:]))
 }

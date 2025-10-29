@@ -39,7 +39,8 @@ func (cw *CachedWriter) UpdateAccountData(address accounts.Address, original, ac
 	if err := cw.w.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}
-	cw.cache.SetAccountWrite(address.Bytes(), account)
+	addressValue := address.Value()
+	cw.cache.SetAccountWrite(addressValue[:], account)
 	return nil
 }
 
@@ -47,7 +48,8 @@ func (cw *CachedWriter) UpdateAccountCode(address accounts.Address, incarnation 
 	if err := cw.w.UpdateAccountCode(address, 1, codeHash, code); err != nil {
 		return err
 	}
-	cw.cache.SetCodeWrite(address.Bytes(), 1, code)
+	addressValue := address.Value()
+	cw.cache.SetCodeWrite(addressValue[:], 1, code)
 	return nil
 }
 
@@ -55,21 +57,24 @@ func (cw *CachedWriter) DeleteAccount(address accounts.Address, original *accoun
 	if err := cw.w.DeleteAccount(address, original); err != nil {
 		return err
 	}
-	cw.cache.SetAccountDelete(address.Bytes())
+	addressValue := address.Value()
+	cw.cache.SetAccountDelete(addressValue[:])
 	return nil
 }
 
-func (cw *CachedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+func (cw *CachedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	if err := cw.w.WriteAccountStorage(address, 1, key, original, value); err != nil {
 		return err
 	}
 	if original == value {
 		return nil
 	}
+	addressValue := address.Value()
+	keyValue := key.Value()
 	if value.IsZero() {
-		cw.cache.SetStorageDelete(address.Bytes(), 1, key[:])
+		cw.cache.SetStorageDelete(addressValue[:], 1, keyValue[:])
 	} else {
-		cw.cache.SetStorageWrite(address.Bytes(), 1, key[:], value.Bytes())
+		cw.cache.SetStorageWrite(addressValue[:], 1, keyValue[:], value.Bytes())
 	}
 	return nil
 }

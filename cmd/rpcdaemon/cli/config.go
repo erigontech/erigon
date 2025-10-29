@@ -68,6 +68,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/debug"
@@ -1041,15 +1042,15 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 	return nil
 }
 
-func (e *remoteConsensusEngine) Author(header *types.Header) (common.Address, error) {
+func (e *remoteConsensusEngine) Author(header *types.Header) (accounts.Address, error) {
 	if err := e.validateEngineReady(); err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
 
 	return e.engine.Author(header)
 }
 
-func (e *remoteConsensusEngine) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+func (e *remoteConsensusEngine) IsServiceTransaction(sender accounts.Address, syscall consensus.SystemCall) bool {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}

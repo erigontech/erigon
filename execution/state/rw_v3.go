@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -241,8 +242,7 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 	}
 
 	for _, lg := range logs {
-		addressValue := lg.Address.Value()
-		if err := domains.IndexAdd(kv.LogAddrIdx, addressValue[:], txNum); err != nil {
+		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txNum); err != nil {
 			return err
 		}
 		for _, topic := range lg.Topics {
@@ -269,7 +269,7 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 }
 
 type storageItem struct {
-	key   types.StorageKey
+	key   accounts.StorageKey
 	value uint256.Int
 }
 
@@ -459,7 +459,7 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 	return nil
 }
 
-func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash types.StorageKey, code []byte) error {
+func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.StorageKey, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
@@ -513,7 +513,7 @@ func (w *BufferedWriter) DeleteAccount(address accounts.Address, original *accou
 	return nil
 }
 
-func (w *BufferedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key types.StorageKey, original, value uint256.Int) error {
+func (w *BufferedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -615,7 +615,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	return nil
 }
 
-func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash types.StorageKey, code []byte) error {
+func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
@@ -650,7 +650,7 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint64, key types.StorageKey, original, value uint256.Int) error {
+func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -750,7 +750,7 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 	return r.ReadAccountData(address)
 }
 
-func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	var composite [20 + 32]byte
 	addressValue := address.Value()
 	keyValue := key.Value()
@@ -867,7 +867,7 @@ func (r *bufferedReader) ReadAccountDataForDebug(address accounts.Address) (*acc
 	return r.reader.ReadAccountDataForDebug(address)
 }
 
-func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 

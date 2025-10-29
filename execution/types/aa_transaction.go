@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/fixedgas"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
@@ -27,8 +28,8 @@ const (
 
 const AA_GAS_PENALTY_PCT = 10
 
-var AA_ENTRY_POINT = common.HexToAddress("0x0000000000000000000000000000000000007560")
-var AA_SENDER_CREATOR = common.HexToAddress("0x00000000000000000000000000000000ffff7560")
+var AA_ENTRY_POINT = accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000007560"))
+var AA_SENDER_CREATOR = accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000ffff7560"))
 
 type AccountAbstractionTransaction struct {
 	TransactionMisc
@@ -165,7 +166,7 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 
 func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	return &Message{
-		to:         nil,
+		to:         accounts.NilAddress,
 		gasPrice:   *tx.FeeCap,
 		blobHashes: []common.Hash{},
 	}, nil
@@ -554,8 +555,14 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 func (tx *AccountAbstractionTransaction) DeployerFrame(rules *chain.Rules, hasEIP3860 bool) *Message {
 	intrinsicGas, _ := tx.PreTransactionGasCost(rules, hasEIP3860)
 	deployerGasLimit := tx.ValidationGasLimit - intrinsicGas
+	var to accounts.Address
+	if tx.Deployer == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.Deployer)
+	}
 	return &Message{
-		to:       tx.Deployer,
+		to:       to,
 		from:     AA_SENDER_CREATOR,
 		gasLimit: deployerGasLimit,
 		data:     tx.DeployerData,
@@ -563,8 +570,14 @@ func (tx *AccountAbstractionTransaction) DeployerFrame(rules *chain.Rules, hasEI
 }
 
 func (tx *AccountAbstractionTransaction) ExecutionFrame() *Message {
+	var to accounts.Address
+	if tx.SenderAddress == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.SenderAddress)
+	}
 	return &Message{
-		to:       tx.SenderAddress,
+		to:       to,
 		from:     AA_ENTRY_POINT,
 		gasLimit: tx.GasLimit,
 		data:     tx.ExecutionData,
@@ -576,9 +589,14 @@ func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte
 	if err != nil {
 		return nil, errors.New("unable to encode postPaymasterTransaction")
 	}
-
+	var to accounts.Address
+	if tx.Paymaster == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.Paymaster)
+	}
 	return &Message{
-		to:       tx.Paymaster,
+		to:       to,
 		from:     AA_SENDER_CREATOR,
 		gasLimit: tx.PostOpGasLimit,
 		data:     postOpData,
@@ -601,8 +619,14 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 	if err != nil {
 		return nil, err
 	}
+	var to accounts.Address
+	if tx.Paymaster == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.Paymaster)
+	}
 	return &Message{
-		to:       tx.Paymaster,
+		to:       to,
 		from:     AA_ENTRY_POINT,
 		gasLimit: tx.PaymasterValidationGasLimit,
 		data:     validatePaymasterData,
@@ -623,9 +647,14 @@ func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deplo
 
 	intrinsicGas, _ := tx.PreTransactionGasCost(rules, hasEIP3860)
 	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentGasUsed
-
+	var to accounts.Address
+	if tx.SenderAddress == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.SenderAddress)
+	}
 	return &Message{
-		to:       tx.SenderAddress,
+		to:       to,
 		from:     AA_ENTRY_POINT,
 		gasLimit: accountGasLimit,
 		data:     validateTransactionData,
@@ -765,7 +794,7 @@ func convertProtoAuthorizations(auths []*typesproto.Authorization) []Authorizati
 		chainID.SetUint64(auth.ChainId)
 		goAuths[i] = Authorization{
 			ChainID: chainID,
-			Address: common.BytesToAddress(auth.Address),
+			Address: accounts.InternAddress(common.BytesToAddress(auth.Address)),
 			Nonce:   auth.Nonce,
 			YParity: uint8(auth.YParity),
 			R:       r,

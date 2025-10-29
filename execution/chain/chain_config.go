@@ -184,10 +184,10 @@ type BorConfig interface {
 	GetBhilaiBlock() *big.Int
 	IsRio(num uint64) bool
 	GetRioBlock() *big.Int
-	StateReceiverContractAddress() common.Address
+	StateReceiverContractAddress() accounts.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
-	CalculateCoinbase(number uint64) common.Address
+	CalculateCoinbase(number uint64) accounts.Address
 }
 
 func timestampToTime(unixTime *big.Int) *time.Time {

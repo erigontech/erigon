@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 )
@@ -131,13 +130,13 @@ type (
 	}
 	storageChange struct {
 		account     accounts.Address
-		key         types.StorageKey
+		key         accounts.StorageKey
 		prevalue    uint256.Int
 		wasCommited bool
 	}
 	fakeStorageChange struct {
 		account  accounts.Address
-		key      types.StorageKey
+		key      accounts.StorageKey
 		prevalue uint256.Int
 	}
 	codeChange struct {
@@ -164,12 +163,12 @@ type (
 	}
 	accessListAddSlotChange struct {
 		address accounts.Address
-		slot    types.StorageKey
+		slot    accounts.StorageKey
 	}
 
 	transientStorageChange struct {
 		account  accounts.Address
-		key      types.StorageKey
+		key      accounts.StorageKey
 		prevalue uint256.Int
 	}
 )
@@ -196,7 +195,7 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 }
 
 func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
-	return types.NilAddress, false
+	return accounts.NilAddress, false
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
@@ -312,7 +311,7 @@ func (ch balanceIncrease) dirtied() (accounts.Address, bool) {
 }
 
 func (ch balanceIncreaseTransfer) dirtied() (accounts.Address, bool) {
-	return types.NilAddress, false
+	return accounts.NilAddress, false
 }
 
 func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
@@ -472,7 +471,7 @@ func (ch transientStorageChange) revert(s *IntraBlockState) error {
 }
 
 func (ch transientStorageChange) dirtied() (accounts.Address, bool) {
-	return types.NilAddress, false
+	return accounts.NilAddress, false
 }
 
 func (ch refundChange) revert(s *IntraBlockState) error {
@@ -481,7 +480,7 @@ func (ch refundChange) revert(s *IntraBlockState) error {
 }
 
 func (ch refundChange) dirtied() (accounts.Address, bool) {
-	return types.NilAddress, false
+	return accounts.NilAddress, false
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) error {
@@ -498,7 +497,7 @@ func (ch addLogChange) revert(s *IntraBlockState) error {
 }
 
 func (ch addLogChange) dirtied() (accounts.Address, bool) {
-	return types.NilAddress, false
+	return accounts.NilAddress, false
 }
 
 func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
@@ -516,7 +515,7 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 }
 
 func (ch accessListAddAccountChange) dirtied() (accounts.Address, bool) {
-	return types.NilAddress, false
+	return accounts.NilAddress, false
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
@@ -525,5 +524,5 @@ func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
 }
 
 func (ch accessListAddSlotChange) dirtied() (accounts.Address, bool) {
-	return types.NilAddress, false
+	return accounts.NilAddress, false
 }

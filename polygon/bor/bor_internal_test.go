@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -100,8 +101,8 @@ func TestCommitStatesIndore(t *testing.T) {
 
 	called := 0
 
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		require.Equal(t, contract, contractAddr)
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+		require.Equal(t, contract.Value(), contractAddr)
 		called++
 
 		return nil, nil

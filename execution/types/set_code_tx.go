@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const DelegateDesignationCodeSize = 23
@@ -115,13 +116,19 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.To)
+	}
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         *tx.FeeCap,
 		tipCap:           *tx.TipCap,
 		feeCap:           *tx.FeeCap,
-		to:               tx.To,
+		to:               to,
 		amount:           *tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,
@@ -148,9 +155,12 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	}
 	msg.authorizations = tx.Authorizations
 
-	var err error
-	msg.from, err = tx.Sender(s)
-	return &msg, err
+	if msgFrom, err := tx.Sender(s); err != nil {
+		return nil, err
+	} else {
+		msg.from = accounts.InternAddress(msgFrom)
+	}
+	return &msg, nil
 }
 
 func (tx *SetCodeTransaction) Sender(signer Signer) (common.Address, error) {
@@ -363,17 +373,17 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.
-func ParseDelegation(code []byte) (Address, bool) {
+func ParseDelegation(code []byte) (accounts.Address, bool) {
 	if len(code) != DelegateDesignationCodeSize || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
-		return NilAddress, false
+		return accounts.NilAddress, false
 	}
 	var addr common.Address
 	copy(addr[:], code[len(params.DelegatedDesignationPrefix):])
-	return InternAddress(addr), true
+	return accounts.InternAddress(addr), true
 }
 
 // AddressToDelegation adds the delegation prefix to the specified address.
-func AddressToDelegation(addr Address) []byte {
+func AddressToDelegation(addr accounts.Address) []byte {
 	addrVal := addr.Value()
 	return append(params.DelegatedDesignationPrefix, addrVal[:]...)
 }

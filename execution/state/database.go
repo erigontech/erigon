@@ -25,7 +25,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -39,7 +38,7 @@ const (
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
-	ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error)
+	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
 	HasStorage(address accounts.Address) (bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
 	ReadAccountCodeSize(address accounts.Address) (int, error)
@@ -57,7 +56,7 @@ type StateWriter interface {
 	UpdateAccountData(address accounts.Address, original, account *accounts.Account) error
 	UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(address accounts.Address, original *accounts.Account) error
-	WriteAccountStorage(address accounts.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error
+	WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error
 	CreateContract(address accounts.Address) error
 }
 
@@ -95,7 +94,7 @@ func (nw *NoopWriter) UpdateAccountCode(address accounts.Address, incarnation ui
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+func (nw *NoopWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -361,13 +362,13 @@ func (c *AuRa) Type() chain.ConsensusName {
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 // This is thread-safe (only access the Coinbase of the header)
-func (c *AuRa) Author(header *types.Header) (common.Address, error) {
+func (c *AuRa) Author(header *types.Header) (accounts.Address, error) {
 	/*
 				 let message = keccak(empty_step_rlp(self.step, &self.parent_hash));
 		        let public = publickey::recover(&self.signature.into(), &message)?;
 		        Ok(publickey::public_to_address(&public))
 	*/
-	return header.Coinbase, nil
+	return accounts.InternAddress(header.Coinbase), nil
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -1011,7 +1012,7 @@ func (c *AuRa) SealHash(header *types.Header) common.Hash {
 
 // See https://openethereum.github.io/Permissioning.html#gas-price
 // This is thread-safe: it only accesses the `certifier` which is used behind a RWLock
-func (c *AuRa) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall consensus.SystemCall) bool {
 	c.certifierLock.Lock()
 	defer c.certifierLock.Unlock()
 	if c.certifier == nil && c.cfg.Registrar != nil {
@@ -1024,7 +1025,7 @@ func (c *AuRa) IsServiceTransaction(sender common.Address, syscall consensus.Sys
 	if err != nil {
 		panic(err)
 	}
-	out, err := syscall(*c.certifier, packed)
+	out, err := syscall(accounts.InternAddress(*c.certifier), packed)
 	if err != nil {
 		panic(err)
 	}

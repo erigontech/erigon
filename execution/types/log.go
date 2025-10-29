@@ -64,7 +64,7 @@ type Log struct {
 type Logs []*Log
 
 type ErigonLog struct {
-	Address     Address       `json:"address" gencodec:"required" codec:"1"`
+	Address     common.Address       `json:"address" gencodec:"required" codec:"1"`
 	Topics      []common.Hash `json:"topics" gencodec:"required" codec:"2"`
 	Data        []byte        `json:"data" gencodec:"required" codec:"3"`
 	BlockNumber uint64        `json:"blockNumber" codec:"-"`
@@ -105,7 +105,7 @@ func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex u
 	}
 }
 
-func (logs Logs) Filter(addrMap map[Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
+func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
 	topicMap := make([]map[common.Hash]struct{}, len(topics))
 
 	//populate topic map
@@ -158,7 +158,7 @@ func (logs Logs) Filter(addrMap map[Address]struct{}, topics [][]common.Hash, ma
 	return o
 }
 
-func (logs Logs) ContainingTopics(addrMap map[Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
+func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
 	var logCount uint64
 
@@ -191,7 +191,7 @@ func (logs Logs) ContainingTopics(addrMap map[Address]struct{}, topicsMap map[co
 	return o
 }
 
-func (logs Logs) FilterOld(addresses map[Address]struct{}, topics [][]common.Hash) Logs {
+func (logs Logs) FilterOld(addresses map[common.Address]struct{}, topics [][]common.Hash) Logs {
 	result := make(Logs, 0, len(logs))
 	// populate a set of addresses
 Logs:
@@ -234,13 +234,13 @@ type logMarshaling struct {
 }
 
 type rlpLog struct {
-	Address Address
+	Address common.Address
 	Topics  []common.Hash
 	Data    []byte
 }
 
 type rlpStorageLog struct {
-	Address Address
+	Address common.Address
 	Topics  []common.Hash
 	Data    []byte
 	//BlockNumber uint64
@@ -326,9 +326,7 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var addr common.Address
-	err = s.ReadBytes(addr[:])
-	l.Address = InternAddress(addr)
+	err = s.ReadBytes(l.Address[:])
 	if err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}

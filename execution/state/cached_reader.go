@@ -19,7 +19,6 @@ package state
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -64,7 +63,7 @@ func (cr *CachedReader) ReadAccountDataForDebug(address accounts.Address) (*acco
 }
 
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
-func (cr *CachedReader) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (cr *CachedReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addrValue := address.Value()
 	keyValue := key.Value()
 	if s, ok := cr.cache.GetStorage(addrValue[:], 1, keyValue[:]); ok {

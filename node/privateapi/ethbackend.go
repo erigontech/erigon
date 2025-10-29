@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/direct"
@@ -469,9 +470,9 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	stateReader.SetTxNum(maxTxNum)
 	ibs := state.New(stateReader)
 
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &common.Address{}, s.chainConfig)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
 
-	senderCodeSize, err := ibs.GetCodeSize(*aaTxn.SenderAddress)
+	senderCodeSize, err := ibs.GetCodeSize(accounts.InternAddress(*aaTxn.SenderAddress))
 	if err != nil {
 		return nil, err
 	}

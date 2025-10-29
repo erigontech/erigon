@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -92,7 +91,7 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*a
 	return hr.ReadAccountData(address)
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
 	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)

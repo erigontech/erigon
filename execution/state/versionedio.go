@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -150,7 +149,7 @@ func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 type VersionedRead struct {
 	Address accounts.Address
 	Path    AccountPath
-	Key     types.StorageKey
+	Key     accounts.StorageKey
 	Source  ReadSource
 	Version Version
 	Val     interface{}
@@ -163,7 +162,7 @@ func (vr VersionedRead) String() string {
 type VersionedWrite struct {
 	Address accounts.Address
 	Path    AccountPath
-	Key     types.StorageKey
+	Key     accounts.StorageKey
 	Version Version
 	Val     interface{}
 	Reason  tracing.BalanceChangeReason
@@ -237,7 +236,7 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	return nil, nil
 }
 
-func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path AccountPath, key types.StorageKey, txIndex int) (T, bool) {
+func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIndex int) (T, bool) {
 	if res := versionMap.Read(addr, path, key, txIndex); res.Status() == MVReadResultDone {
 		return res.Value().(T), true
 	}
@@ -251,13 +250,13 @@ func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path 
 // be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
 // we do  want to capture the updates
 func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
-	if update, ok := versionedUpdate[uint256.Int](vr.versionMap, address, BalancePath, types.NilKey, vr.txIndex); ok {
+	if update, ok := versionedUpdate[uint256.Int](vr.versionMap, address, BalancePath, accounts.NilKey, vr.txIndex); ok {
 		account.Balance = update
 	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, types.NilKey, vr.txIndex); ok {
+	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, accounts.NilKey, vr.txIndex); ok {
 		account.Nonce = update
 	}
-	if update, ok := versionedUpdate[common.Hash](vr.versionMap, address, CodeHashPath, types.NilKey, vr.txIndex); ok {
+	if update, ok := versionedUpdate[common.Hash](vr.versionMap, address, CodeHashPath, accounts.NilKey, vr.txIndex); ok {
 		account.CodeHash = update
 	}
 	return account
@@ -285,7 +284,7 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address)
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key types.StorageKey) (uint256.Int, bool, error) {
+func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
 		return val, true, nil
@@ -384,7 +383,7 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 	return false
 }
 
-func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key types.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
+func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr)
 
@@ -397,7 +396,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		return defaultV, StorageRead, UnknownVersion, nil
-	} else if res := s.versionMap.Read(addr, SelfDestructPath, types.NilKey, s.txIndex); res.Status() == MVReadResultDone {
+	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone {
 		return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
 	}
 
@@ -518,7 +517,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 
 				if pr.Source == MapRead {
 					if path == BalancePath || path == NoncePath || path == CodeHashPath {
-						if _, source, version, _ := versionedRead(s, addr, AddressPath, types.NilKey, false, nil,
+						if _, source, version, _ := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 							func(v *accounts.Account) *accounts.Account { return v }, nil); source == pr.Source && version == pr.Version {
 							return pr.Val.(T), ReadSetRead, pr.Version, nil
 						}
@@ -546,7 +545,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		var err error
 
 		if path == BalancePath || path == NoncePath || path == CodeHashPath {
-			readAccount, source, version, err := versionedRead(s, addr, AddressPath, types.NilKey, false, nil,
+			readAccount, source, version, err := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 				func(v *accounts.Account) *accounts.Account { return v }, nil)
 
 			if err != nil {
@@ -652,7 +651,7 @@ func (io *VersionedIO) HasReads(txnIdx int) bool {
 	return len(io.inputs[txnIdx+1].readSet) > 0
 }
 
-func (io *VersionedIO) HasWritten(txnIdx int, addr accounts.Address, path AccountPath, key types.StorageKey) bool {
+func (io *VersionedIO) HasWritten(txnIdx int, addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
 	if len(io.outputsSet) <= txnIdx+1 {
 		return false
 	}
