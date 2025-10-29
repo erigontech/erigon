@@ -210,7 +210,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.BlockNumber = uint64(*bundle.BlockOverride.BlockNumber)
 		}
 		if bundle.BlockOverride.BaseFee != nil {
-			blockCtx.BaseFee = bundle.BlockOverride.BaseFee
+			blockCtx.BaseFee = *bundle.BlockOverride.BaseFee
 		}
 		if bundle.BlockOverride.Coinbase != nil {
 			blockCtx.Coinbase = *bundle.BlockOverride.Coinbase
@@ -232,7 +232,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
-			msg, err := txn.ToMessage(api.GasCap, blockCtx.BaseFee)
+			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)
 			if err != nil {
 				return nil, err
 			}

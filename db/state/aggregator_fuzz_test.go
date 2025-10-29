@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -45,7 +46,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -78,7 +79,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			acc := accounts.Account{
 				Nonce:       1,
-				Balance:     *uint256.NewInt(0),
+				Balance:     uint256.Int{},
 				CodeHash:    common.Hash{},
 				Incarnation: 0,
 			}
@@ -161,7 +162,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 

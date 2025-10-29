@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -316,7 +316,7 @@ Loop:
 		if !ok {
 			return errors.New("tx is not a temporal tx")
 		}
-		doms, err := state.NewSharedDomains(temporalTx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
+		doms, err := execctx.NewSharedDomains(temporalTx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 		if err != nil {
 			return err
 		}
