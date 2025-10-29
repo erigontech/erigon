@@ -174,7 +174,6 @@ func uint256ToHash(v *uint256.Int) common.Hash {
 func (sdb *IntraBlockState) EnableBlockAccessList(rules *chain.Rules) {
 	enabled := rules != nil && rules.CollectBlockAccessList
 	sdb.blockAccessEnabled = enabled
-	log.Info("experimental bal enable collector", "enabled", enabled)
 	sdb.blockAccessIgnorePreload = false
 	if !enabled {
 		sdb.blockAccessTxTouches = nil
@@ -184,7 +183,6 @@ func (sdb *IntraBlockState) EnableBlockAccessList(rules *chain.Rules) {
 	}
 	sdb.blockAccessTxTouches = make(map[common.Address]*blockAccessTouch)
 	sdb.blockAccessSnapshots = sdb.blockAccessSnapshots[:0]
-	log.Info("experimental bal enable collector complete", "existingSnapshots", len(sdb.blockAccessSnapshots))
 }
 
 func (sdb *IntraBlockState) ResetTxTracking() {
@@ -564,6 +562,9 @@ func (sdb *IntraBlockState) applyJournalEntry(snapshot *blockAccessSnapshot, wri
 			}
 		}
 		acc.ensureStorageReads()[e.slot] = struct{}{}
+	case addLogChange, transientStorageChange, refundChange:
+		// not required to track in BAL
+		return nil
 	default:
 		log.Info("experimental bal journal unhandled", "index", snapshot.index, "entry", fmt.Sprintf("%T", entry))
 	}
