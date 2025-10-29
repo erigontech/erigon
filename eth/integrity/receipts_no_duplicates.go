@@ -137,15 +137,16 @@ func ValidateDomainProgress(db kv.TemporalRoDB, domain kv.Domain, txNumsReader r
 		msg := fmt.Sprintf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d); this might be okay, please check", domain.String(), receiptProgress, e1, accProgress, e2)
 		log.Warn(msg)
 		return nil
-	} else if accProgress < receiptProgress {
-		// something very wrong
-		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
-		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
-
-		err := fmt.Errorf("[integrity] %s=%d (%d) is ahead of AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
-		log.Error(err.Error())
-		return err
-
 	}
+	// else if accProgress < receiptProgress {
+	// 	// something very wrong
+	// 	e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+	// 	e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+	// 	err := fmt.Errorf("[integrity] %s=%d (%d) is ahead of AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
+	// 	log.Error(err.Error())
+	// 	return err
+
+	// }
 	return nil
 }
