@@ -165,26 +165,7 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
-	protectFiles := make(map[string]struct{}, len(fNames))
-	for _, f := range fNames {
-		protectFiles[f] = struct{}{}
-	}
-	var toClose []*FilesItem
-	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
-					continue
-				}
-			}
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		item.closeFiles()
-		h.dirtyFiles.Delete(item)
-	}
+	closeWhatNotInList(h.dirtyFiles, fNames)
 }
 
 func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.ValuesTable) }

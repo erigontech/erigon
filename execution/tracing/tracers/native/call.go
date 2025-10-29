@@ -190,7 +190,7 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.depth = depth
 	t.precompiles = append(t.precompiles, precompile)
 	if t.config.OnlyTopCall && depth > 0 {
@@ -211,7 +211,8 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 		Input: common.CopyBytes(input),
 		Gas:   gas,
 	}
-	if value != nil {
+
+	if call.Type != vm.STATICCALL {
 		call.Value = value.ToBig()
 	}
 
