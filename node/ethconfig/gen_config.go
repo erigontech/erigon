@@ -68,6 +68,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		PolygonPosSingleSlotFinality        bool
 		PolygonPosSingleSlotFinalityBlockAt uint64
 		AllowAA                             bool
+		ExperimentalBAL                     bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -114,6 +115,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.PolygonPosSingleSlotFinality = c.PolygonPosSingleSlotFinality
 	enc.PolygonPosSingleSlotFinalityBlockAt = c.PolygonPosSingleSlotFinalityBlockAt
 	enc.AllowAA = c.AllowAA
+	enc.ExperimentalBAL = c.ExperimentalBAL
 	return &enc, nil
 }
 
@@ -164,6 +166,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		PolygonPosSingleSlotFinality        *bool
 		PolygonPosSingleSlotFinalityBlockAt *uint64
 		AllowAA                             *bool
+		ExperimentalBAL                     *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -300,6 +303,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.AllowAA != nil {
 		c.AllowAA = *dec.AllowAA
+	}
+	if dec.ExperimentalBAL != nil {
+		c.ExperimentalBAL = *dec.ExperimentalBAL
 	}
 	return nil
 }

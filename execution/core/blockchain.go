@@ -397,8 +397,11 @@ func FinalizeBlockExecution(
 
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
 	rules := blockContext.Rules(cc)
+	collectBAL := rules != nil && rules.CollectBlockAccessList
+	enforceBAL := rules != nil && rules.IsGlamsterdam
+	log.Info("FinalizeBlockExecution", "collectBAL", collectBAL, "enforceBAL", enforceBAL)
 
-	if rules.IsGlamsterdam {
+	if collectBAL {
 		if err := ibs.SnapshotSystemAccess(uint16(len(txs) + 1)); err != nil {
 			return nil, nil, err
 		}
@@ -410,10 +413,25 @@ func FinalizeBlockExecution(
 		if len(blockAccessList) > 0 {
 			hash = blockAccessList.Hash()
 		}
-		hashCopy := hash
-		header.BlockAccessListHash = &hashCopy
-		if newBlock != nil {
-			newBlock.SetBlockAccessList(blockAccessList)
+		if enforceBAL {
+			hashCopy := hash
+			header.BlockAccessListHash = &hashCopy
+			if newBlock != nil {
+				newBlock.SetBlockAccessList(blockAccessList)
+			}
+			if cc.ExperimentalBAL && logger != nil {
+				logger.Info("experimental block access list", "block", header.Number.Uint64(), "hash", hash, "accounts", len(blockAccessList))
+			}
+		} else {
+			header.BlockAccessListHash = nil
+			if cc.ExperimentalBAL && logger != nil {
+				logger.Info("experimental block access list", "block", header.Number.Uint64(), "hash", hash, "accounts", len(blockAccessList))
+			}
+		}
+	} else if !enforceBAL {
+		header.BlockAccessListHash = nil
+		if cc.ExperimentalBAL && logger != nil {
+			logger.Info("experimental block access list collection inactive", "block", header.Number.Uint64(), "reason", "rules disabled")
 		}
 	}
 
@@ -434,10 +452,13 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
 		return ret, err
 	}, logger, tracer)
+	if rules.CollectBlockAccessList && logger != nil {
+		logger.Info("experimental block access list collection enabled", "block", header.Number.Uint64(), "time", header.Time)
+	}
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
-	if rules.IsGlamsterdam {
+	if rules.CollectBlockAccessList {
 		if err := ibs.SnapshotSystemAccess(0); err != nil {
 			return err
 		}

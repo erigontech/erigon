@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 	"slices"
 	"sort"
@@ -25,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -170,16 +172,19 @@ func uint256ToHash(v *uint256.Int) common.Hash {
 }
 
 func (sdb *IntraBlockState) EnableBlockAccessList(rules *chain.Rules) {
-	enabled := rules != nil && rules.IsGlamsterdam
+	enabled := rules != nil && rules.CollectBlockAccessList
 	sdb.blockAccessEnabled = enabled
+	log.Info("experimental bal enable collector", "enabled", enabled)
 	sdb.blockAccessIgnorePreload = false
 	if !enabled {
 		sdb.blockAccessTxTouches = nil
 		sdb.blockAccessSnapshots = nil
+		log.Info("experimental bal disable collector cleanup")
 		return
 	}
 	sdb.blockAccessTxTouches = make(map[common.Address]*blockAccessTouch)
 	sdb.blockAccessSnapshots = sdb.blockAccessSnapshots[:0]
+	log.Info("experimental bal enable collector complete", "existingSnapshots", len(sdb.blockAccessSnapshots))
 }
 
 func (sdb *IntraBlockState) ResetTxTracking() {
@@ -190,14 +195,26 @@ func (sdb *IntraBlockState) ResetTxTracking() {
 }
 
 func (sdb *IntraBlockState) SnapshotTxAccess(index uint16) error {
-	return sdb.captureBlockAccessSnapshot(index)
+	err := sdb.captureBlockAccessSnapshotWithEntries(index, append([]journalEntry(nil), sdb.journal.entries...))
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (sdb *IntraBlockState) SnapshotSystemAccess(index uint16) error {
-	return sdb.captureBlockAccessSnapshot(index)
+	err := sdb.captureBlockAccessSnapshotWithEntries(index, append([]journalEntry(nil), sdb.journal.entries...))
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (sdb *IntraBlockState) captureBlockAccessSnapshot(index uint16) error {
+	return sdb.captureBlockAccessSnapshotWithEntries(index, append([]journalEntry(nil), sdb.journal.entries...))
+}
+
+func (sdb *IntraBlockState) captureBlockAccessSnapshotWithEntries(index uint16, entries []journalEntry) error {
 	if !sdb.blockAccessEnabled {
 		return nil
 	}
@@ -205,7 +222,7 @@ func (sdb *IntraBlockState) captureBlockAccessSnapshot(index uint16) error {
 	snapshot := &blockAccessSnapshot{index: index}
 	writtenSlots := make(map[common.Address]map[common.Hash]struct{})
 
-	for _, entry := range sdb.journal.entries {
+	for _, entry := range entries {
 		if err := sdb.applyJournalEntry(snapshot, writtenSlots, entry); err != nil {
 			return err
 		}
@@ -532,6 +549,23 @@ func (sdb *IntraBlockState) applyJournalEntry(snapshot *blockAccessSnapshot, wri
 		addr := *e.account
 		acc := snapshot.account(addr)
 		acc.touched = true
+	case accessListAddAccountChange:
+		addr := e.address
+		acc := snapshot.account(addr)
+		acc.touched = true
+	case accessListAddSlotChange:
+		addr := e.address
+		acc := snapshot.account(addr)
+		acc.touched = true
+		written := writtenSlots[addr]
+		if written != nil {
+			if _, ok := written[e.slot]; ok {
+				return nil
+			}
+		}
+		acc.ensureStorageReads()[e.slot] = struct{}{}
+	default:
+		log.Info("experimental bal journal unhandled", "index", snapshot.index, "entry", fmt.Sprintf("%T", entry))
 	}
 	return nil
 }

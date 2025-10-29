@@ -10,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
@@ -410,6 +411,17 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
 				blockAccessList = result.BlockAccessList
+				if se.cfg.chainConfig.ExperimentalBAL {
+					if blockAccessList != nil {
+						hash := empty.BlockAccessListHash
+						if len(blockAccessList) > 0 {
+							hash = blockAccessList.Hash()
+						}
+						se.logger.Info("experimental block access list", "block", txTask.BlockNumber(), "hash", hash, "accounts", len(blockAccessList))
+					} else {
+						se.logger.Info("experimental block access list missing", "block", txTask.BlockNumber(), "reason", "no data from execution")
+					}
+				}
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))

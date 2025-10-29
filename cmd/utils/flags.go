@@ -1141,6 +1141,11 @@ var (
 		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
 		Value: false,
 	}
+	ExperimentalBALFlag = cli.BoolFlag{
+		Name:  "experimental.bal",
+		Usage: "EXPERIMENTAL: collect block access lists during execution and log their hashes",
+		Value: false,
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -2023,6 +2028,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setCaplin(ctx, cfg)
 
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
+	experimentalBAL := ctx.Bool(ExperimentalBALFlag.Name)
+	cfg.ExperimentalBAL = experimentalBAL
+	logger.Info("Experimental block access list collection enabled")
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {

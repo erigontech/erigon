@@ -492,7 +492,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			return ret, err
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		if rules.IsGlamsterdam {
+		if rules.CollectBlockAccessList {
 			if err := ibs.SnapshotSystemAccess(0); err != nil {
 				result.Err = err
 				return &result
@@ -504,12 +504,14 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			break
 		}
 
+		collectBAL := rules != nil && rules.CollectBlockAccessList
+
 		result.TraceTos = map[common.Address]struct{}{}
 		result.TraceTos[txTask.Header.Coinbase] = struct{}{}
 		for _, uncle := range txTask.Uncles {
 			result.TraceTos[uncle.Coinbase] = struct{}{}
 		}
-		if rules.IsGlamsterdam {
+		if collectBAL {
 			accessIndex := len(txTask.Txs) + 1
 			if accessIndex > 0xffff {
 				result.Err = fmt.Errorf("block access index overflow (system %d)", accessIndex)
@@ -578,7 +580,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
-			if rules.IsGlamsterdam {
+			if rules.CollectBlockAccessList {
 				accessIndex := txTask.TxIndex + 1
 				if accessIndex > 0xffff {
 					result.Err = fmt.Errorf("block access index overflow (tx %d)", accessIndex)
@@ -608,7 +610,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			panic(err)
 		}
 
-		if rules.IsGlamsterdam && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+		if rules.CollectBlockAccessList && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
 			ibs.ResetTxTracking()
 		}
 
@@ -686,7 +688,9 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 
 	result.ExecutionResult.GasUsed = gasUsed
 
-	if rules.IsGlamsterdam {
+	collectBAL := rules != nil && rules.CollectBlockAccessList
+
+	if collectBAL {
 		accessIndex := txTask.TxIndex + 1
 		if accessIndex > 0xffff {
 			result.Err = fmt.Errorf("block access index overflow (tx %d)", accessIndex)
@@ -701,7 +705,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
-	if rules.IsGlamsterdam {
+	if rules.CollectBlockAccessList {
 		ibs.ResetTxTracking()
 	}
 

@@ -108,7 +108,8 @@ type Config struct {
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
 	// Account Abstraction
-	AllowAA bool
+	AllowAA         bool
+	ExperimentalBAL bool `json:"-"`
 }
 
 var (
@@ -710,6 +711,8 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka, IsGlamsterdam                  bool
 	IsAura                                            bool
+	CollectBlockAccessList                            bool
+	LogBlockAccessList                                bool
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.

@@ -29,24 +29,30 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		chainID = new(big.Int)
 	}
 
+	collectBAL := c.IsGlamsterdam(bc.Time)
+	if c.ExperimentalBAL {
+		collectBAL = true
+	}
+
 	return &chain.Rules{
-		ChainID:            new(big.Int).Set(chainID),
-		IsHomestead:        c.IsHomestead(bc.BlockNumber),
-		IsTangerineWhistle: c.IsTangerineWhistle(bc.BlockNumber),
-		IsSpuriousDragon:   c.IsSpuriousDragon(bc.BlockNumber),
-		IsByzantium:        c.IsByzantium(bc.BlockNumber),
-		IsConstantinople:   c.IsConstantinople(bc.BlockNumber),
-		IsPetersburg:       c.IsPetersburg(bc.BlockNumber),
-		IsIstanbul:         c.IsIstanbul(bc.BlockNumber),
-		IsBerlin:           c.IsBerlin(bc.BlockNumber),
-		IsLondon:           c.IsLondon(bc.BlockNumber),
-		IsShanghai:         c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber),
-		IsCancun:           c.IsCancun(bc.Time),
-		IsNapoli:           c.IsNapoli(bc.BlockNumber),
-		IsBhilai:           c.IsBhilai(bc.BlockNumber),
-		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
-		IsOsaka:            c.IsOsaka(bc.Time),
-		IsGlamsterdam:      c.IsGlamsterdam(bc.Time),
-		IsAura:             c.Aura != nil,
+		ChainID:                new(big.Int).Set(chainID),
+		IsHomestead:            c.IsHomestead(bc.BlockNumber),
+		IsTangerineWhistle:     c.IsTangerineWhistle(bc.BlockNumber),
+		IsSpuriousDragon:       c.IsSpuriousDragon(bc.BlockNumber),
+		IsByzantium:            c.IsByzantium(bc.BlockNumber),
+		IsConstantinople:       c.IsConstantinople(bc.BlockNumber),
+		IsPetersburg:           c.IsPetersburg(bc.BlockNumber),
+		IsIstanbul:             c.IsIstanbul(bc.BlockNumber),
+		IsBerlin:               c.IsBerlin(bc.BlockNumber),
+		IsLondon:               c.IsLondon(bc.BlockNumber),
+		IsShanghai:             c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber),
+		IsCancun:               c.IsCancun(bc.Time),
+		IsNapoli:               c.IsNapoli(bc.BlockNumber),
+		IsBhilai:               c.IsBhilai(bc.BlockNumber),
+		IsPrague:               c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
+		IsOsaka:                c.IsOsaka(bc.Time),
+		IsGlamsterdam:          c.IsGlamsterdam(bc.Time),
+		IsAura:                 c.Aura != nil,
+		CollectBlockAccessList: collectBAL,
 	}
 }

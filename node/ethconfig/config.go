@@ -276,7 +276,8 @@ type Config struct {
 	PolygonPosSingleSlotFinalityBlockAt uint64
 
 	// Account Abstraction
-	AllowAA bool
+	AllowAA         bool
+	ExperimentalBAL bool
 
 	// ErigonDB geometry settings
 	ErigonDBStepSize          int

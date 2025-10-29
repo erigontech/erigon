@@ -281,6 +281,8 @@ func (sdb *IntraBlockState) HasStorage(addr common.Address) (bool, error) {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
+	preserveBAL := sdb.blockAccessEnabled
+	preservedSnapshots := sdb.blockAccessSnapshots
 	sdb.nilAccounts = map[common.Address]struct{}{}
 	sdb.stateObjects = map[common.Address]*stateObject{}
 	sdb.stateObjectsDirty = map[common.Address]struct{}{}
@@ -309,6 +311,10 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.blockAccessIgnorePreload = false
 	sdb.blockAccessTxTouches = nil
 	sdb.blockAccessSnapshots = nil
+	if preserveBAL {
+		sdb.blockAccessEnabled = true
+		sdb.blockAccessSnapshots = preservedSnapshots
+	}
 }
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
@@ -2025,4 +2031,8 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 		}
 	}
 	return nil
+}
+
+func (sdb *IntraBlockState) BlockAccessSnapshotCount() int {
+	return len(sdb.blockAccessSnapshots)
 }

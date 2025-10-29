@@ -15,6 +15,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -216,6 +217,17 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 						if !pe.isMining && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
 							pe.cfg.notifications.RecentLogs.Add(applyResult.Receipts)
+						}
+						if pe.cfg.chainConfig.ExperimentalBAL {
+							if applyResult.BlockAccessList != nil {
+								hash := empty.BlockAccessListHash
+								if len(applyResult.BlockAccessList) > 0 {
+									hash = applyResult.BlockAccessList.Hash()
+								}
+								pe.logger.Info("experimental block access list", "block", applyResult.BlockNum, "hash", hash, "accounts", len(applyResult.BlockAccessList))
+							} else {
+								pe.logger.Info("experimental block access list missing", "block", applyResult.BlockNum, "reason", "no data from execution")
+							}
 						}
 					}
 

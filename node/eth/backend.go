@@ -393,6 +393,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		panic(err)
 	}
 	chainConfig.AllowAA = config.AllowAA
+	chainConfig.ExperimentalBAL = config.ExperimentalBAL
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()

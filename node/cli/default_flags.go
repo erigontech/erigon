@@ -256,6 +256,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
+	&utils.ExperimentalBALFlag,
 
 	&utils.ErigonDBStepSizeFlag,
 	&utils.ErigonDBStepsInFrozenFileFlag,
