@@ -29,9 +29,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon/cmd/utils/cmdtest"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/internal/reexec"
-	"github.com/erigontech/erigon/turbo/cmdtest"
 )
 
 func TestMain(m *testing.M) {

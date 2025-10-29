@@ -72,7 +72,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: torrent-client-status-${{ env.CHAIN }}
         path: torrent-client-status.txt
@@ -94,12 +94,19 @@ jobs:
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: test-results-${{ env.CHAIN }}
         path: |
           ${{ github.workspace }}/result-${{ env.CHAIN }}.json
           ${{ github.workspace }}/erigon_data/logs/
+
+    - name: Upload metric plots
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v5
+      with:
+        name: metric-plots-${{ env.CHAIN }}
+        path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Clean up Erigon data directory
       if: always()

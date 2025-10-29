@@ -29,7 +29,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -41,8 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -51,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -59,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 // StartStreamLoops starts message processing loops for all sentries.
@@ -71,7 +69,6 @@ import (
 // AnnounceBlockRangeLoop - announces available block range to all peers every epoch
 func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 	sentries := cs.Sentries()
-	go cs.AnnounceBlockRangeLoop(ctx)
 	for i := range sentries {
 		sentry := sentries[i]
 		go cs.RecvMessageLoop(ctx, sentry, nil)
@@ -133,80 +130,6 @@ func (cs *MultiClient) RecvMessageLoop(
 	}
 
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
-}
-
-func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
-	frequency := cs.ChainConfig.EpochDuration()
-
-	headerInDB := func() bool {
-		var done bool
-		_ = cs.db.View(ctx, func(tx kv.Tx) error {
-			header := rawdb.ReadCurrentHeaderHavingBody(tx)
-			done = header != nil
-			return nil
-		})
-		return done
-	}
-
-	if err := cs.waitForPrerequisites(ctx, frequency, headerInDB); err != nil {
-		return
-	}
-
-	broadcastEvery := time.NewTicker(frequency)
-	defer broadcastEvery.Stop()
-
-	for {
-		select {
-		case <-broadcastEvery.C:
-			cs.doAnnounceBlockRange(ctx)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
-	sentries := cs.Sentries()
-	status, err := cs.statusDataProvider.GetStatusData(ctx)
-	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
-		return
-	}
-
-	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
-	cs.logger.Debug("sending status data", "start", status.MinimumBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
-
-	request := eth.BlockRangeUpdatePacket{
-		Earliest:   status.MinimumBlockHeight,
-		Latest:     status.MaxBlockHeight,
-		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
-	}
-
-	data, err := rlp.EncodeToBytes(&request)
-	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
-		return
-	}
-
-	for _, s := range sentries {
-		handshake, err := s.HandShake(ctx, &emptypb.Empty{})
-		if err != nil {
-			cs.logger.Error("blockRangeUpdate", "err", err)
-			continue // continue sending message to other sentries
-		}
-
-		version := direct.ProtocolToUintMap[handshake.Protocol]
-		if version >= direct.ETH69 {
-			_, err := s.SendMessageToAll(ctx, &sentryproto.OutboundMessageData{
-				Id:   sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
-				Data: data,
-			})
-			if err != nil {
-				cs.logger.Error("blockRangeUpdate", "err", err)
-				continue // continue sending message to other sentries
-			}
-		}
-	}
 }
 
 // waitForPrerequisites handles waiting for the blockReader to be ready and for a header to be available.
@@ -842,14 +765,8 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *sentryproto
 				totalCached += len(queriedBytes)
 			}
 
-			start := wit.PageSize * witnessPage.Page
-			if start > uint64(len(witnessBytes)) {
-				start = uint64(len(witnessBytes))
-			}
-			end := start + wit.PageSize
-			if end > uint64(len(witnessBytes)) {
-				end = uint64(len(witnessBytes))
-			}
+			start := min(wit.PageSize*witnessPage.Page, uint64(len(witnessBytes)))
+			end := min(start+wit.PageSize, uint64(len(witnessBytes)))
 			witnessPageResponse.Data = witnessBytes[start:end]
 			totalResponsePayloadDataAmount += len(witnessPageResponse.Data)
 		}
@@ -1046,6 +963,9 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 	var query eth.BlockRangeUpdatePacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
+	}
+	if err := query.Validate(); err != nil {
+		return err
 	}
 
 	go func() {

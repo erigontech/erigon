@@ -39,10 +39,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -380,12 +380,12 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(7)
+		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(8)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 38)
 
-		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(9)
+		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(10)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 40)
@@ -395,23 +395,23 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
-	})
-	t.Run("invalid input", func(t *testing.T) {
-		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(11)
-		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
-		require.Error(t, err)
 
-		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(1_000_000)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
-		require.Error(t, err)
-
-		n = rpc.BlockNumber(0)
-		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		// latest block is 11, should work both ways: [11,12) and [11,nil)
+		n2 = rpc.BlockNumber(12)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
+		require.NoError(t, err)
+		require.Len(t, result, 3)
+	})
+	t.Run("invalid input", func(t *testing.T) {
+		n := rpc.BlockNumber(1_000_000)
+		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.Error(t, err)
 
-		n = rpc.BlockNumber(1_000_000)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		n = rpc.BlockNumber(11)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n)
 		require.Error(t, err)
 	})
 }

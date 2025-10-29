@@ -27,10 +27,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type Sync struct {
@@ -284,7 +284,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialC
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 
-func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
+func (s *Sync) RunUnwind(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
@@ -292,7 +292,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
 		}
-		if err := s.unwindStage(false, s.unwindOrder[j], db, txc); err != nil {
+		if err := s.unwindStage(false, s.unwindOrder[j], db, sd, tx); err != nil {
 			return err
 		}
 	}
@@ -305,7 +305,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
 	return nil
 }
 
-func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
+func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) (bool, error) {
 	var hasMore bool
 	initialCycle, firstCycle := false, false
 	s.prevUnwindPoint = nil
@@ -319,7 +319,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, txc); err != nil {
+				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, sd, tx); err != nil {
 					return false, err
 				}
 			}
@@ -352,7 +352,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 			continue
 		}
 
-		stageHasMore, err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind)
+		stageHasMore, err := s.runStage(stage, db, sd, tx, initialCycle, firstCycle, badBlockUnwind)
 		if err != nil {
 			return false, err
 		}
@@ -398,7 +398,7 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool) (bool, error) {
+func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (bool, error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -411,7 +411,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, txc); err != nil {
+				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, sd, tx); err != nil {
 					return false, err
 				}
 			}
@@ -447,7 +447,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 			s.NextStage()
 			continue
 		}
-		stageHasMore, err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind)
+		stageHasMore, err := s.runStage(stage, db, sd, tx, initialCycle, firstCycle, badBlockUnwind)
 		if err != nil {
 			return false, err
 		}
@@ -463,10 +463,10 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
 			if s.posTransition != nil {
-				ptx := txc.Tx
+				ptx := tx
 
 				if ptx == nil {
-					if tx, err := db.BeginRw(context.Background()); err == nil {
+					if tx, err := db.BeginTemporalRw(context.Background()); err == nil {
 						ptx = tx
 						defer tx.Rollback()
 					}
@@ -534,15 +534,15 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
 	start := time.Now()
 	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
-	stageState, err := s.StageState(stage.ID, txc.Tx, db, initialCycle, firstCycle)
+	stageState, err := s.StageState(stage.ID, rwTx, db, initialCycle, firstCycle)
 	if err != nil {
 		return false, err
 	}
 
-	if err = stage.Forward(badBlockUnwind, stageState, s, txc, s.logger); err != nil {
+	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
 		var errExhausted *ErrLoopExhausted
 		if errors.As(err, &errExhausted) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
@@ -569,9 +569,9 @@ func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
 	s.metricsCache.stageRunDurationSummary(stageState.ID).Observe(took.Seconds())
 }
 
-func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap.TxContainer) error {
+func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	start := time.Now()
-	stageState, err := s.StageState(stage.ID, txc.Tx, db, initialCycle, false)
+	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
 	if err != nil {
 		return err
 	}
@@ -587,7 +587,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap
 		return err
 	}
 
-	err = stage.Unwind(unwind, stageState, txc, s.logger)
+	err = stage.Unwind(unwind, stageState, sd, tx, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}

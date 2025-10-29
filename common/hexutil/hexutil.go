@@ -99,10 +99,7 @@ func DecodeBig(input string) (*big.Int, error) {
 	words := make([]big.Word, len(raw)/bigWordNibbles+1)
 	end := len(raw)
 	for i := range words {
-		start := end - bigWordNibbles
-		if start < 0 {
-			start = 0
-		}
+		start := max(end-bigWordNibbles, 0)
 		for ri := start; ri < end; ri++ {
 			nib := decodeNibble(raw[ri])
 			if nib == badNibble {
@@ -255,24 +252,27 @@ func Encode(b []byte) string {
 }
 
 func FromHex(s string) []byte {
+	b, _ := FromHexWithValidation(s)
+	return b
+}
+
+func FromHexWithValidation(s string) ([]byte, error) {
 	if Has0xPrefix(s) {
 		s = s[2:]
 	}
 	if len(s)%2 == 1 {
 		s = "0" + s
 	}
-	return Hex2Bytes(s)
+	h, err := hex.DecodeString(s)
+	if err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
 // Has0xPrefix validates str begins with '0x' or '0X'.
 func Has0xPrefix(str string) bool {
 	return len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')
-}
-
-// Hex2Bytes returns the bytes represented by the hexadecimal string str.
-func Hex2Bytes(str string) []byte {
-	h, _ := hex.DecodeString(str)
-	return h
 }
 
 // IsHex validates whether each byte is valid hexadecimal string.
@@ -291,12 +291,4 @@ func IsHex(str string) bool {
 // isHexCharacter returns bool of c being a valid hexadecimal.
 func isHexCharacter(c byte) bool {
 	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
-}
-
-func MustDecodeString(s string) []byte {
-	r, err := hex.DecodeString(s)
-	if err != nil {
-		panic(err)
-	}
-	return r
 }

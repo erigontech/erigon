@@ -81,7 +81,11 @@ func checksum(file string) uint32 {
 	return hasher.Sum32()
 }
 
-func prepareDict(t *testing.T, multiplier int) *Decompressor {
+func prepareDict(t *testing.T, multiplier int, keys int) *Decompressor {
+	return prepareDictMetadata(t, multiplier, false, nil, keys)
+}
+
+func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadata []byte, keys int) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -89,6 +93,7 @@ func prepareDict(t *testing.T, multiplier int) *Decompressor {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
+	cfg.ExpectMetadata = hasMetadata
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +101,7 @@ func prepareDict(t *testing.T, multiplier int) *Decompressor {
 	defer c.Close()
 	k := bytes.Repeat([]byte("long"), multiplier)
 	v := bytes.Repeat([]byte("word"), multiplier)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < keys; i++ {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
@@ -110,18 +115,21 @@ func prepareDict(t *testing.T, multiplier int) *Decompressor {
 			t.Fatal(err)
 		}
 	}
+	if hasMetadata {
+		c.SetMetadata(metadata)
+	}
 	if err = c.Compress(); err != nil {
 		t.Fatal(err)
 	}
 	var d *Decompressor
-	if d, err = NewDecompressor(file); err != nil {
+	if d, err = NewDecompressorWithMetadata(file, hasMetadata); err != nil {
 		t.Fatal(err)
 	}
 	return d
 }
 
 func TestCompressDict1(t *testing.T) {
-	d := prepareDict(t, 1)
+	d := prepareDict(t, 1, 100)
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
@@ -187,7 +195,7 @@ func TestCompressDict1(t *testing.T) {
 }
 
 func TestCompressDictCmp(t *testing.T) {
-	d := prepareDict(t, 1)
+	d := prepareDict(t, 1, 100)
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
@@ -253,5 +261,67 @@ func TestCompressDictCmp(t *testing.T) {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
+	}
+}
+
+func Test_CompressWithMetadata(t *testing.T) {
+	metadata := []byte("lorem metadata ipsum")
+	d := prepareDictMetadata(t, 1, true, metadata, 100)
+	defer d.Close()
+	require.Equal(t, metadata, d.GetMetadata())
+	g := d.MakeGetter()
+	i := 0
+	g.Reset(0)
+	for g.HasNext() {
+		// next word is `nil`
+		require.False(t, g.MatchPrefix([]byte("long")))
+		require.True(t, g.MatchPrefix([]byte("")))
+		require.True(t, g.MatchPrefix([]byte{}))
+
+		word, _ := g.Next(nil)
+		require.NotNil(t, word)
+		require.Empty(t, word)
+
+		// next word is `long`
+		require.True(t, g.MatchPrefix([]byte("long")))
+		require.False(t, g.MatchPrefix([]byte("longlong")))
+		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+		require.True(t, g.MatchPrefix([]byte{}))
+
+		_, _ = g.Next(nil)
+
+		// next word is `word`
+		require.False(t, g.MatchPrefix([]byte("long")))
+		require.False(t, g.MatchPrefix([]byte("longlong")))
+		require.True(t, g.MatchPrefix([]byte("word")))
+		require.True(t, g.MatchPrefix([]byte("")))
+		require.True(t, g.MatchPrefix(nil))
+		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+
+		_, _ = g.Next(nil)
+
+		// next word is `longlongword %d`
+		expectPrefix := fmt.Sprintf("%d long", i)
+
+		require.True(t, g.MatchPrefix([]byte(fmt.Sprintf("%d", i))))
+		require.True(t, g.MatchPrefix([]byte(expectPrefix)))
+		require.True(t, g.MatchPrefix([]byte(expectPrefix+"long")))
+		require.True(t, g.MatchPrefix([]byte(expectPrefix+"longword ")))
+		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+		require.True(t, g.MatchPrefix([]byte{}))
+
+		savePos := g.dataP
+		word, nextPos := g.Next(nil)
+		expected := fmt.Sprintf("%d longlongword %d", i, i)
+		g.Reset(savePos)
+		require.Equal(t, 0, g.MatchCmp([]byte(expected)))
+		g.Reset(nextPos)
+		if string(word) != expected {
+			t.Errorf("expected %s, got (hex) [%s]", expected, word)
+		}
+		i++
 	}
 }

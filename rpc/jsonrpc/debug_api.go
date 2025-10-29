@@ -27,13 +27,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -243,16 +243,16 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	endNum := startNum + 1 // allows for single param calls
 	if endNumber != nil {
 		// forces negative numbers to fail (too large) but allows zero
-		endNum = uint64(endNumber.Int64()) + 1
+		endNum = uint64(endNumber.Int64()) // [startNum,endNum) from user
 	}
 
 	// is endNum too big?
-	if endNum > latestBlock {
+	if endNum > latestBlock+1 { // [startNum,endNum)
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
 
-	if startNum > endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	if startNum >= endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 	//[from, to)
 	startTxNum, err := api._txNumReader.Min(tx, startNum)
@@ -307,16 +307,14 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 
 	if endHash != nil {
 		var err error
-		endNum, err = api.headerNumberByHash(ctx, tx, *endHash)
+		endNum, err = api.headerNumberByHash(ctx, tx, *endHash) // [startNum,endNum) from user
 		if err != nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
-		endNum = endNum + 1
-
 	}
 
-	if startNum > endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	if startNum >= endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
 	//[from, to)

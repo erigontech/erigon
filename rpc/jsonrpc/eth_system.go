@@ -19,25 +19,23 @@ package jsonrpc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"math/big"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -259,7 +257,7 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 // EthHardForkConfig represents config of a hard-fork
 type EthHardForkConfig struct {
 	ActivationTime  uint64                    `json:"activationTime"`
-	BlobSchedule    params.BlobConfig         `json:"blobSchedule"`
+	BlobSchedule    *params.BlobConfig        `json:"blobSchedule"`
 	ChainId         hexutil.Uint              `json:"chainId"`
 	ForkId          hexutil.Bytes             `json:"forkId"`
 	Precompiles     map[string]common.Address `json:"precompiles"`
@@ -275,31 +273,43 @@ type EthConfigResp struct {
 
 // Config returns the HardFork config for current and upcoming forks:
 // assuming linear fork progression and ethereum-like schedule
-func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error) {
-	var timeUnix uint64
-	if timeArg != nil {
-		timeUnix = timeArg.Uint64()
-	} else {
-		timeUnix = uint64(time.Now().Unix())
-	}
+func (api *APIImpl) Config(ctx context.Context, blockTimeOverride *hexutil.Uint64) (*EthConfigResp, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
+	var currentBlockTime uint64
+	if blockTimeOverride != nil {
+		// optional utility arg to aid with testing
+		currentBlockTime = blockTimeOverride.Uint64()
+	} else {
+		h, err := api.headerByRPCNumber(ctx, rpc.LatestBlockNumber, tx)
+		if err != nil {
+			return nil, err
+		}
+		if h == nil {
+			return nil, errors.New("latest header not found")
+		}
+		currentBlockTime = h.Time
+	}
+
 	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	if !chainConfig.IsCancun(timeUnix) {
-		return &EthConfigResp{}, fmt.Errorf("not supported: %w: time=%v", ErrForkTimeBeforeCancun, timeUnix)
+	gatherForksFrom := genesis.Time()
+	if genesis.Time() >= currentBlockTime {
+		// handle forks activated at genesis with activation time 0
+		gatherForksFrom = 0
+		currentBlockTime = 0
 	}
 
 	response := EthConfigResp{}
-	forkBlockNums, forkTimes := forkid.GatherForks(chainConfig, genesis.Time())
+	forkBlockNums, forkTimes := forkid.GatherForks(chainConfig, gatherForksFrom)
 	// current fork config
-	currentForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, timeUnix)
+	currentForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, currentBlockTime)
 	response.Current = fillForkConfig(chainConfig, currentForkId.Hash, currentForkId.Activation)
 
 	// next fork config
@@ -318,12 +328,10 @@ func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthCo
 	return &response, nil
 }
 
-var ErrForkTimeBeforeCancun = errors.New("fork time before cancun")
-
 func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime uint64) *EthHardForkConfig {
 	forkConfig := EthHardForkConfig{}
 	forkConfig.ActivationTime = activationTime
-	forkConfig.BlobSchedule = *chainConfig.GetBlobConfig(activationTime)
+	forkConfig.BlobSchedule = chainConfig.GetBlobConfig(activationTime)
 	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
 	forkConfig.ForkId = forkId[:]
 	blockContext := evmtypes.BlockContext{

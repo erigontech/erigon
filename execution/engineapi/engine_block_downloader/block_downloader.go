@@ -25,20 +25,17 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 const (
@@ -55,19 +52,16 @@ const (
 
 // EngineBlockDownloader is responsible to download blocks in reverse, and then insert them in the database.
 type EngineBlockDownloader struct {
-	backgroundCtx   context.Context
-	status          atomic.Value // current Status of the downloading process, aka: is it doing anything
-	blockReader     services.FullBlockReader
-	db              kv.RoDB
-	chainRW         eth1_chain_reader.ChainReaderWriterEth1
-	syncCfg         ethconfig.Sync
-	lock            sync.Mutex
-	logger          log.Logger
-	bbd             *p2p.BackwardBlockDownloader
-	badHeaders      *lru.Cache[common.Hash, common.Hash]
-	messageListener *p2p.MessageListener
-	peerTracker     *p2p.PeerTracker
-	stopped         atomic.Bool
+	backgroundCtx context.Context
+	status        atomic.Value // current Status of the downloading process, aka: is it doing anything
+	blockReader   services.FullBlockReader
+	db            kv.RoDB
+	chainRW       eth1_chain_reader.ChainReaderWriterEth1
+	syncCfg       ethconfig.Sync
+	lock          sync.Mutex
+	logger        log.Logger
+	bbd           *p2p.BackwardBlockDownloader
+	badHeaders    *lru.Cache[common.Hash, common.Hash]
 }
 
 func NewEngineBlockDownloader(
@@ -77,63 +71,26 @@ func NewEngineBlockDownloader(
 	blockReader services.FullBlockReader,
 	db kv.RoDB,
 	config *chain.Config,
-	tmpdir string,
 	syncCfg ethconfig.Sync,
-	sentryClient sentryproto.SentryClient,
-	statusDataProvider *sentry.StatusDataProvider,
+	bbd *p2p.BackwardBlockDownloader,
 ) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(Idle)
-	peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
-	messageListener := p2p.NewMessageListener(logger, sentryClient, statusDataProvider.GetStatusData, peerPenalizer)
-	messageSender := p2p.NewMessageSender(sentryClient)
-	peerTracker := p2p.NewPeerTracker(logger, messageListener)
-	var fetcher p2p.Fetcher
-	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
-	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
-	fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
-	bbd := p2p.NewBackwardBlockDownloader(logger, fetcher, peerPenalizer, peerTracker, tmpdir)
-	badHeaders, err := lru.New[common.Hash, common.Hash](1_000_000) // 64mb
+	badHeaders, err := lru.New[common.Hash, common.Hash](10_000) // 640kb
 	if err != nil {
 		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
 	}
 	return &EngineBlockDownloader{
-		backgroundCtx:   ctx,
-		db:              db,
-		status:          s,
-		syncCfg:         syncCfg,
-		logger:          logger,
-		blockReader:     blockReader,
-		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
-		bbd:             bbd,
-		badHeaders:      badHeaders,
-		messageListener: messageListener,
-		peerTracker:     peerTracker,
+		backgroundCtx: ctx,
+		db:            db,
+		status:        s,
+		syncCfg:       syncCfg,
+		logger:        logger,
+		blockReader:   blockReader,
+		chainRW:       eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		bbd:           bbd,
+		badHeaders:    badHeaders,
 	}
-}
-
-func (e *EngineBlockDownloader) Run(ctx context.Context) error {
-	e.logger.Info("[EngineBlockDownloader] running")
-	defer func() {
-		e.logger.Info("[EngineBlockDownloader] stopped")
-		e.stopped.Store(true)
-	}()
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		err := e.peerTracker.Run(ctx)
-		if err != nil {
-			return fmt.Errorf("engine block downloader peer tracker failed: %w", err)
-		}
-		return nil
-	})
-	eg.Go(func() error {
-		err := e.messageListener.Run(ctx)
-		if err != nil {
-			return fmt.Errorf("engine block downloader message listener failed: %w", err)
-		}
-		return nil
-	})
-	return eg.Wait()
 }
 
 func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {
@@ -212,9 +169,6 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 
 func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req BackwardDownloadRequest) error {
 	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
-	if e.stopped.Load() {
-		return errors.New("engine block downloader is stopped")
-	}
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {

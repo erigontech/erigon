@@ -116,7 +116,8 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
 func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
-	return DialHTTPWithClient(endpoint, new(http.Client), logger)
+	client := &http.Client{Timeout: 30 * time.Second}
+	return DialHTTPWithClient(endpoint, client, logger)
 }
 
 func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
@@ -287,6 +288,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if errorMsg != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		codec.WriteJSON(ctx, errorMsg)
+	}
+
+	if !s.disableStreaming {
+		stream.Flush()
 	}
 }
 

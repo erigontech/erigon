@@ -44,8 +44,8 @@ Binary 32-byte (256-bit) string.
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts
 cannot have storage, therefore root makes sense only for smart contract accounts. For non-contract accounts, the root
 field is assumed to be equal to the Merkle root of an empty tree, which is hard-coded in the variable `EmptyRoot` in
-[execution/trie/trie.go](../../execution/trie/trie.go). For contract accounts, the root is computed using member function `Hash`
-of type `Trie` [execution/trie/trie.go](../../execution/trie/trie.go), once the storage of the contract has been organised into
+[execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go). For contract accounts, the root is computed using member function `Hash`
+of type `Trie` [execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go), once the storage of the contract has been organised into
 the tree by calling member functions
 `Update` and `Delete` on the same type.
 
@@ -54,10 +54,10 @@ the tree by calling member functions
 Binary 32-byte (256-bit) string.
 
 Hash of the bytecode (deployed code) of a smart contract. The computation of the code hash is performed in the `SetCode`
-member function of the type `IntraBlockState` [code/state/intra_block_state.go](../../core/state/intra_block_state.go).
+member function of the type `IntraBlockState` [execution/state/intra_block_state.go](../../execution/state/intra_block_state.go).
 Since a non-contract account has no bytecode, code hash only makes sense for smart contract accounts. For non-contract
 accounts, the code hash is assumed to be equal to the hash of `nil`, which is hard-coded in the variable `emptyCode`
-in [code/state/intra_block_state.go](../../core/state/intra_block_state.go)
+in [execution/state/intra_block_state.go](../../execution/state/intra_block_state.go)
 
 ### Address - identifier of an account
 
@@ -78,13 +78,13 @@ file [crypto/crypto.go](../../common/crypto/crypto.go)
 
 In many places in the code, sets of accounts are represented by mappings from account addresses to the objects
 representing the accounts themselves, for example, field `stateObjects` in the
-type `IntraBlockState` [core/state/intra_block_state.go](../../core/state/intra_block_state.go). Member functions of the
+type `IntraBlockState` [execution/state/intra_block_state.go](../../execution/state/intra_block_state.go). Member functions of the
 type `IntraBlockState` that are for querying and modifying one of the components of an accounts, are all accepting
 address as their first argument, see functions `GetBalance`, `GetNonce`, `GetCode`, `GetCodeSize`, `GetCodeHash`
 , `GetState` (this one queries an item in the contract storage), `GetCommittedState`, `AddBalance`, `SubBalance`
 , `SetBalance`, `SetNonce`,
 `SetCode`, `SetState` (this one modifies an item in the contract
-storage) [core/state/intra_block_state.go](../../core/state/intra_block_state.go).
+storage) [execution/state/intra_block_state.go](../../execution/state/intra_block_state.go).
 
 Organising Ethereum State into a Merkle Tree
 --------------------------------------------
@@ -128,14 +128,14 @@ Merkle Patricia tree hashing rules first remove redundant parts of each key with
 so-called "leaf nodes". To produce the hash of a leaf node, one applies the hash function to the two-piece RLP (
 Recursive Length Prefix). The first piece is the representation of the non-redundant part of the key. And the second
 piece is the representation of the leaf value corresponding to the key, as shown in the member function `hashChildren`
-of the type `hasher` [execution/trie/hasher.go](../../execution/trie/hasher.go), under the `*shortNode` case.
+of the type `hasher` [execution/commitment/trie/hasher.go](../../execution/commitment/trie/hasher.go), under the `*shortNode` case.
 
 Hashes of the elements within a prefix group are combined into so-called "branch nodes". They correspond to the
 types `duoNode` (for prefix groups with exactly two elements) and `fullNode` in the
-file [execution/trie/node.go](../../execution/trie/node.go). To produce the hash of a branch node, one represents it as an array
+file [execution/commitment/trie/node.go](../../execution/commitment/trie/node.go). To produce the hash of a branch node, one represents it as an array
 of 17 elements (17-th element is for the attached leaf, if exists). The positions in the array that do not have
 corresponding elements in the prefix group are filled with empty strings. This is shown in the member
-function `hashChildren` of the type `hasher` [execution/trie/hasher.go](../../execution/trie/hasher.go), under the `*duoNode`
+function `hashChildren` of the type `hasher` [execution/commitment/trie/hasher.go](../../execution/commitment/trie/hasher.go), under the `*duoNode`
 and
 `*fullNode` cases.
 
@@ -145,7 +145,7 @@ extension nodes". However, the value in an extension node is always the represen
 leaf. To produce the hash of an extension node, one applies the hash function to the two-piece RLP. The first piece is
 the representation of the non-redundant part of the key. The second part is the hash of the branch node representing the
 prefix group. This is shown in the member function `hashChildren` of the
-type `hasher` [execution/trie/hasher.go](../../execution/trie/hasher.go), under the `*shortNode` case.
+type `hasher` [execution/commitment/trie/hasher.go](../../execution/commitment/trie/hasher.go), under the `*shortNode` case.
 
 This is the illustration of resulting leaf nodes, branch nodes, and extension nodes for our example:
 
@@ -274,7 +274,7 @@ BRANCH 0123
 ```
 
 These opcodes are implemented by the type `HashBuilder` (implements the interface `structInfoReceiver`)
-in [execution/trie/hashbuilder.go](../../execution/trie/hashbuilder.go)
+in [execution/commitment/trie/hashbuilder.go](../../execution/commitment/trie/hashbuilder.go)
 
 ### Multiproofs
 
@@ -407,7 +407,7 @@ common prefix with the succeeding key (they are both empty). The optional part o
 is emitted, and `groups` is trimmed to become empty. No recursive invocation follows.
 
 The step of this algorithm is implemented by the function `GenStructStep`
-in [execution/trie/gen_struct_step.go](../../execution/trie/gen_struct_step.go).
+in [execution/commitment/trie/gen_struct_step.go](../../execution/commitment/trie/gen_struct_step.go).
 
 ### Converting sequence of keys and value into a multiproof
 
@@ -429,7 +429,7 @@ efficiently, the set of keys being resolved will be converted into a sorted list
 processes a key, it maintains references to two consecutive keys from that sorted list - one "LTE" (Less Than or Equal
 to the currently processed key), and another "GT" (Greater Than the currently processed key). If max common prefix is
 also prefix of either LTE or GT, then `BRANCH` opcode is emitted, otherwise, `BRANCHHASH` opcode is emitted. This is
-implemented by the type `RetainList` in [execution/trie/retain_list.go](../../execution/trie/retain_list.go)
+implemented by the type `RetainList` in [execution/commitment/trie/retain_list.go](../../execution/commitment/trie/retain_list.go)
 
 ### Extension of the structure to support contracts with contract storage
 
@@ -529,7 +529,7 @@ account (SELFDESTRUCT). Naive storage deletion may take several minutes - depend
 will not process any incoming block that time. To protect against this attack:
 PlainState, HashedState and IntermediateTrieHash buckets have "incarnations". Account entity has field "Incarnation" -
 just a digit which increasing each SELFDESTRUCT or CREATE2 opcodes. Storage key formed by:
-`{account_key}{incarnation}{storage_hash}`. And [execution/trie/trie_root.go](../../execution/trie/trie_root.go) has logic -
+`{account_key}{incarnation}{storage_hash}`. And [execution/commitment/trie/trie_root.go](../../execution/commitment/trie/trie_root.go) has logic -
 every time when Account visited - we save it to `accAddrHashWithInc` variable and skip any Storage or
 IntermediateTrieHashes with another incarnation.
 

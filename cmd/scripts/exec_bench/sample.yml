@@ -1,0 +1,8 @@
+## erigon_cmd1 - needs to export metrics on 6061; cmd2 - on 6062 
+## this helps differentiate between the different series coming from the two executions (see prometheus-docker.yml)
+
+source_datadir: /erigon-data/par_eth
+chain: mainnet
+## --block is added by script to the stage_exec commands
+erigon_cmd1: ERIGON_NO_PRUNE=true ERIGON_NO_MERGE=true ERIGON_DISCARD_COMMITMENT=true ./build/bin/integration stage_exec --datadir /erigon-data/par_eth_serial/ --chain mainnet  --batchSize=10g --no-commit  --metrics --metrics.addr=0.0.0.0 --metrics.port 6061
+erigon_cmd2: ERIGON_EXEC3_PARALLEL=true ERIGON_NO_PRUNE=true ERIGON_NO_MERGE=true ERIGON_DISCARD_COMMITMENT=true ./build/bin/integration stage_exec --datadir /erigon-data/par_eth_par/ --chain mainnet  --batchSize=10g --no-commit  --metrics --metrics.addr=0.0.0.0 --metrics.port 6062

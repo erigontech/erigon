@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -38,19 +37,20 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/node/silkworm"
 )
 
 const (
@@ -133,10 +133,10 @@ func StageExecuteBlocksCfg(
 
 // ================ Erigon3 ================
 
-func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
+func ExecBlockV3(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
 
-	prevStageProgress, err := stageProgress(txc.Tx, cfg.db, stages.Senders)
+	prevStageProgress, err := stageProgress(rwTx, cfg.db, stages.Senders)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, dbg.Exec3Parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, doms, rwTx, dbg.Exec3Parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
 		return err
 	}
 	return nil
@@ -157,30 +157,20 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
-	var domains *state.SharedDomains
-	var tx kv.TemporalRwTx
-	if txc.Doms == nil {
-		temporalTx, ok := txc.Tx.(kv.TemporalRwTx)
-		if !ok {
-			return errors.New("tx is not a temporal tx")
-		}
-		tx = temporalTx
-		domains, err = state.NewSharedDomains(temporalTx, logger)
+
+	if doms == nil {
+		doms, err = execctx.NewSharedDomains(rwTx, logger)
 		if err != nil {
 			return err
 		}
-		defer domains.Close()
-	} else {
-		tx = txc.Ttx.(kv.TemporalRwTx)
-		domains = txc.Doms
+		defer doms.Close()
 	}
-
 	txNumsReader := br.TxnumReader(ctx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := txNumsReader.Min(tx, u.UnwindPoint+1)
+	txNum, err := txNumsReader.Min(rwTx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
@@ -188,7 +178,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	t := time.Now()
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, ok, err := br.CanonicalHash(ctx, tx, currentBlock)
+		currentHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
 		if err != nil {
 			return err
 		}
@@ -196,7 +186,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			return fmt.Errorf("canonical hash not found %d", currentBlock)
 		}
 		var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
-		currentKeys, ok, err = domains.GetDiffset(tx, currentHash, currentBlock)
+		currentKeys, ok, err = doms.GetDiffset(rwTx, currentHash, currentBlock)
 		if !ok {
 			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
 		}
@@ -211,10 +201,10 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			}
 		}
 	}
-	if err := unwindExec3State(ctx, tx, domains, u.UnwindPoint, txNum, accumulator, changeSet, logger); err != nil {
+	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
-	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
+	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 	return nil
@@ -224,7 +214,8 @@ var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
 const trace bool = true
 
-func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedDomains,
+func unwindExec3State(ctx context.Context,
+	sd *execctx.SharedDomains, tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
@@ -344,34 +335,38 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 
 // ================ Erigon3 End ================
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
-	if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger, false); err != nil {
+	if err = ExecBlockV3(s, u, doms, rwTx, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger, false); err != nil {
 		return err
 	}
 	return nil
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}
-	useExternalTx := txc.Tx != nil
+	useExternalTx := rwTx != nil
 	if !useExternalTx {
-		tx, err := cfg.db.BeginRw(ctx)
+		temporalDb, ok := cfg.db.(kv.TemporalRwDB)
+		if !ok {
+			return errors.New("cfg.db is not a temporal db")
+		}
+		tx, err := temporalDb.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
-		txc.SetTx(tx)
+		rwTx = tx
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Ttx)
+	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 	if err != nil {
 		return err
 	}
@@ -379,50 +374,50 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 
-	if err = unwindExecutionStage(u, s, txc, ctx, cfg, logger); err != nil {
+	if err = unwindExecutionStage(u, s, doms, rwTx, ctx, cfg, logger); err != nil {
 		return err
 	}
 
-	if err = u.Done(txc.Tx); err != nil {
+	if err = u.Done(rwTx); err != nil {
 		return err
 	}
 	//dumpPlainStateDebug(tx, nil)
 
 	if !useExternalTx {
-		if err = txc.Tx.Commit(); err != nil {
+		if err = rwTx.Commit(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.notifications.Accumulator
 
-		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, u.UnwindPoint)
+		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}
 		if !ok {
 			return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
 		}
-		header, err := cfg.blockReader.HeaderByHash(ctx, txc.Tx, hash)
+		header, err := cfg.blockReader.HeaderByHash(ctx, rwTx, hash)
 		if err != nil {
 			return fmt.Errorf("read canonical header of unwind point: %w", err)
 		}
 		if header == nil {
 			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
 		}
-		txs, err := cfg.blockReader.RawTransactions(ctx, txc.Tx, u.UnwindPoint, s.BlockNumber)
+		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
 		if err != nil {
 			return err
 		}
 		accumulator.StartChange(header, txs, true)
 	}
 
-	return unwindExec3(u, s, txc, ctx, cfg, accumulator, logger)
+	return unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger)
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) (err error) {
@@ -477,7 +472,8 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 	}
 
-	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
+	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
+	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {

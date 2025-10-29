@@ -47,8 +47,8 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type SortedRange interface {
@@ -703,12 +703,7 @@ func (s *RoSnapshots) LogStat(label string) {
 
 func (s *RoSnapshots) Types() []snaptype.Type { return s.types }
 func (s *RoSnapshots) HasType(in snaptype.Type) bool {
-	for _, t := range s.enums {
-		if t == in.Enum() {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.enums, in.Enum())
 }
 
 type ready struct {

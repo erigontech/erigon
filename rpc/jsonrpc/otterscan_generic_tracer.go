@@ -20,10 +20,10 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -34,7 +34,7 @@ type GenericTracer interface {
 }
 
 func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context, blockNum, txnID uint64, txIndex int, chainConfig *chain.Config, tracer GenericTracer) error {
-	executor := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)
+	executor := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)
 	defer executor.Close()
 
 	// if block number changed, calculate all related field

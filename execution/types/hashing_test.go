@@ -24,8 +24,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/trie"
 )
 
 func genTransactions(n uint64) Transactions {
@@ -114,25 +114,25 @@ var (
 )
 
 func BenchmarkLegacySmallList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		legacyDeriveSha(smallTxList)
 	}
 }
 
 func BenchmarkCurrentSmallList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		DeriveSha(smallTxList)
 	}
 }
 
 func BenchmarkLegacyLargeList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		legacyDeriveSha(largeTxList)
 	}
 }
 
 func BenchmarkCurrentLargeList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		DeriveSha(largeTxList)
 	}
 }

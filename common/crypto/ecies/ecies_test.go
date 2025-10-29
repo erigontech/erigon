@@ -176,7 +176,7 @@ func TestTooBigSharedKey(t *testing.T) {
 
 // Benchmark the generation of P256 keys.
 func BenchmarkGenerateKeyP256(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := GenerateKey(rand.Reader, elliptic.P256(), nil); err != nil {
 			b.Fatal(err)
 		}
@@ -189,8 +189,8 @@ func BenchmarkGenSharedKeyP256(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		_, err := prv.GenerateShared(&prv.PublicKey, 16, 16)
 		if err != nil {
 			b.Fatal(err)
@@ -204,8 +204,8 @@ func BenchmarkGenSharedKeyS256(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		_, err := prv.GenerateShared(&prv.PublicKey, 16, 16)
 		if err != nil {
 			b.Fatal(err)
