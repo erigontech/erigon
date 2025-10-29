@@ -122,6 +122,7 @@ func FuzzMul(f *testing.F) {
 }
 
 func FuzzPair(f *testing.F) {
+	f.Add([]byte("0000000000000000000000000000000000000000000000000000000000000000"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		input := bytes.NewReader(data)
 		pc, pg, ps := getG1Points(input)
