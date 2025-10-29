@@ -35,10 +35,7 @@ func GenerateBenchData(ctx context.Context, c *rpcclient.Client) (BenchData, err
 			return BenchData{}, err
 		}
 
-		take := 2
-		if len(hashes) < take {
-			take = len(hashes)
-		}
+		take := min(len(hashes), 2)
 		item := BenchItem{
 			Number: num,
 			Txs:    append([]string{}, hashes[:take]...),

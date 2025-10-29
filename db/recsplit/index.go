@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
 	"math"
 	"math/bits"
 	"os"
@@ -31,6 +30,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/c2h5oh/datasize"
 
@@ -398,11 +399,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		d := gr.ReadNext(idx.golombParam(m))
 		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
 		part := hmod / idx.primaryAggrBound
-		if idx.primaryAggrBound < m-part*idx.primaryAggrBound {
-			m = idx.primaryAggrBound
-		} else {
-			m = m - part*idx.primaryAggrBound
-		}
+		m = min(idx.primaryAggrBound, m-part*idx.primaryAggrBound)
 		cumKeys += uint64(idx.primaryAggrBound * part)
 		if part != 0 {
 			gr.SkipSubtree(idx.skipNodes(idx.primaryAggrBound)*int(part), idx.skipBits(idx.primaryAggrBound)*int(part))
@@ -414,11 +411,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		d := gr.ReadNext(idx.golombParam(m))
 		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
 		part := hmod / idx.leafSize
-		if idx.leafSize < m-part*idx.leafSize {
-			m = idx.leafSize
-		} else {
-			m = m - part*idx.leafSize
-		}
+		m = min(idx.leafSize, m-part*idx.leafSize)
 		cumKeys += uint64(idx.leafSize * part)
 		if part != 0 {
 			gr.SkipSubtree(int(part), idx.skipBits(idx.leafSize)*int(part))

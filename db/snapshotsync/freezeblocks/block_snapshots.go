@@ -758,11 +758,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		if workers > int(body.TxCount-2) {
-			if int(body.TxCount-2) > 1 {
-				workers = int(body.TxCount - 2)
-			} else {
-				workers = 1
-			}
+			workers = max(int(body.TxCount-2), 1)
 		}
 
 		parsers := errgroup.Group{}

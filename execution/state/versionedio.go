@@ -188,10 +188,7 @@ func valueString(path AccountPath, value any) string {
 	case NoncePath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
-		l := len(value.([]byte))
-		if l > 40 {
-			l = 40
-		}
+		l := min(len(value.([]byte)), 40)
 		return hex.EncodeToString(value.([]byte)[0:l])
 	}
 

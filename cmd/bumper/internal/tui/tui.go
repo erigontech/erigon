@@ -114,10 +114,7 @@ func (m *model) rebuildRight() {
 	if len(m.cats) == 0 {
 		return
 	}
-	i := m.left.Cursor()
-	if i < 0 {
-		i = 0
-	}
+	i := max(m.left.Cursor(), 0)
 	if i >= len(m.cats) {
 		i = len(m.cats) - 1
 	}

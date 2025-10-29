@@ -447,7 +447,7 @@ func (b *BpsTree) Get(g *seg.PagedReader, key []byte) (v []byte, ok bool, offset
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }
 func (b *BpsTree) Distances() (map[int]int, error) {
 	distances := map[int]int{}
-	var prev int = -1
+	var prev = -1
 	it := b.Offsets().Iterator()
 	for it.HasNext() {
 		j, err := it.Next()

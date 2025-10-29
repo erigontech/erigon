@@ -287,10 +287,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		pend    sync.WaitGroup
 	)
 
-	threads := runtime.NumCPU()
-	if threads > int(numBlocks) {
-		threads = int(numBlocks)
-	}
+	threads := min(runtime.NumCPU(), int(numBlocks))
 	jobs := make(chan *blockReplayTask, threads)
 	for th := 0; th < threads; th++ {
 		pend.Add(1)

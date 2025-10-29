@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -148,7 +148,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := dbstate.NewSharedDomains(tx, api.logger)
+	sharedDomains, err := execctx.NewSharedDomains(tx, api.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +376,7 @@ func (s *simulator) simulateBlock(
 	ctx context.Context,
 	tx kv.TemporalTx,
 	txNumReader rawdbv3.TxNumsReader,
-	sharedDomains *dbstate.SharedDomains,
+	sharedDomains *execctx.SharedDomains,
 	bsc *SimulatedBlock,
 	header *types.Header,
 	parent *types.Header,
@@ -441,7 +441,7 @@ func (s *simulator) simulateBlock(
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
 	if bsc.BlockOverrides.BlobBaseFee != nil {
-		blockCtx.BlobBaseFee = bsc.BlockOverrides.BlobBaseFee.ToUint256()
+		blockCtx.BlobBaseFee = *bsc.BlockOverrides.BlobBaseFee.ToUint256()
 	}
 	rules := blockCtx.Rules(s.chainConfig)
 
@@ -576,14 +576,14 @@ func (s *simulator) simulateCall(
 	}
 
 	// Prepare the transaction message
-	msg, err := call.ToMessage(s.gasPool.Gas(), blockCtx.BaseFee)
+	msg, err := call.ToMessage(s.gasPool.Gas(), &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	msg.SetCheckGas(s.validation)
 	msg.SetCheckNonce(s.validation)
 	txCtx := core.NewEVMTxContext(msg)
-	txn, err := call.ToTransaction(s.gasPool.Gas(), blockCtx.BaseFee)
+	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
