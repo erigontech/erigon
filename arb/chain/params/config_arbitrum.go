@@ -27,11 +27,29 @@ import (
 
 func ArbitrumOneParams() types.ArbitrumChainParams {
 	return types.ArbitrumChainParams{
+		ParentChainID:             1,
+		ParentChainIsArbitrum:     false,
+		ChainName:                 "arb1",
+		SequencerURL:              "https://arb1-sequencer.arbitrum.io/rpc",
+		FeedURL:                   "wss://arb1-feed.arbitrum.io/feed",
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
 		InitialArbOSVersion:       osver.ArbosVersion_6,
 		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
+		GenesisBlockNum:           22207817,
+		GenesisTxNum:              69372193, // non-canonical (E3) txnumber of first txn in given block
+
+		Rollup: types.ArbRollupConfig{
+			Bridge:                 "0x8315177ab297ba92a06054ce80a67ed4dbd7ed3a",
+			Inbox:                  "0x4dbd4fc535ac27206064b68ffcf827b0a60bab3f",
+			SequencerInbox:         "0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6",
+			Rollup:                 "0x5ef0d09d1e6204141b4d37530808ed19f60fba35",
+			ValidatorUtils:         "0x9e40625f52829cf04bc4839f186d621ee33b0e67",
+			ValidatorWalletCreator: "0x960953f7c69cd2bc2322db9223a815c680ccc7ea",
+			StakeToken:             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+			DeployedAt:             15411056,
+		},
 	}
 }
 

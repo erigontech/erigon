@@ -36,9 +36,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
-
-	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
@@ -76,6 +73,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/snaptype"
+	arbchain "github.com/erigontech/erigon/arb/chain"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -138,6 +137,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/mdbx-go/mdbx"
 
 	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
@@ -362,6 +362,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var chainConfig *chain.Config
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
+		arbOne := chainspec.ChainConfigByChainName("arb1")
+		if config.NetworkID == arbOne.ChainID.Uint64() {
+			chainConfig = arbOne
+			genesis = rawdb.ReadBlock(tx, arbchain.Arb1GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum)
+			if genesis == nil {
+				log.Info("db genesis block is nil")
+				genesis = arbchain.Arb1GenesisBlock()
+			}
+			return nil
+		}
 
 		genesisConfig, err := core.ReadGenesis(tx)
 		if err != nil {
@@ -579,12 +589,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, kv.ChainDB, logger)
 
 	var currentBlock *types.Block
-	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock, err = blockReader.CurrentBlock(tx)
-		return err
-	}); err != nil {
-		panic(err)
-	}
+	//if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
+	//	currentBlock, err = blockReader.CurrentBlock(tx)
+	//	return err
+	//}); err != nil {
+	//	panic(err)
+	//}
 
 	currentBlockNumber := uint64(0)
 	if currentBlock != nil {

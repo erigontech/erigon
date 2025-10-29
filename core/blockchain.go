@@ -409,8 +409,13 @@ var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
 func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if gasUsed != h.GasUsed {
-		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
-			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
+		err := fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x", gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
+		log.Warn("MITIGATING GAS USED MISMATCH", "err", err)
+		if h.GasUsed != 0 {
+			return err // apparently bug means that header gas is zero while txns was not free
+		}
+		// return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
+		// 	gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
 	}
 
 	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {

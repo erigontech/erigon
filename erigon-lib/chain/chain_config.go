@@ -693,18 +693,19 @@ func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 // Rules is syntactic sugar over Config. It can be used for functions
 // that do not have or require information about the block.
 //
-// Rules is a one time interface meaning that it shouldn't be used in between transition
-// phases.
+// Rules is a one time interface meaning that it shouldn't be used in between transition phases.
 type Rules struct {
 	ChainID                                           *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka                                 bool
-	IsAura                                            bool
-	IsArbitrum, IsStylus                              bool
-	ArbOSVersion                                      uint64
+	IsPrague, IsOsaka, IsAura                         bool
+
+	// Arbiturm related chain rules
+	ArbOSVersion uint64 // current ArbOS version. Defined by header.
+	IsArbitrum   bool   // if true, chain is using ArbOS
+	IsStylus     bool   // if true, Arbitrum is running ArbOS version >= ArbosVersion_Stylus. !IsStylus means zombie (after spurious dragon) should be preserved
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
