@@ -130,7 +130,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 					if err != nil {
 						return err
 					}
-					f.peerDas.ScheduleSyncColumnData(blindedBlock)
+					f.peerDas.ScheduleSyncColumnData(blockRoot, blindedBlock)
 				}
 			}
 		} else if block.Version() >= clparams.DenebVersion {

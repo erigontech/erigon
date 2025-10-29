@@ -38,7 +38,7 @@ type PeerDas interface {
 	IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool
 	IsArchivedMode() bool
 	StateReader() peerdasstate.PeerDasStateReader
-	ScheduleSyncColumnData(block *cltypes.SignedBlindedBeaconBlock) error
+	ScheduleSyncColumnData(blockRoot common.Hash, block *cltypes.SignedBlindedBeaconBlock) error
 }
 
 var (
@@ -853,18 +853,14 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 	return payload
 }
 
-func (d *peerdas) ScheduleSyncColumnData(block *cltypes.SignedBlindedBeaconBlock) error {
+func (d *peerdas) ScheduleSyncColumnData(blockRoot common.Hash, block *cltypes.SignedBlindedBeaconBlock) error {
 	if block.Version() < clparams.FuluVersion {
 		return nil
 	}
 	if block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
 		return nil
 	}
-	root, err := block.Block.HashSSZ()
-	if err != nil {
-		return err
-	}
-	d.blocksToSync.Store(root, block)
+	d.blocksToSync.Store(blockRoot, block)
 	return nil
 }
 
