@@ -174,10 +174,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 
 	// Process chunks in parallel
 	for start := fromBlock; start <= toBlock; start += chunkSize {
-		end := start + chunkSize - 1
-		if end > toBlock {
-			end = toBlock
-		}
+		end := min(start+chunkSize-1, toBlock)
 
 		chunkStart := start // Capture loop variable
 		chunkEnd := end     // Capture loop variable

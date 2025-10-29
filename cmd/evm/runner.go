@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/state"
@@ -186,7 +186,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := dbstate.NewSharedDomains(tx, log.Root())
+	sd, err := execctx.NewSharedDomains(tx, log.Root())
 	if err != nil {
 		return err
 	}
@@ -256,8 +256,8 @@ func runCmd(ctx *cli.Context) error {
 		Origin:      sender,
 		State:       statedb,
 		GasLimit:    initialGas,
-		GasPrice:    gasPrice,
-		Value:       value,
+		GasPrice:    *gasPrice,
+		Value:       *value,
 		Difficulty:  genesisConfig.Difficulty,
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
 		Coinbase:    genesisConfig.Coinbase,

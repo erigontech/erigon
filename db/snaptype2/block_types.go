@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -48,7 +49,6 @@ func init() {
 	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.Holesky, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Hoodi, ethereumTypes)
 }
 

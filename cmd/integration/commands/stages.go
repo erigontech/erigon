@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/builder"
@@ -606,7 +607,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
-	domains, err := dbstate.NewSharedDomains(tx, logger)
+	domains, err := execctx.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
@@ -929,7 +930,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		if execProgress == 0 {
-			doms, err := dbstate.NewSharedDomains(tx, log.New())
+			doms, err := execctx.NewSharedDomains(tx, log.New())
 			if err != nil {
 				panic(err)
 			}
