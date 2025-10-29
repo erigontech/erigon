@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -585,8 +586,8 @@ func TestOpTstore(t *testing.T) {
 		state          = state.New(nil)
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
-		caller         = common.Address{}
-		to             = common.Address{1}
+		caller         = accounts.ZeroAddress
+		to             = accounts.InternAddress(common.Address{1})
 		callContext    = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{}, NewJumpDestCache(16))}
 		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)

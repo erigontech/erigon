@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -529,7 +530,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return hash, nil
 	}
 
-	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
+	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 	rules := evm.ChainRules()

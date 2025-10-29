@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -249,7 +250,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	header := block.HeaderNoCopy()
 	//blockNum, txNum := header.Number.Uint64(), 1
 
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.Json.Env.Coinbase, config)
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = uint256.Int{}
@@ -271,7 +272,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
-		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, common.Address{})
+		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 
 	// Execute the message.
@@ -305,26 +306,27 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)
-	for addr, a := range accounts {
-		statedb.SetCode(addr, a.Code)
-		statedb.SetNonce(addr, a.Nonce)
+	for addr, a := range alloc {
+		address := accounts.InternAddress(addr)
+		statedb.SetCode(address, a.Code)
+		statedb.SetNonce(address, a.Nonce)
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)
 		}
-		statedb.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+		statedb.SetBalance(address, balance, tracing.BalanceChangeUnspecified)
 		for k, v := range a.Storage {
-			key := k
+			key := accounts.InternKey(k)
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
-			statedb.SetState(addr, key, *val)
+			statedb.SetState(address, key, *val)
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
-			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+			statedb.SetIncarnation(address, state.FirstContractIncarnation)
 		}
 	}
 

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -171,7 +172,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return hash, err
 	}
 
-	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
+	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
@@ -207,10 +208,15 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	contractAddr := types.CreateAddress(msg.From(), msg.Nonce())
+	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.GetTo() == nil && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
-		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
+		var to *common.Address
+		if !msg.To().IsNil() {
+			toVal := msg.To().Value()
+			to = &toVal
+		}
+		msg = types.NewMessage(msg.From().Value(), to, msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	} else {
 		msg.ChangeGas(api.GasCap, api.GasCap)
 	}
@@ -234,7 +240,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if err != nil {
 			return nil, err
 		}
-		code, err := evm.IntraBlockState().GetCode(address)
+		code, err := evm.IntraBlockState().GetCode(accounts.InternAddress(address))
 		if err != nil {
 			return nil, err
 		}
@@ -448,7 +454,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		return hash, err
 	}
 
-	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
+	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
 
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
@@ -500,7 +506,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		if receipt.Status == types.ReceiptStatusFailed {
 			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
 
-			contractCreation := msg.To() == nil
+			contractCreation := msg.To().IsNil()
 			if !contractCreation {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())

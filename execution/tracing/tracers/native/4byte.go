@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -53,10 +54,10 @@ func init() {
 //	  0xc281d19e-0: 1
 //	}
 type fourByteTracer struct {
-	ids               map[string]int   // ids aggregates the 4byte ids found
-	interrupt         atomic.Bool      // Atomic flag to signal execution interruption
-	reason            error            // Textual reason for the interruption
-	activePrecompiles []common.Address // Updated on tx start based on given rules
+	ids               map[string]int     // ids aggregates the 4byte ids found
+	interrupt         atomic.Bool        // Atomic flag to signal execution interruption
+	reason            error              // Textual reason for the interruption
+	activePrecompiles []accounts.Address // Updated on tx start based on given rules
 }
 
 // newFourByteTracer returns a native go tracer which collects
@@ -76,7 +77,7 @@ func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer
 }
 
 // isPrecompiled returns whether the addr is a precompile. Logic borrowed from newJsTracer in execution/tracing/tracers/js/tracer.go
-func (t *fourByteTracer) isPrecompiled(addr common.Address) bool {
+func (t *fourByteTracer) isPrecompiled(addr accounts.Address) bool {
 	for _, p := range t.activePrecompiles {
 		if p == addr {
 			return true
@@ -91,7 +92,7 @@ func (t *fourByteTracer) store(id []byte, size int) {
 	t.ids[key] += 1
 }
 
-func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	blockContext := evmtypes.BlockContext{
 		BlockNumber: env.BlockNumber,
 		Time:        env.Time,
@@ -100,7 +101,7 @@ func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
-func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnter(depth int, opcode byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return

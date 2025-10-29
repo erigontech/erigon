@@ -116,7 +116,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
-				s.SetState(addr, types.InternKey(key), *val)
+				s.SetState(addr, accounts.InternKey(key), *val)
 			},
 			args: make([]int64, 2),
 		},
@@ -279,14 +279,14 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		var err error
 		checkeq := func(op string, a, b interface{}) bool {
 			if err == nil && !reflect.DeepEqual(a, b) {
-				err = fmt.Errorf("got %s(%s) == %v, want %v", op, addr.Hex(), a, b)
+				err = fmt.Errorf("got %s(%s) == %v, want %v", op, addr, a, b)
 				return false
 			}
 			return true
 		}
 		checkeqBigInt := func(op string, a, b *big.Int) bool {
 			if err == nil && a.Cmp(b) != 0 {
-				err = fmt.Errorf("got %s(%s) == %d, want %d", op, addr.Hex(), a, b)
+				err = fmt.Errorf("got %s(%s) == %d, want %d", op, addr, a, b)
 				return false
 			}
 			return true

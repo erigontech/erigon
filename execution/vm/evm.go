@@ -526,7 +526,7 @@ func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining uint64
 	if err != nil {
 		return nil, accounts.NilAddress, 0, err
 	}
-	contractAddr = types.CreateAddress(caller, nonce)
+	contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout)
 }
 
@@ -537,7 +537,7 @@ func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining uint64
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create2(caller accounts.Address, code []byte, gasRemaining uint64, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
-	contractAddr = types.CreateAddress2(caller, salt.Bytes32(), codeAndHash.Hash().Bytes())
+	contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), codeAndHash.Hash().Bytes()))
 	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout)
 }
 

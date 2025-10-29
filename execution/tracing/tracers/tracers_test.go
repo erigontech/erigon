@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 
@@ -71,13 +72,13 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	*/
 	origin, _ := signer.Sender(txn)
 	txContext := evmtypes.TxContext{
-		Origin:   origin,
+		Origin:   accounts.InternAddress(origin),
 		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    consensus.Transfer,
-		Coinbase:    common.Address{},
+		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),

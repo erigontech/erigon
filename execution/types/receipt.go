@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 //(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
@@ -524,7 +523,7 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []accounts.Address) error {
+func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(rs) {
 		return fmt.Errorf("transaction and receipt count mismatch, txn count = %d, receipts count = %d", len(txs), len(rs))
@@ -549,7 +548,7 @@ func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transaction
 			// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 			// and then the address of the contract one is creating this way will depend on the `tx.From`
 			// and the nonce of the creating account (which is `tx.From`).
-			rs[i].ContractAddress = CreateAddress(senders[i], txs[i].GetNonce()).Value()
+			rs[i].ContractAddress = CreateAddress(senders[i], txs[i].GetNonce())
 		}
 		// The used gas can be calculated based on previous r
 		if i == 0 {
@@ -608,7 +607,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 		// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 		// and then the address of the contract one is creating this way will depend on the `tx.From`
 		// and the nonce of the creating account (which is `tx.From`).
-		r.ContractAddress = CreateAddress(accounts.InternAddress(sender), txn.GetNonce()).Value()
+		r.ContractAddress = CreateAddress(sender, txn.GetNonce())
 	}
 	// The used gas can be calculated based on previous r
 	if txnIdx == 0 {

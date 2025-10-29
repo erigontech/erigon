@@ -45,6 +45,7 @@ import (
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -139,7 +140,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			context := evmtypes.BlockContext{
 				CanTransfer: core.CanTransfer,
 				Transfer:    consensus.Transfer,
-				Coinbase:    test.Context.Miner,
+				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
 				Difficulty:  (*big.Int)(test.Context.Difficulty),
@@ -251,13 +252,13 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	origin, _ := signer.Sender(tx)
 	baseFee := uint256.MustFromBig((*big.Int)(test.Context.BaseFee))
 	txContext := evmtypes.TxContext{
-		Origin:   origin,
+		Origin:   accounts.InternAddress(origin),
 		GasPrice: *tx.GetEffectiveGasTip(baseFee),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    consensus.Transfer,
-		Coinbase:    test.Context.Miner,
+		Coinbase:    accounts.InternAddress(test.Context.Miner),
 		BlockNumber: uint64(test.Context.Number),
 		Time:        uint64(test.Context.Time),
 		Difficulty:  (*big.Int)(test.Context.Difficulty),
@@ -311,13 +312,13 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	origin, _ := signer.Sender(tx)
 	txContext := evmtypes.TxContext{
-		Origin:   origin,
+		Origin:   accounts.InternAddress(origin),
 		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    consensus.Transfer,
-		Coinbase:    common.Address{},
+		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),

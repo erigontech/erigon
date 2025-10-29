@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 )
 
@@ -31,7 +32,7 @@ func TestRecoverSigner(t *testing.T) {
 
 	auth := Authorization{
 		ChainID: *uint256.NewInt(7088110746),
-		Address: common.Address{180, 125, 156, 99, 77, 80, 241, 96, 13, 77, 247, 103, 233, 71, 76, 37, 160, 48, 52, 40},
+		Address: accounts.InternAddress(common.Address{180, 125, 156, 99, 77, 80, 241, 96, 13, 77, 247, 103, 233, 71, 76, 37, 160, 48, 52, 40}),
 		Nonce:   1,
 		YParity: 1,
 		R:       uint256.Int{11238962557009670571, 14017651393191758745, 18358999445216475025, 5549385460848219779},

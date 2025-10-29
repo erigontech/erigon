@@ -126,7 +126,7 @@ func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account,
 func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
-func (*NoopReader) ReadAccountStorage(address accounts.Address, key common.Hash) (uint256.Int, bool, error) {
+func (*NoopReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
 func (*NoopReader) HasStorage(address accounts.Address) (bool, error)               { return false, nil }
