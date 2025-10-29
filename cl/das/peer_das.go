@@ -38,6 +38,7 @@ type PeerDas interface {
 	IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool
 	IsArchivedMode() bool
 	StateReader() peerdasstate.PeerDasStateReader
+	ScheduleSyncColumnData(block *cltypes.SignedBlindedBeaconBlock) error
 }
 
 var (
@@ -58,6 +59,7 @@ type peerdas struct {
 
 	recoveringMutex sync.Mutex
 	isRecovering    map[common.Hash]bool
+	blocksToSync    sync.Map
 }
 
 func NewPeerDas(
@@ -87,11 +89,13 @@ func NewPeerDas(
 
 		recoveringMutex: sync.Mutex{},
 		isRecovering:    make(map[common.Hash]bool),
+		blocksToSync:    sync.Map{},
 	}
 	p.resubscribeGossip()
 	for range numOfBlobRecoveryWorkers {
 		go p.blobsRecoverWorker(ctx)
 	}
+	go p.syncColumnDataWorker(ctx)
 	return p
 }
 
@@ -837,4 +841,69 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 	}
 	d.cacheRequest = payload
 	return payload
+}
+
+func (d *peerdas) ScheduleSyncColumnData(block *cltypes.SignedBlindedBeaconBlock) error {
+	if block.Version() < clparams.FuluVersion {
+		return nil
+	}
+	if block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
+		return nil
+	}
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	d.blocksToSync.Store(root, block)
+	return nil
+}
+
+func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			blocks := []*cltypes.SignedBlindedBeaconBlock{}
+			d.blocksToSync.Range(func(key, value any) bool {
+				root := key.(common.Hash)
+				block := value.(*cltypes.SignedBlindedBeaconBlock)
+				available, err := d.IsDataAvailable(block.Block.Slot, root)
+				if err != nil {
+					log.Warn("failed to check if data is available", "err", err)
+				} else if available {
+					log.Debug("[syncColumnDataWorker] column data is available, removing from sync queue", "slot", block.Block.Slot, "blockRoot", root)
+					d.blocksToSync.Delete(root)
+				} else {
+					blocks = append(blocks, block)
+				}
+				return true
+			})
+			if len(blocks) == 0 {
+				continue
+			}
+			if d.IsArchivedMode() {
+				if err := d.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
+					log.Warn("failed to download columns and recover blobs", "err", err)
+					continue
+				}
+			} else {
+				if err := d.DownloadOnlyCustodyColumns(ctx, blocks); err != nil {
+					log.Warn("failed to download only custody columns", "err", err)
+					continue
+				}
+			}
+			for _, block := range blocks {
+				root, err := block.Block.HashSSZ()
+				if err != nil {
+					log.Warn("failed to get block root", "err", err)
+					continue
+				}
+				d.blocksToSync.Delete(root)
+				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", block.Block.Slot, "blockRoot", root)
+			}
+		}
+	}
 }

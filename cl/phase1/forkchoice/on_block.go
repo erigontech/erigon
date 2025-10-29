@@ -123,7 +123,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return err
 			}
 			if !available {
-				return ErrEIP7594ColumnDataNotAvailable
+				if f.syncedDataManager.Syncing() {
+					return ErrEIP7594ColumnDataNotAvailable
+				}
 			}
 		} else if block.Version() >= clparams.DenebVersion {
 			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
