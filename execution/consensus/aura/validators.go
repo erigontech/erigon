@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/aura/aurainterfaces"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // nolint
@@ -636,7 +637,7 @@ func (s *ValidatorSafeContract) getList(caller consensus.Call) (*SimpleList, boo
 	if err != nil {
 		panic(err)
 	}
-	out, err := caller(s.contractAddress, packed)
+	out, err := caller(accounts.InternAddress(s.contractAddress), packed)
 	if err != nil {
 		panic(err)
 	}
@@ -653,7 +654,7 @@ func (s *ValidatorSafeContract) getListSyscall(caller consensus.SystemCall) (*Si
 	if err != nil {
 		panic(err)
 	}
-	out, err := caller(s.contractAddress, packed)
+	out, err := caller(accounts.InternAddress(s.contractAddress), packed)
 	if err != nil {
 		panic(err)
 	}
@@ -671,7 +672,7 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call cons
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
 	data := common.FromHex("75286211") // s.abi.Pack("finalizeChange")
-	_, err := caller(s.contractAddress, data)
+	_, err := caller(accounts.InternAddress(s.contractAddress), data)
 	if err != nil {
 		return err
 	}

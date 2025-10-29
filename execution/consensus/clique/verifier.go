@@ -282,7 +282,7 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.FakeDiff {
-		inturn := snap.inturn(header.Number.Uint64(), signer)
+		inturn := snap.inturn(header.Number.Uint64(), signer.Value())
 		if inturn && header.Difficulty.Cmp(DiffInTurn) != 0 {
 			return errWrongDifficulty
 		}

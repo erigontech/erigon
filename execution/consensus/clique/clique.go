@@ -208,7 +208,7 @@ func New(cfg *chain.Config, snapshotConfig *chainspec.ConsensusSnapshotConfig, c
 	}
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC[common.Hash, *Snapshot](snapshotConfig.InmemorySnapshots)
-	signatures, _ := lru.NewARC[common.Hash, common.Address](snapshotConfig.InmemorySignatures)
+	signatures, _ := lru.NewARC[common.Hash, accounts.Address](snapshotConfig.InmemorySignatures)
 
 	exitCh := make(chan struct{})
 
@@ -310,7 +310,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		// Gather all the proposals that make sense voting on
 		addresses := make([]common.Address, 0, len(c.proposals))
 		for address, authorize := range c.proposals {
-			if snap.validVote(address, authorize) {
+			if snap.validVote(accounts.InternAddress(address), authorize) {
 				addresses = append(addresses, address)
 			}
 		}
@@ -421,7 +421,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 	}
 	// Don't hold the signer fields for the entire sealing procedure
 	c.lock.RLock()
-	signer, signFn := c.signer, c.signFn
+	signer, signFn := accounts.InternAddress(c.signer), c.signFn
 	c.lock.RUnlock()
 
 	// Bail out if we're unauthorized to sign a block
@@ -452,7 +452,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 		c.logger.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
-	sighash, err := signFn(signer, accounts.MimetypeClique, CliqueRLP(header))
+	sighash, err := signFn(signer.Value(), accounts.MimetypeClique, CliqueRLP(header))
 	if err != nil {
 		return err
 	}

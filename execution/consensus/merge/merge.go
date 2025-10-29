@@ -181,7 +181,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		} else {
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
-				state.AddBalance(w.Address, *amountInWei, tracing.BalanceIncreaseWithdrawal)
+				state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}
 	}
@@ -369,7 +369,7 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
 	if chain.Config().IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
-		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr common.Address, data []byte) ([]byte, error) {
+		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}

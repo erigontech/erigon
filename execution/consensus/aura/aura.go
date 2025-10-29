@@ -656,11 +656,12 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	//Check block gas limit from smart contract, if applicable
 	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 
-	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
+	for addressValue, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
+		address := accounts.InternAddress(addressValue)
 		state.SetCode(address, rewrittenCode)
 	}
 
-	syscall := func(addr common.Address, data []byte) ([]byte, error) {
+	syscall := func(addr accounts.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)
 	}
 	c.certifierLock.Lock()
@@ -1103,7 +1104,7 @@ func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*type
 		beneficiaries, amounts = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
 		rewards := make([]consensus.Reward, len(amounts))
 		for i, amount := range amounts {
-			rewards[i].Beneficiary = beneficiaries[i]
+			rewards[i].Beneficiary = accounts.InternAddress(beneficiaries[i])
 			rewards[i].Kind = consensus.RewardExternal
 			rewards[i].Amount = *amount
 		}
@@ -1124,7 +1125,7 @@ func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*type
 		return nil, errors.New("Current block's reward is not found; this indicates a chain config error")
 	}
 
-	r := consensus.Reward{Beneficiary: header.Coinbase, Kind: consensus.RewardAuthor, Amount: *reward.amount}
+	r := consensus.Reward{Beneficiary: accounts.InternAddress(header.Coinbase), Kind: consensus.RewardAuthor, Amount: *reward.amount}
 	return []consensus.Reward{r}, nil
 }
 
@@ -1147,7 +1148,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		return err
 	}
 
-	_, err = syscall(*c.cfg.WithdrawalContractAddress, packed)
+	_, err = syscall(accounts.InternAddress(*c.cfg.WithdrawalContractAddress), packed)
 	if err != nil {
 		log.Warn("ExecuteSystemWithdrawals", "err", err)
 	}
