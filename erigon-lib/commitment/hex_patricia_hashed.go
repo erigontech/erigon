@@ -1870,38 +1870,40 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 }
 
 func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
-	if hph.trace {
-		fmt.Printf("deleteCell, activeRows = %d\n", hph.activeRows)
-	}
-	var cell *cell
 	if hph.activeRows == 0 { // Remove the root
-		cell = &hph.root
+		(&hph.root).reset()
 		hph.rootTouched, hph.rootPresent = true, false
-	} else {
-		row := hph.activeRows - 1
-		if hph.depths[row] < len(hashedKey) {
-			if hph.trace {
-				fmt.Printf("deleteCell skipping spurious delete depth=%d, len(hashedKey)=%d\n", hph.depths[row], len(hashedKey))
-			}
-			return
+		if hph.trace {
+			fmt.Println("deleteCell was root")
 		}
-		nibble := int(hashedKey[hph.currentKeyLen])
-		cell = &hph.grid[row][nibble]
-		col := uint16(1) << nibble
-		if hph.afterMap[row]&col != 0 {
-			// Prevent "spurious deletions", i.e. deletion of absent items
-			hph.touchMap[row] |= col
-			hph.afterMap[row] &^= col
-			if hph.trace {
-				fmt.Printf("deleteCell setting (%d, %x)\n", row, nibble)
-			}
-		} else {
-			if hph.trace {
-				fmt.Printf("deleteCell ignoring (%d, %x)\n", row, nibble)
-			}
+		return
+	}
+
+	row := hph.activeRows - 1
+	depth := hph.depths[row]
+	nibble := int(hashedKey[hph.currentKeyLen])
+	if depth < len(hashedKey) {
+		if hph.trace {
+			fmt.Printf("deleteCell (%d, %x, depth=%d) skipping spurious delete len(hashedKey)=%d\n",
+				row, nibble, depth, len(hashedKey))
+		}
+		return
+	}
+
+	col := uint16(1) << nibble
+	if hph.afterMap[row]&col == 0 {
+		if hph.trace {
+			fmt.Printf("deleteCell (%d, %x, depth=%d) ignored\n", row, nibble, depth)
+		}
+	} else {
+		// Prevent "spurious deletions", i.e. deletion of absent items
+		hph.touchMap[row] |= col
+		hph.afterMap[row] &^= col
+		if hph.trace {
+			fmt.Printf("deleteCell (%d, %x, depth=%d) mark updated\n", row, nibble, depth)
 		}
 	}
-	cell.reset()
+	(&hph.grid[row][nibble]).reset()
 }
 
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
@@ -1927,18 +1929,18 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		hph.touchMap[row] |= col
 		hph.afterMap[row] |= col
 		if hph.trace {
-			fmt.Printf("updateCell setting (%d, %x, depth=%d) key %x %s\n", row, nibble, depth, plainKey, u.String())
+			fmt.Printf("updateCell (%d, %x, depth=%d)\n\tset key %x\n\tset state %s\n", row, nibble, depth, plainKey, u.String())
 		}
 	}
 	if cell.hashedExtLen == 0 {
 		copy(cell.hashedExtension[:], hashedKey[depth:])
 		cell.hashedExtLen = len(hashedKey) - depth
 		if hph.trace {
-			fmt.Printf("set downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
+			fmt.Printf("\tset downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 		}
 	} else {
 		if hph.trace {
-			fmt.Printf("keep downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
+			fmt.Printf("\tkeep downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 		}
 	}
 	if len(plainKey) == hph.accountKeyLen {
