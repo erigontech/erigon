@@ -1927,7 +1927,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		hph.touchMap[row] |= col
 		hph.afterMap[row] |= col
 		if hph.trace {
-			fmt.Printf("updateCell setting (%d, %x, depth=%d)\n", row, nibble, depth)
+			fmt.Printf("updateCell setting (%d, %x, depth=%d) key %x %s\n", row, nibble, depth, plainKey, u.String())
 		}
 	}
 	if cell.hashedExtLen == 0 {
@@ -1953,9 +1953,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	cell.stateHashLen = 0
 
 	cell.setFromUpdate(u)
-	if hph.trace {
-		fmt.Printf("updateCell %x => %s\n", plainKey, u.String())
-	}
 	return cell
 }
 
