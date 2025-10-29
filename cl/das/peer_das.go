@@ -148,7 +148,12 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 			nowCustodies[column] = true
 		}
 	}
-	return len(nowCustodies) == len(expectedCustodies), nil
+
+	if len(nowCustodies) < len(expectedCustodies) {
+		log.Debug("isMyColumnDataAvailable", "nowCustodies", len(nowCustodies), "expectedCustodies", len(expectedCustodies))
+	}
+
+	return len(nowCustodies) >= len(expectedCustodies)/2, nil
 }
 
 func (d *peerdas) resubscribeGossip() {
