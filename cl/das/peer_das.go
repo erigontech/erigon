@@ -652,19 +652,19 @@ mainloop:
 			break mainloop
 		case <-halfCheckTicker.C:
 			for _, entry := range req.remainingEntries() {
-				if needToRecoverBlobs &&
-					(d.IsColumnOverHalf(entry.slot, entry.blockRoot) || d.IsBlobAlreadyRecovered(entry.blockRoot)) {
-					// no need to schedule recovery for this block because someone else will do it
-					req.removeBlock(entry.slot, entry.blockRoot)
+				if needToRecoverBlobs {
+					if d.IsColumnOverHalf(entry.slot, entry.blockRoot) || d.IsBlobAlreadyRecovered(entry.blockRoot) {
+						// no need to schedule recovery for this block because someone else will do it
+						req.removeBlock(entry.slot, entry.blockRoot)
+					}
+				} else {
+					if available, err := d.IsDataAvailable(entry.slot, entry.blockRoot); err != nil {
+						log.Debug("failed to check if data is available", "err", err)
+						continue
+					} else if available {
+						req.removeBlock(entry.slot, entry.blockRoot)
+					}
 				}
-				/*available, err := d.IsDataAvailable(entry.slot, entry.blockRoot)
-				if err != nil {
-					log.Debug("failed to check if data is available", "err", err)
-					continue
-				}
-				if available {
-					req.removeBlock(entry.slot, entry.blockRoot)
-				}*/
 			}
 			if req.requestData().Len() == 0 {
 				break mainloop
