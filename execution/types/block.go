@@ -853,7 +853,7 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen,
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	if rb.BlockAccessList != nil {
+	if len(rb.BlockAccessList) > 0 {
 		blockAccessListLen += EncodingSizeGenericList(rb.BlockAccessList)
 		payloadSize += rlp.ListPrefixLen(blockAccessListLen) + blockAccessListLen
 	}
@@ -888,7 +888,7 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if rb.BlockAccessList != nil {
+	if len(rb.BlockAccessList) > 0 {
 		if err := encodeRLPGeneric(rb.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
 			return err
 		}
@@ -953,7 +953,7 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen,
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	if bfs.BlockAccessList != nil {
+	if len(bfs.BlockAccessList) > 0 {
 		blockAccessListLen += EncodingSizeGenericList(bfs.BlockAccessList)
 		payloadSize += rlp.ListPrefixLen(blockAccessListLen) + blockAccessListLen
 	}
@@ -992,7 +992,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if bfs.BlockAccessList != nil {
+	if len(bfs.BlockAccessList) > 0 {
 		if err := encodeRLPGeneric(bfs.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
 			return err
 		}
@@ -1052,7 +1052,7 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 	}
 
 	// size of BlockAccessList (optional)
-	if bb.BlockAccessList != nil {
+	if len(bb.BlockAccessList) > 0 {
 		blockAccessListLen += EncodingSizeGenericList(bb.BlockAccessList)
 		payloadSize += rlp.ListPrefixLen(blockAccessListLen) + blockAccessListLen
 	}
@@ -1083,7 +1083,7 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if bb.BlockAccessList != nil {
+	if len(bb.BlockAccessList) > 0 {
 		if err := encodeRLPGeneric(bb.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
 			return err
 		}

@@ -468,7 +468,7 @@ func (sdb *IntraBlockState) getBalance(addr common.Address) (uint256.Int, bool, 
 		return *u256.Num0, false, nil
 	}
 
-	balance, source, _, err := versionedRead(sdb, addr, BalancePath, common.Hash{}, false, *u256.Num0,
+	balance, source, _, err := versionedRead(sdb, addr, BalancePath, common.Hash{}, false, uint256.Int{},
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -758,7 +758,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		// If this account has not been read, add to the balance increment map
 		if _, needAccount := sdb.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
 			sdb.journal.append(balanceIncrease{
-				account:  &addr,
+				account:  addr,
 				increase: amount,
 			})
 
@@ -771,7 +771,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 			if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
 				// TODO: discuss if we should ignore error
 				prev := new(uint256.Int)
-
+				amount := amount
 				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
 					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 				}
@@ -789,7 +789,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
 			}
 
-			bi.increase.Add(&bi.increase, &amount)
+			bi.increase = u256.Add(bi.increase, amount)
 			bi.count++
 			return nil
 		}
@@ -804,7 +804,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		}
 
 		if stateObject.data.Empty() {
-			sdb.versionWritten(addr, BalancePath, common.Hash{}, *common.Num0)
+			sdb.versionWritten(addr, BalancePath, common.Hash{}, uint256.Int{})
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
 				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 			}
@@ -819,6 +819,8 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 	if sdb.trace || dbg.TraceAccount(addr) {
 		defer func() {
 			bal, _ := sdb.GetBalance(addr)
+			prev := prev     // avoid capture allocation unless we're tracing
+			amount := amount // avoid capture allocation unless we're tracing
 			expected := (&uint256.Int{}).Add(&prev, &amount)
 			if bal.Cmp(expected) != 0 {
 				panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
@@ -827,14 +829,14 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		}()
 	}
 
-	update := new(uint256.Int).Add(&prev, &amount)
+	update := u256.Add(prev, amount)
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
-	stateObject.SetBalance(*update, wasCommited, reason)
-	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
+	stateObject.SetBalance(update, wasCommited, reason)
+	sdb.versionWritten(addr, BalancePath, common.Hash{}, update)
 	return nil
 }
 
@@ -963,6 +965,8 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, 
 	if sdb.trace || dbg.TraceAccount(addr) {
 		defer func() {
 			bal, _ := sdb.GetBalance(addr)
+			prev := prev     // avoid capture allocation unless we're tracing
+			amount := amount // avoid capture allocation unless we're tracing
 			fmt.Printf("%d (%d.%d) SubBalance %x, %d-%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)
 		}()
 	}
@@ -971,10 +975,10 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, 
 	if err != nil {
 		return err
 	}
-	update := new(uint256.Int).Sub(&prev, &amount)
-	stateObject.SetBalance(*update, wasCommited, reason)
+	update := u256.Sub(prev, amount)
+	stateObject.SetBalance(update, wasCommited, reason)
 	if sdb.versionMap != nil {
-		sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
+		sdb.versionWritten(addr, BalancePath, common.Hash{}, update)
 	}
 	return nil
 }
@@ -982,6 +986,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace || dbg.TraceAccount(addr) {
+		amount := amount
 		fmt.Printf("%d (%d.%d) SetBalance %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &amount)
 	}
 	stateObject, err := sdb.GetOrNewStateObject(addr)
@@ -1151,7 +1156,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 	}
 	prevBalance := stateObject.Balance()
 	sdb.journal.append(selfdestructChange{
-		account:     &addr,
+		account:     addr,
 		prev:        stateObject.selfdestructed,
 		prevbalance: prevBalance,
 		wasCommited: !sdb.hasWrite(addr, SelfDestructPath, common.Hash{}),
@@ -1317,7 +1322,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 
 func (sdb *IntraBlockState) setStateObject(addr common.Address, object *stateObject) {
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
-		object.data.Balance.Add(&object.data.Balance, &bi.increase)
+		object.data.Balance = u256.Add(object.data.Balance, bi.increase)
 		bi.transferred = true
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
@@ -1516,7 +1521,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
-			tracingHooks.OnBalanceChange(stateObject.address, balance, *uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
+			tracingHooks.OnBalanceChange(stateObject.address, balance, uint256.Int{}, tracing.BalanceDecreaseSelfdestructBurn)
 		}
 		if dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed)

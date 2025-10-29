@@ -307,6 +307,7 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 		nil, nil,
 		data, nil,
 		false, // checkNonce
+		false, // checkTransaction
 		false, // checkGas
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
@@ -325,11 +326,11 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
-		vm.AccountRef(msg.From()),
+		msg.From(),
 		*msg.To(),
 		msg.Data(),
 		msg.Gas(),
-		msg.Value(),
+		*msg.Value(),
 		false,
 	)
 	if isBor && err != nil {
@@ -351,6 +352,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 		data, nil,
 		false, // checkNonce
 		false, // checkGas
+		false, // checkTransaction
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
@@ -362,10 +364,10 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.SysCreate(
-		vm.AccountRef(msg.From()),
+		msg.From(),
 		msg.Data(),
 		msg.Gas(),
-		msg.Value(),
+		*msg.Value(),
 		contract,
 	)
 	return ret, err

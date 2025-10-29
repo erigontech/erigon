@@ -23,11 +23,10 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 type serialExecutor struct {
@@ -37,7 +36,7 @@ type serialExecutor struct {
 	gasUsed         uint64
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
-	worker          *exec3.Worker
+	worker          *exec.Worker
 }
 
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -63,7 +62,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
-			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit, "initialTxNum", initialTxNum,
+			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
 			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", se.inMemExec)
 	}
@@ -81,7 +80,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		var err error
-		b, err = exec3.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
+		b, err = exec.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
 		if err != nil {
 			return nil, rwTx, err
 		}
@@ -293,7 +292,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
 		if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-			if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
+			if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
 		}
@@ -324,8 +323,8 @@ func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx 
 func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) (err error) {
 
 	if se.worker == nil {
-		se.taskExecMetrics = exec3.NewWorkerMetrics()
-		se.worker = exec3.NewWorker(context.Background(), false, se.taskExecMetrics,
+		se.taskExecMetrics = exec.NewWorkerMetrics()
+		se.worker = exec.NewWorker(context.Background(), false, se.taskExecMetrics,
 			se.cfg.db, nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
 	}
 
@@ -369,10 +368,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we need to skip that check for the first block, if we find half-executed data (startTxIndex>0).
-		startTxIndex = tasks[0].(*exec.TxTask).TxIndex
-		if startTxIndex < 0 {
-			startTxIndex = 0
-		}
+		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
 	var gasPool *core.GasPool

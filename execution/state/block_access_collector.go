@@ -435,10 +435,10 @@ func (sdb *IntraBlockState) applyJournalEntry(snapshot *blockAccessSnapshot, wri
 		acc := snapshot.account(addr)
 		acc.touched = true
 	case storageChange:
-		if e.account == nil {
+		if e.account == (common.Address{}) {
 			return nil
 		}
-		addr := *e.account
+		addr := e.account
 		acc := snapshot.account(addr)
 		acc.touched = true
 
@@ -461,10 +461,10 @@ func (sdb *IntraBlockState) applyJournalEntry(snapshot *blockAccessSnapshot, wri
 		}
 		slotSet[e.key] = struct{}{}
 	case balanceChange:
-		if e.account == nil {
+		if e.account == (common.Address{}) {
 			return nil
 		}
-		addr := *e.account
+		addr := e.account
 		acc := snapshot.account(addr)
 		acc.touched = true
 
@@ -479,10 +479,10 @@ func (sdb *IntraBlockState) applyJournalEntry(snapshot *blockAccessSnapshot, wri
 			acc.setBalance(new(big.Int))
 		}
 	case nonceChange:
-		if e.account == nil {
+		if e.account == (common.Address{}) {
 			return nil
 		}
-		addr := *e.account
+		addr := e.account
 		acc := snapshot.account(addr)
 		acc.touched = true
 
@@ -496,10 +496,10 @@ func (sdb *IntraBlockState) applyJournalEntry(snapshot *blockAccessSnapshot, wri
 			acc.setNonce(0)
 		}
 	case codeChange:
-		if e.account == nil {
+		if e.account == (common.Address{}) {
 			return nil
 		}
-		addr := *e.account
+		addr := e.account
 		acc := snapshot.account(addr)
 		acc.touched = true
 
@@ -517,10 +517,10 @@ func (sdb *IntraBlockState) applyJournalEntry(snapshot *blockAccessSnapshot, wri
 			acc.setCode(nil)
 		}
 	case selfdestructChange:
-		if e.account == nil {
+		if e.account == (common.Address{}) {
 			return nil
 		}
-		addr := *e.account
+		addr := e.account
 		acc := snapshot.account(addr)
 		acc.touched = true
 
@@ -541,10 +541,10 @@ func (sdb *IntraBlockState) applyJournalEntry(snapshot *blockAccessSnapshot, wri
 		acc := snapshot.account(addr)
 		acc.touched = true
 	case balanceIncrease:
-		if e.account == nil {
+		if e.account == (common.Address{}) {
 			return nil
 		}
-		addr := *e.account
+		addr := e.account
 		acc := snapshot.account(addr)
 		acc.touched = true
 	case accessListAddAccountChange:

@@ -13,7 +13,7 @@ func InitSchemasGen() {
 	Schema.AccountsDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.AccountsDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.BodiesBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.BodiesBlock.Version.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 1}}
+	Schema.BodiesBlock.Version.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}

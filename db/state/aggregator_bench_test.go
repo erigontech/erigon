@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
@@ -65,7 +66,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -172,12 +173,12 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1000000, // .kv file size about 550 MB
+		KeyCount:  1_000_000, // .kv file size about 550 MB
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
-	b.Run("seek_only", func(b *testing.B) {
+	b.Run("seek_only_v", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.IntN(len(keys))
 
@@ -189,12 +190,10 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 			if !bytes.Equal(keys[p], cur.Key()) {
 				panic("mistmatch")
 			}
-
-			cur.Close()
 		}
 	})
 
-	b.Run("get_only", func(b *testing.B) {
+	b.Run("get_only_v", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.IntN(len(keys))
 
@@ -216,12 +215,12 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1000000, // .kv file size about 550 MB
+		KeyCount:  1_000_000, // .kv file size about 550 MB
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
-	b.Run("seek_only", func(b *testing.B) {
+	b.Run("seek_only_k", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.IntN(len(keys))
 
@@ -233,12 +232,10 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 			if !bytes.Equal(keys[p], cur.Key()) {
 				panic("mistmatch")
 			}
-
-			cur.Close()
 		}
 	})
 
-	b.Run("get_only", func(b *testing.B) {
+	b.Run("get_only_k", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.IntN(len(keys))
 
@@ -260,12 +257,12 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1000000, // .kv file size about 550 MB
+		KeyCount:  1_000_000, // .kv file size about 550 MB
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
-	b.Run("seek_only", func(b *testing.B) {
+	b.Run("seek_only_kv", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.IntN(len(keys))
 
@@ -277,12 +274,10 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 			if !bytes.Equal(keys[p], cur.Key()) {
 				panic("mistmatch")
 			}
-
-			cur.Close()
 		}
 	})
 
-	b.Run("get_only", func(b *testing.B) {
+	b.Run("get_only_kv", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.IntN(len(keys))
 
@@ -304,7 +299,7 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1000000, // .kv file size about 550 MB
+		KeyCount:  1_000_000, // .kv file size about 550 MB
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
@@ -321,8 +316,6 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 			if !bytes.Equal(keys[p], cur.Key()) {
 				panic("mistmatch")
 			}
-
-			cur.Close()
 		}
 	})
 
@@ -348,7 +341,7 @@ func Benchmark_BTree_SeekThenNext(b *testing.B) {
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1000000, // .kv file size about 550 MB
+		KeyCount:  1_000_000, // .kv file size about 550 MB
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)

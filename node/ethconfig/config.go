@@ -282,6 +282,9 @@ type Config struct {
 	// ErigonDB geometry settings
 	ErigonDBStepSize          int
 	ErigonDBStepsInFrozenFile int
+
+	// fork choice update timeout
+	FcuTimeout time.Duration
 }
 
 type Sync struct {

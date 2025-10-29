@@ -3,6 +3,8 @@ package network
 import (
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type timeBasedRateLimiter struct {
@@ -37,4 +39,54 @@ func (r *timeBasedRateLimiter) tryAcquire() bool {
 	}
 
 	return false
+}
+
+type tokenBucketLimiter struct {
+	limiter    *rate.Limiter
+	lastAccess time.Time
+}
+
+type tokenBucketRateLimiter struct {
+	limiter map[string]tokenBucketLimiter
+	mu      sync.Mutex
+	rate    rate.Limit
+	burst   int
+}
+
+func newTokenBucketRateLimiter(ratePerSecond float64, burst int) *tokenBucketRateLimiter {
+	tb := &tokenBucketRateLimiter{
+		limiter: make(map[string]tokenBucketLimiter),
+		mu:      sync.Mutex{},
+		rate:    rate.Limit(ratePerSecond),
+		burst:   burst,
+	}
+	go tb.cleanup()
+	return tb
+}
+
+func (r *tokenBucketRateLimiter) acquire(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	limiter, ok := r.limiter[key]
+	if !ok {
+		limiter.limiter = rate.NewLimiter(r.rate, r.burst)
+		r.limiter[key] = limiter
+	}
+
+	limiter.lastAccess = time.Now()
+	return limiter.limiter.Allow()
+}
+
+func (r *tokenBucketRateLimiter) cleanup() {
+	for {
+		time.Sleep(10 * time.Second)
+		r.mu.Lock()
+		for key, limiter := range r.limiter {
+			if time.Since(limiter.lastAccess) > 3*time.Minute {
+				delete(r.limiter, key)
+			}
+		}
+		r.mu.Unlock()
+	}
 }

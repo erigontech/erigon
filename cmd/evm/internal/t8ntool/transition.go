@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"
@@ -323,7 +323,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
+	sd, err := execctx.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return err
 	}
@@ -680,7 +680,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 	defer c.Close()
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}

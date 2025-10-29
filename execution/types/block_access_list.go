@@ -475,7 +475,7 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		return err
 	}
 	if len(changes) == 0 {
-		*out = BlockAccessList{}
+		*out = nil
 		return nil
 	}
 	*out = changes

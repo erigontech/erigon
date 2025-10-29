@@ -48,7 +48,7 @@ type SnapshotRepo struct {
 	logger log.Logger
 }
 
-func NewSnapshotRepoForForkable(id ForkableId, logger log.Logger) *SnapshotRepo {
+func NewSnapshotRepoForForkable(id kv.ForkableId, logger log.Logger) *SnapshotRepo {
 	return NewSnapshotRepo(Registry.Name(id), FromForkable(id), Registry.SnapshotConfig(id), logger)
 }
 
@@ -448,26 +448,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 }
 
 func (f *SnapshotRepo) closeWhatNotInList(fNames []string) {
-	protectFiles := make(map[string]struct{}, len(fNames))
-	for _, f := range fNames {
-		protectFiles[f] = struct{}{}
-	}
-	var toClose []*FilesItem
-	f.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
-					continue
-				}
-			}
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		item.closeFiles()
-		f.dirtyFiles.Delete(item)
-	}
+	closeWhatNotInList(f.dirtyFiles, fNames)
 }
 
 func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
