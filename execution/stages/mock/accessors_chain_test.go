@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
@@ -531,7 +532,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	var txNum uint64
 	{
 		blockNum := header.Number.Uint64()
-		sd, err := state.NewSharedDomains(tx, log.New())
+		sd, err := execctx.NewSharedDomains(tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
 		base, err := txNumReader.Min(tx, 1)
@@ -623,7 +624,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	}
 
 	// Write withdrawals to block
-	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
+	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals, nil)
 	if err := rawdb.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}

@@ -23,11 +23,14 @@ jobs:
       - name: Fast checkout git repository
         uses: actions/checkout@v5
 
-      - name: Login to Docker Hub (if secrets available)
+      - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
         # have access to our Docker secrets.
-        if: github.repository_owner == 'erigontech'
+        if: |
+          github.repository == 'erigontech/erigon' && 
+          github.actor != 'dependabot[bot]' &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)      
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
@@ -53,11 +56,14 @@ jobs:
       - name: Fast checkout git repository
         uses: actions/checkout@v5
 
-      - name: Login to Docker Hub (if secrets available)
+      - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
         # have access to our Docker secrets.
-        if: github.repository_owner == 'erigontech'
+        if: |
+          github.repository == 'erigontech/erigon' && 
+          github.actor != 'dependabot[bot]' &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}

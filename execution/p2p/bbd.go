@@ -259,7 +259,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		connectionPoint = initialHeader
 	}
 	// if not, then continue fetching headers backwards until we find a connecting point
-	for connectionPoint == nil && lastHeader.Number.Uint64() > 0 {
+	for connectionPoint == nil && lastHeader.Number.Sign() > 0 {
 		if chainLen > config.chainLengthLimit {
 			return nil, fmt.Errorf(
 				"%w: num=%d, hash=%s, len=%d, limit=%d",

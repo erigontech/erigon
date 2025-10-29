@@ -1,9 +1,6 @@
 version: "2"
 run:
   build-tags:
-    - nosqlite
-    - noboltdb
-    - nosilkworm
     - goexperiment.synctest
 linters:
   enable:
@@ -139,11 +136,13 @@ linters:
           - gosec
         path: p2p/dnsdisc
     paths:
+      - build/
+      - vendor/
       - third_party$
       - builtin$
       - examples$
-      - testdata$
-      - execution-spec-tests$
+      - testdata
+      - execution-spec-tests
 formatters:
   enable:
     - gofmt
@@ -153,8 +152,10 @@ formatters:
   exclusions:
     generated: lax
     paths:
+      - build/
+      - vendor/
       - third_party$
       - builtin$
       - examples$
-      - testdata$
-      - execution-spec-tests$
+      - testdata
+      - execution-spec-tests

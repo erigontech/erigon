@@ -54,7 +54,7 @@ func init() {
 //	}
 type fourByteTracer struct {
 	ids               map[string]int   // ids aggregates the 4byte ids found
-	interrupt         uint32           // Atomic flag to signal execution interruption
+	interrupt         atomic.Bool      // Atomic flag to signal execution interruption
 	reason            error            // Textual reason for the interruption
 	activePrecompiles []common.Address // Updated on tx start based on given rules
 }
@@ -100,9 +100,9 @@ func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
-func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) { // Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
 	// Skip if tracing was interrupted
-	if atomic.LoadUint32(&t.interrupt) > 0 {
+	if t.interrupt.Load() {
 		return
 	}
 	if len(input) < 4 {
@@ -134,7 +134,7 @@ func (t *fourByteTracer) GetResult() (json.RawMessage, error) {
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *fourByteTracer) Stop(err error) {
 	t.reason = err
-	atomic.StoreUint32(&t.interrupt, 1)
+	t.interrupt.Store(true)
 }
 
 func bytesToHex(s []byte) string {
