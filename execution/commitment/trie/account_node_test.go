@@ -124,7 +124,7 @@ func TestHash(t *testing.T) {
 	addr2 := common.HexToAddress("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc2 := &accounts.Account{
 		Nonce:    0,
-		Balance:  *uint256.NewInt(0),
+		Balance:  uint256.Int{},
 		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
 	}

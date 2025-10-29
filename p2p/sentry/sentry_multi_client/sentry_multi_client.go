@@ -765,14 +765,8 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *sentryproto
 				totalCached += len(queriedBytes)
 			}
 
-			start := wit.PageSize * witnessPage.Page
-			if start > uint64(len(witnessBytes)) {
-				start = uint64(len(witnessBytes))
-			}
-			end := start + wit.PageSize
-			if end > uint64(len(witnessBytes)) {
-				end = uint64(len(witnessBytes))
-			}
+			start := min(wit.PageSize*witnessPage.Page, uint64(len(witnessBytes)))
+			end := min(start+wit.PageSize, uint64(len(witnessBytes)))
 			witnessPageResponse.Data = witnessBytes[start:end]
 			totalResponsePayloadDataAmount += len(witnessPageResponse.Data)
 		}

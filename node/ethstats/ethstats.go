@@ -601,10 +601,7 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 		if headNumber == nil || err != nil {
 			return err
 		}
-		start := int(*headNumber - historyUpdateRange + 1)
-		if start < 0 {
-			start = 0
-		}
+		start := max(int(*headNumber-historyUpdateRange+1), 0)
 		for i := uint64(start); i <= *headNumber; i++ {
 			indexes = append(indexes, i)
 		}

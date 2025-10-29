@@ -110,14 +110,8 @@ func toProgram(code []byte) *Program {
 
 		if op.IsPushWithImmediateArgs() {
 			pushByteSize := stmt.operation.opNum
-			startMin := pc + 1
-			if startMin >= codeLen {
-				startMin = codeLen
-			}
-			endMin := startMin + pushByteSize
-			if startMin+pushByteSize >= codeLen {
-				endMin = codeLen
-			}
+			startMin := min(pc+1, codeLen)
+			endMin := min(startMin+pushByteSize, codeLen)
 			integer := new(uint256.Int)
 			integer.SetBytes(code[startMin:endMin])
 			stmt.value = *integer
