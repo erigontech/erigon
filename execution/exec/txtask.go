@@ -181,7 +181,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		return nil, err
 	}
 
-	if txMessage != nil && txMessage.To() == nil {
+	if txMessage != nil && txMessage.To().IsNil() {
 		txSender, err := r.TxSender()
 		if err != nil {
 			return nil, err

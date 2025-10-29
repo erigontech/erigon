@@ -1306,7 +1306,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.TemporalRwDB, stateDif
 			return fmt.Errorf("signer missing: %w", err)
 		}
 		if borcfg != nil {
-			borcfg.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+			borcfg.Authorize(accounts.InternAddress(eb), func(_ accounts.Address, mimeType string, message []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 			})
 		} else if s.chainConfig.Consensus == chain.CliqueConsensus {
@@ -1323,8 +1323,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.TemporalRwDB, stateDif
 		// this assumes in this mode we're only running a single validator
 
 		if s.chainConfig.ChainName == networkname.BorDevnet && s.config.WithoutHeimdall {
-			borcfg.Authorize(eb, func(addr common.Address, _ string, _ []byte) ([]byte, error) {
-				return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
+			borcfg.Authorize(accounts.InternAddress(eb), func(addr accounts.Address, _ string, _ []byte) ([]byte, error) {
+				addrVal := addr.Value()
+				return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: addrVal[:]}
 			})
 		}
 

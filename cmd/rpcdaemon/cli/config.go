@@ -564,7 +564,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 	if cfg.WithDatadir {
 		if cc != nil && cc.Bor != nil {
-			stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
+			stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress().Value()
 
 			bridgeConfig := bridge.ReaderConfig{
 				Store:                        bridgeStore,
