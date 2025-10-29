@@ -17,10 +17,9 @@
 package integrity
 
 import (
-	"cmp"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -29,7 +28,11 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
+
+// ErrIntegrity is useful to differentiate integrity errors from program errors.
+var ErrIntegrity = errors.New("integrity error")
 
 func CheckKvis(tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Logger) error {
 	aggTx := state.AggTx(tx)
@@ -38,85 +41,100 @@ func CheckKvis(tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Log
 	switch domain {
 	case kv.CommitmentDomain:
 		kvCompression = statecfg.Schema.CommitmentDomain.Compression
+	case kv.StorageDomain:
+		kvCompression = statecfg.Schema.StorageDomain.Compression
+	case kv.AccountsDomain:
+		kvCompression = statecfg.Schema.AccountsDomain.Compression
+	case kv.CodeDomain:
+		kvCompression = statecfg.Schema.CodeDomain.Compression
 	default:
 		panic(fmt.Sprintf("add compression for domain to CheckKvis: %s", domain))
 	}
-	var kvis []state.VisibleFile
-	for _, file := range files {
-		if strings.HasSuffix(file.Fullpath(), ".kvi") {
-			kvis = append(kvis, file)
-		}
-	}
-	slices.SortFunc(kvis, func(a, b state.VisibleFile) int {
-		return cmp.Compare(a.EndRootNum(), b.EndRootNum())
-	})
 	var integrityErr error
-	for _, kvi := range kvis {
-		err := CheckKvi(kvi.Fullpath(), kvCompression, failFast, logger)
+	for _, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
+		kvPath := file.Fullpath()
+		kviPath := kvPath + "i"
+		var err error
+		kviPath, err = version.ReplaceVersionWithMask(kviPath)
+		if err != nil {
+			return err
+		}
+		var ok bool
+		kviPath, _, ok, err = version.FindFilesWithVersionsByPattern(kviPath)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("kvi not found for %s", kvPath)
+		}
+		err = CheckKvi(kviPath, kvPath, kvCompression, failFast, logger)
 		if err == nil {
 			continue
 		}
-		if errors.Is(err, ErrIntegrity) {
-			integrityErr = AccumulateIntegrityError(integrityErr, err)
-			continue
+		if failFast {
+			return err
 		}
-		return err
+		log.Warn(err.Error())
+		integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
 	}
 	return integrityErr
 }
 
-func CheckKvi(kviFilePath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) error {
-	logger.Trace("checking kvi", "file", kviFilePath)
-	kvi, err := recsplit.OpenIndex(kviFilePath)
+func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) error {
+	logger.Trace("checking kvi", "kviPath", kviPath, "kvPath", kvPath)
+	kvi, err := recsplit.OpenIndex(kviPath)
 	if err != nil {
 		return err
 	}
 	defer kvi.Close()
 	kviReader := kvi.GetReaderFromPool()
-	kvFilePath, ok := strings.CutSuffix(kviFilePath, "i")
-	if !ok {
-		return fmt.Errorf("invalid kvi file name: %s", kviFilePath)
-	}
-	kvDecompressor, err := seg.NewDecompressor(kvFilePath)
+	kvDecompressor, err := seg.NewDecompressor(kvPath)
 	if err != nil {
 		return err
 	}
 	defer kvDecompressor.Close()
 	kvReader := seg.NewReader(kvDecompressor.MakeGetter(), kvCompression)
-	var keyBuf []byte
-	var keyOffset uint64
 	var integrityErr error
-	if uint64(kvReader.Count()) != kvi.KeyCount() {
-		err = fmt.Errorf("kv key count %d != kvi key count %d in %s", kvReader.Count(), kvi.KeyCount(), kviFilePath)
+	if kvKeyCount := uint64(kvReader.Count()) / 2; kvKeyCount != kvi.KeyCount() {
+		err = fmt.Errorf("kv key count %d != kvi key count %d in %s", kvKeyCount, kvi.KeyCount(), kviPath)
 		if failFast {
 			return err
-		} else {
-			logger.Warn(err.Error())
-			integrityErr = AccumulateIntegrityError(integrityErr, err)
 		}
+		logger.Warn(err.Error())
+		integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
 	}
+	var keyBuf []byte
+	var keyOffset uint64
+	var atValue bool
 	for kvReader.HasNext() {
-		keyBuf, keyOffset = kvReader.Next(keyBuf[:0])
-		logger.Trace("checking kvi for", "key", keyBuf, "offset", keyOffset)
+		if atValue {
+			keyOffset, _ = kvReader.Skip()
+			atValue = false
+			continue
+		}
+		keyBuf, _ = kvReader.Next(keyBuf[:0])
+		atValue = true
+		logger.Trace("checking kvi for", "key", hex.EncodeToString(keyBuf), "offset", keyOffset)
 		kviOffset, ok := kviReader.Lookup(keyBuf)
 		if !ok {
-			err = fmt.Errorf("key %x not found in %s", keyBuf, kviFilePath)
+			err = fmt.Errorf("key %x not found in %s", keyBuf, kviPath)
 			if failFast {
 				return err
-			} else {
-				logger.Warn(err.Error())
-				integrityErr = AccumulateIntegrityError(integrityErr, err)
-				continue
 			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
+			continue
 		}
 		if kviOffset != keyOffset {
-			err = fmt.Errorf("key %x offset mismatch in %s: %d != %d", keyBuf, kviFilePath, keyOffset, kviOffset)
+			err = fmt.Errorf("key %x offset mismatch in %s: %d != %d", keyBuf, kviPath, keyOffset, kviOffset)
 			if failFast {
 				return err
-			} else {
-				logger.Warn(err.Error())
-				integrityErr = AccumulateIntegrityError(integrityErr, err)
 			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
 		}
 	}
 	return integrityErr

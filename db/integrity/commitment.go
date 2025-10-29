@@ -47,31 +47,28 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool,
 			err = fmt.Errorf("commitment root not found in %s with endTxNum %d", file.Fullpath(), endTxNum)
 			if failFast {
 				return err
-			} else {
-				logger.Warn(err.Error())
-				integrityErr = AccumulateIntegrityError(integrityErr, err)
-				continue
 			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
+			continue
 		}
 		rootHash, err := commitment.HexTrieExtractStateRoot(v)
 		if err != nil {
 			err = fmt.Errorf("commitment root in %s with endTxNum %d could not be extracted: %w", file.Fullpath(), endTxNum, err)
 			if failFast {
 				return err
-			} else {
-				logger.Warn(err.Error())
-				integrityErr = AccumulateIntegrityError(integrityErr, err)
-				continue
 			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
+			continue
 		}
 		if common.BytesToHash(rootHash) == (common.Hash{}) {
 			err = fmt.Errorf("commitment root in %s with endTxNum %d is empty", file.Fullpath(), endTxNum)
 			if failFast {
 				return err
-			} else {
-				logger.Warn(err.Error())
-				integrityErr = AccumulateIntegrityError(integrityErr, err)
 			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
 		}
 	}
 	return integrityErr
