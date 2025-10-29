@@ -872,7 +872,19 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// check peers count
+			peersCount, err := d.rpc.Peers()
+			if err != nil {
+				log.Warn("failed to get peers count", "err", err)
+				continue
+			}
+			if peersCount == 0 {
+				log.Info("[syncColumnDataWorker] no peers available, skipping sync")
+				continue
+			}
+
 			blocks := []*cltypes.SignedBlindedBeaconBlock{}
+			roots := []common.Hash{}
 			d.blocksToSync.Range(func(key, value any) bool {
 				root := key.(common.Hash)
 				block := value.(*cltypes.SignedBlindedBeaconBlock)
@@ -884,6 +896,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 					d.blocksToSync.Delete(root)
 				} else {
 					blocks = append(blocks, block)
+					roots = append(roots, root)
 				}
 				return true
 			})
@@ -901,14 +914,9 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 					continue
 				}
 			}
-			for _, block := range blocks {
-				root, err := block.Block.HashSSZ()
-				if err != nil {
-					log.Warn("failed to get block root", "err", err)
-					continue
-				}
+			for i, root := range roots {
 				d.blocksToSync.Delete(root)
-				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", block.Block.Slot, "blockRoot", root)
+				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].Block.Slot, "blockRoot", root)
 			}
 		}
 	}
