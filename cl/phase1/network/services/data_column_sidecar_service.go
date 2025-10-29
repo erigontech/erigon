@@ -68,13 +68,20 @@ type seenSidecarKey struct {
 }
 
 func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
+	blockHeader := msg.SignedBlockHeader.Header
+	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to get block root: %v", err)
+	}
+
+	log.Debug("[dataColumnSidecarService] Processing data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
+
 	if s.syncDataManager.Syncing() {
 		// maybe later processing
 		return ErrIgnore
 	}
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/p2p-interface.md
-	blockHeader := msg.SignedBlockHeader.Header
 	seenKey := seenSidecarKey{
 		slot:          blockHeader.Slot,
 		proposerIndex: blockHeader.ProposerIndex,
@@ -85,13 +92,6 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if _, ok := s.seenSidecar.Get(seenKey); ok {
 		return ErrIgnore
 	}
-
-	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("failed to get block root: %v", err)
-	}
-
-	log.Debug("[dataColumnSidecarService] Processing data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
 
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
 		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
