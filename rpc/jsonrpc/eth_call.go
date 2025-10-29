@@ -581,6 +581,19 @@ func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) 
 	if !bytes.Equal(resultingStateRoot, expectedBlockStateRoot) {
 		return fmt.Errorf("resulting state root after execution doesn't match state root in block actual(%x)!=expected(%x)", resultingStateRoot, expectedBlockStateRoot)
 	}
+
+	expectedBalHash := block.BlockAccessListHash()
+	actualBalHash := execResult.BlockAccessListHash
+	if expectedBalHash != nil {
+		if actualBalHash == nil {
+			return fmt.Errorf("missing block access list hash in execution result")
+		}
+		if *actualBalHash != *expectedBalHash {
+			return fmt.Errorf("mismatch in block access list hash actual(%x) != expected(%x)", *actualBalHash, *expectedBalHash)
+		}
+	} else if actualBalHash != nil {
+		return fmt.Errorf("unexpected block access list hash in execution result for pre-Glamsterdam block")
+	}
 	return nil
 }
 

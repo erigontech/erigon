@@ -209,7 +209,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
-							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
+							applyResult.BlockAccessList, lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", consensus.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
@@ -896,23 +896,24 @@ type applyResult interface {
 }
 
 type blockResult struct {
-	BlockNum    uint64
-	BlockTime   uint64
-	BlockHash   common.Hash
-	ParentHash  common.Hash
-	StateRoot   common.Hash
-	Err         error
-	GasUsed     uint64
-	BlobGasUsed uint64
-	lastTxNum   uint64
-	complete    bool
-	isPartial   bool
-	ApplyCount  int
-	TxIO        *state.VersionedIO
-	Receipts    types.Receipts
-	Stats       map[int]ExecutionStat
-	Deps        *state.DAG
-	AllDeps     map[int]map[int]bool
+	BlockNum        uint64
+	BlockTime       uint64
+	BlockHash       common.Hash
+	ParentHash      common.Hash
+	StateRoot       common.Hash
+	Err             error
+	GasUsed         uint64
+	BlobGasUsed     uint64
+	lastTxNum       uint64
+	complete        bool
+	isPartial       bool
+	ApplyCount      int
+	TxIO            *state.VersionedIO
+	Receipts        types.Receipts
+	BlockAccessList types.BlockAccessList
+	Stats           map[int]ExecutionStat
+	Deps            *state.DAG
+	AllDeps         map[int]map[int]bool
 }
 
 type txResult struct {
@@ -1203,9 +1204,10 @@ type blockExecutor struct {
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// cummulative gas for this block
-	gasUsed     uint64
-	blobGasUsed uint64
-	gasPool     *core.GasPool
+	gasUsed         uint64
+	blobGasUsed     uint64
+	gasPool         *core.GasPool
+	blockAccessList types.BlockAccessList
 
 	execFailed, execAborted []int
 
@@ -1245,6 +1247,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	tx := task.index
 	be.results[tx] = &execResult{res, nil}
+	if txTask, ok := task.Task.(*exec.TxTask); ok && txTask.IsBlockEnd() {
+		be.blockAccessList = res.BlockAccessList
+	}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(core.ErrExecAbortError); ok {
 			if execErr.OriginError != nil && be.skipCheck[tx] {
@@ -1567,6 +1572,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.applyCount,
 			be.blockIO,
 			receipts,
+			be.blockAccessList,
 			be.stats,
 			&deps,
 			allDeps}
@@ -1596,6 +1602,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.applyCount,
 		be.blockIO,
 		nil,
+		be.blockAccessList,
 		be.stats,
 		nil,
 		nil}, nil

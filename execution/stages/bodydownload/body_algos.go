@@ -216,10 +216,10 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, withdrawals []types.Withdrawals,
+func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, withdrawals []types.Withdrawals, blockAccessLists []types.BlockAccessList,
 	lenOfP2PMsg uint64, peerID [64]byte,
 ) {
-	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, withdrawals: withdrawals, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
+	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, withdrawals: withdrawals, blockAccessLists: blockAccessLists, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
 	case bd.DeliveryNotify <- struct{}{}:
@@ -278,14 +278,17 @@ Loop:
 		if delivery.withdrawals == nil {
 			bd.logger.Warn("nil withdrawals delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
 		}
-		if delivery.txs == nil || delivery.uncles == nil || delivery.withdrawals == nil {
+		if delivery.blockAccessLists == nil {
+			bd.logger.Warn("nil block access lists delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
+		}
+		if delivery.txs == nil || delivery.uncles == nil || delivery.withdrawals == nil || delivery.blockAccessLists == nil {
 			bd.logger.Debug("delivery body processing has been skipped due to nil tx|data")
 			continue
 		}
 
 		//var deliveredNums []uint64
 		toClean := map[uint64]struct{}{}
-		txs, uncles, withdrawals, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.lenOfP2PMessage
+		txs, uncles, withdrawals, blockAccessLists, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.blockAccessLists, delivery.lenOfP2PMessage
 
 		for i := range txs {
 			var bodyHashes BodyHashes
@@ -313,7 +316,11 @@ Loop:
 			}
 			delete(bd.requestedMap, bodyHashes) // Delivered, cleaning up
 
-			bd.addBodyToCache(blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i]})
+			var bal types.BlockAccessList
+			if i < len(blockAccessLists) {
+				bal = blockAccessLists[i]
+			}
+			bd.addBodyToCache(blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i], BlockAccessList: bal})
 			bd.delivered.Add(blockNum)
 			delivered++
 			dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyReceived)

@@ -18,6 +18,7 @@ package clique
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"time"
 
@@ -99,6 +100,14 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 
 	if header.RequestsHash != nil {
 		return consensus.ErrUnexpectedRequests
+	}
+
+	glamsterdam := c.ChainConfig.IsGlamsterdam(header.Time)
+	if glamsterdam && header.BlockAccessListHash == nil {
+		return errors.New("missing blockAccessListHash")
+	}
+	if !glamsterdam && header.BlockAccessListHash != nil {
+		return fmt.Errorf("unexpected blockAccessListHash before Glamsterdam: %x", *header.BlockAccessListHash)
 	}
 
 	// All basic checks passed, verify cascading fields

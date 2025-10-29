@@ -439,7 +439,7 @@ func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
-	if c.IsOsaka(time) {
+	if c.IsOsaka(time) || c.IsGlamsterdam(time) {
 		return params.MaxRlpBlockSize
 	}
 	return math.MaxInt

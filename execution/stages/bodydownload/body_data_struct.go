@@ -34,11 +34,12 @@ type BodyHashes [3 * length.Hash]byte
 const MaxBodiesInRequest = 1024
 
 type Delivery struct {
-	peerID          [64]byte
-	txs             [][][]byte
-	uncles          [][]*types.Header
-	withdrawals     []types.Withdrawals
-	lenOfP2PMessage uint64
+	peerID           [64]byte
+	txs              [][][]byte
+	uncles           [][]*types.Header
+	withdrawals      []types.Withdrawals
+	blockAccessLists []types.BlockAccessList
+	lenOfP2PMessage  uint64
 }
 
 // BodyQueueItem is part of the body cache kept in memory

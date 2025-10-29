@@ -110,6 +110,8 @@ type TxResult struct {
 
 	TraceFroms map[common.Address]struct{}
 	TraceTos   map[common.Address]struct{}
+
+	BlockAccessList types.BlockAccessList
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -482,6 +484,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			break
 		}
 
+		ibs.EnableBlockAccessList(rules)
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
@@ -489,6 +492,12 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			return ret, err
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
+		if rules.IsGlamsterdam {
+			if err := ibs.SnapshotSystemAccess(0); err != nil {
+				result.Err = err
+				return &result
+			}
+		}
 		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {
@@ -499,6 +508,23 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		result.TraceTos[txTask.Header.Coinbase] = struct{}{}
 		for _, uncle := range txTask.Uncles {
 			result.TraceTos[uncle.Coinbase] = struct{}{}
+		}
+		if rules.IsGlamsterdam {
+			accessIndex := len(txTask.Txs) + 1
+			if accessIndex > 0xffff {
+				result.Err = fmt.Errorf("block access index overflow (system %d)", accessIndex)
+				return &result
+			}
+			if err := ibs.SnapshotSystemAccess(uint16(accessIndex)); err != nil {
+				result.Err = err
+				return &result
+			}
+			blockAccessList, err := ibs.BuildBlockAccessList()
+			if err != nil {
+				result.Err = err
+				return &result
+			}
+			result.BlockAccessList = blockAccessList
 		}
 	default:
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {
@@ -512,7 +538,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				return &result
 			}
 
-			result = *txTask.executeAA(aaTxn, evm, txTask.GasPool(), ibs, chainConfig)
+			result = *txTask.executeAA(aaTxn, evm, txTask.GasPool(), ibs, chainConfig, rules)
 			break
 		}
 
@@ -552,6 +578,17 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
+			if rules.IsGlamsterdam {
+				accessIndex := txTask.TxIndex + 1
+				if accessIndex > 0xffff {
+					result.Err = fmt.Errorf("block access index overflow (tx %d)", accessIndex)
+				} else if err := ibs.SnapshotTxAccess(uint16(accessIndex)); err != nil {
+					result.Err = err
+				}
+			}
+		}
+
+		if result.Err == nil {
 			// TODO these can be removed - use result instead
 			// Update the state with pending changes
 			ibs.SoftFinalise()
@@ -571,6 +608,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			panic(err)
 		}
 
+		if rules.IsGlamsterdam && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			ibs.ResetTxTracking()
+		}
+
 		result.TxIn = txTask.VersionedReads(ibs)
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}
@@ -582,7 +623,8 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	evm *vm.EVM,
 	gasPool *core.GasPool,
 	ibs *state.IntraBlockState,
-	chainConfig *chain.Config) *TxResult {
+	chainConfig *chain.Config,
+	rules *chain.Rules) *TxResult {
 	var result TxResult
 
 	if !txTask.InBatch {
@@ -643,9 +685,25 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.GasUsed = gasUsed
+
+	if rules.IsGlamsterdam {
+		accessIndex := txTask.TxIndex + 1
+		if accessIndex > 0xffff {
+			result.Err = fmt.Errorf("block access index overflow (tx %d)", accessIndex)
+			return &result
+		}
+		if err := ibs.SnapshotTxAccess(uint16(accessIndex)); err != nil {
+			result.Err = err
+			return &result
+		}
+	}
+
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+	if rules.IsGlamsterdam {
+		ibs.ResetTxTracking()
+	}
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
 

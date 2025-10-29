@@ -49,23 +49,25 @@ type ommer struct {
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
 type stEnv struct {
-	Coinbase         common.Address                      `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty       *big.Int                            `json:"currentDifficulty"`
-	Random           *big.Int                            `json:"currentRandom"`
-	MixDigest        common.Hash                         `json:"mixHash,omitempty"`
-	ParentDifficulty *big.Int                            `json:"parentDifficulty"`
-	GasLimit         uint64                              `json:"currentGasLimit"   gencodec:"required"`
-	Number           uint64                              `json:"currentNumber"     gencodec:"required"`
-	Timestamp        uint64                              `json:"currentTimestamp"  gencodec:"required"`
-	ParentTimestamp  uint64                              `json:"parentTimestamp,omitempty"`
-	BlockHashes      map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
-	Ommers           []ommer                             `json:"ommers,omitempty"`
-	BaseFee          *big.Int                            `json:"currentBaseFee,omitempty"`
-	ParentUncleHash  common.Hash                         `json:"parentUncleHash"`
-	UncleHash        common.Hash                         `json:"uncleHash,omitempty"`
-	Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
-	WithdrawalsHash  *common.Hash                        `json:"withdrawalsRoot,omitempty"`
-	RequestsHash     *common.Hash                        `json:"requestsHash,omitempty"`
+	Coinbase            common.Address                      `json:"currentCoinbase"   gencodec:"required"`
+	Difficulty          *big.Int                            `json:"currentDifficulty"`
+	Random              *big.Int                            `json:"currentRandom"`
+	MixDigest           common.Hash                         `json:"mixHash,omitempty"`
+	ParentDifficulty    *big.Int                            `json:"parentDifficulty"`
+	GasLimit            uint64                              `json:"currentGasLimit"   gencodec:"required"`
+	Number              uint64                              `json:"currentNumber"     gencodec:"required"`
+	Timestamp           uint64                              `json:"currentTimestamp"  gencodec:"required"`
+	ParentTimestamp     uint64                              `json:"parentTimestamp,omitempty"`
+	BlockHashes         map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
+	Ommers              []ommer                             `json:"ommers,omitempty"`
+	BaseFee             *big.Int                            `json:"currentBaseFee,omitempty"`
+	ParentUncleHash     common.Hash                         `json:"parentUncleHash"`
+	UncleHash           common.Hash                         `json:"uncleHash,omitempty"`
+	Withdrawals         []*types.Withdrawal                 `json:"withdrawals,omitempty"`
+	WithdrawalsHash     *common.Hash                        `json:"withdrawalsRoot,omitempty"`
+	RequestsHash        *common.Hash                        `json:"requestsHash,omitempty"`
+	BlockAccessListHash *common.Hash                        `json:"blockAccessListHash,omitempty"`
+	BlockAccessList     types.BlockAccessList               `json:"blockAccessList,omitempty"`
 }
 
 type stEnvMarshaling struct {

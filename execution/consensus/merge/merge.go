@@ -334,6 +334,14 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return consensus.ErrUnexpectedRequests
 	}
 
+	glamsterdam := chain.Config().IsGlamsterdam(header.Time)
+	if glamsterdam && header.BlockAccessListHash == nil {
+		return errors.New("missing blockAccessListHash")
+	}
+	if !glamsterdam && header.BlockAccessListHash != nil {
+		return fmt.Errorf("unexpected blockAccessListHash before Glamsterdam: %x", *header.BlockAccessListHash)
+	}
+
 	return nil
 }
 

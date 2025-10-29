@@ -69,16 +69,18 @@ type RejectedTx struct {
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        common.Hash           `json:"stateRoot"`
-	TxRoot           common.Hash           `json:"txRoot"`
-	ReceiptRoot      common.Hash           `json:"receiptsRoot"`
-	LogsHash         common.Hash           `json:"logsHash"`
-	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts        `json:"receipts"`
-	Rejected         RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt        `json:"-"`
+	StateRoot           common.Hash           `json:"stateRoot"`
+	TxRoot              common.Hash           `json:"txRoot"`
+	ReceiptRoot         common.Hash           `json:"receiptsRoot"`
+	LogsHash            common.Hash           `json:"logsHash"`
+	Bloom               types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Receipts            types.Receipts        `json:"receipts"`
+	Rejected            RejectedTxs           `json:"rejected,omitempty"`
+	Difficulty          *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed             math.HexOrDecimal64   `json:"gasUsed"`
+	BlockAccessListHash *common.Hash          `json:"blockAccessListHash,omitempty"`
+	BlockAccessList     types.BlockAccessList `json:"blockAccessList,omitempty"`
+	StateSyncReceipt    *types.Receipt        `json:"-"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -190,18 +192,36 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
+	var blockAccessList types.BlockAccessList
+	if newBlock != nil {
+		blockAccessList = newBlock.BlockAccessList()
+	}
+	var blockAccessListHash *common.Hash
+	if header.BlockAccessListHash != nil {
+		hashCopy := *header.BlockAccessListHash
+		blockAccessListHash = &hashCopy
+	} else if blockAccessList != nil {
+		computed := empty.BlockAccessListHash
+		if len(blockAccessList) > 0 {
+			computed = blockAccessList.Hash()
+		}
+		hashCopy := computed
+		blockAccessListHash = &hashCopy
+	}
 	blockLogs := ibs.Logs()
 	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
-		StateRoot:   newRoot,
-		TxRoot:      types.DeriveSha(includedTxs),
-		ReceiptRoot: receiptSha,
-		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
-		Receipts:    receipts,
-		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
-		GasUsed:     math.HexOrDecimal64(*gasUsed),
-		Rejected:    rejectedTxs,
+		StateRoot:           newRoot,
+		TxRoot:              types.DeriveSha(includedTxs),
+		ReceiptRoot:         receiptSha,
+		Bloom:               bloom,
+		LogsHash:            rlpHash(blockLogs),
+		Receipts:            receipts,
+		Difficulty:          (*math.HexOrDecimal256)(header.Difficulty),
+		GasUsed:             math.HexOrDecimal64(*gasUsed),
+		Rejected:            rejectedTxs,
+		BlockAccessListHash: blockAccessListHash,
+		BlockAccessList:     blockAccessList,
 	}
 
 	if chainConfig.Bor != nil {
@@ -427,7 +447,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
-func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
+func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, blockAccessList types.BlockAccessList, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if gasUsed != h.GasUsed {
 		var txgas string
 		sep := ""
@@ -473,6 +493,33 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
 		result := logReceipts(receipts, txns, chainConfig, h, logger)
 		fmt.Println(h.Number.Uint64(), "receipts", result)
+	}
+
+	if chainConfig.IsGlamsterdam(h.Time) {
+		computed := empty.BlockAccessListHash
+		if len(blockAccessList) > 0 {
+			computed = blockAccessList.Hash()
+		}
+		if h.BlockAccessListHash == nil {
+			if !isMining {
+				return fmt.Errorf("missing block access list hash")
+			}
+			hashCopy := computed
+			h.BlockAccessListHash = &hashCopy
+		} else if computed != *h.BlockAccessListHash {
+			if !isMining {
+				return fmt.Errorf("block access list hash mismatch: have %x, want %x", computed, *h.BlockAccessListHash)
+			}
+			hashCopy := computed
+			h.BlockAccessListHash = &hashCopy
+		}
+	} else {
+		if h.BlockAccessListHash != nil {
+			return fmt.Errorf("unexpected block access list hash before Glamsterdam")
+		}
+		if len(blockAccessList) != 0 {
+			return fmt.Errorf("unexpected block access list payload before Glamsterdam")
+		}
 	}
 
 	return nil

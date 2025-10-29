@@ -35,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -275,6 +276,20 @@ func Main(ctx *cli.Context) error {
 
 	// manufacture block from above inputs
 	header := NewHeader(prestate.Env)
+	if prestate.Env.BlockAccessList != nil {
+		computed := empty.BlockAccessListHash
+		if len(prestate.Env.BlockAccessList) > 0 {
+			computed = prestate.Env.BlockAccessList.Hash()
+		}
+		if prestate.Env.BlockAccessListHash != nil && *prestate.Env.BlockAccessListHash != computed {
+			return NewError(ErrorVMConfig, fmt.Errorf("block access list hash mismatch: provided %x, computed %x", *prestate.Env.BlockAccessListHash, computed))
+		}
+		hashCopy := computed
+		header.BlockAccessListHash = &hashCopy
+	} else if prestate.Env.BlockAccessListHash != nil {
+		hashCopy := *prestate.Env.BlockAccessListHash
+		header.BlockAccessListHash = &hashCopy
+	}
 
 	var ommerHeaders = make([]*types.Header, len(prestate.Env.Ommers))
 	header.Number.Add(header.Number, big.NewInt(int64(len(prestate.Env.Ommers))))
@@ -284,6 +299,9 @@ func Main(ctx *cli.Context) error {
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
+	if prestate.Env.BlockAccessList != nil {
+		block.SetBlockAccessList(prestate.Env.BlockAccessList)
+	}
 
 	getHash := func(num uint64) (common.Hash, error) {
 		if prestate.Env.BlockHashes == nil {
@@ -645,6 +663,10 @@ func NewHeader(env stEnv) *types.Header {
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
 	header.RequestsHash = env.RequestsHash
+	if env.BlockAccessListHash != nil {
+		hashCopy := *env.BlockAccessListHash
+		header.BlockAccessListHash = &hashCopy
+	}
 
 	return &header
 }
