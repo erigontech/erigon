@@ -205,29 +205,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		tx.Rollback()
 	}()
 
-	{ // used by eth_syncing
-		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-			return
-		}
-		if num != nil {
-			e.hook.LastNewBlockSeen(*num) // used by eth_syncing
-		}
-	}
-
 	blockHash := originalBlockHash
-
-	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
-	if err != nil {
-		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		return
-	}
-	headersProgressBefore, err := stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		return
-	}
 
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
@@ -237,6 +215,19 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	if fcuHeader == nil {
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
+		return
+	}
+
+	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
+
+	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		return
+	}
+	headersProgressBefore, err := stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
 	}
 

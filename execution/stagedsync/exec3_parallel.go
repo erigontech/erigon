@@ -321,11 +321,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							resetCommitmentGauges(ctx)
 
 							pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
-							if !pe.inMemExec {
-								if err := changeset.WriteDiffSet(rwTx, applyResult.BlockNum, applyResult.BlockHash, changeSet); err != nil {
-									return err
-								}
-							}
 							pe.domains().SetChangesetAccumulator(nil)
 
 							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {

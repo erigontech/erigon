@@ -161,11 +161,26 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("canonical hash not found %d", currentBlock)
+			// we may have executed blocks which are not in the canonical chain
+			nonCanonicalHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
+			if err != nil {
+				return err
+			}
+			switch {
+			case len(nonCanonicalHeaders) == 0:
+				return fmt.Errorf("can't find diffsets for: %d", currentBlock)
+			case len(nonCanonicalHeaders) == 1:
+				currentHash = nonCanonicalHeaders[0].Hash()
+			default:
+				return fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
+			}
 		}
 		var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
 		currentKeys, ok, err = doms.GetDiffset(rwTx, currentHash, currentBlock)
 		if !ok {
+			if changeSet == nil {
+				continue
+			}
 			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
 		}
 		if err != nil {
@@ -254,26 +269,28 @@ func unwindExec3State(ctx context.Context,
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
-	accountDiffs := changeset[kv.AccountsDomain]
-	for _, kv := range accountDiffs {
-		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key)[:length.Addr], kv.Value); err != nil {
+	if changeset != nil {
+		accountDiffs := changeset[kv.AccountsDomain]
+		for _, kv := range accountDiffs {
+			if err := stateChanges.Collect(toBytesZeroCopy(kv.Key)[:length.Addr], kv.Value); err != nil {
+				return err
+			}
+		}
+		storageDiffs := changeset[kv.StorageDomain]
+		for _, kv := range storageDiffs {
+			if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
+				return err
+			}
+		}
+
+		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
-	}
-	storageDiffs := changeset[kv.StorageDomain]
-	for _, kv := range storageDiffs {
-		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
+
+		// TODO this may need to be moved
+		if err := tx.Unwind(ctx, txUnwindTo, changeset); err != nil {
 			return err
 		}
-	}
-
-	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-
-	// TODO this may need to be moved
-	if err := tx.Unwind(ctx, txUnwindTo, changeset); err != nil {
-		return err
 	}
 
 	sd.SetTxNum(txUnwindTo)
