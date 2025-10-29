@@ -80,11 +80,11 @@ type ChainReader interface {
 	HasBlock(hash common.Hash, number uint64) bool
 }
 
-type SystemCall func(contract common.Address, data []byte) ([]byte, error)
+type SystemCall func(contract types.Address, data []byte) ([]byte, error)
 
 // Use more options to call contract
-type SysCallCustom func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
-type Call func(contract common.Address, data []byte) ([]byte, error)
+type SysCallCustom func(contract types.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
+type Call func(contract types.Address, data []byte) ([]byte, error)
 
 // RewardKind - The kind of block reward.
 // Depending on the consensus engine the allocated block reward might have
@@ -103,7 +103,7 @@ const (
 )
 
 type Reward struct {
-	Beneficiary common.Address
+	Beneficiary types.Address
 	Kind        RewardKind
 	Amount      uint256.Int
 }
@@ -120,7 +120,7 @@ type EngineReader interface {
 	// Author retrieves the Ethereum address of the account that minted the given
 	// block, which may be different from the header's coinbase if a consensus
 	// engine is based on signatures.
-	Author(header *types.Header) (common.Address, error)
+	Author(header *types.Header) (types.Address, error)
 
 	// Dependencies retrives the dependencies between transactions
 	// included in the block accosiated with this header a nil return
@@ -128,7 +128,7 @@ type EngineReader interface {
 	TxDependencies(header *types.Header) [][]int
 
 	// Service transactions are free and don't pay baseFee after EIP-1559
-	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
+	IsServiceTransaction(sender types.Address, syscall SystemCall) bool
 
 	Type() chain.ConsensusName
 
@@ -205,7 +205,7 @@ type PoW interface {
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount uint256.Int, bailout bool) error {
+func Transfer(db evmtypes.IntraBlockState, sender, recipient types.Address, amount uint256.Int, bailout bool) error {
 	if !bailout {
 		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 		if err != nil {

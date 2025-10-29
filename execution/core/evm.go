@@ -39,15 +39,15 @@ import (
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
-	engine consensus.EngineReader, author *common.Address, config *chain.Config) evmtypes.BlockContext {
+	engine consensus.EngineReader, author *types.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
-	var beneficiary common.Address
+	var beneficiary types.Address
 	if author == nil {
 		if config.Bor != nil && config.Bor.IsRio(header.Number.Uint64()) {
 			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
 
 			// In case the coinbase is not set post Rio, use the default coinbase
-			if beneficiary == (common.Address{}) {
+			if beneficiary == (types.NilAddress) {
 				beneficiary, _ = engine.Author(header)
 			}
 		} else {
@@ -201,10 +201,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount uint256.Int) (can bool, err error) {
+func CanTransfer(db evmtypes.IntraBlockState, addr types.Address, amount uint256.Int) (can bool, err error) {
 	balance, err := db.GetBalance(addr)
 
-	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr) {
+	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Handle()) {
 		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {
 			if !can {

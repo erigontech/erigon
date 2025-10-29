@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 )
 
@@ -34,21 +35,21 @@ type journalEntry interface {
 	revert(*IntraBlockState) error
 
 	// dirtied returns the Ethereum address modified by this journal entry.
-	dirtied() (Address, bool)
+	dirtied() (types.Address, bool)
 }
 
 // journal contains the list of state modifications applied since the last state
 // commit. These are tracked to be able to be reverted in case of an execution
 // exception or revertal request.
 type journal struct {
-	entries []journalEntry  // Current changes tracked by the journal
-	dirties map[Address]int // Dirty accounts and the number of changes
+	entries []journalEntry        // Current changes tracked by the journal
+	dirties map[types.Address]int // Dirty accounts and the number of changes
 }
 
 // newJournal create a new initialized journal.
 func newJournal() *journal {
 	return &journal{
-		dirties: make(map[Address]int),
+		dirties: make(map[types.Address]int),
 	}
 }
 func (j *journal) Reset() {
@@ -84,7 +85,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 // dirty explicitly sets an address to dirty, even if the change entries would
 // otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
 // precompile consensus exception.
-func (j *journal) dirty(addr Address) {
+func (j *journal) dirty(addr types.Address) {
 	j.dirties[addr]++
 }
 
@@ -96,14 +97,14 @@ func (j *journal) length() int {
 type (
 	// Changes to the account trie.
 	createObjectChange struct {
-		account Address
+		account types.Address
 	}
 	resetObjectChange struct {
-		account Address
+		account types.Address
 		prev    *stateObject
 	}
 	selfdestructChange struct {
-		account     Address
+		account     types.Address
 		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 		wasCommited bool
@@ -111,35 +112,35 @@ type (
 
 	// Changes to individual accounts.
 	balanceChange struct {
-		account     Address
+		account     types.Address
 		prev        uint256.Int
 		wasCommited bool
 	}
 	balanceIncrease struct {
-		account  Address
+		account  types.Address
 		increase uint256.Int
 	}
 	balanceIncreaseTransfer struct {
 		bi *BalanceIncrease
 	}
 	nonceChange struct {
-		account     Address
+		account     types.Address
 		prev        uint64
 		wasCommited bool
 	}
 	storageChange struct {
-		account     Address
-		key         common.Hash
+		account     types.Address
+		key         types.StorageKey
 		prevalue    uint256.Int
 		wasCommited bool
 	}
 	fakeStorageChange struct {
-		account  Address
-		key      common.Hash
+		account  types.Address
+		key      types.StorageKey
 		prevalue uint256.Int
 	}
 	codeChange struct {
-		account     Address
+		account     types.Address
 		prevcode    []byte
 		prevhash    common.Hash
 		wasCommited bool
@@ -153,21 +154,21 @@ type (
 		txIndex int
 	}
 	touchChange struct {
-		account Address
+		account types.Address
 	}
 
 	// Changes to the access list
 	accessListAddAccountChange struct {
-		address Address
+		address types.Address
 	}
 	accessListAddSlotChange struct {
-		address Address
-		slot    StorageKey
+		address types.Address
+		slot    types.StorageKey
 	}
 
 	transientStorageChange struct {
-		account  Address
-		key      StorageKey
+		account  types.Address
+		key      types.StorageKey
 		prevalue uint256.Int
 	}
 )
@@ -184,7 +185,7 @@ func (ch createObjectChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch createObjectChange) dirtied() (Address, bool) {
+func (ch createObjectChange) dirtied() (types.Address, bool) {
 	return ch.account, true
 }
 
@@ -193,8 +194,8 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch resetObjectChange) dirtied() (Address, bool) {
-	return ZeroAddress, false
+func (ch resetObjectChange) dirtied() (types.Address, bool) {
+	return types.NilAddress, false
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
@@ -242,17 +243,17 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch selfdestructChange) dirtied() (Address, bool) {
+func (ch selfdestructChange) dirtied() (types.Address, bool) {
 	return ch.account, true
 }
 
-var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
+var ripemd = types.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
 func (ch touchChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch touchChange) dirtied() (Address, bool) { return ch.account, true }
+func (ch touchChange) dirtied() (types.Address, bool) { return ch.account, true }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(ch.account)
@@ -260,7 +261,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 		return err
 	}
 
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
@@ -290,7 +291,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch balanceChange) dirtied() (Address, bool) {
+func (ch balanceChange) dirtied() (types.Address, bool) {
 	return ch.account, true
 }
 
@@ -305,12 +306,12 @@ func (ch balanceIncrease) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch balanceIncrease) dirtied() (Address, bool) {
+func (ch balanceIncrease) dirtied() (types.Address, bool) {
 	return ch.account, true
 }
 
-func (ch balanceIncreaseTransfer) dirtied() (Address, bool) {
-	return ZeroAddress, false
+func (ch balanceIncreaseTransfer) dirtied() (types.Address, bool) {
+	return types.NilAddress, false
 }
 
 func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
@@ -323,7 +324,7 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 		return err
 	}
 
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
@@ -351,7 +352,7 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch nonceChange) dirtied() (Address, bool) {
+func (ch nonceChange) dirtied() (types.Address, bool) {
 	return ch.account, true
 }
 
@@ -361,7 +362,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		return err
 	}
 
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
@@ -405,7 +406,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch codeChange) dirtied() (Address, bool) {
+func (ch codeChange) dirtied() (types.Address, bool) {
 	return ch.account, true
 }
 
@@ -415,14 +416,13 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		return err
 	}
 
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
 	var val uint256.Int
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		var commited uint256.Int
-		obj.GetState(ch.key, &val)
-		obj.GetCommittedState(ch.key, &commited)
+		val, _ = obj.GetState(ch.key)
+		commited, _ := obj.GetCommittedState(ch.key)
 		fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
 	}
 	if s.versionMap != nil {
@@ -448,7 +448,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch storageChange) dirtied() (Address, bool) {
+func (ch storageChange) dirtied() (types.Address, bool) {
 	return ch.account, true
 }
 
@@ -461,7 +461,7 @@ func (ch fakeStorageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch fakeStorageChange) dirtied() (Address, bool) {
+func (ch fakeStorageChange) dirtied() (types.Address, bool) {
 	return ch.account, true
 }
 
@@ -470,8 +470,8 @@ func (ch transientStorageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch transientStorageChange) dirtied() (Address, bool) {
-	return ZeroAddress, false
+func (ch transientStorageChange) dirtied() (types.Address, bool) {
+	return types.NilAddress, false
 }
 
 func (ch refundChange) revert(s *IntraBlockState) error {
@@ -479,8 +479,8 @@ func (ch refundChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch refundChange) dirtied() (Address, bool) {
-	return ZeroAddress, false
+func (ch refundChange) dirtied() (types.Address, bool) {
+	return types.NilAddress, false
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) error {
@@ -496,8 +496,8 @@ func (ch addLogChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch addLogChange) dirtied() (Address, bool) {
-	return ZeroAddress, false
+func (ch addLogChange) dirtied() (types.Address, bool) {
+	return types.NilAddress, false
 }
 
 func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
@@ -514,8 +514,8 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch accessListAddAccountChange) dirtied() (Address, bool) {
-	return ZeroAddress, false
+func (ch accessListAddAccountChange) dirtied() (types.Address, bool) {
+	return types.NilAddress, false
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
@@ -523,6 +523,6 @@ func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch accessListAddSlotChange) dirtied() (Address, bool) {
-	return ZeroAddress, false
+func (ch accessListAddSlotChange) dirtied() (types.Address, bool) {
+	return types.NilAddress, false
 }

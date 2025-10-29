@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -55,12 +56,12 @@ func TestNull(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 
-	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
+	address := types.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
 	state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	state.SetState(address, common.Hash{}, value)
+	state.SetState(address, types.ZeroKey, value)
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
@@ -68,7 +69,7 @@ func TestNull(t *testing.T) {
 	err = state.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	state.GetCommittedState(address, common.Hash{}, &value)
+	state.GetCommittedState(address, types.ZeroKey, &value)
 	if !value.IsZero() {
 		t.Errorf("expected empty hash. got %x", value)
 	}

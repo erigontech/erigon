@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -60,7 +61,7 @@ type PrecompiledContract interface {
 }
 
 // PrecompiledContracts contains the precompiled contracts supported at the given fork.
-type PrecompiledContracts map[common.Address]PrecompiledContract
+type PrecompiledContracts map[types.Address]PrecompiledContract
 
 func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
@@ -92,150 +93,150 @@ func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
 // contracts used in the Frontier and Homestead releases.
 var PrecompiledContractsHomestead = PrecompiledContracts{
-	common.BytesToAddress([]byte{1}): &ecrecover{},
-	common.BytesToAddress([]byte{2}): &sha256hash{},
-	common.BytesToAddress([]byte{3}): &ripemd160hash{},
-	common.BytesToAddress([]byte{4}): &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{1})): &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{2})): &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{3})): &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{4})): &dataCopy{},
 }
 
 // PrecompiledContractsByzantium contains the default set of pre-compiled Ethereum
 // contracts used in the Byzantium release.
 var PrecompiledContractsByzantium = PrecompiledContracts{
-	common.BytesToAddress([]byte{1}): &ecrecover{},
-	common.BytesToAddress([]byte{2}): &sha256hash{},
-	common.BytesToAddress([]byte{3}): &ripemd160hash{},
-	common.BytesToAddress([]byte{4}): &dataCopy{},
-	common.BytesToAddress([]byte{5}): &bigModExp{eip2565: false},
-	common.BytesToAddress([]byte{6}): &bn254AddByzantium{},
-	common.BytesToAddress([]byte{7}): &bn254ScalarMulByzantium{},
-	common.BytesToAddress([]byte{8}): &bn254PairingByzantium{},
+	types.InternAddress(common.BytesToAddress([]byte{1})): &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{2})): &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{3})): &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{4})): &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{5})): &bigModExp{eip2565: false},
+	types.InternAddress(common.BytesToAddress([]byte{6})): &bn254AddByzantium{},
+	types.InternAddress(common.BytesToAddress([]byte{7})): &bn254ScalarMulByzantium{},
+	types.InternAddress(common.BytesToAddress([]byte{8})): &bn254PairingByzantium{},
 }
 
 // PrecompiledContractsIstanbul contains the default set of pre-compiled Ethereum
 // contracts used in the Istanbul release.
 var PrecompiledContractsIstanbul = PrecompiledContracts{
-	common.BytesToAddress([]byte{1}): &ecrecover{},
-	common.BytesToAddress([]byte{2}): &sha256hash{},
-	common.BytesToAddress([]byte{3}): &ripemd160hash{},
-	common.BytesToAddress([]byte{4}): &dataCopy{},
-	common.BytesToAddress([]byte{5}): &bigModExp{eip2565: false},
-	common.BytesToAddress([]byte{6}): &bn254AddIstanbul{},
-	common.BytesToAddress([]byte{7}): &bn254ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{8}): &bn254PairingIstanbul{},
-	common.BytesToAddress([]byte{9}): &blake2F{},
+	types.InternAddress(common.BytesToAddress([]byte{1})): &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{2})): &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{3})): &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{4})): &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{5})): &bigModExp{eip2565: false},
+	types.InternAddress(common.BytesToAddress([]byte{6})): &bn254AddIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{7})): &bn254ScalarMulIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{8})): &bn254PairingIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{9})): &blake2F{},
 }
 
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsBerlin = PrecompiledContracts{
-	common.BytesToAddress([]byte{1}): &ecrecover{},
-	common.BytesToAddress([]byte{2}): &sha256hash{},
-	common.BytesToAddress([]byte{3}): &ripemd160hash{},
-	common.BytesToAddress([]byte{4}): &dataCopy{},
-	common.BytesToAddress([]byte{5}): &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{6}): &bn254AddIstanbul{},
-	common.BytesToAddress([]byte{7}): &bn254ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{8}): &bn254PairingIstanbul{},
-	common.BytesToAddress([]byte{9}): &blake2F{},
+	types.InternAddress(common.BytesToAddress([]byte{1})): &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{2})): &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{3})): &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{4})): &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{5})): &bigModExp{eip2565: true},
+	types.InternAddress(common.BytesToAddress([]byte{6})): &bn254AddIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{7})): &bn254ScalarMulIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{8})): &bn254PairingIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{9})): &blake2F{},
 }
 
 var PrecompiledContractsCancun = PrecompiledContracts{
-	common.BytesToAddress([]byte{0x01}): &ecrecover{},
-	common.BytesToAddress([]byte{0x02}): &sha256hash{},
-	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}): &dataCopy{},
-	common.BytesToAddress([]byte{0x05}): &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{0x06}): &bn254AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}): &bn254ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}): &bn254PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}): &blake2F{},
-	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+	types.InternAddress(common.BytesToAddress([]byte{0x01})): &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{0x02})): &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x03})): &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x04})): &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{0x05})): &bigModExp{eip2565: true},
+	types.InternAddress(common.BytesToAddress([]byte{0x06})): &bn254AddIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x07})): &bn254ScalarMulIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x08})): &bn254PairingIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x09})): &blake2F{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0a})): &pointEvaluation{},
 }
 
 var PrecompiledContractsNapoli = PrecompiledContracts{
-	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
-	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
-	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
-	common.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{0x06}):       &bn254AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}):       &bn254ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}):       &bn254PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}):       &blake2F{},
-	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+	types.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{eip2565: true},
+	types.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
+	types.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
 }
 
 var PrecompiledContractsBhilai = PrecompiledContracts{
-	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
-	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
-	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
-	common.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{0x06}):       &bn254AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}):       &bn254ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}):       &bn254PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}):       &blake2F{},
-	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
-	common.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
-	common.BytesToAddress([]byte{0x0e}):       &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
-	common.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
-	common.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
-	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+	types.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{eip2565: true},
+	types.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0b})):       &bls12381G1Add{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0c})):       &bls12381G1MultiExp{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0d})):       &bls12381G2Add{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0e})):       &bls12381G2MultiExp{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0f})):       &bls12381Pairing{},
+	types.InternAddress(common.BytesToAddress([]byte{0x10})):       &bls12381MapFpToG1{},
+	types.InternAddress(common.BytesToAddress([]byte{0x11})):       &bls12381MapFp2ToG2{},
+	types.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
 }
 
 var PrecompiledContractsPrague = PrecompiledContracts{
-	common.BytesToAddress([]byte{0x01}): &ecrecover{},
-	common.BytesToAddress([]byte{0x02}): &sha256hash{},
-	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}): &dataCopy{},
-	common.BytesToAddress([]byte{0x05}): &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{0x06}): &bn254AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}): &bn254ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}): &bn254PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}): &blake2F{},
-	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
-	common.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
-	common.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},
-	common.BytesToAddress([]byte{0x0e}): &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
-	common.BytesToAddress([]byte{0x10}): &bls12381MapFpToG1{},
-	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
+	types.InternAddress(common.BytesToAddress([]byte{0x01})): &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{0x02})): &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x03})): &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x04})): &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{0x05})): &bigModExp{eip2565: true},
+	types.InternAddress(common.BytesToAddress([]byte{0x06})): &bn254AddIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x07})): &bn254ScalarMulIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x08})): &bn254PairingIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x09})): &blake2F{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0a})): &pointEvaluation{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0b})): &bls12381G1Add{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0c})): &bls12381G1MultiExp{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0d})): &bls12381G2Add{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0e})): &bls12381G2MultiExp{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0f})): &bls12381Pairing{},
+	types.InternAddress(common.BytesToAddress([]byte{0x10})): &bls12381MapFpToG1{},
+	types.InternAddress(common.BytesToAddress([]byte{0x11})): &bls12381MapFp2ToG2{},
 }
 
 var PrecompiledContractsOsaka = PrecompiledContracts{
-	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
-	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
-	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
-	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
-	common.BytesToAddress([]byte{0x05}):       &bigModExp{osaka: true},
-	common.BytesToAddress([]byte{0x06}):       &bn254AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}):       &bn254ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}):       &bn254PairingIstanbul{},
-	common.BytesToAddress([]byte{0x09}):       &blake2F{},
-	common.BytesToAddress([]byte{0x0a}):       &pointEvaluation{},
-	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
-	common.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
-	common.BytesToAddress([]byte{0x0e}):       &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
-	common.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
-	common.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
-	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{eip7951: true},
+	types.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
+	types.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
+	types.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
+	types.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{osaka: true},
+	types.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
+	types.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0a})):       &pointEvaluation{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0b})):       &bls12381G1Add{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0c})):       &bls12381G1MultiExp{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0d})):       &bls12381G2Add{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0e})):       &bls12381G2MultiExp{},
+	types.InternAddress(common.BytesToAddress([]byte{0x0f})):       &bls12381Pairing{},
+	types.InternAddress(common.BytesToAddress([]byte{0x10})):       &bls12381MapFpToG1{},
+	types.InternAddress(common.BytesToAddress([]byte{0x11})):       &bls12381MapFp2ToG2{},
+	types.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
 var (
-	PrecompiledAddressesOsaka     []common.Address
-	PrecompiledAddressesPrague    []common.Address
-	PrecompiledAddressesNapoli    []common.Address
-	PrecompiledAddressesBhilai    []common.Address
-	PrecompiledAddressesCancun    []common.Address
-	PrecompiledAddressesBerlin    []common.Address
-	PrecompiledAddressesIstanbul  []common.Address
-	PrecompiledAddressesByzantium []common.Address
-	PrecompiledAddressesHomestead []common.Address
+	PrecompiledAddressesOsaka     []types.Address
+	PrecompiledAddressesPrague    []types.Address
+	PrecompiledAddressesNapoli    []types.Address
+	PrecompiledAddressesBhilai    []types.Address
+	PrecompiledAddressesCancun    []types.Address
+	PrecompiledAddressesBerlin    []types.Address
+	PrecompiledAddressesIstanbul  []types.Address
+	PrecompiledAddressesByzantium []types.Address
+	PrecompiledAddressesHomestead []types.Address
 )
 
 func init() {
@@ -269,7 +270,7 @@ func init() {
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
-func ActivePrecompiles(rules *chain.Rules) []common.Address {
+func ActivePrecompiles(rules *chain.Rules) []types.Address {
 	switch {
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka

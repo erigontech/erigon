@@ -27,18 +27,19 @@ import (
 
 // CreateAddress creates an ethereum address given the bytes and the nonce
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress(a common.Address, nonce uint64) common.Address {
+func CreateAddress(a Address, nonce uint64) Address {
 	listLen := 21 + rlp.U64Len(nonce)
 	data := make([]byte, listLen+1)
 	pos := rlp.EncodeListPrefix(listLen, data)
-	pos += rlp.EncodeAddress(a[:], data[pos:])
+	av := a.Value()
+	pos += rlp.EncodeAddress(av[:], data[pos:])
 	rlp.EncodeU64(nonce, data[pos:])
-	return common.BytesToAddress(crypto.Keccak256(data)[12:])
+	return InternAddress(common.BytesToAddress(crypto.Keccak256(data)[12:]))
 }
 
 // CreateAddress2 creates an ethereum address given the address bytes, initial
 // contract code hash and a salt.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress2(b common.Address, salt [32]byte, inithash []byte) common.Address {
+func CreateAddress2(b Address, salt [32]byte, inithash []byte) Address {
 	return common.BytesToAddress(crypto.Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
 }

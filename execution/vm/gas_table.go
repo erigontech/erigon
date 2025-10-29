@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so
@@ -104,9 +105,8 @@ var (
 
 func gasSStore(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
-	key := common.Hash(x.Bytes32())
-	var current uint256.Int
-	evm.IntraBlockState().GetState(callContext.Address(), key, &current)
+	key := types.InternKey(x.Bytes32())
+	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
 	// OR Constantinople is not active
@@ -192,9 +192,8 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, scopeGas uint64, memor
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
-	key := common.Hash(x.Bytes32())
-	var current uint256.Int
-	evm.IntraBlockState().GetState(callContext.Address(), key, &current)
+	key := types.InternKey(x.Bytes32())
+	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 
 	if current.Eq(value) { // noop (1)
 		return params.SloadGasEIP2200, nil
@@ -387,7 +386,7 @@ func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uin
 	var (
 		gas            uint64
 		transfersValue = !callContext.Stack.Back(2).IsZero()
-		address        = common.Address(callContext.Stack.Back(1).Bytes20())
+		address        = types.InternAddress(callContext.Stack.Back(1).Bytes20())
 	)
 	if evm.ChainRules().IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
@@ -533,7 +532,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, scopeGas uint64, memory
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas = params.SelfdestructGasEIP150
-		var address = common.Address(callContext.Stack.Back(0).Bytes20())
+		var address = types.InternAddress(callContext.Stack.Back(0).Bytes20())
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

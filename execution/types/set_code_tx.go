@@ -363,16 +363,17 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.
-func ParseDelegation(code []byte) (common.Address, bool) {
+func ParseDelegation(code []byte) (Address, bool) {
 	if len(code) != DelegateDesignationCodeSize || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
-		return common.Address{}, false
+		return NilAddress, false
 	}
 	var addr common.Address
 	copy(addr[:], code[len(params.DelegatedDesignationPrefix):])
-	return addr, true
+	return InternAddress(addr), true
 }
 
 // AddressToDelegation adds the delegation prefix to the specified address.
-func AddressToDelegation(addr common.Address) []byte {
-	return append(params.DelegatedDesignationPrefix, addr.Bytes()...)
+func AddressToDelegation(addr Address) []byte {
+	addrVal := addr.Value()
+	return append(params.DelegatedDesignationPrefix, addrVal[:]...)
 }

@@ -85,7 +85,7 @@ func (t *Tracer) Hooks() *tracing.Hooks {
 	}
 }
 
-func (t *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from common.Address) {
+func (t *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from types.Address) {
 	if t.recordOptions.DisableOnTxStartRecording {
 		return
 	}
@@ -98,7 +98,7 @@ func (t *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from co
 		OnTxStart: &OnTxStartTrace{
 			VMContext:   vm,
 			Transaction: txn,
-			From:        from,
+			From:        from.Value(),
 		},
 	})
 }
@@ -132,7 +132,7 @@ func (t *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.mustFlushToFile(path.Join(t.outputDir, txnTraceFile))
 }
 
-func (t *Tracer) OnEnter(depth int, typ byte, from, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *Tracer) OnEnter(depth int, typ byte, from, to types.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if t.recordOptions.DisableOnEnterRecording {
 		return
 	}
@@ -147,8 +147,8 @@ func (t *Tracer) OnEnter(depth int, typ byte, from, to common.Address, precompil
 		OnEnter: &OnEnterTrace{
 			Depth:      depth,
 			Type:       typ,
-			From:       from,
-			To:         to,
+			From:       from.Value(),
+			To:         to.Value(),
 			Precompile: precompile,
 			Input:      inputCopy,
 			Gas:        gas,
@@ -219,7 +219,7 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, opContext tracin
 			Op:         fmt.Sprintf("%v", vm.OpCode(op)),
 			Gas:        gas,
 			Cost:       cost,
-			Caller:     opContext.Caller(),
+			Caller:     opContext.Caller().Value(),
 			Stack:      stack,
 			Memory:     memory,
 			MemorySize: len(memory),
@@ -266,7 +266,7 @@ func (t *Tracer) OnFault(pc uint64, op byte, gas, cost uint64, opContext tracing
 			Op:         op,
 			Gas:        gas,
 			Cost:       cost,
-			Caller:     opContext.Caller(),
+			Caller:     opContext.Caller().Value(),
 			Stack:      stack,
 			Memory:     memory,
 			MemorySize: len(memory),
@@ -400,7 +400,7 @@ func (t *Tracer) OnSystemCallEnd() {
 	})
 }
 
-func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance uint256.Int, reason tracing.BalanceChangeReason) {
+func (t *Tracer) OnBalanceChange(address types.Address, oldBalance, newBalance uint256.Int, reason tracing.BalanceChangeReason) {
 	if t.recordOptions.DisableOnBalanceChangeRecording {
 		return
 	}
@@ -411,7 +411,7 @@ func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance 
 
 	t.traces.Append(Trace{
 		OnBalanceChange: &OnBalanceChangeTrace{
-			Address:    address,
+			Address:    address.Value(),
 			OldBalance: oldBalance,
 			NewBalance: newBalance,
 			Reason:     fmt.Sprintf("%v", reason),
@@ -419,7 +419,7 @@ func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance 
 	})
 }
 
-func (t *Tracer) OnNonceChange(address common.Address, oldNonce, newNonce uint64) {
+func (t *Tracer) OnNonceChange(address types.Address, oldNonce, newNonce uint64) {
 	if t.recordOptions.DisableOnNonceChangeRecording {
 		return
 	}
@@ -430,14 +430,14 @@ func (t *Tracer) OnNonceChange(address common.Address, oldNonce, newNonce uint64
 
 	t.traces.Append(Trace{
 		OnNonceChange: &OnNonceChangeTrace{
-			Address:  address,
+			Address:  address.Value(),
 			OldNonce: oldNonce,
 			NewNonce: newNonce,
 		},
 	})
 }
 
-func (t *Tracer) OnCodeChange(address common.Address, prevCodeHash common.Hash, prevCode []byte, newCodeHash common.Hash, newCode []byte) {
+func (t *Tracer) OnCodeChange(address types.Address, prevCodeHash common.Hash, prevCode []byte, newCodeHash common.Hash, newCode []byte) {
 	if t.recordOptions.DisableOnCodeChangeRecording {
 		return
 	}
@@ -448,7 +448,7 @@ func (t *Tracer) OnCodeChange(address common.Address, prevCodeHash common.Hash, 
 
 	t.traces.Append(Trace{
 		OnCodeChange: &OnCodeChangeTrace{
-			Address:      address,
+			Address:      address.Value(),
 			PrevCodeHash: prevCodeHash,
 			PrevCode:     prevCode,
 			NewCodeHash:  newCodeHash,
@@ -457,7 +457,7 @@ func (t *Tracer) OnCodeChange(address common.Address, prevCodeHash common.Hash, 
 	})
 }
 
-func (t *Tracer) OnStorageChange(address common.Address, slot common.Hash, prev, new uint256.Int) {
+func (t *Tracer) OnStorageChange(address types.Address, slot types.StorageKey, prev, new uint256.Int) {
 	if t.recordOptions.DisableOnStorageChangeRecording {
 		return
 	}
@@ -468,8 +468,8 @@ func (t *Tracer) OnStorageChange(address common.Address, slot common.Hash, prev,
 
 	t.traces.Append(Trace{
 		OnStorageChange: &OnStorageChangeTrace{
-			Address: address,
-			Slot:    slot,
+			Address: address.Value(),
+			Slot:    slot.Value(),
 			Prev:    prev,
 			New:     new,
 		},
@@ -624,7 +624,7 @@ type Trace struct {
 type OnTxStartTrace struct {
 	VMContext   *tracing.VMContext `json:"vmContext,omitempty"`
 	Transaction types.Transaction  `json:"transaction,omitempty"`
-	From        common.Address     `json:"from,omitempty"`
+	From        common.Address      `json:"from,omitempty"`
 }
 
 type OnTxEndTrace struct {
@@ -633,15 +633,15 @@ type OnTxEndTrace struct {
 }
 
 type OnEnterTrace struct {
-	Depth      int            `json:"depth,omitempty"`
-	Type       byte           `json:"type,omitempty"`
+	Depth      int           `json:"depth,omitempty"`
+	Type       byte          `json:"type,omitempty"`
 	From       common.Address `json:"from,omitempty"`
 	To         common.Address `json:"to,omitempty"`
-	Precompile bool           `json:"precompile,omitempty"`
-	Input      hexutil.Bytes  `json:"input,omitempty"`
-	Gas        uint64         `json:"gas,omitempty"`
-	Value      *uint256.Int   `json:"value,omitempty"`
-	Code       hexutil.Bytes  `json:"code,omitempty"`
+	Precompile bool          `json:"precompile,omitempty"`
+	Input      hexutil.Bytes `json:"input,omitempty"`
+	Gas        uint64        `json:"gas,omitempty"`
+	Value      *uint256.Int  `json:"value,omitempty"`
+	Code       hexutil.Bytes `json:"code,omitempty"`
 }
 
 type OnExitTrace struct {
@@ -657,7 +657,7 @@ type OnOpcodeTrace struct {
 	Op         string          `json:"op,omitempty"`
 	Gas        uint64          `json:"gas,omitempty"`
 	Cost       uint64          `json:"cost,omitempty"`
-	Caller     common.Address  `json:"caller,omitempty"`
+	Caller     common.Address   `json:"caller,omitempty"`
 	Stack      []hexutil.Bytes `json:"stack,omitempty"`
 	Memory     hexutil.Bytes   `json:"memory,omitempty"`
 	MemorySize int             `json:"memSize,omitempty"`
@@ -671,7 +671,7 @@ type OnFaultTrace struct {
 	Op         byte            `json:"op,omitempty"`
 	Gas        uint64          `json:"gas,omitempty"`
 	Cost       uint64          `json:"cost,omitempty"`
-	Caller     common.Address  `json:"caller,omitempty"`
+	Caller     common.Address   `json:"caller,omitempty"`
 	Stack      []hexutil.Bytes `json:"stack,omitempty"`
 	Memory     hexutil.Bytes   `json:"memory,omitempty"`
 	MemorySize int             `json:"memSize,omitempty"`
@@ -708,30 +708,30 @@ type OnSystemCallEndTrace struct{}
 
 type OnBalanceChangeTrace struct {
 	Address    common.Address `json:"address,omitempty"`
-	OldBalance uint256.Int    `json:"oldBalance,omitempty"`
-	NewBalance uint256.Int    `json:"newBalance,omitempty"`
-	Reason     string         `json:"reason,omitempty"`
+	OldBalance uint256.Int   `json:"oldBalance,omitempty"`
+	NewBalance uint256.Int   `json:"newBalance,omitempty"`
+	Reason     string        `json:"reason,omitempty"`
 }
 
 type OnNonceChangeTrace struct {
 	Address  common.Address `json:"address,omitempty"`
-	OldNonce uint64         `json:"oldNonce,omitempty"`
-	NewNonce uint64         `json:"newNonce,omitempty"`
+	OldNonce uint64        `json:"oldNonce,omitempty"`
+	NewNonce uint64        `json:"newNonce,omitempty"`
 }
 
 type OnCodeChangeTrace struct {
 	Address      common.Address `json:"address,omitempty"`
-	PrevCodeHash common.Hash    `json:"prevCodeHash,omitempty"`
-	PrevCode     hexutil.Bytes  `json:"prevCode,omitempty"`
-	NewCodeHash  common.Hash    `json:"newCodeHash,omitempty"`
-	NewCode      hexutil.Bytes  `json:"newCode,omitempty"`
+	PrevCodeHash common.Hash   `json:"prevCodeHash,omitempty"`
+	PrevCode     hexutil.Bytes `json:"prevCode,omitempty"`
+	NewCodeHash  common.Hash   `json:"newCodeHash,omitempty"`
+	NewCode      hexutil.Bytes `json:"newCode,omitempty"`
 }
 
 type OnStorageChangeTrace struct {
 	Address common.Address `json:"address,omitempty"`
-	Slot    common.Hash    `json:"slot,omitempty"`
-	Prev    uint256.Int    `json:"prev,omitempty"`
-	New     uint256.Int    `json:"new,omitempty"`
+	Slot    common.Hash   `json:"slot,omitempty"`
+	Prev    uint256.Int   `json:"prev,omitempty"`
+	New     uint256.Int   `json:"new,omitempty"`
 }
 
 type OnLogTrace struct {
