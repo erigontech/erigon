@@ -100,19 +100,6 @@ func TestCreation(t *testing.T) {
 			},
 		},
 		{
-			chainspec.Holesky,
-			[]testcase{
-				{0, 1696000704, ID{Hash: ChecksumToBytes(0xfd4f016b), Activation: 1696000704, Next: 1707305664}},       // First Shanghai block
-				{0, 1707305652, ID{Hash: ChecksumToBytes(0xfd4f016b), Activation: 1696000704, Next: 1707305664}},       // Last Shanghai block
-				{894733, 1707305676, ID{Hash: ChecksumToBytes(0x9b192ad0), Activation: 1707305664, Next: 1740434112}},  // First Cancun block
-				{3419703, 1740434100, ID{Hash: ChecksumToBytes(0x9b192ad0), Activation: 1707305664, Next: 1740434112}}, // Last Cancun block
-				{3419704, 1740434112, ID{Hash: ChecksumToBytes(0xdfbd9bed), Activation: 1740434112, Next: 1759308480}}, // First Prague block
-				{4619676, 1759308480, ID{Hash: ChecksumToBytes(0x783def52), Activation: 1759308480, Next: 1759800000}}, // First Osaka block (approx)
-				{4660636, 1759800000, ID{Hash: ChecksumToBytes(0xa280a45c), Activation: 1759800000, Next: 1760389824}}, // First BPO1 block (approx)
-				{8000000, 1800000000, ID{Hash: ChecksumToBytes(0x9bc6cb31), Activation: 1760389824, Next: 0}},          // Future BPO2 block (mock)
-			},
-		},
-		{
 			chainspec.Hoodi,
 			[]testcase{
 				{0, 174221200, ID{Hash: ChecksumToBytes(0xbef71d30), Activation: 0, Next: 1742999832}},                 // First Cancun block

@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -15,11 +16,17 @@ import (
 type InternalAPI interface {
 	GetTxNumInfo(ctx context.Context, txNum uint64) (*TxNumInfo, error)
 	GetStepsInDB(ctx context.Context) (float64, error)
+	GetPruningProgress(ctx context.Context) ([]*PruningProgress, error)
 }
 
 type TxNumInfo struct {
 	BlockNum uint64 `json:"blockNum"`
 	Idx      uint64 `json:"idx"`
+}
+
+type PruningProgress struct {
+	Table string `json:"table"`
+	Step  uint64 `json:"step"`
 }
 
 type InternalAPIImpl struct {
@@ -72,4 +79,46 @@ func (api *InternalAPIImpl) GetStepsInDB(ctx context.Context) (float64, error) {
 
 	steps := rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize())
 	return steps, nil
+}
+
+func (api *InternalAPIImpl) GetPruningProgress(ctx context.Context) ([]*PruningProgress, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	cursor, err := tx.Cursor(kv.TblPruningProgress)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close()
+
+	prog := make([]*PruningProgress, 0)
+	k, v, err := cursor.First()
+	if err != nil {
+		return nil, err
+	}
+	for k != nil {
+		if len(v) == 1 && v[0] == 0 {
+			p := &PruningProgress{
+				Table: string(k),
+				Step:  0,
+			}
+			prog = append(prog, p)
+		} else {
+			p := &PruningProgress{
+				Table: string(k),
+				Step:  binary.BigEndian.Uint64(v),
+			}
+			prog = append(prog, p)
+		}
+
+		k, v, err = cursor.Next()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return prog, nil
 }

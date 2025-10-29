@@ -111,7 +111,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "parallel"),
-			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit, "initialTxNum", initialTxNum,
+			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
 			"inMem", pe.inMemExec)
 	}
@@ -122,15 +122,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	pe.resetWorkers(ctx, pe.rs, rwTx)
 
-	maxExecBlockNum := maxBlockNum
-
-	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
-		var errExhausted *ErrLoopExhausted
-		if errors.As(err, &errExhausted) {
-			maxExecBlockNum = errExhausted.To
-		} else {
-			return nil, rwTx, err
-		}
+	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
+		return nil, rwTx, err
 	}
 
 	var lastExecutedLog time.Time
@@ -228,7 +221,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
 
 					if !dbg.DiscardCommitment() {
-						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxExecBlockNum ||
+						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
+							applyResult.Exhausted != nil ||
 							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 
 							resetExecGauges(ctx)
@@ -245,8 +239,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
 							commitProgress := make(chan *commitment.CommitProgress, 100)
-
+							logCommittedDone := make(chan struct{})
 							go func() {
+								defer close(logCommittedDone)
 								logEvery := time.NewTicker(20 * time.Second)
 								commitStart := time.Now()
 
@@ -340,6 +335,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									rwTx, pe.cfg, execStage, maxBlockNum, pe.logger, u)
 							}
 							// fix these here - they will contain estimates after commit logging
+							select {
+							case <-logCommittedDone: // make sure no async mutations by LogCommitted can happen at this point
+							}
 							pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
 							pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
 							uncommittedBlocks = 0
@@ -355,15 +353,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
 					}
 
-					if applyResult.BlockNum == maxExecBlockNum {
-						switch {
-						case applyResult.BlockNum == maxBlockNum:
-							return nil
-						case blockLimit > 0:
-							return &ErrLoopExhausted{From: startBlockNum, To: applyResult.BlockNum, Reason: "block limit reached"}
-						default:
-							return nil
-						}
+					if applyResult.BlockNum == maxBlockNum {
+						return nil
+					}
+					if applyResult.Exhausted != nil {
+						return applyResult.Exhausted
 					}
 
 					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
@@ -412,8 +406,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	if rwTx, err = pe.flushAndCommit(ctx, execStage, rwTx, asyncTxChan, useExternalTx); err != nil {
 		return nil, rwTx, fmt.Errorf("flush failed: %w", err)
 	}
-
-	return lastHeader, rwTx, pe.wait(ctx)
+	if err = pe.wait(ctx); err != nil {
+		return nil, rwTx, fmt.Errorf("wait failed: %w", err)
+	}
+	return lastHeader, rwTx, execErr
 }
 
 func (pe *parallelExecutor) LogExecuted() {
@@ -744,7 +740,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.applyResults, execRequest.profile)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.applyResults, execRequest.profile, execRequest.exhausted)
 			}
 		}
 
@@ -912,6 +908,7 @@ type blockResult struct {
 	Stats       map[int]ExecutionStat
 	Deps        *state.DAG
 	AllDeps     map[int]map[int]bool
+	Exhausted   *ErrLoopExhausted
 }
 
 type txResult struct {
@@ -1153,6 +1150,7 @@ type execRequest struct {
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
+	exhausted    *ErrLoopExhausted
 }
 
 type blockExecutor struct {
@@ -1216,9 +1214,10 @@ type blockExecutor struct {
 	execStarted time.Time
 	result      *blockResult
 	applyCount  int
+	exhausted   *ErrLoopExhausted
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
 		blockHash:    blockHash,
@@ -1232,6 +1231,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool,
 		profile:      profile,
 		applyResults: applyResults,
 		gasPool:      gasPool,
+		exhausted:    exhausted,
 	}
 }
 
@@ -1568,7 +1568,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			receipts,
 			be.stats,
 			&deps,
-			allDeps}
+			allDeps,
+			be.exhausted,
+		}
 		return be.result, nil
 	}
 
@@ -1597,7 +1599,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		nil,
 		be.stats,
 		nil,
-		nil}, nil
+		nil,
+		be.exhausted,
+	}, nil
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
