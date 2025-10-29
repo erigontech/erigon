@@ -88,7 +88,7 @@ jobs:
           fi
           echo "Erigon started"
 
-      - name: Run RpcDaemon & Erigon
+      - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           echo "Starting RpcDaemon..."
@@ -136,7 +136,7 @@ jobs:
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_remote_ethereum.sh
           
           set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum.sh ${{ runner.workspace }} $TEST_RESULT_DIR
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_remote_ethereum.sh ${{ runner.workspace }} $TEST_RESULT_DIR
           test_exit_status=$? # Capture test runner script exit status
           set -e # Re-enable exit on error after test run
 
