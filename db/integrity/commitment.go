@@ -74,12 +74,13 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool,
 	return integrityErr
 }
 
-func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	aggTx := state.AggTx(tx)
-	files := aggTx.Files(kv.CommitmentDomain)
-}
+//
+//func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {
+//	tx, err := db.BeginTemporalRo(ctx)
+//	if err != nil {
+//		return err
+//	}
+//	defer tx.Rollback()
+//	aggTx := state.AggTx(tx)
+//	files := aggTx.Files(kv.CommitmentDomain)
+//}
