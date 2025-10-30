@@ -206,7 +206,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return fmt.Errorf("failed to make bodies canonical %d: %w", firstBlock, err)
 		}
 		return nil
-
 	}
 
 	if tx != nil {
@@ -225,7 +224,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("[Arbitrum] Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(),
 			"latestProcessedBlock", lastCommittedBlockNum, "wasTxCommitted", !useExternalTx)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
