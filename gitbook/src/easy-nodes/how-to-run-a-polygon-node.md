@@ -17,7 +17,7 @@ The final release series of Erigon that officially supports Polygon is 3.1.\*. F
 
 To set up Erigon quickly, we recommend the following:
 
-* For Linux and MacOS users, use our [pre-built binaries](../getting-started/installation/pre-built-binaries.md);
+* For Linux and macOS users, use our [pre-built binaries](../getting-started/installation/pre-built-binaries.md);
 * For Windows users, [build executable binaries natively](../getting-started/installation/windows-build-executables.md).
 
 ## Start Erigon

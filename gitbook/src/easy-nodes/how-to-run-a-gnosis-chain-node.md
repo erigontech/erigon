@@ -13,7 +13,7 @@ description: How to run a Gnosis Chain node
 
 To set up Erigon quickly, we recommend the following:
 
-* For Linux and MacOS users, use our [pre-built binaries](../getting-started/installation/pre-built-binaries.md);
+* For Linux and macOS users, use our [pre-built binaries](../getting-started/installation/pre-built-binaries.md);
 * For Windows users, [build executable binaries natively](../getting-started/installation/windows-build-executables.md).
 
 ## Start Erigon​

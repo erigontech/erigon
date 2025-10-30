@@ -4,25 +4,23 @@ description: Remote Procedure Call Daemon
 
 # RPC Daemon
 
-The RPC daemon is a crucial component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component. For detailed instructions on running it remotely, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
+The RPC daemon is a crucial component of Erigon, enabling JSON remote procedure calls (RPC) and providing access to various [APIs](../../interacting-with-erigon/interacting-with-erigon.md).  It's designed for flexible deployment, capable of running both internally (in-process) or externally (out-of-process).&#x20;
 
-For a comprehensive understanding of the RPC daemon's functionality, configuration, and usage, please refer to [https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md) (also contained in your locally compiled Erigon folder at `/cmd/rpcdaemon`) which covers the following key topics:
+### RPC Deployment Modes
 
-1. **Introduction**: An overview of the RPC daemon, its benefits, and how it integrates with Erigon.
-2. **Getting Started**: Step-by-step guides for running the RPC daemon locally and remotely, including configuration options and command-line flags.
-3. **Healthcheck**: Information on performing health checks using POST requests or GET requests with custom headers.
-4. **Testing and debugging**: Examples of testing the RPC daemon using `curl` commands and Postman, debugging.
-5. **FAQ**: Frequently asked questions and answers covering topics such as prune options, RPC implementation status, and securing communication between the RPC daemon and Erigon instance.
-6. **For Developers**: Resources for developers, including code generation and information on working with the RPC daemon.
-7. **Relations between prune options and RPC methods**: Explains how prune options affect RPC methods.
-8. **RPC Implementation Status**: Provides a table showing the current implementation status of Erigon's RPC daemon.
-9. **Securing the communication between RPC daemon and Erigon instance via TLS and authentication**: Outlines the steps to secure communication between the RPC daemon and Erigon instance.
-10. **Ethstats**: Describes how to run ethstats with the RPC daemon.
-11. **Allowing only specific methods (Allowlist)**: Explains how to restrict access to specific RPC methods.
+The Erigon RPC service offers three distinct deployment modes when it comes to the logical functionality, depending on whether it runs as part of the main `erigon` process or as a standalone `rpcdaemon` process.
+
+<table data-header-hidden><thead><tr><th width="137"></th><th></th><th></th><th></th></tr></thead><tbody><tr><td><strong>Mode</strong></td><td><strong>Configuration</strong></td><td><strong>CLI Command to Run</strong></td><td><strong>Key Characteristics</strong></td></tr><tr><td>Embedded 🏡</td><td>RPC server is hosted within the <code>erigon</code> process.</td><td><code>./build/bin/erigon</code></td><td>The simplest, all-in-one solution. No separate RPC command is needed.</td></tr><tr><td>Local ⚙️</td><td><code>rpcdaemon</code> runs as a standalone process on the same machine as <code>erigon</code>. It directly accesses local data storage.</td><td><p>First (Erigon):</p><p><code>./build/bin/erigon --private.api.addr="&#x3C;host_IP>:9090"</code><br></p><p>Second (<code>rpcdaemon</code>):</p><p><code>./build/bin/rpcdaemon --datadir="&#x3C;erigon_data_path>"</code></p></td><td>Improves isolation, increases tuning options, and maintains high-performance data access. Requires two processes running on the same machine.</td></tr><tr><td>Remote 🌐</td><td><code>rpcdaemon</code> runs as a standalone process on a separate machine and accesses data storage remotely via the Erigon gRPC interface.</td><td><p>First (Erigon):</p><p><code>./build/bin/erigon --private.api.addr="&#x3C;host_IP>:9090" --grpc</code></p><p></p><p>Second (<code>rpcdaemon</code>):</p><p><code>./build/bin/rpcdaemon --private.api.addr="&#x3C;erigon_IP>:9090"</code></p></td><td>Highly scalable, leverages the same data storage for multiple service endpoints. Uses the <code>--private.api.addr</code> flag to point the daemon to the remote Erigon instance.</td></tr></tbody></table>
+
+For a comprehensive understanding and the latest instructions, the official documentation is essential:
+
+* **Detailed Functionality and Configuration**: The primary documentation for the `rpcdaemon` is located at [https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md).
+* **Local Access**: This documentation is also contained in your locally compiled Erigon folder at `/cmd/rpcdaemon`.
+* **Remote Running Instructions**: For detailed instructions on running RPC in Remote mode, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
 
 ## Command Line Options
 
-To display available options for RPCdaemon digit:
+When running RPC daemon in Local or Remote deployment mode, use this command to display available options for RPCdaemon digit:
 
 ```bash
 ./build/bin/rpcdaemon --help

@@ -1,18 +1,18 @@
 ---
 description: >-
-  The Erigon RPC Daemon: Enabling JSON-RPC, Transports (HTTP/WS/gRPC), and API
+  The Erigon RPC Service: Enabling JSON-RPC, Transports (HTTP/WS/gRPC), and API
   Namespaces
 ---
 
 # Interacting with Erigon
 
-The RPC daemon is a fundamental component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component.
+The [RPC daemon](../fundamentals/modules/rpc-daemon.md) is a fundamental component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component.
 
-{% hint style="info" %}
-For detailed instructions on running the RPC daemon remotely, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
-{% endhint %}
+{% content-ref url="../fundamentals/modules/rpc-daemon.md" %}
+[rpc-daemon.md](../fundamentals/modules/rpc-daemon.md)
+{% endcontent-ref %}
 
-The RPC Daemon supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+The RPC Service supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
 * [`eth`](eth.md): Standard Ethereum API.
 * [`erigon`](erigon.md): Erigon-specific extensions.
@@ -128,7 +128,7 @@ Erigon also supports gRPC for high-performance access to blockchain data:
 rpcdaemon --grpc --grpc.addr localhost --grpc.port 9090
 ```
 
-#### GraphQL
+### GraphQL
 
 Erigon uses the standard GraphQL documented by Geth at [https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql).
 

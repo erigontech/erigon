@@ -15,7 +15,7 @@ Using the command-line options allows for configurations, and several functional
 for example:
 
 ```shell
-./build/bin/erigon --chain=holesky
+./build/bin/erigon --http.addr="0.0.0.0"
 ```
 
 See [here](configuring-erigon.md) how to configure Erigon with the available flags.
@@ -39,7 +39,7 @@ The default Consensus Layer utilized is [Caplin](caplin.md), the Erigon flagship
     ```bash
     --datadir=<your_data_dir>
     ```
-* Based on the [sync mode](sync-modes.md) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node or `--prune.mode=minimal` for a minimal node. The default node is full node.
+* Based on the [sync mode](sync-modes.md) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default) or `--prune.mode=minimal` for a minimal node. The default node is full node.
 * `--chain=mainnet`, add the flag `--chain=sepolia` for Sepolia testnet or `--chain=holesky` for Holesky testnet.
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [wallet](web3-wallet.md).
 * To increase download speed add `--torrent.download.rate=512mb` (default is 16mb).
@@ -50,10 +50,10 @@ Additional flags can be added to [configure](configuring-erigon.md) the node wit
 
 ## Testnets
 
-If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one of the public [testnets](supported-networks.md#testnets), Holesky, adding the option `--chain=holesky` and using the default Consensus Layer, Caplin. You can also had the flag `--prune.mode=minimal` to have a node that is syncing fast while taking not so much disk space:
+If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one of the public [testnets](supported-networks.md#testnets), Hoodi, adding the option `--chain=hoodi` and using the default Consensus Layer, Caplin. You can also had the flag `--prune.mode=minimal` to have a node that is syncing fast while taking not so much disk space:
 
 ```bash
-./build/bin/erigon --chain=holesky --prune.mode=minimal
+./build/bin/erigon --chain=hoodi --prune.mode=minimal
 ```
 
 ## Help

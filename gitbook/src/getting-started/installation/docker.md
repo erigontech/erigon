@@ -4,67 +4,134 @@ description: How to run a Erigon node with Docker
 
 # Docker
 
-sing Docker allows starting Erigon packaged as a Docker image without installing the program directly on your system.
+Docker is like a portable container for software. It packages Erigon and everything it needs to run, so you don't have to install complicated dependencies on your computer.
+
+The Docker image works on **Intel/AMD computers** (linux/amd64) and **Apple Silicon Macs** (linux/arm64).
 
 ### General Info
 
-* The new Docker images feature seven binaries as are included in the released archive: `erigon`, `integration`, `diag`, `sentry`, `txpool`, `downloader`, `rpcdaemon`.
-* Multi-platform docker image available for linux/amd64/v2 and linux/arm64 platforms and based on alpine:3.20.2; no need to pull another docker image for another different platform.
-* All build flags are now passed to the release workflow, allowing users to view previously missed build information in our released binaries and Docker images. Additionally, this change is expected to result in better build optimization.
-* Docker images now contain the label “org.opencontainers.image.revision,” which refers to the commit ID from the Erigon project used to build the artifacts.
+* The Docker images feature several binaries, including: `erigon`, `downloader`, `evm`, `caplin`, `capcli`, `integration`, `rpcdaemon`, `sentry`, and `txpool`.
+* The multi-platform Docker image is available for `linux/amd64/v2` and `linux/arm64` platforms and is now based on Debian Bookworm. There's no need to pull a different image for another supported platform.
+* All build flags are now passed to the release workflow, allowing users to view previously missed build information in the released binaries and Docker images. This change is also expected to result in better build optimization.
+* Docker images now contain the label `org.opencontainers.image.revision`, which refers to the commit ID from the Erigon project used to build the artifacts.
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
 * Images are stored at [https://hub.docker.com/r/erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
 
-## Prerequisites
+{% hint style="info" %}
+&#x20;By default, the Docker image only includes the main `erigon` binary. Other tools like `downloader`, `rpcdaemon`, or `sentry` are available but need to be built separately if you want to use them as standalone services.&#x20;
+{% endhint %}
 
-Having Docker Engine installed, see instructions [here](https://docs.docker.com/engine/install/).
+### Prerequisites
 
-## Download and start Erigon in Docker
+{% tabs %}
+{% tab title="Linux / MacOS" %}
+* Docker Engine installed, see instructions [here](https://docs.docker.com/engine/install/).
+* About **1-2 TB of free disk space** (depending on which [network](../../fundamentals/supported-networks.md) and [Sync Mode](../../fundamentals/sync-modes.md) you're choosing)
+{% endtab %}
 
-Here are the steps to download and start Erigon in Docker:
+{% tab title="Windows" %}
+* **Docker Desktop** installed on your computer (download from [docker.com](https://docker.com/))
+* About **1-2 TB of free disk space** (depending on the chosen [Network](../../fundamentals/supported-networks.md) and [Sync Mode](../../fundamentals/sync-modes.md).
+{% endtab %}
+{% endtabs %}
 
-1. Download the latest version:
+### Download and start Erigon in Docker
 
-```bash
-docker pull erigontech/erigon:
+Here are the steps to download and start Erigon in Docker.&#x20;
+
+#### 1. Check which version you want to download
+
+Check in the GitHub [Release Notes](https://github.com/erigontech/erigon/releases) page which version you want to download (normally latest is the best choice).
+
+#### 2. Download Erigon container
+
+Download the chosen version replacing `<version_tag>` with the actual version:
+
+```sh
+docker pull erigontech/erigon:<version_tag>
 ```
 
-2. List the downloaded images to get the IMAGE ID:
+&#x20;For example:
 
-```bash
-docker images
+```sh
+docker pull erigontech/erigon:v3.2.1
 ```
 
-3. Check which Erigon version has been downloaded:
+#### 3. Start the Erigon container
+
+Start the Erigon container in your terminal:
+
+{% code overflow="wrap" %}
+```sh
+docker run -it erigontech/erigon:<version_tag> <flags>
+```
+{% endcode %}
+
+For example:
+
+{% code overflow="wrap" %}
+```sh
+docker run -v /erigon-data/n:/erigon-data -it erigontech/erigon:v3.2.1 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
+```
+{% endcode %}
+
+* `-v` connects a folder on your computer to the container
+* `-it` lets you see what's happening and interact with Erigon
+* `--chain=hoodi` specifies which Ethereum network (mainnet, holesky, etc.)
+* `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](../../fundamentals/sync-modes.md)
+* `--datadir` tells Erigon where to store data inside the container
+
+Additional flags can be added to [configure](../../fundamentals/configuring-erigon.md) Erigon with several options.
+
+{% hint style="success" %}
+Press `Ctrl+C` in the terminal to stop Erigon.
+{% endhint %}
+
+### Optional: Setup dedicated user <a href="#optional-setup-dedicated-user" id="optional-setup-dedicated-user"></a>
+
+#### Understanding File Permissions
+
+When Erigon runs inside a Docker container and creates files (like its data directory), those files need to be accessible to your local user account on your host machine.
+
+The potential issue is that Docker often creates these files with a default User ID (UID) of `1000`. If this doesn't match your host machine's UID, you may run into permission issues when trying to access, modify, or delete the data directory from your host machine.
+
+#### The Solution: Using Your Host UID
+
+To prevent these problems, you can run the Docker container using your local operating system's User ID (UID).
+
+Running the container with your host machine's UID ensures that any files created or modified by Erigon inside the container will be owned by that specific user ID on the host operating system. This synchronization of permissions makes managing the data directory much easier.
+
+If you are encountering permission issues, you can find your user ID using this command:
 
 ```bash
-docker run -it <image_id> --v
+id -u
 ```
 
-If you want to start Erigon add the options according to the [basic usage](../../fundamentals/basic-usage.md) page or the advanced customization page. For example:
+#### Example Run
 
-```bash
-docker run -it 36f25992dd1a --chain=holesky --prune.mode=minimal
+To use a specific UID, like `1205`, and mount a host data directory (`/erigon-data`) into the container, use the `--user` flag:
+
+```sh
+docker run \
+--user 1205 \
+-v /erigon-data:/container-erigon-data \
+-it erigontech/erigon:<version_tag> \
+--chain=hoodi \
+--prune.mode=minimal \
+--datadir /container-erigon-data
 ```
 
-To exit the container press `Ctrl+C`; the container will stop.
+In this example, the Erigon process inside the container will run as user `1205` and the contents of the host directory `/erigon-data` will be written and owned by user `1205` on your host OS.
 
-## Optional: Setup dedicated user
+{% hint style="warning" %}
+Support for `docker-compose` in Windows is not available.
+{% endhint %}
 
-User UID/GID need to be synchronized between the host OS and container so files are written with correct permission.
-
-You may wish to setup a dedicated user/group on the host OS, in which case the following `make` targets are available.
-
-```bash
-# create "erigon" user
-make user_linux
-# or
-make user_macos
-```
-
-### Environment Variables
+### Environment Variables <a href="#environment-variables" id="environment-variables"></a>
 
 There is a `.env.example` file in the root of the repo.
+
+Copy
 
 ```
 * DOCKER_UID - The UID of the docker user
@@ -78,17 +145,17 @@ If not specified, the UID/GID will use the current user.
 
 A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by helper targets `make user_linux` or `make user_macos`.
 
-### Check: Permissions
+#### Check: Permissions <a href="#check-permissions" id="check-permissions"></a>
 
 In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
 
 If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
-### Run
+#### Run <a href="#run" id="run"></a>
 
 Next command starts: `erigon` on port `30303`, `rpcdaemon` on port `8545`, `prometheus` on port `9090`, and `grafana` on port `3000`:
 
-```
+```bash
 #
 # Will mount ~/.local/share/erigon to /home/erigon/.local/share/erigon inside container
 #
@@ -125,5 +192,3 @@ sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${E
 `makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode). See: [https://github.com/ledgerwatch/erigon/pull/2392/files](https://github.com/ledgerwatch/erigon/pull/2392/files)
 
 If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
-
-Windows support for docker-compose is not ready yet.

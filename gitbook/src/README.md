@@ -23,4 +23,4 @@ Explore also our help, wiki and dedicated developer guide.
 * **Releases**: see [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases).
 * **Docker image releases**:
   * New Docker Image Repository: Erigon images are now available on Dockerhub repository [erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
-  * Multi-Platform Support: The docker image is built for linux/amd64/v2 and linux/arm64 platforms using Alpine.
+  * Multi-Platform Support: The docker image is built for linux/amd64/v2 and linux/arm64 platforms using Debian Bookworm.

@@ -1,6 +1,8 @@
-# Build executable binaries natively for Windows
+---
+description: Build Executable Binaries NAtively for Windows
+---
 
-Before proceeding, ensure that the [hardware](../hardware-requirements.md) and [software](../software-requirements.md) requirements are met.
+# Native compilation
 
 ## Installing Chocolatey
 
@@ -50,9 +52,15 @@ Then click on the "**New**" button and paste the following path:
 
 Open the Command Prompt and type the following:
 
-```bash
-git clone --branch release/3.2 --single-branch https://github.com/erigontech/erigon.git
-```
+{% include "../../.gitbook/includes/git-clone-https-github.co....md" %}
+
+Next, fetch all available release tags:
+
+{% include "../../.gitbook/includes/git-fetch-tags.md" %}
+
+Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
+
+{% include "../../.gitbook/includes/git-checkout-version.md" %}
 
 You might need to change the `ExecutionPolicy` to allow scripts created locally or signed by a trusted publisher to run. Open a Powershell session as Administrator and type:
 
@@ -122,7 +130,7 @@ You can use the same command to build other binaries such as `RPCDaemon`, `TxPoo
 To start Erigon place your command prompt in the `.\build\bin\` subfolder and use:
 
 ```powershell
-start erigon.exe.
+start erigon.exe
 ```
 
 or from any place use the full address of the executable:
@@ -131,4 +139,4 @@ or from any place use the full address of the executable:
 start C:\Users\username\AppData\Local\erigon.exe
 ```
 
-See [basic usage](../../fundamentals/basic-usage.md) documentation on available options and flags to customize your Erigon experience.
+See [basic usage](../../fundamentals/basic-usage.md) documentation on available options and flags to [customize](../../fundamentals/configuring-erigon.md) your Erigon experience.

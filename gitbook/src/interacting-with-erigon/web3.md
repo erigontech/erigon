@@ -1,3 +1,7 @@
+---
+description: Essential Utility Methods
+---
+
 # web3
 
 The `web3` namespace provides utility methods that are part of the standard Ethereum JSON-RPC API. These methods offer basic functionality for client identification and cryptographic operations. In Erigon, the web3 namespace is implemented through the `Web3API` interface and `Web3APIImpl` struct. The web3 namespace is enabled by default in Erigon's RPC daemon and provides essential utility functions that many Ethereum applications rely on for basic operations.
@@ -20,48 +24,8 @@ The `web3` namespace provides utility methods that are part of the standard Ethe
 * No special configuration is required to use these methods
 * They are available on both HTTP and WebSocket connections
 
-***
+## API documentation
 
-## **web3\_clientVersion**
+For the API documentation refer to official Ethereum documentation available at
 
-Returns the current client version string, including the node name and version information.
-
-**Parameters**
-
-None
-
-**Example**
-
-```bash
-curl -s --data '{"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
-```
-
-**Returns**
-
-| Type   | Description                                                       |
-| ------ | ----------------------------------------------------------------- |
-| STRING | The current client version string including node name and version |
-
-***
-
-## **web3\_sha3**
-
-Returns Keccak-256 (not the standardized SHA3-256) of the given data. This method is commonly used for hashing arbitrary data using the same algorithm that Ethereum uses internally.
-
-**Parameters**
-
-| Parameter | Type | Description                          |
-| --------- | ---- | ------------------------------------ |
-| data      | DATA | The data to convert into a SHA3 hash |
-
-**Example**
-
-```bash
-curl -s --data '{"jsonrpc":"2.0","method":"web3_sha3","params":["0x68656c6c6f20776f726c64"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
-```
-
-**Returns**
-
-| Type | Description                               |
-| ---- | ----------------------------------------- |
-| DATA | The SHA3 result of the given input string |
+[https://ethereum.org/developers/docs/apis/json-rpc/#web3\_clientversion](https://ethereum.org/developers/docs/apis/json-rpc/#web3_clientversion)

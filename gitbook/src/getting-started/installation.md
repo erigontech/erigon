@@ -1,21 +1,21 @@
+---
+description: Erigon Installation Options
+---
+
 # Installation
 
-In order to use Erigon, the software has to be installed first. There are several ways to install Erigon, depending on the operating system and the user's choice of installation method, e.g. using a pre-built image, container or building from source.
+To use Erigon, you must first install the software. You have several installation options, which typically depend on your operating system and your technical preference (e.g., using a pre-built image, a container, or compiling from source).
 
-{% hint style="info" %}
-Always check the [list of releases](https://github.com/erigontech/erigon/releases) for release notes.
-{% endhint %}
+#### Before You Begin
 
-***
+* Always check the list of releases for the latest [Release Notes](https://github.com/erigontech/erigon/releases).
 
-[Linux and MacOS](installation/linux-and-macos.md)
+#### Installation and Management Topics
 
-[Windows](installation/windows.md)
+You can find detailed instructions for the following methods:
 
-[Docker](installation/docker.md)
-
-[Upgrading from a previous version](installation/upgrading.md)
-
-***
-
-See here if you are [migrating from GETH](installation/migrating-from-geth.md).
+* [Linux and MacOS](installation/linux-and-macos.md)
+* [Windows](installation/windows.md)
+* [Docker](installation/docker.md)
+* [Upgrading from a previous version](installation/upgrading.md)
+* Migrating from another client like Geth (see [here](installation/migrating-from-geth.md) for specific instructions).
