@@ -26,11 +26,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type BlockBuilderFunc func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error)
+type BlockBuilderFunc func(param *core.BlockBuilderParameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining")
 type BlockBuilder struct {
-	interrupt int32
+	interrupt atomic.Bool
 	syncCond  *sync.Cond
 	result    *types.BlockWithReceipts
 	err       error
@@ -78,7 +78,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters,
 }
 
 func (b *BlockBuilder) Stop() (*types.BlockWithReceipts, error) {
-	atomic.StoreInt32(&b.interrupt, 1)
+	b.interrupt.Store(true)
 
 	b.syncCond.L.Lock()
 	defer b.syncCond.L.Unlock()

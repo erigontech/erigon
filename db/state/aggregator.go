@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
@@ -118,6 +119,11 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, stepsInFroz
 
 		produce: true,
 	}, nil
+}
+
+type HasAgg interface {
+	Agg() any
+	ForkableAgg(kv.ForkableId) any
 }
 
 // GetStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -1813,7 +1819,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.getLatest(domain, k, tx, nil, time.Time{})
 }
 
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, metrics, start)
 	}
@@ -1824,7 +1830,7 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metric
 	}
 	if ok {
 		if metrics != nil {
-			metrics.updateDbReads(domain, start)
+			metrics.UpdateDbReads(domain, start)
 		}
 		return v, step, true, nil
 	}
@@ -1834,7 +1840,7 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metric
 		return nil, kv.Step(0), false, err
 	}
 	if metrics != nil {
-		metrics.updateFileReads(domain, start)
+		metrics.UpdateFileReads(domain, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err

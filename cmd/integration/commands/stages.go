@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/builder"
@@ -80,6 +81,7 @@ import (
 	"github.com/erigontech/erigon/node/ethconsensusconfig"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
@@ -88,7 +90,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
-	"github.com/erigontech/erigon/turbo/shards"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -606,7 +607,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
-	domains, err := dbstate.NewSharedDomains(tx, logger)
+	domains, err := execctx.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
@@ -920,36 +921,31 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return nil
 	}
 
-	doms, err := dbstate.NewSharedDomains(tx, log.New())
-	if err != nil {
+	var sendersProgress, execProgress uint64
+	
+	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}
-
-	if unwind > 0 {
-		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		err := stagedsync.UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-
-	execProgress, err := stages.GetStageProgress(tx, stages.Execution)
-
-	if err != nil {
-		return err
-	}
-
 	if execProgress == 0 {
+		doms, err := execctx.NewSharedDomains(tx, log.New())
+		if err != nil {
+			panic(err)
+		}
 		execProgress = doms.BlockNum()
+		doms.Close()
+	}
+
+	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
+		return err
 	}
 
 	if block == 0 {
-		if sendersProgress, err := stages.GetStageProgress(tx, stages.Senders); err != nil {
-			return err
-		} else {
-			block = sendersProgress
-		}
+		block = sendersProgress
+	}
+
+	doms, err := execctx.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return err
 	}
 
 	if chainTipMode {

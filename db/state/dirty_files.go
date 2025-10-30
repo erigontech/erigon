@@ -777,3 +777,28 @@ func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint6
 	}
 	return
 }
+
+// closeWhatNotInList closes and removes from dirtyFiles all items whose decompressor file name
+// is not in the provided fNames list.
+func closeWhatNotInList(dirtyFiles *btree2.BTreeG[*FilesItem], fNames []string) {
+	protectFiles := make(map[string]struct{}, len(fNames))
+	for _, f := range fNames {
+		protectFiles[f] = struct{}{}
+	}
+	var toClose []*FilesItem
+	dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			if item.decompressor != nil {
+				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
+					continue
+				}
+			}
+			toClose = append(toClose, item)
+		}
+		return true
+	})
+	for _, item := range toClose {
+		item.closeFiles()
+		dirtyFiles.Delete(item)
+	}
+}

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -48,8 +49,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/node/silkworm"
 )
 
 const (
@@ -134,9 +135,16 @@ func StageExecuteBlocksCfg(
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func unwindExec3(u *UnwindState, s *StageState, doms *state.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
 
+	if doms == nil {
+		doms, err = execctx.NewSharedDomains(rwTx, logger)
+		if err != nil {
+			return err
+		}
+		defer doms.Close()
+	}
 	txNumsReader := br.TxnumReader(ctx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
@@ -185,7 +193,7 @@ var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 const trace bool = true
 
 func unwindExec3State(ctx context.Context,
-	sd *state.SharedDomains, tx kv.TemporalRwTx,
+	sd *execctx.SharedDomains, tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
@@ -297,7 +305,7 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 
 // ================ Erigon3 End ================
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *state.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
@@ -327,7 +335,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *state.SharedDomain
 	return nil
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, doms *state.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil

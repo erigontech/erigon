@@ -67,14 +67,8 @@ func NewCfgAbsSem() *CfgAbsSem {
 
 func getPushValue(code []byte, pc int, opsem0 *CfgOpSem) uint256.Int {
 	pushByteSize := opsem0.opNum
-	startMin := pc + 1
-	if startMin >= len(code) {
-		startMin = len(code)
-	}
-	endMin := startMin + pushByteSize
-	if startMin+pushByteSize >= len(code) {
-		endMin = len(code)
-	}
+	startMin := min(pc+1, len(code))
+	endMin := min(startMin+pushByteSize, len(code))
 	integer := new(uint256.Int)
 	integer.SetBytes(code[startMin:endMin])
 	return *integer

@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
@@ -58,7 +58,7 @@ type MiningExecCfg struct {
 	blockReader services.FullBlockReader
 	vmConfig    *vm.Config
 	tmpdir      string
-	interrupt   *int32
+	interrupt   *atomic.Bool
 	payloadId   uint64
 	txnProvider txnprovider.TxnProvider
 }
@@ -71,7 +71,7 @@ func StageMiningExecCfg(
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	tmpdir string,
-	interrupt *int32,
+	interrupt *atomic.Bool,
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
@@ -94,7 +94,7 @@ func StageMiningExecCfg(
 // SpawnMiningExecStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *dbstate.SharedDomains, tx kv.TemporalRwTx, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, logger log.Logger, u Unwinder) (err error) {
+func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, logger log.Logger, u Unwinder) (err error) {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
@@ -121,7 +121,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *dbstate.Shared
 
 	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
 	defer mb.Close()
-	simSd, err := dbstate.NewSharedDomains(mb, logger)
+	simSd, err := execctx.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *dbstate.Shared
 
 			// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
 			if len(txns) < amount {
-				if interrupt != nil && atomic.LoadInt32(interrupt) == 0 {
+				if interrupt != nil && !interrupt.Load() {
 					// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 					// since there may be new txns that can arrive
 					time.Sleep(50 * time.Millisecond)
@@ -439,7 +439,7 @@ func addTransactionsToMiningBlock(
 	txns types.Transactions,
 	coinbase common.Address,
 	ibs *state.IntraBlockState,
-	interrupt *int32,
+	interrupt *atomic.Bool,
 	payloadId uint64,
 	logger log.Logger,
 ) (types.Logs, bool, error) {
@@ -524,7 +524,7 @@ LOOP:
 			return nil, true, err
 		}
 
-		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil {
+		if interrupt != nil && interrupt.Load() && stopped == nil {
 			logger.Debug("Transaction adding was requested to stop", "payload", payloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
