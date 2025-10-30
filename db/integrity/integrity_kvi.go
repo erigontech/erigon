@@ -122,7 +122,8 @@ func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, 
 		select {
 		case <-logTicker.C:
 			rate := float64(keyCount) / time.Since(start).Seconds()
-			logger.Info("checking kvi progress", "key", keyCount, "keys", kvi.KeyCount(), "k/s", rate, "kvi", kviFileName)
+			eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
+			logger.Info("checking kvi progress", "key", keyCount, "keys", kvi.KeyCount(), "k/s", rate, "eta", eta, "kvi", kviFileName)
 		default: // proceed
 		}
 		if atValue {
