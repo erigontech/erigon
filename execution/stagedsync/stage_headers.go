@@ -179,16 +179,12 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
 
-	if useExternalTx {
-		log.Warn("Using external tx for Arbitrum headers stage, closing")
-		tx.Commit()
-	}
-
-	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, client, receiptClient, firstBlock, latestBlock.Uint64(), false, true, false)
+	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestBlock.Uint64(), false, true, false)
 	if err != nil {
 		return fmt.Errorf("error fetching and committing blocks from rpc: %w", err)
 	}
-	err = cfg.db.Update(ctx, func(tx kv.RwTx) error {
+
+	finaliseState := func(tx kv.RwTx) error {
 		err = cfg.hd.ReadProgressFromDb(tx)
 		if err != nil {
 			return fmt.Errorf("error reading header progress from db: %w", err)
@@ -210,7 +206,15 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return fmt.Errorf("failed to make bodies canonical %d: %w", firstBlock, err)
 		}
 		return nil
-	})
+
+	}
+
+	if useExternalTx {
+		err = finaliseState(tx)
+	} else {
+		err = cfg.db.Update(ctx, func(tx kv.RwTx) error { return finaliseState(tx) })
+	}
+
 	if err != nil {
 		return fmt.Errorf("error updating DB after insertion: %w", err)
 	}

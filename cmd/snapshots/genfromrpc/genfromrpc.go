@@ -730,7 +730,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	_, err = GetAndCommitBlocks(context.Background(), db, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite)
+	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite)
 	return err
 }
 
@@ -739,7 +739,7 @@ var (
 	prevReceiptTime = new(atomic.Uint64)
 )
 
-func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool) (lastBlockNum uint64, err error) {
+func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool) (lastBlockNum uint64, err error) {
 	var (
 		batchSize     = uint64(20)
 		logInterval   = time.Second * 40
@@ -781,52 +781,56 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *
 		if dryRun {
 			continue
 		}
-		if err = commitUpdate(ctx, db, blocks); err != nil {
+
+		if rwTx != nil {
+			err = commitUpdate(rwTx, blocks)
+		} else {
+			err = db.Update(ctx, func(tx kv.RwTx) error { return commitUpdate(tx, blocks) })
+		}
+		if err != nil {
 			return 0, err
 		}
 	}
 	return lastBlockNum, nil
 }
 
-func commitUpdate(ctx context.Context, db kv.RwDB, blocks []*types.Block) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		var blk *types.Block
-		var blockNum uint64
-		for _, blk = range blocks {
-			blockNum = blk.NumberU64()
+func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
+	var blk *types.Block
+	var blockNum uint64
+	for _, blk = range blocks {
+		blockNum = blk.NumberU64()
 
-			if err := rawdb.WriteBlock(tx, blk); err != nil {
-				return fmt.Errorf("error writing block %d: %w", blockNum, err)
-			}
-			if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-				return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
-			}
-			if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-				return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+		if err := rawdb.WriteBlock(tx, blk); err != nil {
+			return fmt.Errorf("error writing block %d: %w", blockNum, err)
+		}
+		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+		}
+		if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+		}
+	}
+
+	if len(blocks) > 0 {
+		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+			return err
+		}
+		rawdb.WriteHeadBlockHash(tx, blk.Hash())
+
+		syncStages := []stages.SyncStage{
+			stages.Snapshots,
+			stages.Headers,
+			stages.BlockHashes,
+			stages.Bodies,
+			stages.Senders,
+		}
+		for _, stage := range syncStages {
+			if err := stages.SaveStageProgress(tx, stage, blockNum); err != nil {
+				return fmt.Errorf("failed to save stage progress for stage %q at block %d: %w", stage, blockNum, err)
 			}
 		}
-
-		if len(blocks) > 0 {
-			if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
-				return err
-			}
-			rawdb.WriteHeadBlockHash(tx, blk.Hash())
-
-			syncStages := []stages.SyncStage{
-				stages.Snapshots,
-				stages.Headers,
-				stages.BlockHashes,
-				stages.Bodies,
-				stages.Senders,
-			}
-			for _, stage := range syncStages {
-				if err := stages.SaveStageProgress(tx, stage, blockNum); err != nil {
-					return fmt.Errorf("failed to save stage progress for stage %q at block %d: %w", stage, blockNum, err)
-				}
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
