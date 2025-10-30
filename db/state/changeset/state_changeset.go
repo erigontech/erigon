@@ -319,19 +319,24 @@ type DomainIOMetrics struct {
 	CacheGetCount     int64
 	CachePutCount     int64
 	CacheGetSize      int
+	CacheGetKeySize   int
+	CacheGetValueSize int
 	CachePutSize      int
+	CachePutKeySize   int
+	CachePutValueSize int
 	DbReadCount       int64
 	DbReadDuration    time.Duration
 	FileReadCount     int64
 	FileReadDuration  time.Duration
 }
+
 type DomainMetrics struct {
 	sync.RWMutex
 	DomainIOMetrics
 	Domains map[kv.Domain]*DomainIOMetrics
 }
 
-func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
+func (dm *DomainMetrics) updateCacheReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
 	dm.CacheReadCount++
@@ -348,7 +353,7 @@ func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
 	}
 }
 
-func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
+func (dm *DomainMetrics) updateDbReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
 	dm.DbReadCount++
@@ -365,7 +370,7 @@ func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
 	}
 }
 
-func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
+func (dm *DomainMetrics) updateFileReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
 	dm.FileReadCount++
