@@ -1,3 +1,7 @@
+---
+description: Running Multiple Erigon Instances on a Single Machine
+---
+
 # Multiple instances / One machine
 
 Erigon supports running multiple instances on the same machine by configuring distinct ports and data directories for each instance. Multiple instances are fully supported but require careful configuration to avoid port conflicts and resource contention. The modular architecture allows for flexible deployment patterns, from fully integrated instances to distributed service architectures. The primary consideration is the performance impact from shared disk access, especially during initial synchronization phases.
@@ -6,12 +10,12 @@ Erigon supports running multiple instances on the same machine by configuring di
 
 To avoid conflicts between instances, you must define **6 essential flags** for each instance:
 
-- `--datadir` - Separate data directory for each instance
-- `--port` - P2P networking port (default: `30303`)
-- `--http.port` - HTTP JSON-RPC port (default: `8545`)
-- `--authrpc.port` - Engine API port (default: `8551`)
-- `--torrent.port` - BitTorrent protocol port (default: `42069`)
-- `--private.api.addr` - Internal gRPC API address (default: `127.0.0.1:9090`)
+* `--datadir` - Separate data directory for each instance
+* `--port` - P2P networking port (default: `30303`)
+* `--http.port` - HTTP JSON-RPC port (default: `8545`)
+* `--authrpc.port` - Engine API port (default: `8551`)
+* `--torrent.port` - BitTorrent protocol port (default: `42069`)
+* `--private.api.addr` - Internal gRPC API address (default: `127.0.0.1:9090`)
 
 ## Example Configuration
 
@@ -48,22 +52,24 @@ Here's how to run mainnet and sepolia instances simultaneously:
 For containerized deployments, the docker-compose configuration shows how services can be orchestrated with proper port isolation:
 
 The compose file demonstrates the port allocation strategy:
-- **9090-9094**: Internal gRPC services (execution, sentry, consensus, downloader, txpool)
-- **8545, 8551**: External HTTP APIs
-- **30303, 42069**: P2P networking ports
+
+* **9090-9094**: Internal gRPC services (execution, sentry, consensus, downloader, txpool)
+* **8545, 8551**: External HTTP APIs
+* **30303, 42069**: P2P networking ports
 
 ## Best Practices
 
 ### 1. Resource Management
 
-**Memory Considerations:**
-Erigon uses memory-mapped files (MDBX) where the OS manages page cache. Multiple instances will share the same page cache efficiently, but be aware that:
+**Memory Considerations:** Erigon uses memory-mapped files (MDBX) where the OS manages page cache. Multiple instances will share the same page cache efficiently, but be aware that:
 
-- Each instance uses ~4GB RAM during genesis sync and ~1GB during normal operation
-- OS page cache can utilize unlimited memory and is shared between instances
-- Memory usage shown by `htop` includes OS page cache and may appear inflated
+* Each instance uses \~4GB RAM during genesis sync and \~1GB during normal operation
+* OS page cache can utilize unlimited memory and is shared between instances
+* Memory usage shown by `htop` includes OS page cache and may appear inflated
 
-> ⚠️ **Disk Performance Warning:** Multiple instances accessing the same disk concurrently will impact performance due to increased random disk access. This is particularly problematic during the "Blocks Execution stage" which performs many random reads. **Avoid running multiple genesis syncs on the same disk.**
+{% hint style="warning" %}
+⚠️ **Disk Performance Warning:** Multiple instances accessing the same disk concurrently will impact performance due to increased random disk access. This is particularly problematic during the "Blocks Execution stage" which performs many random reads. **Avoid running multiple genesis syncs on the same disk.**
+{% endhint %}
 
 ### 2. Database Configuration
 
@@ -79,22 +85,23 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 
 **Default Port Allocation:**
 
-| Component | Default Port | Protocol | Purpose |
-|-----------|--------------|----------|---------|
-| Engine | 9090 | TCP | gRPC Server (Private) |
-| Engine | 42069 | TCP/UDP | BitTorrent (Public) |
-| Engine | 8551 | TCP | Engine API (Private) |
-| Sentry | 30303/30304 | TCP/UDP | P2P Peering (Public) |
-| RPCDaemon | 8545 | TCP | HTTP/WebSocket (Private) |
+| Component | Default Port | Protocol | Purpose                  |
+| --------- | ------------ | -------- | ------------------------ |
+| Engine    | 9090         | TCP      | gRPC Server (Private)    |
+| Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
+| Engine    | 8551         | TCP      | Engine API (Private)     |
+| Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
+| RPCDaemon | 8545         | TCP      | HTTP/WebSocket (Private) |
 
 ### 4. Service Separation
 
 Erigon supports modular deployment where components can run as separate processes:
 
 For multiple instances, you can:
-- Run each instance with integrated services (default)
-- Separate heavy components like `downloader` or `rpcdaemon` to dedicated processes
-- Use the `--private.api.addr` flag for inter-service communication
+
+* Run each instance with integrated services (default)
+* Separate heavy components like `downloader` or `rpcdaemon` to dedicated processes
+* Use the `--private.api.addr` flag for inter-service communication
 
 ### 5. Monitoring and Logging
 
@@ -127,7 +134,7 @@ export ERIGON_SNAPSHOT_MADV_RND=false
 
 ### Memory Locking for Performance
 
-For production setups with sufficient RAM, you can lock critical data in memory: 
+For production setups with sufficient RAM, you can lock critical data in memory:
 
 ```bash
 # Lock domain snapshots in RAM
@@ -140,24 +147,28 @@ vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
 ```
 
-If it is failing with "can't allocate memory", try: 
+If it is failing with "can't allocate memory", try:
 
 ```
 sync && sudo sysctl vm.drop_caches=3
 echo 1 > /proc/sys/vm/compact_memory
 ```
 
-> **Warning:**: Running multiple instances of Erigon on the same machine will cause concurrent disk access, which can negatively impact performance. One of Erigon's main optimizations is to reduce disk random access, but the "Blocks Execution stage" still performs many random reads, making it the slowest stage. Therefore, **we do not recommend running multiple genesis syncs on the same disk**. However, if the genesis sync has already been completed, it is acceptable to run multiple Erigon instances on the same disk.
+
+
+{% hint style="warning" %}
+⚠️**Warning**: Running multiple instances of Erigon on the same machine will cause concurrent disk access, which can negatively impact performance. One of Erigon's main optimizations is to reduce disk random access, but the "Blocks Execution stage" still performs many random reads, making it the slowest stage. Therefore, **we do not recommend running multiple genesis syncs on the same disk**. However, if the genesis sync has already been completed, it is acceptable to run multiple Erigon instances on the same disk.
+{% endhint %}
 
 What can be done:
 
-- reduce disk latency (not throughput, not iops)
-    - use latency-critical cloud-drives
-    - or attached-NVMe (at least for initial sync)
-- increase RAM
-- if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
-- Use `--db.pagesize=64kb` (less fragmentation, more IO)
-- Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
+* reduce disk latency (not throughput, not iops)
+  * use latency-critical cloud-drives
+  * or attached-NVMe (at least for initial sync)
+* increase RAM
+* if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
+* Use `--db.pagesize=64kb` (less fragmentation, more IO)
+* Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ```yaml
 # Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool

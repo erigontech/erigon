@@ -14,6 +14,6 @@ Erigon is by default an "all-in-one" binary solution, but it's possible start an
 
 This may be for security, scalability, decentralisation, resource limitation, custom implementation, or any other reason you/your team deems appropriate. See the appropriate section to understand how to start each service separately.
 
-{% hint style="warning" %}
-**Warning**: Don't start services as separated processes unless you have clear reason for it.
+{% hint style="success" %}
+Don't start services as separated processes unless you have clear reason for it.
 {% endhint %}

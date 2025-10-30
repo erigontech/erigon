@@ -75,7 +75,7 @@ To compile Erigon there are two alternative methods:
 1. [Compiling from the wmake.ps1 file in the File Explorer](windows-build-executables.md#1-compiling-from-the-wmakeps1-file-in-the-file-explorer)
 2. [Using the PowerShell CLI](windows-build-executables.md#2-using-the-powershell-cli)
 
-### 1. Compiling from the wmake.ps1 file in the File Explorer
+### 1. Compiling from the `wmake.ps1` file in the File Explorer
 
 This is the fastest way which normally works for everyone. Open the File Explorer and go to the Erigon folder, then right click the `wmake` file and choose "**Run with PowerShell**".
 
@@ -140,3 +140,7 @@ start C:\Users\username\AppData\Local\erigon.exe
 ```
 
 See [basic usage](../../fundamentals/basic-usage.md) documentation on available options and flags to [customize](../../fundamentals/configuring-erigon.md) your Erigon experience.
+
+{% content-ref url="../../fundamentals/basic-usage.md" %}
+[basic-usage.md](../../fundamentals/basic-usage.md)
+{% endcontent-ref %}

@@ -1,3 +1,7 @@
+---
+description: 'Erigon RPC debug Namespace: Deep Diagnostics and State Introspection'
+---
+
 # debug
 
 The `debug` namespace provides debugging and diagnostic methods for Erigon node operators and developers. These methods offer deep introspection into blockchain state, transaction execution, and node performance. The debug namespace is implemented through the `PrivateDebugAPI` interface and `DebugAPIImpl` struct.

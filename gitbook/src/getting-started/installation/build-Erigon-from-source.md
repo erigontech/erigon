@@ -49,3 +49,18 @@ make -j<n> erigon
 {% endstepper %}
 
 The resulting executable binary will be created in the `./build/bin/erigon` path.
+
+#### Running Erigon
+
+After installation, you can run Erigon from your terminal:
+
+```bash
+erigon [options]
+```
+
+See Basic Usage for more info.
+
+{% content-ref url="../../fundamentals/basic-usage.md" %}
+[basic-usage.md](../../fundamentals/basic-usage.md)
+{% endcontent-ref %}
+

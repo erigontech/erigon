@@ -46,7 +46,11 @@ The default Consensus Layer utilized is [Caplin](caplin.md), the Erigon flagship
 
 To stop the Erigon node you can use the `CTRL+C` command.
 
-Additional flags can be added to [configure](configuring-erigon.md) the node with several options.
+_Additional flags can be added to configure the node with several options._
+
+{% content-ref url="configuring-erigon.md" %}
+[configuring-erigon.md](configuring-erigon.md)
+{% endcontent-ref %}
 
 ## Testnets
 

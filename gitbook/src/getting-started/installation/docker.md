@@ -39,11 +39,15 @@ The Docker image works on **Intel/AMD computers** (linux/amd64) and **Apple Sili
 
 Here are the steps to download and start Erigon in Docker.&#x20;
 
-#### 1. Check which version you want to download
+{% stepper %}
+{% step %}
+### Check which version you want to download
 
 Check in the GitHub [Release Notes](https://github.com/erigontech/erigon/releases) page which version you want to download (normally latest is the best choice).
+{% endstep %}
 
-#### 2. Download Erigon container
+{% step %}
+### Download Erigon container
 
 Download the chosen version replacing `<version_tag>` with the actual version:
 
@@ -56,8 +60,12 @@ docker pull erigontech/erigon:<version_tag>
 ```sh
 docker pull erigontech/erigon:v3.2.1
 ```
+{% endstep %}
 
-#### 3. Start the Erigon container
+{% step %}
+### Start the Erigon container
+
+
 
 Start the Erigon container in your terminal:
 
@@ -80,8 +88,14 @@ docker run -v /erigon-data/n:/erigon-data -it erigontech/erigon:v3.2.1 --chain=h
 * `--chain=hoodi` specifies which Ethereum network (mainnet, holesky, etc.)
 * `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](../../fundamentals/sync-modes.md)
 * `--datadir` tells Erigon where to store data inside the container
+{% endstep %}
+{% endstepper %}
 
-Additional flags can be added to [configure](../../fundamentals/configuring-erigon.md) Erigon with several options.
+Additional flags can be added to configure Erigon with several options.
+
+{% content-ref url="../../fundamentals/configuring-erigon.md" %}
+[configuring-erigon.md](../../fundamentals/configuring-erigon.md)
+{% endcontent-ref %}
 
 {% hint style="success" %}
 Press `Ctrl+C` in the terminal to stop Erigon.

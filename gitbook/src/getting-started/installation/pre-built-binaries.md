@@ -48,7 +48,7 @@ Next, use the appropriate command for your operating system and the name of your
 | **Operating System** | **Command to Generate Checksum**       |
 | -------------------- | -------------------------------------- |
 | Linux                | `sha256sum <DOWNLOADED_FILE_NAME>`     |
-| MacOS                | `shasum -a 256 <DOWNLOADED_FILE_NAME>` |
+| macOS                | `shasum -a 256 <DOWNLOADED_FILE_NAME>` |
 
 Example (Linux with a `tar.gz` file):
 
@@ -134,5 +134,11 @@ macOS binaries are provided as compressed archives (`.tar.gz`).
 After installation, you can run Erigon from your terminal:
 
 ```bash
-erigon --chain=mainnet [options]
+erigon [options]
 ```
+
+See Basic Usage for more info.
+
+{% content-ref url="../../fundamentals/basic-usage.md" %}
+[basic-usage.md](../../fundamentals/basic-usage.md)
+{% endcontent-ref %}
