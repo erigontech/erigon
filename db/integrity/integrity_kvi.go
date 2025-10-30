@@ -45,19 +45,7 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 	start := time.Now()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(domain)
-	var kvCompression seg.FileCompression
-	switch domain {
-	case kv.CommitmentDomain:
-		kvCompression = statecfg.Schema.CommitmentDomain.Compression
-	case kv.StorageDomain:
-		kvCompression = statecfg.Schema.StorageDomain.Compression
-	case kv.AccountsDomain:
-		kvCompression = statecfg.Schema.AccountsDomain.Compression
-	case kv.CodeDomain:
-		kvCompression = statecfg.Schema.CodeDomain.Compression
-	default:
-		panic(fmt.Sprintf("add compression for domain to CheckKvis: %s", domain))
-	}
+	kvCompression := statecfg.Schema.GetDomainCfg(domain).Compression
 	var eg *errgroup.Group
 	if failFast {
 		// if 1 goroutine fails, fail others
@@ -135,7 +123,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 			return 0, err
 		}
 		logger.Warn(err.Error())
-		integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
+		integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 	}
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
@@ -170,7 +158,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 				return 0, err
 			}
 			logger.Warn(err.Error())
-			integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
+			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			continue
 		}
 		if kviOffset != keyOffset {
@@ -179,7 +167,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 				return 0, err
 			}
 			logger.Warn(err.Error())
-			integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
+			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 		}
 	}
 	duration := time.Since(start)

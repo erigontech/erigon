@@ -933,12 +933,16 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
+		case integrity.CommitmentRoot:
+			if err := integrity.CheckCommitmentRoot(ctx, db, failFast, logger); err != nil {
+				return err
+			}
 		case integrity.CommitmentKvi:
 			if err := integrity.CheckCommitmentKvi(ctx, db, failFast, logger); err != nil {
 				return err
 			}
-		case integrity.CommitmentRoot:
-			if err := integrity.CheckCommitmentRoot(ctx, db, failFast, logger); err != nil {
+		case integrity.CommitmentKvDeref:
+			if err := integrity.CheckCommitmentKvDeref(ctx, db, failFast, logger); err != nil {
 				return err
 			}
 		default:
