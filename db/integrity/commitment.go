@@ -3,6 +3,7 @@ package integrity
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -37,14 +38,15 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool,
 	}
 	var integrityErr error
 	for _, file := range files {
+		fileName := filepath.Base(file.Fullpath())
 		endTxNum := file.EndRootNum()
-		logger.Trace("checking commitment root in", "file", file.Fullpath(), "endTxNum", endTxNum)
+		logger.Info("checking commitment root in", "file", fileName, "endTxNum", endTxNum)
 		v, ok, _, _, err := aggTx.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, endTxNum)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			err = fmt.Errorf("commitment root not found in %s with endTxNum %d", file.Fullpath(), endTxNum)
+			err = fmt.Errorf("commitment root not found in %s with endTxNum %d", fileName, endTxNum)
 			if failFast {
 				return err
 			}
@@ -54,7 +56,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool,
 		}
 		rootHash, err := commitment.HexTrieExtractStateRoot(v)
 		if err != nil {
-			err = fmt.Errorf("commitment root in %s with endTxNum %d could not be extracted: %w", file.Fullpath(), endTxNum, err)
+			err = fmt.Errorf("commitment root in %s with endTxNum %d could not be extracted: %w", fileName, endTxNum, err)
 			if failFast {
 				return err
 			}
@@ -63,7 +65,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool,
 			continue
 		}
 		if common.BytesToHash(rootHash) == (common.Hash{}) {
-			err = fmt.Errorf("commitment root in %s with endTxNum %d is empty", file.Fullpath(), endTxNum)
+			err = fmt.Errorf("commitment root in %s with endTxNum %d is empty", fileName, endTxNum)
 			if failFast {
 				return err
 			}
