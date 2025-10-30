@@ -38,7 +38,7 @@ type PeerDas interface {
 	IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool
 	IsArchivedMode() bool
 	StateReader() peerdasstate.PeerDasStateReader
-	ScheduleSyncColumnData(blockRoot common.Hash, block *cltypes.SignedBlindedBeaconBlock) error
+	SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error
 }
 
 var (
@@ -57,9 +57,9 @@ type peerdas struct {
 	ethClock          eth_clock.EthereumClock
 	recoverBlobsQueue chan recoverBlobsRequest
 
-	recoveringMutex sync.Mutex
-	isRecovering    map[common.Hash]bool
-	blocksToSync    sync.Map
+	recoveringMutex   sync.Mutex
+	isRecovering      map[common.Hash]bool
+	blocksToCheckSync sync.Map // blockRoot -> blindedBlock
 }
 
 func NewPeerDas(
@@ -87,9 +87,9 @@ func NewPeerDas(
 		ethClock:          ethClock,
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
 
-		recoveringMutex: sync.Mutex{},
-		isRecovering:    make(map[common.Hash]bool),
-		blocksToSync:    sync.Map{},
+		recoveringMutex:   sync.Mutex{},
+		isRecovering:      make(map[common.Hash]bool),
+		blocksToCheckSync: sync.Map{},
 	}
 	p.resubscribeGossip()
 	for range numOfBlobRecoveryWorkers {
@@ -853,14 +853,22 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 	return payload
 }
 
-func (d *peerdas) ScheduleSyncColumnData(blockRoot common.Hash, block *cltypes.SignedBlindedBeaconBlock) error {
+func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	if block.Version() < clparams.FuluVersion {
 		return nil
 	}
 	if block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
 		return nil
 	}
-	d.blocksToSync.Store(blockRoot, block)
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	blindedBlock, err := block.Blinded()
+	if err != nil {
+		return err
+	}
+	d.blocksToCheckSync.Store(blockRoot, blindedBlock)
 	return nil
 }
 
@@ -885,15 +893,20 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 
 			blocks := []*cltypes.SignedBlindedBeaconBlock{}
 			roots := []common.Hash{}
-			d.blocksToSync.Range(func(key, value any) bool {
+			d.blocksToCheckSync.Range(func(key, value any) bool {
 				root := key.(common.Hash)
 				block := value.(*cltypes.SignedBlindedBeaconBlock)
+				curSlot := d.ethClock.GetCurrentSlot()
+				if curSlot-block.Block.Slot < 5 { // wait slow data from peers
+					// skip blocks that are too close to the current slot
+					return true
+				}
 				available, err := d.IsDataAvailable(block.Block.Slot, root)
 				if err != nil {
 					log.Warn("failed to check if data is available", "err", err)
 				} else if available {
-					log.Debug("[syncColumnDataWorker] column data is available, removing from sync queue", "slot", block.Block.Slot, "blockRoot", root)
-					d.blocksToSync.Delete(root)
+					log.Debug("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.Block.Slot, "blockRoot", root)
+					d.blocksToCheckSync.Delete(root)
 				} else {
 					blocks = append(blocks, block)
 					roots = append(roots, root)
@@ -915,7 +928,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				}
 			}
 			for i, root := range roots {
-				d.blocksToSync.Delete(root)
+				d.blocksToCheckSync.Delete(root)
 				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].Block.Slot, "blockRoot", root)
 			}
 		}
