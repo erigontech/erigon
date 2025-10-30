@@ -28,7 +28,7 @@ jobs:
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     timeout-minutes: 300 # 5 hours
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.3/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-main/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 1800 # 0.5 hours
