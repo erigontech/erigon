@@ -460,6 +460,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 
 	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	cfg.GasLimit = gas
+	cfg.Origin = accounts.ZeroAddress
 	//if len(tracerCode) > 0 {
 	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
 	//	if err != nil {
