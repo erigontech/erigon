@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
@@ -53,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/event"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -727,7 +727,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	if err != nil {
 		return nil, err
 	}
-	from.SetBalance(*uint256.NewInt(0).SetAllOne(), true, tracing.BalanceChangeUnspecified)
+	from.SetBalance(*(&uint256.Int{}).SetAllOne(), true, tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 
@@ -842,6 +842,7 @@ type callMsg struct {
 func (m callMsg) From() common.Address                  { return m.CallMsg.From }
 func (m callMsg) Nonce() uint64                         { return 0 }
 func (m callMsg) CheckNonce() bool                      { return false }
+func (m callMsg) CheckTransaction() bool                { return false }
 func (m callMsg) To() *common.Address                   { return m.CallMsg.To }
 func (m callMsg) GasPrice() *uint256.Int                { return m.CallMsg.GasPrice }
 func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCap }

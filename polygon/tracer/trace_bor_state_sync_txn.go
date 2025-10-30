@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 func TraceBorStateSyncTxnDebugAPI(
@@ -142,6 +142,6 @@ func initStateSyncTxContext(blockNum uint64, blockHash common.Hash) evmtypes.TxC
 	return evmtypes.TxContext{
 		TxHash:   bortypes.ComputeBorTxHash(blockNum, blockHash),
 		Origin:   common.Address{},
-		GasPrice: uint256.NewInt(0),
+		GasPrice: uint256.Int{},
 	}
 }

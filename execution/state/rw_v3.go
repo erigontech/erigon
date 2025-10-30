@@ -29,22 +29,22 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 type StateV3 struct {
-	domains *dbstate.SharedDomains
+	domains *execctx.SharedDomains
 	logger  log.Logger
 	syncCfg ethconfig.Sync
 	trace   bool
 }
 
-func NewStateV3(domains *dbstate.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
+func NewStateV3(domains *execctx.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains: domains,
 		logger:  logger,
@@ -143,7 +143,6 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 	var acc accounts.Account
 	emptyRemoval := rules.IsSpuriousDragon
 	for addr, increase := range balanceIncreases {
-		increase := increase
 		addrBytes := addr.Bytes()
 		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, roTx, addrBytes)
 		if err != nil {
@@ -170,7 +169,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 	return nil
 }
 
-func (rs *StateV3) Domains() *dbstate.SharedDomains {
+func (rs *StateV3) Domains() *execctx.SharedDomains {
 	return rs.domains
 }
 
@@ -371,7 +370,7 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	return bufferedState
 }
 
-func (s *StateV3Buffered) WithDomains(domains *dbstate.SharedDomains) *StateV3Buffered {
+func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Buffered {
 	return &StateV3Buffered{
 		StateV3:       NewStateV3(domains, s.syncCfg, s.logger),
 		accounts:      s.accounts,
@@ -971,7 +970,7 @@ func (r *bufferedReader) DiscardReadList() {
 	r.reader.DiscardReadList()
 }
 
-type ReadLists map[string]*dbstate.KvList
+type ReadLists map[string]*execctx.KvList
 
 func (v ReadLists) Return() {
 	returnReadList(v)

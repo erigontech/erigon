@@ -97,7 +97,6 @@ func TestSideChainInsert(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		for i, h := range tc.chain {
 			data, _ := rlp.EncodeToBytes(h)
 			if _, err = hi.FeedHeaderPoW(tx, br, h, data, h.Hash(), uint64(i+1)); err != nil {

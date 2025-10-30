@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -100,6 +101,22 @@ func NewAttestationService(
 	return a
 }
 
+func (s *attestationService) IsMyGossipMessage(name string) bool {
+	return gossip.IsTopicBeaconAttestation(name)
+}
+
+func (s *attestationService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*AttestationForGossip, error) {
+	obj := &AttestationForGossip{
+		Receiver:         copyOfPeerData(data),
+		ImmediateProcess: false,
+	}
+	obj.SingleAttestation = &solid.SingleAttestation{}
+	if err := obj.SingleAttestation.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationForGossip) error {
 	var (
 		root           common.Hash
@@ -156,7 +173,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
 	currentSlot := s.ethClock.GetCurrentSlot()
 	if currentSlot < slot || currentSlot > slot+s.netCfg.AttestationPropagationSlotRange {
-		return fmt.Errorf("not in propagation range %w", ErrIgnore)
+		return fmt.Errorf("not in propagation range")
 	}
 	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
 	if targetEpoch != slot/s.beaconCfg.SlotsPerEpoch {

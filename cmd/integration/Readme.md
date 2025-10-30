@@ -154,7 +154,7 @@ erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
 ## See tables size
 
 ```sh
-./build/bin/mdbx_stat -efa /erigon-data/chaindata/   | awk '
+./build/bin/mdbx_stat -efa  ~/data/chiado33_full/chaindata | awk '
     BEGIN { pagesize = 4096 }
     /^  Pagesize:/ { pagesize = $2 }
     /^Status of/ { table = $3 }
@@ -162,9 +162,15 @@ erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
     /Leaf pages:/ { leaf = $3 }
     /Overflow pages:/ { overflow = $3 }
     /Entries:/ {
-      total_pages = branch + leaf + overflow
-      size_gb = (total_pages * pagesize) / (1024^3)
-      printf "%-30s %.3fG\n", table, size_gb
+      table_pages = branch + leaf + overflow
+      size_gb = (table_pages * pagesize) / (1024^3)
+      printf "%-30s %.2fG\n", table, size_gb
     }
-  ' | grep -v '0.000G'
+    /Reclaimable:/ {
+      table = "Reclaimable" 
+      table_pages = $2
+      size_gb = (table_pages * pagesize) / (1024^3)
+      printf "%-30s %.2fG\n", table, size_gb
+    }
+  ' | grep -v '0.0'
 ```
