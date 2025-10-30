@@ -868,7 +868,7 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	if err != nil {
 		return err
 	}
-	d.blocksToCheckSync.Store(blockRoot, blindedBlock)
+	d.blocksToCheckSync.Store(common.Hash(blockRoot), blindedBlock)
 	return nil
 }
 
