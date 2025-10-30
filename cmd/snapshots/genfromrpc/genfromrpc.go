@@ -749,7 +749,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 
 	defer logEvery.Stop()
 
-	receiptClient.SetRequestLimit(rate.Limit(5), 1)
+	receiptClient.SetRequestLimit(rate.Limit(20), 2)
 	client.SetRequestLimit(rate.Limit(5000), 5)
 
 	for prev := startBlockNum; prev < endBlockNum; {
