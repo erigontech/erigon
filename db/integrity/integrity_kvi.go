@@ -20,7 +20,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -35,6 +37,7 @@ import (
 var ErrIntegrity = errors.New("integrity error")
 
 func CheckKvis(tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Logger) error {
+	start := time.Now()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(domain)
 	var kvCompression seg.FileCompression
@@ -80,11 +83,15 @@ func CheckKvis(tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Log
 		log.Warn(err.Error())
 		integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
 	}
+	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files))
 	return integrityErr
 }
 
 func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) error {
-	logger.Trace("checking kvi", "kviPath", kviPath, "kvPath", kvPath)
+	kviFileName := filepath.Base(kviPath)
+	kvFileName := filepath.Base(kvPath)
+	logger.Info("checking kvi", "kvi", kviFileName, "kv", kvFileName)
+	start := time.Now()
 	kvi, err := recsplit.OpenIndex(kviPath)
 	if err != nil {
 		return err
@@ -99,28 +106,40 @@ func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, 
 	kvReader := seg.NewReader(kvDecompressor.MakeGetter(), kvCompression)
 	var integrityErr error
 	if kvKeyCount := uint64(kvReader.Count()) / 2; kvKeyCount != kvi.KeyCount() {
-		err = fmt.Errorf("kv key count %d != kvi key count %d in %s", kvKeyCount, kvi.KeyCount(), kviPath)
+		err = fmt.Errorf("kv key count %d != kvi key count %d in %s", kvKeyCount, kvi.KeyCount(), kviFileName)
 		if failFast {
 			return err
 		}
 		logger.Warn(err.Error())
 		integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
 	}
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
 	var keyBuf []byte
-	var keyOffset uint64
+	var keyOffset, keyCount uint64
 	var atValue bool
 	for kvReader.HasNext() {
+		if keyCount == 10_000 {
+			time.Sleep(15 * time.Second)
+		}
+		select {
+		case <-logTicker.C:
+			rate := float64(keyCount) / time.Since(start).Seconds()
+			logger.Info("checking kvi progress", "key", keyCount, "keys", kvi.KeyCount(), "k/s", rate, "kvi", kviFileName)
+		default: // proceed
+		}
 		if atValue {
 			keyOffset, _ = kvReader.Skip()
 			atValue = false
 			continue
 		}
 		keyBuf, _ = kvReader.Next(keyBuf[:0])
+		logger.Trace("checking kvi for", "key", hex.EncodeToString(keyBuf), "offset", keyOffset, "kvi", kviFileName)
+		keyCount++
 		atValue = true
-		logger.Trace("checking kvi for", "key", hex.EncodeToString(keyBuf), "offset", keyOffset)
 		kviOffset, ok := kviReader.Lookup(keyBuf)
 		if !ok {
-			err = fmt.Errorf("key %x not found in %s", keyBuf, kviPath)
+			err = fmt.Errorf("key %x not found in %s", keyBuf, kviFileName)
 			if failFast {
 				return err
 			}
@@ -129,7 +148,7 @@ func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, 
 			continue
 		}
 		if kviOffset != keyOffset {
-			err = fmt.Errorf("key %x offset mismatch in %s: %d != %d", keyBuf, kviPath, keyOffset, kviOffset)
+			err = fmt.Errorf("key %x offset mismatch %d != %d in %s", keyBuf, keyOffset, kviOffset, kviFileName)
 			if failFast {
 				return err
 			}
@@ -137,5 +156,8 @@ func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, 
 			integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
 		}
 	}
+	duration := time.Since(start)
+	rate := float64(keyCount) / duration.Seconds()
+	logger.Info("checked kvi in", "dur", duration, "keys", keyCount, "k/s", rate, "kvi", kviFileName, "kv", kvFileName)
 	return integrityErr
 }
