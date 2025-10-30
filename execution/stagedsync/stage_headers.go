@@ -209,7 +209,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 
 	}
 
-	if useExternalTx {
+	if tx != nil {
 		err = finaliseState(tx)
 	} else {
 		err = cfg.db.Update(ctx, func(tx kv.RwTx) error { return finaliseState(tx) })
