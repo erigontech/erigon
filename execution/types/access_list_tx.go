@@ -457,6 +457,8 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 		accessList: tx.AccessList,
 		checkNonce: true,
 		checkGas:   true,
+
+		Tx: tx,
 	}
 
 	if !rules.IsBerlin {
