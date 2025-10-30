@@ -138,7 +138,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, *vmConfig)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, *vmConfig)
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
 			vmConfig.Tracer = nil
@@ -281,9 +281,9 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	msg := types.NewMessage(
 		state.SystemAddress,
 		&contract,
-		0, u256.Num0,
+		0, &u256.Num0,
 		SysCallGasLimit,
-		u256.Num0,
+		&u256.Num0,
 		nil, nil,
 		data, nil,
 		false, // checkNonce

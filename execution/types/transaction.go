@@ -397,20 +397,13 @@ type Message struct {
 	authorizations   []Authorization
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
+func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
-	var toaddr accounts.Address
-	if to != nil {
-		toaddr = accounts.InternAddress(*to)
-	} else {
-		toaddr = accounts.NilAddress
-	}
-
 	m := Message{
-		from:             accounts.InternAddress(from),
-		to:               toaddr,
+		from:             from,
+		to:               to,
 		nonce:            nonce,
 		amount:           *amount,
 		gasLimit:         gasLimit,
