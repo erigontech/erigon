@@ -555,7 +555,7 @@ func (tx *ArbitrumContractTx) UnmarshalJSON(input []byte) error {
 	}
 	return nil
 }
-func (tx *ArbitrumRetryTx) UnmarshalJSON(input []byte) error {
+func (t *ArbitrumRetryTx) UnmarshalJSON(input []byte) error {
 	var dec txJSON
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
