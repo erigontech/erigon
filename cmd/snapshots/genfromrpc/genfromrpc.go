@@ -730,8 +730,8 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	const batchSize = 20
-	return GetAndCommitBlocks(context.Background(), db, client, receiptClient, start, latestBlock.Uint64(), batchSize, verification, isArbitrum, noWrite)
+	_, err = GetAndCommitBlocks(context.Background(), db, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite)
+	return err
 }
 
 var (
@@ -739,13 +739,12 @@ var (
 	prevReceiptTime = new(atomic.Uint64)
 )
 
-func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *rpc.Client, startBlockNum, endBlockNum, batchSize uint64, verify, isArbitrum, dryRun bool) error {
+func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool) (lastBlockNum uint64, err error) {
 	var (
+		batchSize     = uint64(20)
+		logInterval   = time.Second * 40
+		logEvery      = time.NewTicker(logInterval)
 		lastBlockHash common.Hash
-		lastBlockNum  uint64
-
-		logInterval = time.Second * 40
-		logEvery    = time.NewTicker(logInterval)
 	)
 
 	defer logEvery.Stop()
@@ -757,7 +756,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *
 		blocks, err := FetchBlocksBatch(client, receiptClient, prev, endBlockNum, batchSize, verify, isArbitrum)
 		if err != nil {
 			log.Warn("Error fetching block batch", "startBlockNum", prev, "err", err)
-			return err
+			return lastBlockNum, err
 		}
 		if len(blocks) == 0 {
 			log.Info("No more blocks fetched, exiting", "latestFetchedBlock", lastBlockNum, "hash", lastBlockHash)
@@ -783,10 +782,10 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, client, receiptClient *
 			continue
 		}
 		if err = commitUpdate(ctx, db, blocks); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return lastBlockNum, nil
 }
 
 func commitUpdate(ctx context.Context, db kv.RwDB, blocks []*types.Block) error {
