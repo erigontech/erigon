@@ -3,12 +3,11 @@ package state
 import (
 	"fmt"
 
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/statecfg"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	btree2 "github.com/tidwall/btree"
 )
 
 // high 16 bits: specify domain/ii/forkables identifier
@@ -82,7 +81,7 @@ type DependencyIntegrityChecker struct {
 type DependentInfo struct {
 	entity      UniversalEntity
 	filesGetter DirtyFilesGetter
-	accessors   statecfg.Accessors
+	accessors   Accessors
 }
 
 // dependency/referred: account/storage

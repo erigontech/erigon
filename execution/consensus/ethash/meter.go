@@ -22,7 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/debug"
 )
 
 func newHashRateMeter() *hashRateMeter {
@@ -155,7 +155,7 @@ var arbiter = meterArbiter{ticker: time.NewTicker(5 * time.Second), meters: make
 
 // Ticks meters on the scheduled interval
 func (ma *meterArbiter) tick() {
-	defer dbg.LogPanic()
+	defer debug.LogPanic()
 	for range ma.ticker.C {
 		ma.tickMeters()
 	}

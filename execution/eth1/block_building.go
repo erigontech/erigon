@@ -25,8 +25,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -55,9 +55,9 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 }
 
 // Missing: NewPayload, AssembleBlock
-func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
+func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execution.AssembleBlockRequest) (*execution.AssembleBlockResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
-		return &executionproto.AssembleBlockResponse{
+		return &execution.AssembleBlockResponse{
 			Id:   0,
 			Busy: true,
 		}, nil
@@ -85,7 +85,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		param.PayloadId = e.lastParameters.PayloadId
 		if reflect.DeepEqual(e.lastParameters, &param) {
 			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-			return &executionproto.AssembleBlockResponse{
+			return &execution.AssembleBlockResponse{
 				Id:   e.lastParameters.PayloadId,
 				Busy: false,
 			}, nil
@@ -102,7 +102,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot())
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
-	return &executionproto.AssembleBlockResponse{
+	return &execution.AssembleBlockResponse{
 		Id:   e.nextPayloadId,
 		Busy: false,
 	}, nil
@@ -121,9 +121,9 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
+func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *execution.GetAssembledBlockRequest) (*execution.GetAssembledBlockResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
-		return &executionproto.GetAssembledBlockResponse{
+		return &execution.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
 	}
@@ -131,7 +131,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	payloadId := req.Id
 	builder, ok := e.builders[payloadId]
 	if !ok {
-		return &executionproto.GetAssembledBlockResponse{
+		return &execution.GetAssembledBlockResponse{
 			Busy: false,
 		}, nil
 	}
@@ -152,7 +152,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		return nil, err
 	}
 
-	payload := &typesproto.ExecutionPayload{
+	payload := &types2.ExecutionPayload{
 		Version:       1,
 		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase),
@@ -182,7 +182,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
 
-	blobsBundle := &typesproto.BlobsBundle{}
+	blobsBundle := &types2.BlobsBundleV1{}
 	for i, txn := range block.Transactions() {
 		if txn.Type() != types.BlobTxType {
 			continue
@@ -214,9 +214,9 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		}
 	}
 
-	var requestsBundle *typesproto.RequestsBundle
+	var requestsBundle *types2.RequestsBundle
 	if blockWithReceipts.Requests != nil {
-		requestsBundle = &typesproto.RequestsBundle{}
+		requestsBundle = &types2.RequestsBundle{}
 		requests := make([][]byte, 0)
 		for _, r := range blockWithReceipts.Requests {
 			requests = append(requests, r.Encode())
@@ -224,8 +224,8 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		requestsBundle.Requests = requests
 	}
 
-	return &executionproto.GetAssembledBlockResponse{
-		Data: &executionproto.AssembledBlockData{
+	return &execution.GetAssembledBlockResponse{
+		Data: &execution.AssembledBlockData{
 			ExecutionPayload: payload,
 			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
 			BlobsBundle:      blobsBundle,

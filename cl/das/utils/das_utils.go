@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"slices"
+	"sort"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -62,7 +62,9 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 	}
 
 	// Sort custody groups
-	slices.Sort(custodyGroups)
+	sort.Slice(custodyGroups, func(i, j int) bool {
+		return custodyGroups[i] < custodyGroups[j]
+	})
 
 	return custodyGroups, nil
 }

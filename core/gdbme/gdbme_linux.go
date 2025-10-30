@@ -3,7 +3,6 @@
 package gdbme
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -71,7 +70,7 @@ func RestartUnderGDB() {
 	gdbArgs = append(gdbArgs, filteredArgs...)
 
 	fmt.Fprintln(os.Stderr, "Restarting under GDB for crash diagnostics...")
-	cmd := exec.CommandContext(context.Background(), gdbPath, gdbArgs...)
+	cmd := exec.Command(gdbPath, gdbArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

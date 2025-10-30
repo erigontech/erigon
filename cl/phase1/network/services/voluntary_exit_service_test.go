@@ -20,6 +20,7 @@ import (
 	"context"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -62,7 +63,8 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{}
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
-	batchSignatureVerifier.Start()
+	batchCheckInterval = 1 * time.Millisecond
+	go batchSignatureVerifier.Start()
 	t.voluntaryExitService = NewVoluntaryExitService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.ethClock, batchSignatureVerifier)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{
@@ -250,6 +252,6 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 }
 
 func TestVoluntaryExit(t *testing.T) {
-	//t.Skip("issue #14997")
+	t.Skip("issue #14997")
 	suite.Run(t, new(voluntaryExitTestSuite))
 }

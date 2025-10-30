@@ -34,13 +34,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -107,7 +107,7 @@ func TestBodyStorage(t *testing.T) {
 	}
 
 	// prepare db so it works with our test
-	signer1 := types.MakeSigner(chainspec.Mainnet.Config, 1, 0)
+	signer1 := types.MakeSigner(chainspec.MainnetChainConfig, 1, 0)
 	body := &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(types.NewTransaction(1, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
@@ -527,26 +527,23 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
-	var txNum uint64
 	{
-		blockNum := header.Number.Uint64()
 		sd, err := state.NewSharedDomains(tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
 		base, err := txNumReader.Min(tx, 1)
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
-		txNum = base
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
+		sd.SetTxNum(base)
+		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
 		for i, r := range receipts {
-			txNum = base + 1 + uint64(i)
-			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, txNum))
+			sd.SetTxNum(base + 1 + uint64(i))
+			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, base+1+uint64(i)))
 		}
-		txNum = base + uint64(len(receipts)) + 1
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
+		sd.SetTxNum(base + uint64(len(receipts)) + 1)
+		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+uint64(len(receipts))+1))
 
-		// Compute and store the commitment
-		_, err = sd.ComputeCommitment(ctx, true, blockNum, txNum, "flush-commitment")
+		_, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment")
 		require.NoError(err)
 
 		require.NoError(sd.Flush(ctx, tx))
@@ -797,7 +794,7 @@ func TestBadBlocks(t *testing.T) {
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
-		signer1 := types.MakeSigner(chainspec.Mainnet.Config, number, number-1)
+		signer1 := types.MakeSigner(chainspec.MainnetChainConfig, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
 				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),

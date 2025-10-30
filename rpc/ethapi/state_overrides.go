@@ -35,15 +35,11 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 	for addr, account := range *overrides {
 		// Override account nonce.
 		if account.Nonce != nil {
-			if err := state.SetNonce(addr, uint64(*account.Nonce)); err != nil {
-				return err
-			}
+			state.SetNonce(addr, uint64(*account.Nonce))
 		}
 		// Override account(contract) code.
 		if account.Code != nil {
-			if err := state.SetCode(addr, *account.Code); err != nil {
-				return err
-			}
+			state.SetCode(addr, *account.Code)
 		}
 		// Override account balance.
 		if account.Balance != nil {
@@ -51,9 +47,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 			if overflow {
 				return errors.New("account.Balance higher than 2^256-1")
 			}
-			if err := state.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
-				return err
-			}
+			state.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified)
 		}
 		if account.State != nil && account.StateDiff != nil {
 			return fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
@@ -65,18 +59,14 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
 				intState[key] = *intValue
 			}
-			if err := state.SetStorage(addr, intState); err != nil {
-				return err
-			}
+			state.SetStorage(addr, intState)
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
 				key := key
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
-				if err := state.SetState(addr, key, *intValue); err != nil {
-					return err
-				}
+				state.SetState(addr, key, *intValue)
 			}
 		}
 	}

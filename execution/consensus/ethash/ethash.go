@@ -34,12 +34,10 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-
 	"github.com/edsrzf/mmap-go"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -252,7 +250,7 @@ func newCache(epoch uint64) interface{} {
 // generate ensures that the cache content is generated before use.
 func (c *cache) generate(dir string, limit int, lock bool, test bool) {
 	c.once.Do(func() {
-		defer dbg.LogPanic()
+		defer debug.LogPanic()
 		size := cacheSize(c.epoch*epochLength + 1)
 		seed := seedHash(c.epoch*epochLength + 1)
 		if test {
@@ -297,7 +295,7 @@ func (c *cache) generate(dir string, limit int, lock bool, test bool) {
 		for ep := int(c.epoch) - limit; ep >= 0; ep-- {
 			seed := seedHash(uint64(ep)*epochLength + 1)
 			path := filepath.Join(dir, fmt.Sprintf("cache-R%d-%x%s", algorithmRevision, seed[:8], endian))
-			dir2.RemoveFile(path)
+			os.Remove(path)
 		}
 	})
 }
@@ -386,7 +384,7 @@ func (d *dataset) generate(dir string, limit int, lock bool, test bool) {
 		for ep := int(d.epoch) - limit; ep >= 0; ep-- {
 			seed := seedHash(uint64(ep)*epochLength + 1)
 			path := filepath.Join(dir, fmt.Sprintf("full-R%d-%x%s", algorithmRevision, seed[:8], endian))
-			dir2.RemoveFile(path)
+			os.Remove(path)
 		}
 	})
 }
@@ -513,7 +511,7 @@ func (ethash *Ethash) dataset(block uint64, async bool) *dataset {
 	// If async is specified, generate everything in a background thread
 	if async && !current.generated() {
 		go func() {
-			defer dbg.LogPanic()
+			defer debug.LogPanic()
 			current.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ethashcfg.ModeTest)
 
 			if futureI != nil {

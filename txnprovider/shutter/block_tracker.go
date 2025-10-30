@@ -57,7 +57,6 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		bt.blockChangeCond.L.Unlock()
 	}()
 
-	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
 	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
@@ -66,7 +65,6 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		}
 	})
 	defer unregisterBlockEventObserver()
-	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
 
 	bn, err := bt.currentBlockNumReader(ctx)
 	if err != nil {

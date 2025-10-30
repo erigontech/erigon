@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
@@ -390,7 +391,7 @@ func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, su
 		}
 	}
 
-	namespace, subMethod, err := NamespaceAndSubMethodFromMethod(string(method))
+	namespace, subMethod, err := devnetutils.NamespaceAndSubMethodFromMethod(string(method))
 
 	if err != nil {
 		return nil, fmt.Errorf("cannot get namespace and submethod from method: %v", err)
@@ -409,13 +410,4 @@ func (req *requestGenerator) UnsubscribeAll() {
 	subscriptionClient := req.subscriptionClient
 	req.subscriptionClient = nil
 	subscriptionClient.Close()
-}
-
-// NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
-func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
-	parts := strings.SplitN(method, "_", 2)
-	if len(parts) != 2 {
-		return "", "", errors.New("invalid string to split")
-	}
-	return parts[0], parts[1], nil
 }

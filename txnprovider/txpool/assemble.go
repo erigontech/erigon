@@ -22,14 +22,13 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -42,7 +41,7 @@ func Assemble(
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
 	logger log.Logger,
-	ethBackend remoteproto.ETHBACKENDClient,
+	ethBackend remote.ETHBACKENDClient,
 	opts ...Option,
 ) (*TxPool, txpoolproto.TxpoolServer, error) {
 	options := applyOpts(opts...)
@@ -87,7 +86,7 @@ func Assemble(
 type poolDBInitializer func(ctx context.Context, cfg txpoolcfg.Config, logger log.Logger) (kv.RwDB, error)
 
 var defaultPoolDBInitializer = func(ctx context.Context, cfg txpoolcfg.Config, logger log.Logger) (kv.RwDB, error) {
-	opts := mdbx.New(dbcfg.TxPoolDB, logger).
+	opts := mdbx.New(kv.TxPoolDB, logger).
 		Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		WriteMergeThreshold(3 * 8192).

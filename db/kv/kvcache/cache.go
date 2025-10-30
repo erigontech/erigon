@@ -33,9 +33,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 type CacheValidationResult struct {
@@ -51,9 +51,9 @@ type CacheValidationResult struct {
 type Cache interface {
 	// View - returns CacheView consistent with given kv.Tx
 	View(ctx context.Context, tx kv.TemporalTx) (CacheView, error)
-	OnNewBlock(sc *remoteproto.StateChangeBatch)
+	OnNewBlock(sc *remote.StateChangeBatch)
 	Len() int
-	ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*CacheValidationResult, error)
+	ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheValidationResult, error)
 }
 type CacheView interface {
 	Get(k []byte) ([]byte, error)
@@ -138,6 +138,7 @@ type CoherentView struct {
 	stateVersionID uint64
 }
 
+func (c *CoherentView) StateV3() bool { return c.cache.cfg.StateV3 }
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
 	return c.cache.Get(k, c.tx, c.stateVersionID)
 }
@@ -172,6 +173,7 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
+	StateV3         bool
 }
 
 var DefaultCoherentConfig = CoherentConfig{
@@ -182,6 +184,7 @@ var DefaultCoherentConfig = CoherentConfig{
 	MetricsLabel:    "default",
 	WithStorage:     true,
 	WaitForNewBlock: true,
+	StateV3:         true,
 }
 
 func New(cfg CoherentConfig) *Coherent {
@@ -278,7 +281,7 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	return r
 }
 
-func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
+func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.waitExceededCount.Store(0) // reset the circuit breaker
@@ -288,11 +291,11 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
 			switch sc.Changes[i].Action {
-			case remoteproto.Action_UPSERT:
+			case remote.Action_UPSERT:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
 				c.add(addr[:], v, r, id)
-			case remoteproto.Action_UPSERT_CODE:
+			case remote.Action_UPSERT_CODE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
 				c.add(addr[:], v, r, id)
@@ -301,12 +304,12 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				k := make([]byte, 32)
 				c.hasher.Sum(k)
 				c.addCode(k, sc.Changes[i].Code, r, id)
-			case remoteproto.Action_REMOVE:
+			case remote.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				c.add(addr[:], nil, r, id)
-			case remoteproto.Action_STORAGE:
+			case remote.Action_STORAGE:
 				//skip, will check later
-			case remoteproto.Action_CODE:
+			case remote.Action_CODE:
 				c.hasher.Reset()
 				c.hasher.Write(sc.Changes[i].Code)
 				k := make([]byte, 32)
@@ -364,7 +367,7 @@ func (c *Coherent) View(ctx context.Context, tx kv.TemporalTx) (CacheView, error
 	}
 }
 
-func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element, *CoherentRoot, error) {
+func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *CoherentRoot, error) {
 	// using the full lock here rather than RLock as RLock causes a lot of calls to runtime.usleep degrading
 	// performance under load
 	c.lock.Lock()
@@ -377,7 +380,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 	isLatest := c.latestStateVersionID == id
 
 	var it *Element
-	if domain == kv.CodeDomain {
+	if code {
 		it, _ = r.codeCache.Get(&Element{K: k})
 	} else {
 		it, _ = r.cache.Get(&Element{K: k})
@@ -388,8 +391,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 	return it, r, nil
 }
 func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
-	//TODO: Get must accept from user Domain parameter
-	it, r, err := c.getFromCache(k, id, kv.AccountsDomain)
+	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
 		return nil, err
 	}
@@ -402,10 +404,14 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 
 	c.miss.Inc()
 
-	if len(k) == 20 {
-		v, _, err = tx.GetLatest(kv.AccountsDomain, k)
+	if c.cfg.StateV3 {
+		if len(k) == 20 {
+			v, _, err = tx.GetLatest(kv.AccountsDomain, k)
+		} else {
+			v, _, err = tx.GetLatest(kv.StorageDomain, k)
+		}
 	} else {
-		v, _, err = tx.GetLatest(kv.StorageDomain, k)
+		v, err = tx.GetOne(kv.PlainState, k)
 	}
 	if err != nil {
 		return nil, err
@@ -423,7 +429,7 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 }
 
 func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
-	it, r, err := c.getFromCache(k, id, kv.CodeDomain)
+	it, r, err := c.getFromCache(k, id, true)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +441,11 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	}
 	c.codeMiss.Inc()
 
-	v, _, err = tx.GetLatest(kv.CodeDomain, k)
+	if c.cfg.StateV3 {
+		v, _, err = tx.GetLatest(kv.CodeDomain, k)
+	} else {
+		v, err = tx.GetOne(kv.Code, k)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -499,7 +509,7 @@ func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	return it
 }
 
-func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*CacheValidationResult, error) {
+func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheValidationResult, error) {
 
 	result := &CacheValidationResult{
 		Enabled:          true,
@@ -545,7 +555,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 
 	clearCache := false
 
-	compare := func(cache *btree2.BTreeG[*Element], domain kv.Domain) (bool, [][]byte, error) {
+	compare := func(cache *btree2.BTreeG[*Element], bucket string) (bool, [][]byte, error) {
 		keys := make([][]byte, 0)
 
 		for {
@@ -555,7 +565,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 			}
 
 			// check the db
-			inDb, _, err := tx.GetLatest(domain, val.K)
+			inDb, err := tx.GetOne(bucket, val.K)
 			if err != nil {
 				return false, keys, err
 			}
@@ -577,7 +587,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 
 	cache, codeCache := c.cloneCaches(root)
 
-	cancelled, keys, err := compare(cache, kv.AccountsDomain)
+	cancelled, keys, err := compare(cache, kv.PlainState)
 	if err != nil {
 		return nil, err
 	}
@@ -587,17 +597,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 		return result, nil
 	}
 
-	cancelled, keys, err = compare(cache, kv.StorageDomain)
-	if err != nil {
-		return nil, err
-	}
-	result.StateKeysOutOfSync = keys
-	if cancelled {
-		result.RequestCancelled = true
-		return result, nil
-	}
-
-	cancelled, keys, err = compare(codeCache, kv.CodeDomain)
+	cancelled, keys, err = compare(codeCache, kv.Code)
 	if err != nil {
 		return nil, err
 	}

@@ -22,15 +22,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -64,7 +63,7 @@ func TestApplyWithInit(t *testing.T) {
 		},
 	}
 
-	migrator := NewMigrator(dbcfg.ChainDB)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
 	err := migrator.Apply(db, "", "", logger)
@@ -95,7 +94,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -125,7 +124,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	})
 	require.NoError(err)
 
-	migrator := NewMigrator(dbcfg.ChainDB)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
 	err = migrator.Apply(db, "", "", logger)
@@ -160,7 +159,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -190,7 +189,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	})
 	require.NoError(err)
 
-	migrator := NewMigrator(dbcfg.ChainDB)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
 	err = migrator.Apply(db, "", "", logger)
@@ -223,7 +222,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			Name: "repeated_name",
@@ -256,7 +255,7 @@ func TestValidation(t *testing.T) {
 			},
 		},
 	}
-	migrator := NewMigrator(dbcfg.ChainDB)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
 	err := migrator.Apply(db, "", "", logger)
@@ -273,7 +272,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			Name: "one",
@@ -283,7 +282,7 @@ func TestCommitCallRequired(t *testing.T) {
 			},
 		},
 	}
-	migrator := NewMigrator(dbcfg.ChainDB)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
 	err := migrator.Apply(db, "", "", logger)

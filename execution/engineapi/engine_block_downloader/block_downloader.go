@@ -25,21 +25,18 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
-	"golang.org/x/sync/errgroup"
-
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/etl"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/bbd"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/execution/p2p"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
@@ -89,15 +86,11 @@ type EngineBlockDownloader struct {
 	logger log.Logger
 
 	// V2 downloader
-	v2              bool
-	bbdV2           *p2p.BackwardBlockDownloader
-	badHeadersV2    *lru.Cache[common.Hash, common.Hash]
-	messageListener *p2p.MessageListener
-	peerTracker     *p2p.PeerTracker
-	stopped         atomic.Bool
+	v2    bool
+	bbdV2 *bbd.BackwardBlockDownloader
 }
 
-func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient executionproto.ExecutionClient,
+func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
 	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
 	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
 	tmpdir string, syncCfg ethconfig.Sync,
@@ -108,25 +101,10 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 	timeout := syncCfg.BodyDownloadTimeoutSeconds
 	var s atomic.Value
 	s.Store(Idle)
-	var bbdV2 *p2p.BackwardBlockDownloader
-	var badHeadersV2 *lru.Cache[common.Hash, common.Hash]
-	var messageListener *p2p.MessageListener
-	var peerTracker *p2p.PeerTracker
+	var bbdV2 *bbd.BackwardBlockDownloader
 	if v2 {
-		peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
-		messageListener = p2p.NewMessageListener(logger, sentryClient, statusDataProvider.GetStatusData, peerPenalizer)
-		messageSender := p2p.NewMessageSender(sentryClient)
-		peerTracker = p2p.NewPeerTracker(logger, messageListener)
-		var fetcher p2p.Fetcher
-		fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
-		fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
-		fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
-		bbdV2 = p2p.NewBackwardBlockDownloader(logger, fetcher, peerPenalizer, peerTracker, tmpdir)
-		var err error
-		badHeadersV2, err = lru.New[common.Hash, common.Hash](1_000_000) // 64mb
-		if err != nil {
-			panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
-		}
+		hr := headerReader{db: db, blockReader: blockReader}
+		bbdV2 = bbd.NewBackwardBlockDownloader(logger, sentryClient, statusDataProvider.GetStatusData, hr, tmpdir)
 	}
 	return &EngineBlockDownloader{
 		bacgroundCtx:    ctx,
@@ -145,55 +123,16 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
 		v2:              v2,
 		bbdV2:           bbdV2,
-		badHeadersV2:    badHeadersV2,
-		messageListener: messageListener,
-		peerTracker:     peerTracker,
 	}
 }
 
 func (e *EngineBlockDownloader) Run(ctx context.Context) error {
 	if e.v2 {
 		e.logger.Info("[EngineBlockDownloader] running")
-		defer func() {
-			e.logger.Info("[EngineBlockDownloader] stopped")
-			e.stopped.Store(true)
-		}()
-		eg, ctx := errgroup.WithContext(ctx)
-		eg.Go(func() error {
-			err := e.peerTracker.Run(ctx)
-			if err != nil {
-				return fmt.Errorf("engine block downloader peer tracker failed: %w", err)
-			}
-			return nil
-		})
-		eg.Go(func() error {
-			err := e.messageListener.Run(ctx)
-			if err != nil {
-				return fmt.Errorf("engine block downloader message listener failed: %w", err)
-			}
-			return nil
-		})
-		return eg.Wait()
+		defer e.logger.Info("[EngineBlockDownloader] stopped")
+		return e.bbdV2.Run(ctx)
 	}
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {
-	if e.v2 {
-		e.badHeadersV2.Add(badHeader, lastValidAncestor)
-	} else {
-		e.hd.ReportBadHeaderPoS(badHeader, lastValidAncestor)
-	}
-}
-
-func (s *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidAncestor common.Hash) {
-	if s.v2 {
-		lastValidAncestor, bad = s.badHeadersV2.Get(h)
-		return bad, lastValidAncestor
-	} else {
-		return s.hd.IsBadHeaderPoS(h)
-	}
+	return nil
 }
 
 func (e *EngineBlockDownloader) scheduleHeadersDownload(
@@ -263,7 +202,7 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 			return err
 		}
 		if badChainError != nil {
-			e.ReportBadHeader(h.Hash(), lastValidHash)
+			e.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
 			return nil
 		}
 		lastValidHash = h.ParentHash

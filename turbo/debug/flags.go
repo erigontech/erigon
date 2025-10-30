@@ -35,10 +35,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/fdlimit"
+	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/db/downloader"
-	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -240,15 +239,13 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	metricsEnabled := ctx.Bool(metricsEnabledFlag.Name)
 	metricsAddr := ctx.String(metricsAddrFlag.Name)
 
-	var metricsMux, pprofMux *http.ServeMux
+	var metricsMux *http.ServeMux
 	var metricsAddress string
-	var torrentClientStatusAddr string
 
 	if metricsEnabled {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		metricsMux = metrics.Setup(metricsAddress, logger)
-		torrentClientStatusAddr = metricsAddress
 	}
 
 	if pprofEnabled {
@@ -258,19 +255,12 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 		if (address == metricsAddress) && metricsEnabled {
 			metricsMux = StartPProf(address, metricsMux)
 		} else {
-			pprofMux = StartPProf(address, nil)
-		}
-		if !metricsEnabled {
-			torrentClientStatusAddr = address
+			pprofMux := StartPProf(address, nil)
+			return logger, tracer, metricsMux, pprofMux, nil
 		}
 	}
 
-	if metricsEnabled || pprofEnabled {
-		torrentMsg := fmt.Sprintf("curl -s http://%s%s > torrentStatus.txt", torrentClientStatusAddr, downloader.TorrentClientStatusPath)
-		log.Info("To get torrent client status", "command", torrentMsg)
-	}
-
-	return logger, tracer, metricsMux, pprofMux, nil
+	return logger, tracer, metricsMux, nil, nil
 }
 
 func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {

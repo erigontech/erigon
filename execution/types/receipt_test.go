@@ -31,10 +31,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 func TestDecodeEmptyTypedReceipt(t *testing.T) {
@@ -245,7 +246,7 @@ func TestDeriveFields(t *testing.T) {
 				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.Address{}).String())
 			}
 			from, _ := txs[i].Sender(*signer)
-			contractAddress := CreateAddress(from, txs[i].GetNonce())
+			contractAddress := crypto.CreateAddress(from, txs[i].GetNonce())
 			if txs[i].GetTo() == nil && r.ContractAddress != contractAddress {
 				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), contractAddress.String())
 			}

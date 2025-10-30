@@ -24,6 +24,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -36,17 +38,52 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/transactions"
 )
+
+type BlockOverrides struct {
+	BlockNumber *hexutil.Uint64
+	Coinbase    *common.Address
+	Timestamp   *hexutil.Uint64
+	GasLimit    *hexutil.Uint
+	Difficulty  *hexutil.Uint
+	BaseFee     *uint256.Int
+	BlockHash   *map[uint64]common.Hash
+}
 
 type Bundle struct {
 	Transactions  []ethapi.CallArgs
-	BlockOverride transactions.BlockOverrides
+	BlockOverride BlockOverrides
 }
 
 type StateContext struct {
 	BlockNumber      rpc.BlockNumberOrHash
 	TransactionIndex *int
+}
+
+func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOverrides, overrideBlockHash map[uint64]common.Hash) {
+	if blockOverride.BlockNumber != nil {
+		blockCtx.BlockNumber = uint64(*blockOverride.BlockNumber)
+	}
+	if blockOverride.BaseFee != nil {
+		blockCtx.BaseFee = blockOverride.BaseFee
+	}
+	if blockOverride.Coinbase != nil {
+		blockCtx.Coinbase = *blockOverride.Coinbase
+	}
+	if blockOverride.Difficulty != nil {
+		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*blockOverride.Difficulty))
+	}
+	if blockOverride.Timestamp != nil {
+		blockCtx.Time = uint64(*blockOverride.Timestamp)
+	}
+	if blockOverride.GasLimit != nil {
+		blockCtx.GasLimit = uint64(*blockOverride.GasLimit)
+	}
+	if blockOverride.BlockHash != nil {
+		for blockNum, hash := range *blockOverride.BlockHash {
+			overrideBlockHash[blockNum] = hash
+		}
+	}
 }
 
 func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
@@ -139,7 +176,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
-	rules := evm.ChainRules()
+
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := chainConfig.Rules(blockNum, blockCtx.Time, arbosVersion)
 
 	timeoutMilliSeconds := int64(5000)
 

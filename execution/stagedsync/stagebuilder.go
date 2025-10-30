@@ -19,9 +19,9 @@ package stagedsync
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -30,7 +30,7 @@ import (
 type ChainEventNotifier interface {
 	OnNewHeader(newHeadersRlp [][]byte)
 	OnNewPendingLogs(types.Logs)
-	OnLogs([]*remoteproto.SubscribeLogsReply)
+	OnLogs([]*remote.SubscribeLogsReply)
 	HasLogSubscriptions() bool
 }
 

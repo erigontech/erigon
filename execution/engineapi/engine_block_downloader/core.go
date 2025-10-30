@@ -23,11 +23,12 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/bbd"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -141,14 +142,14 @@ func (e *EngineBlockDownloader) download(
 		e.status.Store(Idle)
 		return
 	}
-	if status == executionproto.ExecutionStatus_TooFarAway || status == executionproto.ExecutionStatus_Busy {
+	if status == execution.ExecutionStatus_TooFarAway || status == execution.ExecutionStatus_Busy {
 		e.logger.Info("[EngineBlockDownloader] block verification skipped")
 		e.status.Store(Idle)
 		return
 	}
-	if status == executionproto.ExecutionStatus_BadBlock {
+	if status == execution.ExecutionStatus_BadBlock {
 		e.logger.Warn("[EngineBlockDownloader] block segments downloaded are invalid")
-		e.ReportBadHeader(chainTip.Hash(), latestValidHash)
+		e.hd.ReportBadHeaderPoS(chainTip.Hash(), latestValidHash)
 		e.status.Store(Idle)
 		return
 	}
@@ -174,12 +175,12 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 	if err != nil {
 		return fmt.Errorf("request chain tip validation failed: %w", err)
 	}
-	if status == executionproto.ExecutionStatus_TooFarAway || status == executionproto.ExecutionStatus_Busy {
+	if status == execution.ExecutionStatus_TooFarAway || status == execution.ExecutionStatus_Busy {
 		e.logger.Info("[EngineBlockDownloader] block verification skipped")
 		return nil
 	}
-	if status == executionproto.ExecutionStatus_BadBlock {
-		e.ReportBadHeader(tip.Hash(), latestValidHash)
+	if status == execution.ExecutionStatus_BadBlock {
+		e.hd.ReportBadHeaderPoS(tip.Hash(), latestValidHash)
 		return errors.New("block segments downloaded are invalid")
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
@@ -188,26 +189,22 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 
 func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req BackwardDownloadRequest) error {
 	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
-	if e.stopped.Load() {
-		return errors.New("engine block downloader is stopped")
-	}
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
-	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
+	opts := []bbd.Option{bbd.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
-		opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
+		opts = append(opts, bbd.WithChainLengthLimit(uint64(dbg.MaxReorgDepth)))
 		currentHeader := e.chainRW.CurrentHeader(ctx)
 		if currentHeader != nil {
-			opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
+			opts = append(opts, bbd.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
 		}
 	}
 	if req.Trigger == SegmentRecoveryTrigger {
-		opts = append(opts, p2p.WithChainLengthLimit(uint64(e.syncCfg.LoopBlockLimit)))
+		opts = append(opts, bbd.WithChainLengthLimit(uint64(e.syncCfg.LoopBlockLimit)))
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
-	hr := headerReader{db: e.db, blockReader: e.blockReader}
-	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, hr, opts...)
+	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, opts...)
 	if err != nil {
 		return err
 	}
@@ -258,17 +255,17 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 		return err
 	}
 	switch status {
-	case executionproto.ExecutionStatus_BadBlock:
-		e.ReportBadHeader(block.Hash(), lastValidHash)
-		e.ReportBadHeader(requested, lastValidHash)
+	case execution.ExecutionStatus_BadBlock:
+		e.hd.ReportBadHeaderPoS(block.Hash(), lastValidHash)
+		e.hd.ReportBadHeaderPoS(requested, lastValidHash)
 		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
-	case executionproto.ExecutionStatus_TooFarAway:
+	case execution.ExecutionStatus_TooFarAway:
 		e.logger.Debug(
 			"[EngineBlockDownloader] skipping validation of block batch download due to exec status too far away",
 			"tip", block.Hash(),
 			"latestValidHash", lastValidHash,
 		)
-	case executionproto.ExecutionStatus_Success: // proceed to UpdateForkChoice
+	case execution.ExecutionStatus_Success: // proceed to UpdateForkChoice
 	default:
 		return fmt.Errorf(
 			"unsuccessful status when validating batch download: status=%s, tip=%s, latestValidHash=%s",
@@ -281,7 +278,7 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 	if err != nil {
 		return err
 	}
-	if fcuStatus != executionproto.ExecutionStatus_Success {
+	if fcuStatus != execution.ExecutionStatus_Success {
 		return fmt.Errorf(
 			"unsuccessful status when updating fork choice for batch download: status=%s, tip=%s, latestValidHash=%s",
 			fcuStatus,

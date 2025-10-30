@@ -20,8 +20,6 @@
 package vm
 
 import (
-	"encoding/binary"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -89,15 +87,7 @@ func ToWordSize(size uint64) uint64 {
 }
 
 func allZero(b []byte) bool {
-	// 8-byte strides
-	n8 := len(b) - len(b)%8
-	for i := 0; i < n8; i += 8 {
-		if 0 != binary.NativeEndian.Uint64(b[i:i+8]) {
-			return false
-		}
-	}
-	// 1-byte strides for the remainder
-	for _, byte := range b[n8:] {
+	for _, byte := range b {
 		if byte != 0 {
 			return false
 		}

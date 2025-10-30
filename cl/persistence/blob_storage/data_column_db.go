@@ -10,7 +10,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -18,7 +17,11 @@ import (
 	"github.com/spf13/afero"
 )
 
-//go:generate mockgen -typed=true -destination=./mock_services/data_column_storage_mock.go -package=mock_services . DataColumnStorage
+const (
+	// subdivisionSlot = 10_000
+	mutexSize = 64
+)
+
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error
@@ -35,28 +38,18 @@ type dataColumnStorageImpl struct {
 	beaconChainConfig *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
 	slotsKept         uint64
-	emitters          *beaconevents.EventEmitter
 
-	//lock sync.RWMutex
-	rwLocks []sync.RWMutex
+	lock sync.RWMutex
 }
 
-const rwLocksCount = 64
-
-func NewDataColumnStore(fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, emitters *beaconevents.EventEmitter) DataColumnStorage {
+func NewDataColumnStore(fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) DataColumnStorage {
 	impl := &dataColumnStorageImpl{
 		fs:                fs,
 		beaconChainConfig: beaconChainConfig,
 		ethClock:          ethClock,
 		slotsKept:         slotsKept,
-		emitters:          emitters,
-		rwLocks:           make([]sync.RWMutex, rwLocksCount),
 	}
 	return impl
-}
-
-func (s *dataColumnStorageImpl) acquireLock(slot uint64) *sync.RWMutex {
-	return &s.rwLocks[slot%rwLocksCount]
 }
 
 func dataColumnFilePath(slot uint64, blockRoot common.Hash, columnIndex uint64) (dir, filepath string) {
@@ -67,9 +60,8 @@ func dataColumnFilePath(slot uint64, blockRoot common.Hash, columnIndex uint64) 
 }
 
 func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
-	lock := s.acquireLock(columnData.SignedBlockHeader.Header.Slot)
-	lock.Lock()
-	defer lock.Unlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	dir, filepath := dataColumnFilePath(columnData.SignedBlockHeader.Header.Slot, blockRoot, uint64(columnIndex))
 	if err := s.fs.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -95,15 +87,13 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	}
 
 	fh.Close()
-	s.emitters.Operation().SendDataColumnSidecar(columnData)
 	log.Trace("wrote data column sidecar", "slot", columnData.SignedBlockHeader.Header.Slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	return nil
 }
 
 func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
-	lock := s.acquireLock(slot)
-	lock.RLock()
-	defer lock.RUnlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	fh, err := s.fs.Open(filepath)
 	if err != nil {
@@ -119,9 +109,8 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 }
 
 func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
-	lock := s.acquireLock(slot)
-	lock.RLock()
-	defer lock.RUnlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	if _, err := s.fs.Stat(filepath); os.IsNotExist(err) {
 		return false, nil
@@ -132,9 +121,8 @@ func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot ui
 }
 
 func (s *dataColumnStorageImpl) RemoveAllColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
-	lock := s.acquireLock(slot)
-	lock.Lock()
-	defer lock.Unlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	for i := uint64(0); i < s.beaconChainConfig.NumberOfColumns; i++ {
 		_, filepath := dataColumnFilePath(slot, blockRoot, i)
 		s.fs.Remove(filepath)
@@ -143,9 +131,8 @@ func (s *dataColumnStorageImpl) RemoveAllColumnSidecars(ctx context.Context, slo
 }
 
 func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
-	lock := s.acquireLock(slot)
-	lock.Lock()
-	defer lock.Unlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	for _, index := range columnIndices {
 		_, filepath := dataColumnFilePath(slot, blockRoot, uint64(index))
 		if err := s.fs.Remove(filepath); err != nil {
@@ -160,9 +147,8 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 }
 
 func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
-	lock := s.acquireLock(slot)
-	lock.RLock()
-	defer lock.RUnlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	_, filepath := dataColumnFilePath(slot, blockRoot, idx)
 	fh, err := s.fs.Open(filepath)
 	if err != nil {
@@ -175,9 +161,8 @@ func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot 
 
 // GetSavedColumnIndex returns the list of saved column indices for the given slot and block root.
 func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
-	lock := s.acquireLock(slot)
-	lock.RLock()
-	defer lock.RUnlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	var savedColumns []uint64
 	for i := uint64(0); i < s.beaconChainConfig.NumberOfColumns; i++ {
 		_, filepath := dataColumnFilePath(slot, blockRoot, i)
@@ -192,6 +177,8 @@ func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot ui
 }
 
 func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	currentSlot := s.ethClock.GetCurrentSlot()
 	currentSlot -= keepSlotDistance
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
@@ -202,11 +189,7 @@ func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
 	}
 	// delete all the folders that are older than slotsKept
 	for i := startPrune; i < currentSlot; i += subdivisionSlot {
-		log.Debug("pruning data column sidecars", "slot", i)
-		lock := s.acquireLock(i)
-		lock.Lock()
 		s.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
-		lock.Unlock()
 	}
 	return nil
 }

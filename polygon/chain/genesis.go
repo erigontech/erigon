@@ -21,24 +21,17 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 //go:embed allocs
 var allocs embed.FS
 
-var (
-	amoyChainConfig       = readBorChainSpec("chainspecs/amoy.json")
-	borMainnetChainConfig = readBorChainSpec("chainspecs/bor-mainnet.json")
-	borDevnetChainConfig  = readBorChainSpec("chainspecs/bor-devnet.json")
-	mumbaiChainConfig     = readBorChainSpec("chainspecs/mumbai.json")
-)
-
 // AmoyGenesisBlock returns the Amoy network genesis block.
 func AmoyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     amoyChainConfig,
+		Config:     AmoyChainConfig,
 		Nonce:      0,
 		Timestamp:  1700225065,
 		GasLimit:   10000000,
@@ -52,7 +45,7 @@ func AmoyGenesisBlock() *types.Genesis {
 // BorMainnetGenesisBlock returns the Bor Mainnet network genesis block.
 func BorMainnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     borMainnetChainConfig,
+		Config:     BorMainnetChainConfig,
 		Nonce:      0,
 		Timestamp:  1590824836,
 		GasLimit:   10000000,
@@ -65,7 +58,7 @@ func BorMainnetGenesisBlock() *types.Genesis {
 
 func BorDevnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     borDevnetChainConfig,
+		Config:     BorDevnetChainConfig,
 		Nonce:      0,
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
@@ -73,19 +66,5 @@ func BorDevnetGenesisBlock() *types.Genesis {
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_devnet.json"),
-	}
-}
-
-// MumbaiGenesisBlock returns the Mumbai network genesis block.
-func MumbaiGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     mumbaiChainConfig,
-		Nonce:      0,
-		Timestamp:  1558348305,
-		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/mumbai.json"),
 	}
 }

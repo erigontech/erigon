@@ -20,22 +20,22 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/turbo/privateapi"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/privateapi"
 )
 
 type MiningService struct {
-	txpoolproto.MiningClient
+	txpool.MiningClient
 	log     log.Logger
 	version gointerfaces.Version
 }
 
-func NewMiningService(client txpoolproto.MiningClient) *MiningService {
+func NewMiningService(client txpool.MiningClient) *MiningService {
 	return &MiningService{
 		MiningClient: client,
 		version:      gointerfaces.VersionFromProto(privateapi.MiningAPIVersion),

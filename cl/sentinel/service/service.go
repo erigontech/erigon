@@ -29,25 +29,26 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/libp2p/go-libp2p/core/peer"
-
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
+
+	"github.com/libp2p/go-libp2p/core/peer"
+
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
-const gracePeerCount = 32
+const gracePeerCount = 8
 
-var _ sentinelproto.SentinelServer = (*SentinelServer)(nil)
+var _ sentinelrpc.SentinelServer = (*SentinelServer)(nil)
 
 type SentinelServer struct {
-	sentinelproto.UnimplementedSentinelServer
+	sentinelrpc.UnimplementedSentinelServer
 
 	ctx            context.Context
 	sentinel       *sentinel.Sentinel
@@ -85,10 +86,10 @@ func extractSubnetIndexByGossipTopic(name string) int {
 
 //BanPeer(context.Context, *Peer) (*EmptyMessage, error)
 
-func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
+func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
 	active, _, _ := s.sentinel.GetPeersCount()
 	if active < gracePeerCount {
-		return &sentinelproto.EmptyMessage{}, nil
+		return &sentinelrpc.EmptyMessage{}, nil
 	}
 
 	var pid peer.ID
@@ -98,10 +99,10 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sen
 	s.sentinel.Peers().SetBanStatus(pid, true)
 	s.sentinel.Host().Peerstore().RemovePeer(pid)
 	s.sentinel.Host().Network().ClosePeer(pid)
-	return &sentinelproto.EmptyMessage{}, nil
+	return &sentinelrpc.EmptyMessage{}, nil
 }
 
-func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.GossipData) (*sentinelproto.EmptyMessage, error) {
+func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.GossipData) (*sentinelrpc.EmptyMessage, error) {
 	manager := s.sentinel.GossipManager()
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
@@ -143,16 +144,16 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.Gos
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameDataColumnSidecar(*msg.SubnetId))
 		default:
-			return &sentinelproto.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
+			return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
 		}
 	}
 	if subscription == nil {
-		return &sentinelproto.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
+		return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
 	}
-	return &sentinelproto.EmptyMessage{}, subscription.Publish(compressedData)
+	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }
 
-func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
+func (s *SentinelServer) SubscribeGossip(data *sentinelrpc.SubscriptionData, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
 	ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
@@ -169,10 +170,10 @@ func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, s
 			if !s.gossipMatchSubscription(packet, data) {
 				continue
 			}
-			if err := stream.Send(&sentinelproto.GossipData{
+			if err := stream.Send(&sentinelrpc.GossipData{
 				Data: packet.data,
 				Name: packet.t,
-				Peer: &sentinelproto.Peer{
+				Peer: &sentinelrpc.Peer{
 					Pid: packet.pid,
 				},
 				SubnetId: packet.subnetId,
@@ -183,7 +184,7 @@ func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, s
 	}
 }
 
-func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelproto.SubscriptionData) bool {
+func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelrpc.SubscriptionData) bool {
 	if data.Filter != nil {
 		filter := data.GetFilter()
 		matched, err := path.Match(obj.t, filter)
@@ -211,7 +212,7 @@ func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration)
 	return ctx, cn
 }
 
-func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
+func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	// prepare the http request
 	httpReq, err := http.NewRequest("GET", "http://service.internal/", bytes.NewBuffer(req.Data))
 	if err != nil {
@@ -268,10 +269,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
-	ans := &sentinelproto.ResponseData{
+	ans := &sentinelrpc.ResponseData{
 		Data:  data,
 		Error: !responseCode.Success(),
-		Peer: &sentinelproto.Peer{
+		Peer: &sentinelrpc.Peer{
 			Pid: pid.String(),
 		},
 	}
@@ -279,7 +280,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 
 }
 
-func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
+func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	// Try finding the data to our peers
 	// this is using return statements instead of continue, since it saves a few lines
 	// but me writing this comment has put them back.. oh no!!! anyways, returning true means we stop.
@@ -304,12 +305,12 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.Req
 	return resp, nil
 }
 
-func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *sentinelproto.RequestDataWithPeer) (*sentinelproto.ResponseData, error) {
+func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *sentinelrpc.RequestDataWithPeer) (*sentinelrpc.ResponseData, error) {
 	pid, err := peer.Decode(reqWithPeer.Pid)
 	if err != nil {
 		return nil, err
 	}
-	req := &sentinelproto.RequestData{
+	req := &sentinelrpc.RequestData{
 		Data:  reqWithPeer.Data,
 		Topic: reqWithPeer.Topic,
 	}
@@ -327,15 +328,15 @@ func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *senti
 	return resp, nil
 }
 
-func (s *SentinelServer) Identity(ctx context.Context, in *sentinelproto.EmptyMessage) (*sentinelproto.IdentityResponse, error) {
+func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {
 	// call s.sentinel.Identity()
 	pid, enr, p2pAddresses, discoveryAddresses, metadata := s.sentinel.Identity()
-	return &sentinelproto.IdentityResponse{
+	return &sentinelrpc.IdentityResponse{
 		Pid:                pid,
 		Enr:                enr,
 		P2PAddresses:       p2pAddresses,
 		DiscoveryAddresses: discoveryAddresses,
-		Metadata: &sentinelproto.Metadata{
+		Metadata: &sentinelrpc.Metadata{
 			Seq:      metadata.SeqNumber,
 			Attnets:  fmt.Sprintf("%x", metadata.Attnets),
 			Syncnets: fmt.Sprintf("%x", *metadata.Syncnets),
@@ -344,7 +345,7 @@ func (s *SentinelServer) Identity(ctx context.Context, in *sentinelproto.EmptyMe
 
 }
 
-func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelproto.Status) (*sentinelproto.EmptyMessage, error) {
+func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {
 	// Send the request and get the data if we get an answer.
 	s.sentinel.SetStatus(&cltypes.Status{
 		ForkDigest:     utils.Uint32ToBytes4(req.ForkDigest),
@@ -353,26 +354,26 @@ func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelproto.Status)
 		FinalizedEpoch: req.FinalizedEpoch,
 		HeadSlot:       req.HeadSlot,
 	})
-	return &sentinelproto.EmptyMessage{}, nil
+	return &sentinelrpc.EmptyMessage{}, nil
 }
 
-func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelproto.EmptyMessage) (*sentinelproto.PeerCount, error) {
+func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
 	count, connected, disconnected := s.sentinel.GetPeersCount()
 	// Send the request and get the data if we get an answer.
-	return &sentinelproto.PeerCount{
+	return &sentinelrpc.PeerCount{
 		Active:       uint64(count),
 		Connected:    uint64(connected),
 		Disconnected: uint64(disconnected),
 	}, nil
 }
 
-func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelproto.PeersInfoRequest) (*sentinelproto.PeersInfoResponse, error) {
+func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfoRequest) (*sentinelrpc.PeersInfoResponse, error) {
 	peersInfos := s.sentinel.GetPeersInfos()
 	if r.Direction == nil && r.State == nil {
 		return peersInfos, nil
 	}
-	filtered := &sentinelproto.PeersInfoResponse{
-		Peers: make([]*sentinelproto.Peer, 0, len(peersInfos.Peers)),
+	filtered := &sentinelrpc.PeersInfoResponse{
+		Peers: make([]*sentinelrpc.Peer, 0, len(peersInfos.Peers)),
 	}
 	for _, peer := range peersInfos.Peers {
 		if r.Direction != nil && peer.Direction != *r.Direction {
@@ -397,7 +398,7 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
-func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
+func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelrpc.RequestSubscribeExpiry) (*sentinelrpc.EmptyMessage, error) {
 	var (
 		topic      = expiryReq.GetTopic()
 		expiryTime = time.Unix(int64(expiryReq.GetExpiryUnixSecs()), 0)
@@ -407,7 +408,7 @@ func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sent
 		return nil, errors.New("no such subscription")
 	}
 	subs.OverwriteSubscriptionExpiry(expiryTime)
-	return &sentinelproto.EmptyMessage{}, nil
+	return &sentinelrpc.EmptyMessage{}, nil
 }
 
 func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
@@ -466,9 +467,9 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 }
 
 func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
-		diaglib.Send(diaglib.PeerStatisticMsgUpdate{
+		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
 			PeerName: "TODO",
 			PeerType: "Sentinel",
 			PeerID:   peerID,

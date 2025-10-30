@@ -27,10 +27,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/execution/rlp"
 )
 
 var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))

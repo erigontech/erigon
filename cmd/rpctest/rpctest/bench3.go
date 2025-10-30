@@ -20,7 +20,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"maps"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
@@ -50,7 +49,9 @@ func Bench3(erigon_url, geth_url string) error {
 			break
 		} else {
 			page = sr.Result.Next
-			maps.Copy(accRangeTG, sr.Result.Accounts)
+			for k, v := range sr.Result.Accounts {
+				accRangeTG[k] = v
+			}
 		}
 	}
 
@@ -68,7 +69,9 @@ func Bench3(erigon_url, geth_url string) error {
 			break
 		} else {
 			page = sr.Result.Next
-			maps.Copy(accRangeTG, sr.Result.Accounts)
+			for k, v := range sr.Result.Accounts {
+				accRangeTG[k] = v
+			}
 		}
 	}
 
@@ -132,7 +135,9 @@ func Bench3(erigon_url, geth_url string) error {
 			break
 		} else {
 			nextKey = sr.Result.NextKey
-			maps.Copy(sm, sr.Result.Storage)
+			for k, v := range sr.Result.Storage {
+				sm[k] = v
+			}
 		}
 	}
 	fmt.Printf("storageRange: %d\n", len(sm))
@@ -148,7 +153,9 @@ func Bench3(erigon_url, geth_url string) error {
 			break
 		} else {
 			nextKey = srg.Result.NextKey
-			maps.Copy(smg, srg.Result.Storage)
+			for k, v := range srg.Result.Storage {
+				smg[k] = v
+			}
 		}
 	}
 	fmt.Printf("storageRange g: %d\n", len(smg))

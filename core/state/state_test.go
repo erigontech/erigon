@@ -26,138 +26,222 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	checker "gopkg.in/check.v1"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var toAddr = common.BytesToAddress
 
-func TestNull(t *testing.T) {
-	t.Parallel()
-	_, tx, domains := NewTestRwTx(t)
+type StateSuite struct {
+	kv    kv.TemporalRwDB
+	tx    kv.TemporalTx
+	state *IntraBlockState
+	r     StateReader
+	w     StateWriter
+}
+
+var _ = checker.Suite(&StateSuite{})
+
+func (s *StateSuite) TestDump(c *checker.C) {
+	// generate a few entries
+	obj1, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
+	c.Check(err, checker.IsNil)
+	s.state.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	obj2, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	c.Check(err, checker.IsNil)
+	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	obj3, err := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
+	c.Check(err, checker.IsNil)
+	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+
+	// write some of them to the trie
+	err = s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	c.Check(err, checker.IsNil)
+	err = s.w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
+	c.Check(err, checker.IsNil)
+
+	err = s.state.FinalizeTx(&chain.Rules{}, s.w)
+	c.Check(err, checker.IsNil)
+
+	err = s.state.CommitBlock(&chain.Rules{}, s.w)
+	c.Check(err, checker.IsNil)
+
+	// check that dump contains the state objects that are in trie
+	tx, err1 := s.kv.BeginTemporalRo(context.Background())
+	if err1 != nil {
+		c.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
+	want := `{
+    "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
+    "accounts": {
+        "0x0000000000000000000000000000000000000001": {
+            "balance": "22",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000002": {
+            "balance": "44",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000102": {
+            "balance": "0",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
+            "code": "03030303030303"
+        }
+    }
+}`
+	if got != want {
+		c.Errorf("DumpToCollector mismatch:\ngot: %s\nwant: %s\n", got, want)
+	}
+}
+
+func (s *StateSuite) SetUpTest(c *checker.C) {
+	//var agg *state.Aggregator
+	//s.kv, s.tx, agg = memdb.NewTestTemporalDb(c.Logf)
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	agg, err := state.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	if err != nil {
+		panic(err)
+	}
+	defer agg.Close()
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		panic(err)
+	}
+
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	if err != nil {
+		panic(err)
+	}
+	defer domains.Close()
 
 	txNum := uint64(1)
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(t, err)
+	//domains.SetTxNum(txNum)
+	//domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	if err != nil {
+		panic(err)
+	}
+	s.tx = tx
+	s.r = NewReaderV3(domains.AsGetter(tx))
+	s.w = NewWriter(domains.AsPutDel(tx), nil, txNum)
+	s.state = New(s.r)
+}
 
-	r := NewReaderV3(domains.AsGetter(tx))
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	state := New(r)
+func (s *StateSuite) TearDownTest(c *checker.C) {
+	s.tx.Rollback()
+	s.kv.Close()
+}
 
+func (s *StateSuite) TestNull(c *checker.C) {
 	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
-	state.CreateAccount(address, true)
+	s.state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	state.SetState(address, common.Hash{}, value)
+	s.state.SetState(address, common.Hash{}, value)
 
-	err = state.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
+	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
+	c.Check(err, checker.IsNil)
 
-	err = state.CommitBlock(&chain.Rules{}, w)
-	require.NoError(t, err)
+	err = s.state.CommitBlock(&chain.Rules{}, s.w)
+	c.Check(err, checker.IsNil)
 
-	state.GetCommittedState(address, common.Hash{}, &value)
+	s.state.GetCommittedState(address, common.Hash{}, &value)
 	if !value.IsZero() {
-		t.Errorf("expected empty hash. got %x", value)
+		c.Errorf("expected empty hash. got %x", value)
 	}
 }
 
-func TestTouchDelete(t *testing.T) {
-	t.Parallel()
-	_, tx, domains := NewTestRwTx(t)
+func (s *StateSuite) TestTouchDelete(c *checker.C) {
+	s.state.GetOrNewStateObject(common.Address{})
 
-	txNum := uint64(1)
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(t, err)
-
-	r := NewReaderV3(domains.AsGetter(tx))
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	state := New(r)
-
-	state.GetOrNewStateObject(common.Address{})
-
-	err = state.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
-
-	err = state.CommitBlock(&chain.Rules{}, w)
-	require.NoError(t, err)
-
-	state.Reset()
-
-	snapshot := state.Snapshot()
-	state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
-
-	if len(state.journal.dirties) != 1 {
-		t.Fatal("expected one dirty state object")
+	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
+	if err != nil {
+		c.Fatal("error while finalize", err)
 	}
-	state.RevertToSnapshot(snapshot, nil)
-	if len(state.journal.dirties) != 0 {
-		t.Fatal("expected no dirty state object")
+
+	err = s.state.CommitBlock(&chain.Rules{}, s.w)
+	if err != nil {
+		c.Fatal("error while commit", err)
+	}
+
+	s.state.Reset()
+
+	snapshot := s.state.Snapshot()
+	s.state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
+
+	if len(s.state.journal.dirties) != 1 {
+		c.Fatal("expected one dirty state object")
+	}
+	s.state.RevertToSnapshot(snapshot, nil)
+	if len(s.state.journal.dirties) != 0 {
+		c.Fatal("expected no dirty state object")
 	}
 }
 
-func TestSnapshot(t *testing.T) {
-	t.Parallel()
-	_, tx, domains := NewTestRwTx(t)
-
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(t, err)
-
-	r := NewReaderV3(domains.AsGetter(tx))
-	state := New(r)
-
+func (s *StateSuite) TestSnapshot(c *checker.C) {
 	stateobjaddr := toAddr([]byte("aa"))
 	var storageaddr common.Hash
 	data1 := uint256.NewInt(42)
 	data2 := uint256.NewInt(43)
 
 	// snapshot the genesis state
-	genesis := state.Snapshot()
+	genesis := s.state.Snapshot()
 
 	// set initial state object value
-	state.SetState(stateobjaddr, storageaddr, *data1)
-	snapshot := state.Snapshot()
+	s.state.SetState(stateobjaddr, storageaddr, *data1)
+	snapshot := s.state.Snapshot()
 
 	// set a new state object value, revert it and ensure correct content
-	state.SetState(stateobjaddr, storageaddr, *data2)
-	state.RevertToSnapshot(snapshot, nil)
+	s.state.SetState(stateobjaddr, storageaddr, *data2)
+	s.state.RevertToSnapshot(snapshot, nil)
 
 	var value uint256.Int
-	state.GetState(stateobjaddr, storageaddr, &value)
-	require.Equal(t, *data1, value)
-	state.GetCommittedState(stateobjaddr, storageaddr, &value)
-	require.Equal(t, uint256.Int{}, value)
+	s.state.GetState(stateobjaddr, storageaddr, &value)
+	c.Assert(value, checker.DeepEquals, data1)
+	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	c.Assert(value, checker.DeepEquals, common.Hash{})
 
 	// revert up to the genesis state and ensure correct content
-	state.RevertToSnapshot(genesis, nil)
-	state.GetState(stateobjaddr, storageaddr, &value)
-	require.Equal(t, uint256.Int{}, value)
-	state.GetCommittedState(stateobjaddr, storageaddr, &value)
-	require.Equal(t, uint256.Int{}, value)
+	s.state.RevertToSnapshot(genesis, nil)
+	s.state.GetState(stateobjaddr, storageaddr, &value)
+	c.Assert(value, checker.DeepEquals, common.Hash{})
+	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	c.Assert(value, checker.DeepEquals, common.Hash{})
 }
 
-func TestSnapshotEmpty(t *testing.T) {
-	t.Parallel()
-	_, tx, domains := NewTestRwTx(t)
-
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(t, err)
-
-	r := NewReaderV3(domains.AsGetter(tx))
-	state := New(r)
-
-	state.RevertToSnapshot(state.Snapshot(), nil)
+func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
+	s.state.RevertToSnapshot(s.state.Snapshot(), nil)
 }
 
 // use testing instead of checker because checker does not support
@@ -165,10 +249,14 @@ func TestSnapshotEmpty(t *testing.T) {
 func TestSnapshot2(t *testing.T) {
 	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx, domains := NewTestRwTx(t)
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
 
 	txNum := uint64(1)
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
@@ -187,7 +275,9 @@ func TestSnapshot2(t *testing.T) {
 
 	// db, trie are already non-empty values
 	so0, err := state.getStateObject(stateobjaddr0)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal("getting state", err)
+	}
 	so0.SetBalance(*uint256.NewInt(42), tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43)
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
@@ -196,14 +286,20 @@ func TestSnapshot2(t *testing.T) {
 	state.setStateObject(stateobjaddr0, so0)
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal("error while finalizing transaction", err)
+	}
 
 	err = state.CommitBlock(&chain.Rules{}, w)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal("error while committing state", err)
+	}
 
 	// and one with deleted == true
 	so1, err := state.getStateObject(stateobjaddr1)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal("getting state", err)
+	}
 	so1.SetBalance(*uint256.NewInt(52), tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
@@ -212,7 +308,9 @@ func TestSnapshot2(t *testing.T) {
 	state.setStateObject(stateobjaddr1, so1)
 
 	so1, err = state.getStateObject(stateobjaddr1)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal("getting state", err)
+	}
 	if so1 != nil && !so1.deleted {
 		t.Fatalf("deleted object not nil when getting")
 	}
@@ -221,7 +319,9 @@ func TestSnapshot2(t *testing.T) {
 	state.RevertToSnapshot(snapshot, nil)
 
 	so0Restored, err := state.getStateObject(stateobjaddr0)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal("getting restored state", err)
+	}
 	// Update lazily-loaded values before comparing.
 	var tmp uint256.Int
 	so0Restored.GetState(storageaddr, &tmp)
@@ -231,7 +331,9 @@ func TestSnapshot2(t *testing.T) {
 
 	// deleted should be nil, both before and after restore of state copy
 	so1Restored, err := state.getStateObject(stateobjaddr1)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal("getting restored state", err)
+	}
 	if so1Restored != nil && !so1Restored.deleted {
 		t.Fatalf("deleted object not nil after restoring snapshot: %+v", so1Restored)
 	}
@@ -287,29 +389,43 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.SharedDomains) {
+func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.Aggregator) {
 	tb.Helper()
+	db := memdb.NewStateDB(tb.TempDir())
+	tb.Cleanup(db.Close)
 
-	dirs := datadir.New(tb.TempDir())
+	dirs, logger := datadir.New(tb.TempDir()), log.New()
+	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	agg, err := state.NewAggregator2(context.Background(), dirs, 16, salt, db, log.New())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(agg.Close)
 
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	require.NoError(tb, err)
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
 	tb.Cleanup(tx.Rollback)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(tb, err)
-	tb.Cleanup(domains.Close)
-
-	return db, tx, domains
+	return _db, tx, agg
 }
 
 func TestDump(t *testing.T) {
 	t.Parallel()
-	_, tx, domains := NewTestRwTx(t)
+	_, tx, _ := NewTestTemporalDb(t)
 
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))

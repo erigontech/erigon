@@ -25,19 +25,19 @@ import (
 	"io"
 	"math/bits"
 
-	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -237,7 +237,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			if err != nil {
 				return 0, fmt.Errorf("%w: commitment: %s", ErrParseTxn, err) //nolint
 			}
-			var commitment goethkzg.KZGCommitment
+			var commitment gokzg4844.KZGCommitment
 			copy(commitment[:], payload[commitmentPos:commitmentPos+48])
 			slot.BlobBundles[blobIdx].Commitment = commitment
 			commitmentPos += 48
@@ -253,13 +253,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: proofs len: %s", ErrParseTxn, err) //nolint
 		}
 		proofPos := dataPos
-		proofs := make([]goethkzg.KZGProof, 0)
+		proofs := make([]gokzg4844.KZGProof, 0)
 		for proofPos < dataPos+dataLen {
 			proofPos, err = rlp.StringOfLen(payload, proofPos, 48)
 			if err != nil {
 				return 0, fmt.Errorf("%w: proof: %s", ErrParseTxn, err) //nolint
 			}
-			var proof goethkzg.KZGProof
+			var proof gokzg4844.KZGProof
 			copy(proof[:], payload[proofPos:proofPos+48])
 			proofs = append(proofs, proof)
 			proofPos += 48
@@ -843,9 +843,9 @@ type AuthAndNonce struct {
 }
 
 type PoolBlobBundle struct {
-	Commitment goethkzg.KZGCommitment
+	Commitment gokzg4844.KZGCommitment
 	Blob       []byte
-	Proofs     []goethkzg.KZGProof // Can be 1 or more Proofs/CellProofs
+	Proofs     []gokzg4844.KZGProof // Can be 1 or more Proofs/CellProofs
 }
 
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
@@ -896,16 +896,16 @@ func (tx *TxnSlot) Blobs() [][]byte {
 	return b
 }
 
-func (tx *TxnSlot) Commitments() []goethkzg.KZGCommitment {
-	c := make([]goethkzg.KZGCommitment, 0, len(tx.BlobBundles))
+func (tx *TxnSlot) Commitments() []gokzg4844.KZGCommitment {
+	c := make([]gokzg4844.KZGCommitment, 0, len(tx.BlobBundles))
 	for _, bb := range tx.BlobBundles {
 		c = append(c, bb.Commitment)
 	}
 	return c
 }
 
-func (tx *TxnSlot) Proofs() []goethkzg.KZGProof {
-	p := make([]goethkzg.KZGProof, 0, len(tx.BlobBundles))
+func (tx *TxnSlot) Proofs() []gokzg4844.KZGProof {
+	p := make([]gokzg4844.KZGProof, 0, len(tx.BlobBundles))
 	for _, bb := range tx.BlobBundles {
 		p = append(p, bb.Proofs...)
 	}

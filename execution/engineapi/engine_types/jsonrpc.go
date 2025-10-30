@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -74,10 +74,8 @@ type TransitionConfiguration struct {
 	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
-// BlobsBundle holds the blobs of an execution payload.
-// It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
-// and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
-type BlobsBundle struct {
+// BlobsBundleV1 holds the blobs of an execution payload
+type BlobsBundleV1 struct {
 	Commitments []hexutil.Bytes `json:"commitments" gencodec:"required"`
 	Proofs      []hexutil.Bytes `json:"proofs"      gencodec:"required"`
 	Blobs       []hexutil.Bytes `json:"blobs"       gencodec:"required"`
@@ -89,7 +87,7 @@ type BlobAndProofV1 struct {
 	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
 }
 
-// BlobAndProofV2 holds one item for engine_getBlobsV2
+// BlobAndProofV2 holds one item for engine_getBlobsV1
 type BlobAndProofV2 struct {
 	Blob       hexutil.Bytes   `json:"blob" gencodec:"required"`
 	CellProofs []hexutil.Bytes `json:"proofs" gencodec:"required"`
@@ -115,7 +113,7 @@ type ForkChoiceUpdatedResponse struct {
 type GetPayloadResponse struct {
 	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
 	BlockValue            *hexutil.Big      `json:"blockValue"`
-	BlobsBundle           *BlobsBundle      `json:"blobsBundle"`
+	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
 	ExecutionRequests     []hexutil.Bytes   `json:"executionRequests"`
 	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
 }
@@ -164,7 +162,7 @@ func (e *StringifiedError) Error() error {
 	return e.err
 }
 
-func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *ExecutionPayload {
+func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPayload {
 	header := payload.Header
 	body := payload.Body
 
@@ -205,7 +203,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 	return res
 }
 
-func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPayload {
+func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
 	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
 
@@ -243,11 +241,11 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 	return res
 }
 
-func ConvertBlobsFromRpc(bundle *typesproto.BlobsBundle) *BlobsBundle {
+func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
 	if bundle == nil {
 		return nil
 	}
-	res := &BlobsBundle{
+	res := &BlobsBundleV1{
 		Commitments: make([]hexutil.Bytes, len(bundle.Commitments)),
 		Proofs:      make([]hexutil.Bytes, len(bundle.Proofs)),
 		Blobs:       make([]hexutil.Bytes, len(bundle.Blobs)),
@@ -264,13 +262,13 @@ func ConvertBlobsFromRpc(bundle *typesproto.BlobsBundle) *BlobsBundle {
 	return res
 }
 
-func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
+func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 	if in == nil {
 		return nil
 	}
-	out := make([]*typesproto.Withdrawal, 0, len(in))
+	out := make([]*types2.Withdrawal, 0, len(in))
 	for _, w := range in {
-		out = append(out, &typesproto.Withdrawal{
+		out = append(out, &types2.Withdrawal{
 			Index:          w.Index,
 			ValidatorIndex: w.Validator,
 			Address:        gointerfaces.ConvertAddressToH160(w.Address),
@@ -280,7 +278,7 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 	return out
 }
 
-func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal {
+func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 	if in == nil {
 		return nil
 	}

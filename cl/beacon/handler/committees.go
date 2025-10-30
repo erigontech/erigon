@@ -134,7 +134,10 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, err
 	}
 
-	committeesPerSlot := min(a.beaconChainCfg.MaxCommitteesPerSlot, uint64(len(activeIdxs))/a.beaconChainCfg.SlotsPerEpoch/a.beaconChainCfg.TargetCommitteeSize)
+	committeesPerSlot := uint64(len(activeIdxs)) / a.beaconChainCfg.SlotsPerEpoch / a.beaconChainCfg.TargetCommitteeSize
+	if a.beaconChainCfg.MaxCommitteesPerSlot < committeesPerSlot {
+		committeesPerSlot = a.beaconChainCfg.MaxCommitteesPerSlot
+	}
 	if committeesPerSlot < 1 {
 		committeesPerSlot = 1
 	}

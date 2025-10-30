@@ -165,7 +165,10 @@ func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint
 
 // committeeCount retrieves size of sync committee
 func (c *checkpointState) committeeCount(epoch, lenIndicies uint64) uint64 {
-	committeCount := min(c.beaconConfig.MaxCommitteesPerSlot, lenIndicies/c.beaconConfig.SlotsPerEpoch/c.beaconConfig.TargetCommitteeSize)
+	committeCount := lenIndicies / c.beaconConfig.SlotsPerEpoch / c.beaconConfig.TargetCommitteeSize
+	if c.beaconConfig.MaxCommitteesPerSlot < committeCount {
+		committeCount = c.beaconConfig.MaxCommitteesPerSlot
+	}
 	if committeCount < 1 {
 		committeCount = 1
 	}

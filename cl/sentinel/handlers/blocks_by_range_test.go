@@ -58,7 +58,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
+	peersPool := peers.NewPool()
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 

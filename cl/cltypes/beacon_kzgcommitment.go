@@ -20,8 +20,7 @@ import (
 	"encoding/json"
 	"reflect"
 
-	goethkzg "github.com/crate-crypto/go-eth-kzg"
-
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -36,8 +35,8 @@ var (
 	_ ssz2.SizedObjectSSZ = (*KZGProof)(nil)
 )
 
-type Blob goethkzg.Blob
-type KZGProof goethkzg.KZGProof // [48]byte
+type Blob gokzg4844.Blob
+type KZGProof gokzg4844.KZGProof // [48]byte
 
 const (
 	// https://github.com/ethereum/consensus-specs/blob/3a2304981a3b820a22b518fe4859f4bba0ebc83b/specs/deneb/polynomial-commitments.md#custom-types
@@ -47,7 +46,7 @@ const (
 	BYTES_PER_BLOB          = BYTES_PER_FIELD_ELEMENT * FIELD_ELEMENTS_PER_BLOB
 )
 
-type KZGCommitment goethkzg.KZGCommitment
+type KZGCommitment gokzg4844.KZGCommitment
 
 func (b KZGCommitment) MarshalJSON() ([]byte, error) {
 	return json.Marshal(common.Bytes48(b))

@@ -25,26 +25,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/backup"
-	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/integrity"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type CustomTraceCfg struct {
@@ -184,12 +185,12 @@ Loop:
 
 	log.Info("SpawnCustomTrace finish")
 	if cfg.Produce.ReceiptDomain {
-		if err := integrity.ValidateDomainProgress(cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
+		if err := AssertNotBehindAccounts(cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
 			return err
 		}
 	}
 	if cfg.Produce.RCacheDomain {
-		if err := integrity.ValidateDomainProgress(cfg.db, kv.RCacheDomain, txNumsReader); err != nil {
+		if err := AssertNotBehindAccounts(cfg.db, kv.RCacheDomain, txNumsReader); err != nil {
 			return err
 		}
 	}
@@ -246,11 +247,11 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	}
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	var fromStep, toStep kv.Step
+	var fromStep, toStep uint64
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		fromStep = firstStepNotInFiles(tx, produce)
 		if lastTxNum/agg.StepSize() > 0 {
-			toStep = kv.Step(lastTxNum / agg.StepSize())
+			toStep = lastTxNum / agg.StepSize()
 		}
 		return nil
 	}); err != nil {
@@ -271,6 +272,26 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		return err
 	}
 
+	return nil
+}
+
+func AssertNotBehindAccounts(db kv.TemporalRoDB, domain kv.Domain, txNumsReader rawdbv3.TxNumsReader) (err error) {
+	tx, err := db.BeginTemporalRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	receiptProgress := tx.Debug().DomainProgress(domain)
+	accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
+	if accProgress != receiptProgress {
+		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
+		log.Warn(err.Error())
+		return nil
+	}
 	return nil
 }
 
@@ -439,10 +460,10 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 	return txNum
 }
 
-func firstStepNotInFiles(tx kv.Tx, produce Produce) kv.Step {
+func firstStepNotInFiles(tx kv.Tx, produce Produce) uint64 {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	ac := dbstate.AggTx(tx)
-	fromStep := kv.Step(math.MaxUint64)
+	fromStep := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
 		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())
 	}

@@ -21,10 +21,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v2"
-
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -33,7 +31,11 @@ import (
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/diagnostics/mem"
+
+	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	sentinelapp "github.com/erigontech/erigon/turbo/app"
 )
 

@@ -3,19 +3,17 @@ package state
 import (
 	"context"
 	"math/rand"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOpenFolder(t *testing.T) {
@@ -179,7 +177,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	require.Equal(t, 3, len(bodiesFiles))
 	lastBodyFile := bodiesFiles[len(bodiesFiles)-1].decompressor.FilePath()
 	agg.Close()
-	require.NoError(t, dir.RemoveFile(lastBodyFile))
+	require.NoError(t, os.Remove(lastBodyFile))
 
 	// now open folder and check visiblefiles
 	agg = NewForkableAgg(context.Background(), dirs, db, log)
@@ -238,7 +236,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	require.Equal(t, 3, len(bodiesFiles))
 	lastBodyFile := bodiesFiles[len(bodiesFiles)-1].decompressor.FilePath()
 	agg.Close()
-	require.NoError(t, dir.RemoveFile(lastBodyFile))
+	require.NoError(t, os.Remove(lastBodyFile))
 
 	// now open folder and check visiblefiles
 	agg = NewForkableAgg(context.Background(), dirs, db, log)
@@ -447,7 +445,7 @@ func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	return dirs, db, logger
 }
 

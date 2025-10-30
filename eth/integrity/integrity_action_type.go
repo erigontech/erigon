@@ -29,12 +29,11 @@ const (
 	BorEvents          Check = "BorEvents"
 	BorSpans           Check = "BorSpans"
 	BorCheckpoints     Check = "BorCheckpoints"
-	Publishable        Check = "Publishable"
 )
 
 var AllChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents,
-	BorSpans, BorCheckpoints, RCacheNoDups, Publishable,
+	BorSpans, BorCheckpoints, RCacheNoDups,
 }
 
 var NonDefaultChecks = []Check{}

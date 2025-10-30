@@ -20,28 +20,27 @@ import (
 	"slices"
 	"testing"
 
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 func TestSort(t *testing.T) {
 	tests := []struct {
 		name string
-		got  *remoteproto.NodesInfoReply
-		want *remoteproto.NodesInfoReply
+		got  *remote.NodesInfoReply
+		want *remote.NodesInfoReply
 	}{
 		{
 			name: "sort by name",
-			got: &remoteproto.NodesInfoReply{
-				NodesInfo: []*typesproto.NodeInfoReply{
+			got: &remote.NodesInfoReply{
+				NodesInfo: []*types.NodeInfoReply{
 					{Name: "b", Enode: "c"},
 					{Name: "a", Enode: "d"},
 				},
 			},
-			want: &remoteproto.NodesInfoReply{
-				NodesInfo: []*typesproto.NodeInfoReply{
+			want: &remote.NodesInfoReply{
+				NodesInfo: []*types.NodeInfoReply{
 					{Name: "a", Enode: "d"},
 					{Name: "b", Enode: "c"},
 				},
@@ -49,14 +48,14 @@ func TestSort(t *testing.T) {
 		},
 		{
 			name: "sort by enode",
-			got: &remoteproto.NodesInfoReply{
-				NodesInfo: []*typesproto.NodeInfoReply{
+			got: &remote.NodesInfoReply{
+				NodesInfo: []*types.NodeInfoReply{
 					{Name: "a", Enode: "d"},
 					{Name: "a", Enode: "c"},
 				},
 			},
-			want: &remoteproto.NodesInfoReply{
-				NodesInfo: []*typesproto.NodeInfoReply{
+			want: &remote.NodesInfoReply{
+				NodesInfo: []*types.NodeInfoReply{
 					{Name: "a", Enode: "c"},
 					{Name: "a", Enode: "d"},
 				},
@@ -66,7 +65,7 @@ func TestSort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			slices.SortFunc(tt.got.NodesInfo, remoteproto.NodeInfoReplyCmp)
+			slices.SortFunc(tt.got.NodesInfo, remote.NodeInfoReplyCmp)
 			assert.Equal(t, tt.want, tt.got)
 		})
 	}

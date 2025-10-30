@@ -31,7 +31,8 @@ import (
 	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 )
 
 // WebSeeds - allow use HTTP-based infrastructure to support Bittorrent network
@@ -61,8 +62,7 @@ func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSee
 
 	rc := retryablehttp.NewClient()
 	rc.RetryMax = 5
-	// Disable retryablehttp internal logging; we already log via erigon logger
-	rc.Logger = nil
+	rc.Logger = downloadercfg.NewRetryableHttpLogger(logger.New("app", "downloader"))
 	ws.client = rc.StandardClient()
 	return ws
 }

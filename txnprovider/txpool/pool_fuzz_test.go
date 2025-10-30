@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build !nofuzz
+
 package txpool
 
 import (
@@ -26,18 +28,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -479,10 +481,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 			txID = tx.ViewID()
 			return nil
 		})
-		change := &remoteproto.StateChangeBatch{
+		change := &remote.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remoteproto.StateChange{
+			ChangeBatch: []*remote.StateChange{
 				{BlockHeight: 0, BlockHash: h0},
 			},
 		}
@@ -490,8 +492,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 			addr := pool.senders.senderID2Addr[id]
 			v := make([]byte, EncodeSenderLengthForStorage(sender.nonce, sender.balance))
 			EncodeSender(sender.nonce, sender.balance, v)
-			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-				Action:  remoteproto.Action_UPSERT,
+			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+				Action:  remote.Action_UPSERT,
 				Address: gointerfaces.ConvertAddressToH160(addr),
 				Data:    v,
 			})
@@ -504,10 +506,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(txns1, TxnSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txns2, txns3
-		change = &remoteproto.StateChangeBatch{
+		change = &remote.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remoteproto.StateChange{
+			ChangeBatch: []*remote.StateChange{
 				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
@@ -517,11 +519,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(TxnSlots{}, txns2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		change = &remoteproto.StateChangeBatch{
+		change = &remote.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remoteproto.StateChange{
-				{BlockHeight: 0, BlockHash: h0, Direction: remoteproto.Direction_UNWIND},
+			ChangeBatch: []*remote.StateChange{
+				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, txns2, TxnSlots{}, TxnSlots{})
@@ -529,10 +531,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(txns2, TxnSlots{}, "fork2")
 		checkNotify(txns2, TxnSlots{}, "fork2")
 
-		change = &remoteproto.StateChangeBatch{
+		change = &remote.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remoteproto.StateChange{
+			ChangeBatch: []*remote.StateChange{
 				{BlockHeight: 1, BlockHash: h22},
 			},
 		}

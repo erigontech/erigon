@@ -4,12 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/spf13/afero"
-
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/db/datadir"
+	"github.com/spf13/afero"
 )
 
 // ReadOrFetchLatestBeaconState reads the latest beacon state from disk or fetches it from the network.

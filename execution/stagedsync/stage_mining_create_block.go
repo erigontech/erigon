@@ -25,21 +25,21 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethutils"
-	"github.com/erigontech/erigon/execution/builder/buildercfg"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -93,7 +93,7 @@ func (mb *MiningBlock) AvailableRlpSpace(chainConfig *chain.Config, withAddition
 	blockSize += *mb.withdrawalsRlpSize
 	blockSize += mb.TxnsRlpSize(withAdditional...)
 	blockSize += rlp.ListPrefixLen(blockSize)
-	maxSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Time)
+	maxSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Number.Uint64())
 	return maxSize - blockSize
 }
 
@@ -113,13 +113,13 @@ func (mb *MiningBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
 }
 
 type MiningState struct {
-	MiningConfig    *buildercfg.MiningConfig
+	MiningConfig    *params.MiningConfig
 	PendingResultCh chan *types.Block
 	MiningResultCh  chan *types.BlockWithReceipts
 	MiningBlock     *MiningBlock
 }
 
-func NewMiningState(cfg *buildercfg.MiningConfig) MiningState {
+func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),
@@ -253,7 +253,7 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-	ibs := state.New(state.NewReaderV3(txc.Doms.AsGetter(txc.Ttx)))
+	ibs := state.New(state.NewReaderV3(txc.Doms.AsGetter(txc.Tx)))
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",
@@ -263,7 +263,7 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 			"headerParentHash", header.ParentHash.String(),
 			"parentNumber", parent.Number.Uint64(),
 			"parentHash", parent.Hash().String(),
-			"stack", dbg.Stack())
+			"callers", debug.Callers(10))
 		return err
 	}
 

@@ -18,16 +18,10 @@ package sync
 
 import (
 	"context"
-	"time"
 
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type blockProducersReader interface {
-	Producers(ctx context.Context, blockNum uint64) (*heimdall.ValidatorSet, error)
-}
-
-type blockProducersTracker interface {
-	blockProducersReader
-	AnticipateNewSpanWithTimeout(ctx context.Context, timeout time.Duration) (bool, error)
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 }

@@ -12,7 +12,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 func TestScrapper_Run_TransientErr(t *testing.T) {
@@ -64,7 +63,7 @@ func TestScrapper_Run_TransientErr(t *testing.T) {
 			Times(1),
 		fetcher.EXPECT().
 			FetchEntitiesRange(gomock.Any(), gomock.Any()).
-			Return(nil, poshttp.ErrBadGateway).
+			Return(nil, ErrBadGateway).
 			Times(1),
 		fetcher.EXPECT().
 			FetchEntitiesRange(gomock.Any(), gomock.Any()).
@@ -72,7 +71,7 @@ func TestScrapper_Run_TransientErr(t *testing.T) {
 			Times(1),
 	)
 
-	transientErrs := []error{ErrNotInMilestoneList, poshttp.ErrBadGateway}
+	transientErrs := []error{ErrNotInMilestoneList, ErrBadGateway}
 	scrapper := NewScraper[*Milestone]("test", store, fetcher, time.Millisecond, transientErrs, logger)
 
 	eg, ctx := errgroup.WithContext(ctx)

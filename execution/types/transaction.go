@@ -30,13 +30,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/protolambda/ztyp/codec"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 var (
@@ -84,7 +84,6 @@ type Transaction interface {
 	SigningHash(chainID *big.Int) common.Hash
 	GetData() []byte
 	GetAccessList() AccessList
-	GetAuthorizations() []Authorization // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
@@ -400,8 +399,7 @@ type Message struct {
 	maxFeePerBlobGas uint256.Int
 	data             []byte
 	accessList       AccessList
-	checkNonce       bool
-	checkGas         bool
+	checkNonce       bool // if true, skip checking of the nonce, code hash etc
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
@@ -438,7 +436,7 @@ func (m MessageRunMode) ExecutedOnChain() bool { // can use isFree for that??
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
-	checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
+	isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
 	m := Message{
 		from:       from,
@@ -449,7 +447,6 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		data:       data,
 		accessList: accessList,
 		checkNonce: checkNonce,
-		checkGas:   checkGas,
 		isFree:     isFree,
 	}
 	if gasPrice != nil {
@@ -487,10 +484,6 @@ func (m *Message) SetAuthorizations(authorizations []Authorization) {
 func (m *Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
-}
-func (m *Message) CheckGas() bool { return m.checkGas }
-func (m *Message) SetCheckGas(checkGas bool) {
-	m.checkGas = checkGas
 }
 func (m *Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {

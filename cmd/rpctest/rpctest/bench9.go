@@ -18,14 +18,13 @@ package rpctest
 
 import (
 	"fmt"
-	"maps"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
 )
 
 // bench9 tests eth_getProof
-func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
+func Bench9(erigonURL, gethURL string, needCompare bool) error {
 	setRoutes(erigonURL, gethURL)
 
 	var res CallResult
@@ -45,13 +44,6 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 	bn := uint64(lastBlock) - 256
 	page := common.Hash{}.Bytes()
 
-	var resultsCh chan CallResult = nil
-	if !needCompare {
-		resultsCh = make(chan CallResult, 1000)
-		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getProof"}, resultsCh)
-	}
-
 	for len(page) > 0 {
 		accRangeTG := make(map[common.Address]state.DumpAccount)
 		var sr DebugAccountRange
@@ -62,17 +54,14 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 			return fmt.Errorf("Could not get accountRange (Erigon): %v\n", res.Err)
 		}
 
-		getProofBn := bn
-		if latest {
-			getProofBn = 0 // latest
-		}
-
 		if sr.Error != nil {
 			fmt.Printf("Error getting accountRange (Erigon): %d %s\n", sr.Error.Code, sr.Error.Message)
 			break
 		} else {
 			page = sr.Result.Next
-			maps.Copy(accRangeTG, sr.Result.Accounts)
+			for k, v := range sr.Result.Accounts {
+				accRangeTG[k] = v
+			}
 		}
 		for address, dumpAcc := range accRangeTG {
 			var proof EthGetProof
@@ -87,7 +76,7 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 					}
 				}
 			}
-			res = reqGen.Erigon("eth_getProof", reqGen.getProof(getProofBn, address, storageList), &proof)
+			res = reqGen.Erigon("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
 			if res.Err != nil {
 				return fmt.Errorf("Could not get getProof (Erigon): %v\n", res.Err)
 			}
@@ -98,7 +87,7 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 			if needCompare {
 				var gethProof EthGetProof
 
-				res = reqGen.Geth("eth_getProof", reqGen.getProof(getProofBn, address, storageList), &gethProof)
+				res = reqGen.Geth("eth_getProof", reqGen.getProof(bn, address, storageList), &gethProof)
 				if res.Err != nil {
 					return fmt.Errorf("Could not get getProof (geth): %v\n", res.Err)
 				}
@@ -110,8 +99,6 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 					fmt.Printf("Proofs are different\n")
 					break
 				}
-			} else {
-				resultsCh <- res
 			}
 		}
 	}

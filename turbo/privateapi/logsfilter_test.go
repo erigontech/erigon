@@ -25,16 +25,17 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
 var (
 	address1   = common.HexToHash("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	topic1     = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-	address160 *typesproto.H160
-	topic1H256 *typesproto.H256
+	address160 *types2.H160
+	topic1H256 *types2.H256
 )
 
 func init() {
@@ -45,18 +46,18 @@ func init() {
 }
 
 type testServer struct {
-	received         chan *remoteproto.LogsFilterRequest
+	received         chan *remote.LogsFilterRequest
 	receiveCompleted chan struct{}
-	sent             []*remoteproto.SubscribeLogsReply
+	sent             []*remote.SubscribeLogsReply
 	ctx              context.Context
 	grpc.ServerStream
 }
 
 func newTestServer(ctx context.Context) *testServer {
 	ts := &testServer{
-		received:         make(chan *remoteproto.LogsFilterRequest, 256),
+		received:         make(chan *remote.LogsFilterRequest, 256),
 		receiveCompleted: make(chan struct{}, 1),
-		sent:             make([]*remoteproto.SubscribeLogsReply, 0),
+		sent:             make([]*remote.SubscribeLogsReply, 0),
 		ctx:              ctx,
 		ServerStream:     nil,
 	}
@@ -67,12 +68,12 @@ func newTestServer(ctx context.Context) *testServer {
 	return ts
 }
 
-func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
+func (ts *testServer) Send(m *remote.SubscribeLogsReply) error {
 	ts.sent = append(ts.sent, m)
 	return nil
 }
 
-func (ts *testServer) Recv() (*remoteproto.LogsFilterRequest, error) {
+func (ts *testServer) Recv() (*remote.LogsFilterRequest, error) {
 	// notify receive completed when the last request has been processed
 	if len(ts.received) == 0 {
 		ts.receiveCompleted <- struct{}{}
@@ -85,14 +86,14 @@ func (ts *testServer) Recv() (*remoteproto.LogsFilterRequest, error) {
 	return request, nil
 }
 
-func createLog() *remoteproto.SubscribeLogsReply {
-	return &remoteproto.SubscribeLogsReply{
+func createLog() *remote.SubscribeLogsReply {
+	return &remote.SubscribeLogsReply{
 		Address:          gointerfaces.ConvertAddressToH160([20]byte{}),
 		BlockHash:        gointerfaces.ConvertHashToH256([32]byte{}),
 		BlockNumber:      0,
 		Data:             []byte{},
 		LogIndex:         0,
-		Topics:           []*typesproto.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
+		Topics:           []*types2.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
 		TransactionHash:  gointerfaces.ConvertHashToH256([32]byte{}),
 		TransactionIndex: 0,
 		Removed:          false,
@@ -103,10 +104,11 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
-	ctx := t.Context()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	srv := newTestServer(ctx)
 
-	req1 := &remoteproto.LogsFilterRequest{
+	req1 := &remote.LogsFilterRequest{
 		AllAddresses: false,
 		Addresses:    nil,
 		AllTopics:    false,
@@ -125,7 +127,7 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 
 	// now see if a log would be sent or not
 	log := createLog()
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	_ = agg.distributeLogs([]*remote.SubscribeLogsReply{log})
 
 	if len(srv.sent) != 0 {
 		t.Error("expected the sent slice to be empty")
@@ -136,10 +138,11 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
-	ctx := t.Context()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	srv := newTestServer(ctx)
 
-	req1 := &remoteproto.LogsFilterRequest{
+	req1 := &remote.LogsFilterRequest{
 		AllAddresses: true,
 		Addresses:    nil,
 		AllTopics:    true,
@@ -158,21 +161,21 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 
 	// now see if a log would be sent or not
 	log := createLog()
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	_ = agg.distributeLogs([]*remote.SubscribeLogsReply{log})
 	if len(srv.sent) != 1 {
 		t.Error("expected the sent slice to have the log present")
 	}
 
 	log = createLog()
-	log.Topics = []*typesproto.H256{topic1H256}
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	log.Topics = []*types2.H256{topic1H256}
+	_ = agg.distributeLogs([]*remote.SubscribeLogsReply{log})
 	if len(srv.sent) != 2 {
 		t.Error("expected any topic to be allowed through the filter")
 	}
 
 	log = createLog()
 	log.Address = address160
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	_ = agg.distributeLogs([]*remote.SubscribeLogsReply{log})
 	if len(srv.sent) != 3 {
 		t.Error("expected any address to be allowed through the filter")
 	}
@@ -182,14 +185,15 @@ func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
-	ctx := t.Context()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	srv := newTestServer(ctx)
 
-	req1 := &remoteproto.LogsFilterRequest{
+	req1 := &remote.LogsFilterRequest{
 		AllAddresses: true, // need to allow all addresses on the request else it will filter on them
 		Addresses:    nil,
 		AllTopics:    false,
-		Topics:       []*typesproto.H256{topic1H256},
+		Topics:       []*types2.H256{topic1H256},
 	}
 	srv.received <- req1
 
@@ -204,14 +208,14 @@ func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
 
 	// now see if a log would be sent or not
 	log := createLog()
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	_ = agg.distributeLogs([]*remote.SubscribeLogsReply{log})
 	if len(srv.sent) != 0 {
 		t.Error("the sent slice should be empty as the topic didn't match")
 	}
 
 	log = createLog()
-	log.Topics = []*typesproto.H256{topic1H256}
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	log.Topics = []*types2.H256{topic1H256}
+	_ = agg.distributeLogs([]*remote.SubscribeLogsReply{log})
 	if len(srv.sent) != 1 {
 		t.Error("expected the log to be distributed as the topic matched")
 	}
@@ -221,14 +225,15 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
-	ctx := t.Context()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	srv := newTestServer(ctx)
 
-	req1 := &remoteproto.LogsFilterRequest{
+	req1 := &remote.LogsFilterRequest{
 		AllAddresses: false,
-		Addresses:    []*typesproto.H160{address160},
+		Addresses:    []*types2.H160{address160},
 		AllTopics:    true,
-		Topics:       []*typesproto.H256{},
+		Topics:       []*types2.H256{},
 	}
 	srv.received <- req1
 
@@ -243,14 +248,14 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 
 	// now see if a log would be sent or not
 	log := createLog()
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	_ = agg.distributeLogs([]*remote.SubscribeLogsReply{log})
 	if len(srv.sent) != 0 {
 		t.Error("the sent slice should be empty as the address didn't match")
 	}
 
 	log = createLog()
 	log.Address = address160
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	_ = agg.distributeLogs([]*remote.SubscribeLogsReply{log})
 	if len(srv.sent) != 1 {
 		t.Error("expected the log to be distributed as the address matched")
 	}

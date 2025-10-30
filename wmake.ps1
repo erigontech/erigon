@@ -23,11 +23,13 @@ Param(
     [ValidateSet(
         "clean",
         "db-tools",
+        "devnet",
         "downloader",
         "erigon",
         "evm",
         "hack",
         "integration",
+        "observer",
         "pics",
         "rpcdaemon",
         "rpctest",
@@ -70,11 +72,13 @@ if ($BuildTargets.Count -gt 1) {
 
 if ($BuildTargets[0] -eq "all") {
     $BuildTargets = @(
+        "devnet",
         "downloader",
         "erigon",
         "evm",
         "hack",
         "integration",
+        "observer",
         "pics",
         "rpcdaemon",
         "rpctest",
@@ -416,7 +420,7 @@ $Erigon.BuildTags = "nosqlite,noboltdb"
 $Erigon.Package = "github.com/erigontech/erigon"
 
 $Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"
-$Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/db/version.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/db/version.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/db/version.GitTag=$($Erigon.Tag)"""
+$Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/params.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/params.GitTag=$($Erigon.Tag)"""
 
 $Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:CGO_CFLAGS = "-g -O2 -D__BLST_PORTABLE__"
@@ -519,7 +523,6 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-short") {
     Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $env:GOEXPERIMENT = "synctest"
     $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
@@ -534,7 +537,6 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-all") {
     Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $env:GOEXPERIMENT = "synctest"
     $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {

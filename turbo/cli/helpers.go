@@ -25,7 +25,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/params"
 )
 
 // HelpData is a one shot struct to pass to the usage template
@@ -66,7 +66,7 @@ func (a ByCategory) Less(i, j int) bool {
 func NewApp(gitCommit, usage string) *cli.App {
 	app := cli.NewApp()
 	app.Name = filepath.Base(os.Args[0])
-	app.Version = version.VersionWithCommit(gitCommit)
+	app.Version = params.VersionWithCommit(gitCommit)
 	app.Usage = usage
 	return app
 }

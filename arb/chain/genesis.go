@@ -5,7 +5,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/types"
 )
 

@@ -25,7 +25,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/types/accounts"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 const (

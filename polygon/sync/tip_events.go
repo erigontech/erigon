@@ -26,16 +26,15 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 type EventType string
 
 const EventTypeNewBlock EventType = "new-block"
-const EventTypeNewBlockBatch EventType = "new-block-batch"
 const EventTypeNewBlockHashes EventType = "new-block-hashes"
 const EventTypeNewMilestone EventType = "new-milestone"
 
@@ -60,13 +59,6 @@ type EventNewBlock struct {
 	Source   EventSource
 }
 
-type EventNewBlockBatch struct { // new batch of blocks from peer
-	NewBlocks []*types.Block
-	PeerId    *p2p.PeerId
-	Source    EventSource
-	Processed chan<- error // closed with nil error when processed successfully, otherwise error sent
-}
-
 type EventNewBlockHashes struct {
 	NewBlockHashes eth.NewBlockHashesPacket
 	PeerId         *p2p.PeerId
@@ -78,7 +70,6 @@ type Event struct {
 	Type EventType
 
 	newBlock       EventNewBlock
-	newBlockBatch  EventNewBlockBatch
 	newBlockHashes EventNewBlockHashes
 	newMilestone   EventNewMilestone
 }
@@ -87,7 +78,7 @@ func (e Event) Topic() EventTopic {
 	switch e.Type {
 	case EventTypeNewMilestone:
 		return EventTopicHeimdall
-	case EventTypeNewBlock, EventTypeNewBlockBatch, EventTypeNewBlockHashes:
+	case EventTypeNewBlock, EventTypeNewBlockHashes:
 		return EventTopicP2P
 	default:
 		panic(fmt.Sprintf("unknown event type: %s", e.Type))
@@ -99,13 +90,6 @@ func (e Event) AsNewBlock() EventNewBlock {
 		panic("Event type mismatch")
 	}
 	return e.newBlock
-}
-
-func (e Event) AsNewBlockBatch() EventNewBlockBatch {
-	if e.Type != EventTypeNewBlockBatch {
-		panic("Event type mismatch")
-	}
-	return e.newBlockBatch
 }
 
 func (e Event) AsNewBlockHashes() EventNewBlockHashes {

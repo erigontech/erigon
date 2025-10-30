@@ -20,18 +20,19 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv/remotedbserver"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpoolproto.TxpoolServer,
@@ -44,7 +45,7 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	}
 
 	grpcServer := grpcutil.NewServer(rateLimit, creds)
-	remoteproto.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
+	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 	if txPoolServer != nil {
 		txpoolproto.RegisterTxpoolServer(grpcServer, txPoolServer)
 	}
@@ -52,13 +53,13 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 		txpoolproto.RegisterMiningServer(grpcServer, miningServer)
 	}
 	if bridgeServer != nil {
-		remoteproto.RegisterBridgeBackendServer(grpcServer, bridgeServer)
+		remote.RegisterBridgeBackendServer(grpcServer, bridgeServer)
 	}
 	if heimdallServer != nil {
-		remoteproto.RegisterHeimdallBackendServer(grpcServer, heimdallServer)
+		remote.RegisterHeimdallBackendServer(grpcServer, heimdallServer)
 	}
 
-	remoteproto.RegisterKVServer(grpcServer, kv)
+	remote.RegisterKVServer(grpcServer, kv)
 	var healthServer *health.Server
 	if healthCheck {
 		healthServer = health.NewServer()

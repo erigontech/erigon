@@ -72,10 +72,3 @@ func (f *operationFeed) SendBlobSidecar(value *BlobSidecarData) int {
 		Data:  value,
 	})
 }
-
-func (f *operationFeed) SendDataColumnSidecar(value *DataColumnSidecarData) int {
-	return f.feed.Send(&EventStream{
-		Event: OpDataColumnSidecar,
-		Data:  value,
-	})
-}

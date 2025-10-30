@@ -28,9 +28,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 const (
@@ -38,11 +37,10 @@ const (
 )
 
 type ServiceConfig struct {
-	Store       Store
-	ChainConfig *chain.Config
-	BorConfig   *borcfg.BorConfig
-	Client      Client
-	Logger      log.Logger
+	Store     Store
+	BorConfig *borcfg.BorConfig
+	Client    Client
+	Logger    log.Logger
 }
 
 type Service struct {
@@ -59,7 +57,6 @@ type Service struct {
 
 func NewService(config ServiceConfig) *Service {
 	logger := config.Logger
-	chainConfig := config.ChainConfig
 	borConfig := config.BorConfig
 	store := config.Store
 	client := config.Client
@@ -72,7 +69,7 @@ func NewService(config ServiceConfig) *Service {
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
-		poshttp.TransientErrors,
+		TransientErrors,
 		logger,
 	)
 
@@ -81,7 +78,7 @@ func NewService(config ServiceConfig) *Service {
 	// has been already pruned. Additionally, we've been observing this error happening sporadically for the
 	// latest milestone.
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
-	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, poshttp.TransientErrors...)
+	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, TransientErrors...)
 	milestoneScraper := NewScraper(
 		"milestones",
 		store.Milestones(),
@@ -95,19 +92,19 @@ func NewService(config ServiceConfig) *Service {
 		"spans",
 		store.Spans(),
 		spanFetcher,
-		200*time.Millisecond,
-		poshttp.TransientErrors,
+		1*time.Second,
+		TransientErrors,
 		logger,
 	)
 
 	return &Service{
 		logger:                    logger,
 		store:                     store,
-		reader:                    NewReader(chainConfig, borConfig, store, logger),
+		reader:                    NewReader(borConfig, store, logger),
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, chainConfig, borConfig, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 		client:                    client,
 	}
 }
@@ -181,11 +178,6 @@ func (s *Service) SynchronizeMilestones(ctx context.Context) (*Milestone, bool, 
 	return s.milestoneScraper.Synchronize(ctx)
 }
 
-func (s *Service) AnticipateNewSpanWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
-	s.logger.Info(heimdallLogPrefix(fmt.Sprintf("anticipating new span update within %.0f seconds", timeout.Seconds())))
-	return s.spanBlockProducersTracker.AnticipateNewSpanWithTimeout(ctx, timeout)
-}
-
 func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
 
@@ -228,37 +220,6 @@ func (s *Service) synchronizeSpans(ctx context.Context) error {
 	return nil
 }
 
-// wait until heimdall CatchingUp status is false
-func (s *Service) WaitUntilHeimdallIsSynced(ctx context.Context, retryInterval time.Duration) error {
-	logInterval := 10 * time.Second
-	var lastLogTime time.Time
-
-	catchingUp, err := s.IsCatchingUp(ctx)
-	if err != nil {
-		return err
-	}
-	if !catchingUp {
-		return nil
-	}
-	for catchingUp {
-		if time.Since(lastLogTime) >= logInterval {
-			s.logger.Warn("waiting for heimdall to be synced")
-			lastLogTime = time.Now()
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(retryInterval):
-			catchingUp, err = s.IsCatchingUp(ctx)
-			if err != nil {
-				return err
-			}
-		}
-
-	}
-	return nil
-}
-
 func (s *Service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*Checkpoint, error) {
 	return s.reader.CheckpointsFromBlock(ctx, startBlock)
 }
@@ -267,7 +228,7 @@ func (s *Service) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([
 	return s.reader.MilestonesFromBlock(ctx, startBlock)
 }
 
-func (s *Service) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error) {
+func (s *Service) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
 	return s.reader.Producers(ctx, blockNum)
 }
 
@@ -363,16 +324,16 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	s.RegisterSpanObserver(func(span *Span) {
-		s.spanBlockProducersTracker.ObserveSpanAsync(ctx, span)
+		s.spanBlockProducersTracker.ObserveSpanAsync(span)
 	})
 
 	milestoneObserver := s.RegisterMilestoneObserver(func(milestone *Milestone) {
-		poshttp.UpdateObservedWaypointMilestoneLength(milestone.Length())
+		UpdateObservedWaypointMilestoneLength(milestone.Length())
 	})
 	defer milestoneObserver()
 
 	checkpointObserver := s.RegisterCheckpointObserver(func(checkpoint *Checkpoint) {
-		poshttp.UpdateObservedWaypointCheckpointLength(checkpoint.Length())
+		UpdateObservedWaypointCheckpointLength(checkpoint.Length())
 	}, WithEventsLimit(5))
 	defer checkpointObserver()
 

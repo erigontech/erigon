@@ -23,27 +23,27 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/jsonstream"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/transactions"
@@ -305,14 +305,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 
 	var fromBlock uint64
 	var toBlock uint64
-	var err error
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, api.filters)
-		if err != nil {
-			return err
-		}
+		fromBlock = uint64(*req.FromBlock)
 	}
 
 	if req.ToBlock == nil {
@@ -322,10 +318,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		}
 		toBlock = *headNumber
 	} else {
-		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, api.filters)
-		if err != nil {
-			return err
-		}
+		toBlock = uint64(*req.ToBlock)
 	}
 	if fromBlock > toBlock {
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
@@ -434,8 +427,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
-			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-			lastRules = blockCtx.Rules(chainConfig)
+
+			var arbosVersion uint64
+			if chainConfig.IsArbitrum() {
+				arbosVersion = types.DeserializeHeaderExtraInformation(lastHeader).ArbOSFormatVersion
+			}
+			lastRules = chainConfig.Rules(blockNum, lastHeader.Time, arbosVersion)
 		}
 		if isFnalTxn {
 			// TODO(yperbasis) proper rewards for Gnosis
@@ -583,6 +580,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
 		//cachedWriter := noop
 
+		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
 		ot.config, err = parseOeTracerConfig(traceConfig)
@@ -732,9 +730,12 @@ func (api *TraceAPIImpl) callBlock(
 
 	parentNo := rpc.BlockNumber(pNo)
 	header := block.Header()
-	engine := api.engine()
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
-	rules := blockCtx.Rules(cfg)
+
+	var arbosVersion uint64
+	if cfg.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := cfg.Rules(blockNumber, block.Time(), arbosVersion)
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
 	var borStateSyncTxnHash common.Hash
@@ -774,6 +775,7 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
+	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
@@ -843,9 +845,12 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-	engine := api.engine()
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
-	rules := blockCtx.Rules(cfg)
+
+	var arbosVersion uint64
+	if cfg.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := cfg.Rules(blockNumber, header.Time, arbosVersion)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
 	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil
@@ -888,6 +893,7 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
+	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
@@ -928,13 +934,13 @@ func (api *TraceAPIImpl) callTransaction(
 
 // TraceFilterRequest represents the arguments for trace_filter
 type TraceFilterRequest struct {
-	FromBlock   *rpc.BlockNumberOrHash `json:"fromBlock"`
-	ToBlock     *rpc.BlockNumberOrHash `json:"toBlock"`
-	FromAddress []*common.Address      `json:"fromAddress"`
-	ToAddress   []*common.Address      `json:"toAddress"`
-	Mode        TraceFilterMode        `json:"mode"`
-	After       *uint64                `json:"after"`
-	Count       *uint64                `json:"count"`
+	FromBlock   *hexutil.Uint64   `json:"fromBlock"`
+	ToBlock     *hexutil.Uint64   `json:"toBlock"`
+	FromAddress []*common.Address `json:"fromAddress"`
+	ToAddress   []*common.Address `json:"toAddress"`
+	Mode        TraceFilterMode   `json:"mode"`
+	After       *uint64           `json:"after"`
+	Count       *uint64           `json:"count"`
 }
 
 type TraceFilterMode string

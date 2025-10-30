@@ -26,14 +26,14 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	_debug "github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func ListenSignals(stack io.Closer, logger log.Logger) {
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, unix.SIGINT, unix.SIGTERM)
-	dbg.GetSigC(&sigc)
+	_debug.GetSigC(&sigc)
 	defer signal.Stop(sigc)
 
 	usr1 := make(chan os.Signal, 1)
