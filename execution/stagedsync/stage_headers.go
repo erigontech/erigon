@@ -74,7 +74,8 @@ type HeadersCfg struct {
 
 	syncConfig ethconfig.Sync
 
-	L2RPCAddr string // L2 RPC address for Arbitrum
+	L2RPCAddr      string // L2 RPC address for Arbitrum
+	ReceiptRPCAddr string // L2 RPC address for fetching receipts (if different from L2RPCAddr)
 }
 
 func StageHeadersCfg(
@@ -93,6 +94,7 @@ func StageHeadersCfg(
 	tmpdir string,
 	notifications *shards.Notifications,
 	L2RPCAddr string, // L2 RPC address for Arbitrum
+	ReceiptRPCAddr string,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -110,6 +112,7 @@ func StageHeadersCfg(
 		blockWriter:       blockWriter,
 		notifications:     notifications,
 		L2RPCAddr:         L2RPCAddr,
+		ReceiptRPCAddr:    ReceiptRPCAddr,
 	}
 }
 
@@ -146,6 +149,16 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Warn("Error connecting to RPC", "err", err)
 		return err
 	}
+
+	var receiptClient *rpc.Client
+	if cfg.ReceiptRPCAddr != "" {
+		receiptClient, err = rpc.Dial(cfg.ReceiptRPCAddr, log.Root())
+		if err != nil {
+			log.Warn("Error connecting to receipt RPC", "err", err, "url", cfg.ReceiptRPCAddr)
+			return err
+		}
+	}
+
 	var curBlock uint64
 	curBlock, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {

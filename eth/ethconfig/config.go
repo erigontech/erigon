@@ -276,7 +276,8 @@ type Config struct {
 
 	ElBlockDownloaderV2 bool
 
-	L2RPCAddr string
+	L2RPCAddr        string
+	L2RPCReceiptAddr string
 }
 
 type Sync struct {

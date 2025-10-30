@@ -186,7 +186,11 @@ func withUnwindTypes(cmd *cobra.Command) {
 }
 
 func withL2RPCaddress(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&cli.L2RPCAddrFlag.Name, "l2rpc", "", cli.L2RPCAddrFlag.Usage)
+	cmd.Flags().StringVar(&cli.L2RPCAddrFlag.Name, cli.L2RPCAddrFlag.Name, "", cli.L2RPCAddrFlag.Usage)
+}
+
+func withL2RPCReceiptAddress(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&cli.L2RPCReceiptAddrFlag.Name, cli.L2RPCReceiptAddrFlag.Name, "", cli.L2RPCReceiptAddrFlag.Usage)
 }
 
 func withChaosMonkey(cmd *cobra.Command) {
