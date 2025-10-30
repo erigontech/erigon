@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -38,7 +39,7 @@ type DynamicFeeTransaction struct {
 	TipCap      *uint256.Int
 	FeeCap      *uint256.Int
 	AccessList  AccessList
-	Timeboosted bool
+	Timeboosted *bool
 }
 
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
@@ -83,7 +84,9 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 		FeeCap:     new(uint256.Int),
 	}
 	copy(cpy.AccessList, tx.AccessList)
-	cpy.Timeboosted = tx.Timeboosted
+	if tx.Timeboosted != nil {
+		cpy.Timeboosted = &(*tx.Timeboosted)
+	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -107,12 +110,12 @@ func (tx *DynamicFeeTransaction) GetAccessList() AccessList {
 }
 
 func (tx *DynamicFeeTransaction) EncodingSize() int {
-	payloadSize, _, _, _ := tx.payloadSize()
+	payloadSize, _, _, _ := tx.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
+func (tx *DynamicFeeTransaction) payloadSize(hashingOnly bool) (payloadSize, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
@@ -133,7 +136,7 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	// size of To
 	payloadSize++
 	if tx.To != nil {
-		payloadSize += 20
+		payloadSize += length.Addr
 	}
 	// size of Value
 	payloadSize++
@@ -153,8 +156,7 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 
-	if tx.Timeboosted {
-		// size of Timeboosted
+	if tx.Timeboosted != nil && !hashingOnly {
 		payloadSize++
 		payloadSize += rlp.BoolLen()
 	}
@@ -179,7 +181,7 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
 func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode TxType
@@ -187,13 +189,28 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, false); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen int) error {
+func (tx *DynamicFeeTransaction) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(true)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = DynamicFeeTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -250,9 +267,8 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
-	if tx.Timeboosted {
-		// encode Timeboosted
-		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+	if tx.Timeboosted != nil && !hashingOnly {
+		if err := rlp.EncodeBool(*tx.Timeboosted, w, b); err != nil {
 			return err
 		}
 	}
@@ -260,7 +276,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 }
 
 func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
@@ -274,7 +290,7 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, false); err != nil {
 		return err
 	}
 	return nil
@@ -345,11 +361,8 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		if err != nil {
 			return err
 		}
-		tx.Timeboosted = boolVal
-		return s.ListEnd()
+		tx.Timeboosted = &boolVal
 	}
-	// List already completed, set default.
-	tx.Timeboosted = false
 	return s.ListEnd()
 }
 
@@ -456,11 +469,11 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
 	return addr, nil
 }
 
-func (tx *DynamicFeeTransaction) IsTimeBoosted() bool {
+func (tx *DynamicFeeTransaction) IsTimeBoosted() *bool {
 	return tx.Timeboosted
 }
 
-func (tx *DynamicFeeTransaction) SetTimeboosted(val bool) {
+func (tx *DynamicFeeTransaction) SetTimeboosted(val *bool) {
 	tx.Timeboosted = val
 }
 

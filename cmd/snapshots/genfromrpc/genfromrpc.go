@@ -811,17 +811,18 @@ func commitUpdate(ctx context.Context, db kv.RwDB, blocks []*types.Block) error 
 				return err
 			}
 			rawdb.WriteHeadBlockHash(tx, blk.Hash())
-			if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
-				return err
+
+			syncStages := []stages.SyncStage{
+				stages.Snapshots,
+				stages.Headers,
+				stages.BlockHashes,
+				stages.Bodies,
+				stages.Senders,
 			}
-			if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
-				return err
-			}
-			if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
-				return err
-			}
-			if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
-				return err
+			for _, stage := range syncStages {
+				if err := stages.SaveStageProgress(tx, stage, blockNum); err != nil {
+					return fmt.Errorf("failed to save stage progress for stage %q at block %d: %w", stage, blockNum, err)
+				}
 			}
 		}
 		return nil

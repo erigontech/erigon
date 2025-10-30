@@ -135,14 +135,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
 	}
 
-	syncStages := []stages.SyncStage{
-		stages.Snapshots,
-		stages.Headers,
-		stages.BlockHashes,
-		stages.Bodies,
-		stages.Senders,
-	}
-
 	jsonRpcAddr := cfg.L2RPCAddr
 	client, err := rpc.Dial(jsonRpcAddr, log.Root())
 	if err != nil {

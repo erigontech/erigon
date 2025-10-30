@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -95,7 +96,7 @@ func (ct *CommonTx) GetBlobHashes() []common.Hash {
 type LegacyTx struct {
 	CommonTx
 	GasPrice    *uint256.Int // wei per gas
-	Timeboosted bool
+	Timeboosted *bool
 }
 
 func (tx *LegacyTx) GetTipCap() *uint256.Int { return tx.GasPrice }
@@ -129,11 +130,11 @@ func (tx *LegacyTx) Unwrap() Transaction {
 	return tx
 }
 
-func (tx *LegacyTx) IsTimeBoosted() bool {
+func (tx *LegacyTx) IsTimeBoosted() *bool {
 	return tx.Timeboosted
 }
 
-func (tx *LegacyTx) SetTimeboosted(val bool) {
+func (tx *LegacyTx) SetTimeboosted(val *bool) {
 	tx.Timeboosted = val
 }
 
@@ -180,6 +181,10 @@ func (tx *LegacyTx) copy() *LegacyTx {
 		},
 		GasPrice: new(uint256.Int),
 	}
+	if tx.Timeboosted != nil {
+		val := *tx.Timeboosted
+		cpy.Timeboosted = &val
+	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -193,11 +198,11 @@ func (tx *LegacyTx) copy() *LegacyTx {
 }
 
 func (tx *LegacyTx) EncodingSize() int {
-	payloadSize, _, _ := tx.payloadSize()
+	payloadSize, _, _ := tx.payloadSize(true)
 	return payloadSize
 }
 
-func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
+func (tx *LegacyTx) payloadSize(hashingOnly bool) (payloadSize, nonceLen, gasLen int) {
 	payloadSize++
 	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
 	payloadSize += nonceLen
@@ -208,7 +213,7 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize += gasLen
 	payloadSize++
 	if tx.To != nil {
-		payloadSize += 20
+		payloadSize += length.Addr
 	}
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
@@ -221,8 +226,10 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
-
-	if tx.Timeboosted {
+	if hashingOnly {
+		return
+	}
+	if tx.Timeboosted != nil {
 		payloadSize++
 		payloadSize += rlp.BoolLen()
 	}
@@ -231,16 +238,26 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 }
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	payloadSize, nonceLen, gasLen := tx.payloadSize(false)
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, false); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+func (tx *LegacyTx) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize, nonceLen, gasLen := tx.payloadSize(true)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -291,21 +308,22 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
+	if hashingOnly {
+		return nil
+	}
 
-	if tx.Timeboosted {
-		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
-			return err
-		}
+	if tx.Timeboosted != nil {
+		return rlp.EncodeBool(*tx.Timeboosted, w, b)
 	}
 	return nil
 
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
-	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	payloadSize, nonceLen, gasLen := tx.payloadSize(false)
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, false); err != nil {
 		return err
 	}
 	return nil
@@ -362,17 +380,9 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		if err != nil {
 			return err
 		}
-		tx.Timeboosted = boolVal
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close txn struct: %w", err)
-		}
-		return nil
+		tx.Timeboosted = &boolVal
 	}
-
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close txn struct: %w", err)
-	}
-	return nil
+	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.

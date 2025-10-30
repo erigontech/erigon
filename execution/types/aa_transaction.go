@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/arb"
 	"github.com/erigontech/erigon/execution/abi"
 )
 
@@ -31,6 +32,8 @@ var AA_ENTRY_POINT = common.HexToAddress("0x000000000000000000000000000000000000
 var AA_SENDER_CREATOR = common.HexToAddress("0x00000000000000000000000000000000ffff7560")
 
 type AccountAbstractionTransaction struct {
+	arb.NoTimeBoosted
+
 	TransactionMisc
 	Nonce      uint64
 	ChainID    *uint256.Int
@@ -89,14 +92,6 @@ func (tx *AccountAbstractionTransaction) IsContractDeploy() bool {
 
 func (tx *AccountAbstractionTransaction) Unwrap() Transaction {
 	return tx
-}
-
-func (tx *AccountAbstractionTransaction) IsTimeBoosted() bool {
-	return false
-}
-
-func (tx *AccountAbstractionTransaction) SetTimeboosted(bool) {
-	// Always false
 }
 
 func (tx *AccountAbstractionTransaction) GetChainID() *uint256.Int {
