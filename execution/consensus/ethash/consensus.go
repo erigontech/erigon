@@ -657,7 +657,7 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 	headerNum, _ := uint256.FromBig(header.Number)
 	for _, uncle := range uncles {
 		uncleNum, _ := uint256.FromBig(uncle.Number)
-		r.Add(uncleNum, u256.Num8)
+		r.Add(uncleNum, &u256.Num8)
 		r.Sub(r, headerNum)
 		r.Mul(r, blockReward)
 		r.Rsh(r, 3) // ÷8

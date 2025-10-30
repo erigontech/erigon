@@ -477,7 +477,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 		return nil, err
 	}
 
-	validationTracer := aa.NewValidationRulesTracer(*aaTxn.SenderAddress, senderCodeSize != 0)
+	validationTracer := aa.NewValidationRulesTracer(accounts.InternAddress(*aaTxn.SenderAddress), senderCodeSize != 0)
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
 	ibs.SetHooks(validationTracer.Hooks())
 

@@ -52,7 +52,7 @@ func NewService(config ServiceConfig) *Service {
 		logger:              config.Logger,
 		borConfig:           config.BorConfig,
 		eventFetcher:        config.EventFetcher,
-		reader:              NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContractAddress().Value()),
+		reader:              NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContractAddress()),
 		transientErrors:     poshttp.TransientErrors,
 		fetchedEventsSignal: make(chan struct{}),
 	}

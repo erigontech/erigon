@@ -211,17 +211,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.GetTo() == nil && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
-		var to *common.Address
-		if !msg.To().IsNil() {
-			toVal := msg.To().Value()
-			to = &toVal
-		}
-		msg = types.NewMessage(msg.From().Value(), to, msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
+		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	} else {
 		msg.ChangeGas(api.GasCap, api.GasCap)
 	}
 	txCtx = core.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: address, code: *code, gasCap: api.GasCap}
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: *code, gasCap: api.GasCap}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 
 	// Execute the transaction message

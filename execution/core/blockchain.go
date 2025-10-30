@@ -280,7 +280,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	isBor := chainConfig.Bor != nil
 	msg := types.NewMessage(
 		state.SystemAddress,
-		&contract,
+		contract,
 		0, &u256.Num0,
 		SysCallGasLimit,
 		&u256.Num0,
@@ -307,7 +307,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 
 	ret, _, err := evm.Call(
 		msg.From(),
-		*msg.To(),
+		msg.To(),
 		msg.Data(),
 		msg.Gas(),
 		*msg.Value(),
@@ -321,13 +321,13 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
-func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
+func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
 	msg := types.NewMessage(
 		contract,
-		nil, // to
-		0, u256.Num0,
+		accounts.NilAddress, // to
+		0, &u256.Num0,
 		SysCallGasLimit,
-		u256.Num0,
+		&u256.Num0,
 		nil, nil,
 		data, nil,
 		false, // checkNonce
@@ -338,7 +338,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	author := &contract
+	author := contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
@@ -363,7 +363,7 @@ func FinalizeBlockExecution(
 	logger log.Logger,
 	tracer *tracing.Hooks,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
@@ -377,7 +377,7 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
 	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
@@ -395,7 +395,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
 	ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 	return nil
 }

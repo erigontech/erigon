@@ -1651,10 +1651,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		//Regular txn threshold checks
 		tipThreshold := uint256.NewInt(0)
 		tipThreshold = tipThreshold.Mul(&found.TxnSlot.Tip, uint256.NewInt(100+priceBump))
-		tipThreshold.Div(tipThreshold, u256.N100)
+		tipThreshold.Div(tipThreshold, &u256.N100)
 		feecapThreshold := uint256.NewInt(0)
 		feecapThreshold.Mul(&found.TxnSlot.FeeCap, uint256.NewInt(100+priceBump))
-		feecapThreshold.Div(feecapThreshold, u256.N100)
+		feecapThreshold.Div(feecapThreshold, &u256.N100)
 
 		if mt.TxnSlot.Value.Cmp(&found.TxnSlot.Value) > 0 {
 			//Potential latent overdraft attack

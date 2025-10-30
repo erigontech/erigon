@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -101,15 +102,15 @@ type TxResult struct {
 	ExecutionResult   evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
 	Err               error
-	Coinbase          common.Address
+	Coinbase          accounts.Address
 	TxIn              state.ReadSet
 	TxOut             state.VersionedWrites
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms map[common.Address]struct{}
-	TraceTos   map[common.Address]struct{}
+	TraceFroms map[accounts.Address]struct{}
+	TraceTos   map[accounts.Address]struct{}
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -211,7 +212,7 @@ type TxTask struct {
 	Withdrawals        types.Withdrawals
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[common.Address]uint256.Int
+	BalanceIncreaseSet map[accounts.Address]uint256.Int
 
 	Incarnation           int
 	Tracer                *calltracer.CallTracer
@@ -478,7 +479,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			ret, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
@@ -489,10 +490,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			break
 		}
 
-		result.TraceTos = map[common.Address]struct{}{}
-		result.TraceTos[txTask.Header.Coinbase] = struct{}{}
+		result.TraceTos = map[accounts.Address]struct{}{}
+		result.TraceTos[accounts.InternAddress(txTask.Header.Coinbase)] = struct{}{}
 		for _, uncle := range txTask.Uncles {
-			result.TraceTos[uncle.Coinbase] = struct{}{}
+			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {

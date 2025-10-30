@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -642,7 +643,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							return state.StateUpdates{}, nil
 						}
 
-						syscall := func(contract common.Address, data []byte) ([]byte, error) {
+						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 							ret, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 							if err != nil {
 								return nil, err
@@ -917,8 +918,8 @@ type txResult struct {
 	gasUsed      int64
 	receipt      *types.Receipt
 	logs         []*types.Log
-	traceFroms   map[common.Address]struct{}
-	traceTos     map[common.Address]struct{}
+	traceFroms   map[accounts.Address]struct{}
+	traceTos     map[accounts.Address]struct{}
 	stateUpdates state.StateUpdates
 	rules        *chain.Rules
 }
@@ -946,7 +947,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	txIncarnation := task.Version().Incarnation
 
 	txTrace := dbg.TraceTransactionIO &&
-		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress))
+		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase.Handle()) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress.Handle()))
 
 	var tracePrefix string
 	if txTrace {
@@ -1322,7 +1323,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
 			// Remove entries that were previously written but are no longer written
-			cmpMap := map[common.Address]map[state.AccountKey]struct{}{}
+			cmpMap := map[accounts.Address]map[state.AccountKey]struct{}{}
 
 			for _, w := range res.TxOut {
 				keys, ok := cmpMap[w.Address]
@@ -1495,8 +1496,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			applyResult := txResult{
 				blockNum:   be.blockNum,
-				traceFroms: map[common.Address]struct{}{},
-				traceTos:   map[common.Address]struct{}{},
+				traceFroms: map[accounts.Address]struct{}{},
+				traceTos:   map[accounts.Address]struct{}{},
 				txNum:      task.Version().TxNum,
 				rules:      task.Rules(),
 			}

@@ -149,7 +149,7 @@ func MakeReceipt(
 	}
 	// If the transaction created a contract, store the creation address in the receipt.
 	if msg.To().IsNil() {
-		receipt.ContractAddress = types.CreateAddress(evm.Origin, txn.GetNonce()).Value()
+		receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)

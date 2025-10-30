@@ -6,13 +6,13 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func chargeGas(
@@ -30,7 +30,7 @@ func chargeGas(
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 
 	chargeFrom := tx.GasPayer()
-	balance, err := ibs.GetBalance(*chargeFrom)
+	balance, err := ibs.GetBalance(accounts.InternAddress(*chargeFrom))
 	if err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func chargeGas(
 		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), &balance, preCharge)
 	}
 
-	if err := ibs.SubBalance(*chargeFrom, *preCharge, 0); err != nil {
+	if err := ibs.SubBalance(accounts.InternAddress(*chargeFrom), *preCharge, 0); err != nil {
 		return err
 	}
 
@@ -68,7 +68,7 @@ func refundGas(
 
 	chargeFrom := tx.GasPayer()
 
-	if err := ibs.AddBalance(*chargeFrom, *refund, tracing.BalanceIncreaseGasReturn); err != nil {
+	if err := ibs.AddBalance(accounts.InternAddress(*chargeFrom), *refund, tracing.BalanceIncreaseGasReturn); err != nil {
 		return err
 	}
 
@@ -86,10 +86,8 @@ func payCoinbase(
 	effectiveTip := u256.Num0
 
 	if tx.FeeCap.Gt(baseFee) {
-		effectiveTip = math.U256Min(tx.Tip, new(uint256.Int).Sub(tx.FeeCap, baseFee))
+		effectiveTip = u256.Min(*tx.Tip, u256.Sub(*tx.FeeCap, *baseFee))
 	}
 
-	amount := new(uint256.Int).SetUint64(gasUsed)
-	amount.Mul(amount, effectiveTip)
-	return ibs.AddBalance(coinbase, *amount, tracing.BalanceIncreaseRewardTransactionFee)
+	return ibs.AddBalance(accounts.InternAddress(coinbase), u256.Mul(u256.U64(gasUsed), effectiveTip), tracing.BalanceIncreaseRewardTransactionFee)
 }

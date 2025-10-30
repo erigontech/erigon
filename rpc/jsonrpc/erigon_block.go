@@ -262,7 +262,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 		if !oldBalance.Eq(newBalance) {
 			newBalanceDesc := (*hexutil.Big)(newBalance.ToBig())
-			balancesMapping[address] = newBalanceDesc
+			balancesMapping[address.Value()] = newBalanceDesc
 		}
 	}
 

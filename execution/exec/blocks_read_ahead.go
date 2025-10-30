@@ -89,8 +89,9 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 	}
 
 	for _, txn := range block.Transactions() {
-		to := txn.GetTo()
-		if to != nil {
+		toaddr := txn.GetTo()
+		if toaddr != nil {
+			to := accounts.InternAddress(*toaddr)
 			a, _ := stateReader.ReadAccountData(to)
 			if a == nil {
 				continue
@@ -106,7 +107,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 				stateReader.ReadAccountData(accounts.InternAddress(list.Address))
 				if len(list.StorageKeys) > 0 {
 					for _, slot := range list.StorageKeys {
-						stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), slot)
+						stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), accounts.InternKey(slot))
 					}
 				}
 			}
@@ -114,7 +115,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 		}
 
 	}
-	_, _ = stateReader.ReadAccountData(block.Coinbase())
+	_, _ = stateReader.ReadAccountData(accounts.InternAddress(block.Coinbase()))
 
 	return nil
 }

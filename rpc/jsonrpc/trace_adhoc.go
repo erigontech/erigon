@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	math2 "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/state"
@@ -211,13 +211,13 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 				}
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
-			gasPrice = new(uint256.Int)
+			var gasPrice uint256.Int
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				gasPrice = math2.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
+				gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
 			} else {
 				// This means gasFeeCap == 0, gasTipCap == 0
 				gasPrice.Set(baseFee)
-				gasFeeCap, gasTipCap = gasPrice, gasPrice
+				gasFeeCap, gasTipCap = &gasPrice, &gasPrice
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -239,7 +239,12 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-	msg := types.NewMessage(addr.Value(), args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
+
+	var to accounts.Address
+	if args.To != nil {
+		to = accounts.InternAddress(*args.To)
+	}
+	msg := types.NewMessage(addr, to, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
 	return msg, nil
 }
 
