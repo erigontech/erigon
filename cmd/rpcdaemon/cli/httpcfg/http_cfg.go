@@ -19,7 +19,7 @@ package httpcfg
 import (
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpccfg"

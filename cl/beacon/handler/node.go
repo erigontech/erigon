@@ -23,7 +23,7 @@ import (
 	"runtime"
 	"strconv"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
@@ -46,7 +46,7 @@ type peer struct {
 func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) {
 	syncingStatus, err := beaconhttp.Uint64FromQueryParams(r, "syncing_status")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	syncingCode := http.StatusOK
@@ -68,7 +68,7 @@ func (a *ApiHandler) GetEthV1NodeVersion(w http.ResponseWriter, r *http.Request)
 }
 
 func (a *ApiHandler) GetEthV1NodePeerCount(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	ret, err := a.sentinel.GetPeers(r.Context(), &sentinel.EmptyMessage{})
+	ret, err := a.sentinel.GetPeers(r.Context(), &sentinelproto.EmptyMessage{})
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
@@ -94,7 +94,7 @@ func (a *ApiHandler) GetEthV1NodePeersInfos(w http.ResponseWriter, r *http.Reque
 		directionIn = &direction
 	}
 
-	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinel.PeersInfoRequest{
+	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinelproto.PeersInfoRequest{
 		Direction: directionIn,
 		State:     stateIn,
 	})
@@ -121,7 +121,7 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinel.PeersInfoRequest{})
+	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinelproto.PeersInfoRequest{})
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
@@ -143,7 +143,7 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	id, err := a.sentinel.Identity(r.Context(), &sentinel.EmptyMessage{})
+	id, err := a.sentinel.Identity(r.Context(), &sentinelproto.EmptyMessage{})
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}

@@ -22,12 +22,12 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 )
 
@@ -59,7 +59,6 @@ type Contract struct {
 	self          common.Address
 	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
 	analysis      bitvec         // Locally cached result of JUMPDEST analysis
-	skipAnalysis  bool
 
 	Code     []byte
 	CodeHash common.Hash
@@ -105,11 +104,10 @@ func (c *JumpDestCache) LogStats() {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr common.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller ContractRef, addr common.Address, value *uint256.Int, gas uint64, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
 		CallerAddress: caller.Address(), caller: caller, self: addr,
-		value:        value,
-		skipAnalysis: skipAnalysis,
+		value: value,
 		// Gas should be a pointer so it can safely be reduced through the run
 		// This pointer will be off the state transition
 		Gas:       gas,
@@ -129,9 +127,6 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	// Only JUMPDESTs allowed for destinations
 	if OpCode(c.Code[udest]) != JUMPDEST {
 		return false, false
-	}
-	if c.skipAnalysis {
-		return true, false
 	}
 	return c.isCode(udest), true
 }

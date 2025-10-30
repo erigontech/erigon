@@ -17,12 +17,47 @@
 package dir
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
+
+var (
+	removedFilesChan chan string
+	removedFiles     []string
+)
+
+func init() {
+	if dbg.AssertEnabled {
+		removedFilesChan = make(chan string, 100)
+		go trackRemovedFiles()
+	}
+}
+
+func trackRemovedFiles() {
+	for {
+		select {
+		case path := <-removedFilesChan:
+			if len(removedFiles) > 10_000 {
+				removedFiles = make([]string, 0)
+			}
+			removedFiles = append(removedFiles, path)
+		case <-time.Tick(30 * time.Second):
+			for _, path := range removedFiles {
+				if exists, _ := FileExist(path); exists {
+					panic("Removed file unexpectedly exists: " + path)
+				}
+			}
+		}
+	}
+}
 
 func MustExist(path ...string) {
 	// user rwx, group rwx, other rx
@@ -124,7 +159,7 @@ func DeleteFiles(dirs ...string) error {
 		}
 		for _, fPath := range files {
 			fPath := fPath
-			g.Go(func() error { return os.Remove(fPath) })
+			g.Go(func() error { return RemoveFile(fPath) })
 		}
 	}
 	return g.Wait()
@@ -159,4 +194,43 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 		paths = append(paths, filepath.Join(dir, f.Name()))
 	}
 	return paths, nil
+}
+
+func RemoveFile(path string) error {
+	if dbg.TraceDeletion {
+		log.Debug("[removing] removing file", "path", path, "stack", dbg.Stack())
+	}
+
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	if dbg.AssertEnabled {
+		select {
+		case removedFilesChan <- path:
+		default:
+		}
+	}
+	return nil
+}
+
+func RemoveAll(path string) error {
+	if dbg.TraceDeletion {
+		log.Debug("[removing] removing dir", "path", path, "stack", dbg.Stack())
+	}
+	return os.RemoveAll(path)
+}
+
+// CreateTemp creates a temporary file using `file` as base
+func CreateTemp(file string) (*os.File, error) {
+	return CreateTempWithExtension(file, "tmp")
+}
+
+func CreateTempWithExtension(file string, extension string) (*os.File, error) {
+	directory := filepath.Dir(file)
+	filename := filepath.Base(file)
+	pattern := fmt.Sprintf("%s.*.%s", filename, extension)
+	if !strings.HasSuffix(pattern, ".tmp") {
+		return nil, fmt.Errorf("extension must end with .tmp, erigon cleans these up at restart. pattern: %s", pattern)
+	}
+	return os.CreateTemp(directory, pattern)
 }

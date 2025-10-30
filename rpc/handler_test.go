@@ -24,10 +24,9 @@ import (
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
-
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
