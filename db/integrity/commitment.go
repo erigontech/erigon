@@ -192,7 +192,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
 	var branchKeyBuf, branchValueBuf, newBranchValueBuf, plainKeyBuf []byte
-	var keyCount uint64
+	var keyCount, derefCount uint64
 	var integrityErr error
 	for commReader.HasNext() {
 		select {
@@ -203,7 +203,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(totalKeys)*100)
 			rate := float64(keyCount) / time.Since(start).Seconds()
 			eta := time.Duration(float64(totalKeys-keyCount)/rate) * time.Second
-			logger.Info("checking commitment deref progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kv", fileName)
+			logger.Info("checking commitment deref progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "derefs", derefCount, "kv", fileName)
 		default: // proceed
 		}
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
@@ -249,6 +249,8 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 					return nil, nil
 				}
+				derefCount++
+				return plainKey, nil
 			}
 			if len(key) == length.Addr {
 				return nil, nil // not a referenced key, nothing to check
@@ -271,7 +273,9 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				}
 				logger.Warn(err.Error())
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+				return nil, nil
 			}
+			derefCount++
 			return nil, nil
 		})
 		if err != nil {
@@ -279,7 +283,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		}
 		keyCount++
 	}
-	return 0, 0, integrityErr
+	return keyCount, derefCount, integrityErr
 }
 
 func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain) (*seg.Reader, func(), error) {
