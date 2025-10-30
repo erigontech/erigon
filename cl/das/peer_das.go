@@ -916,6 +916,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			if len(blocks) == 0 {
 				continue
 			}
+			log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
 			if d.IsArchivedMode() {
 				if err := d.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
 					log.Warn("failed to download columns and recover blobs", "err", err)
