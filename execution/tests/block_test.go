@@ -106,10 +106,10 @@ func TestArbitrumExecutionSpecBlockchain(t *testing.T) {
 	bt := new(testMatcher)
 
 	dir := filepath.Join(".", "arb-execution-spec-tests", "blockchain_tests")
-	checkStateRoot := true
+	//checkStateRoot := true
 
-	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})

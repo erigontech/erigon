@@ -4,9 +4,9 @@
 [submodule "eest-fixtures"]
 	path = execution/tests/execution-spec-tests
 	url = https://github.com/erigontech/eest-fixtures
+[submodule "arb-execution-spec-tests"]
+	path = execution/tests/arb-execution-spec-tests
+	url = https://github.com/erigontech/arbitrum-eest-fixtures
 [submodule "erigon-lib/interfaces"]
 	path = erigon-lib/interfaces
 	url = https://github.com/erigontech/interfaces
-[submodule "arb-execution-spec-tests"]
-	path = tests/arb-execution-spec-tests
-	url = https://github.com/erigontech/arbitrum-eest-fixtures
