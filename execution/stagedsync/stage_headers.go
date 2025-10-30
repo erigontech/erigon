@@ -181,7 +181,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 
 	if useExternalTx {
 		log.Warn("Using external tx for Arbitrum headers stage, closing")
-		tx.Rollback()
+		tx.Commit()
 	}
 
 	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, client, receiptClient, firstBlock, latestBlock.Uint64(), false, true, false)
