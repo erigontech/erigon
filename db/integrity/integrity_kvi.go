@@ -17,13 +17,18 @@
 package integrity
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -36,7 +41,7 @@ import (
 // ErrIntegrity is useful to differentiate integrity errors from program errors.
 var ErrIntegrity = errors.New("integrity error")
 
-func CheckKvis(tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Logger) error {
+func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(domain)
@@ -53,8 +58,18 @@ func CheckKvis(tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Log
 	default:
 		panic(fmt.Sprintf("add compression for domain to CheckKvis: %s", domain))
 	}
+	var eg *errgroup.Group
+	if failFast {
+		// if 1 goroutine fails, fail others
+		eg, ctx = errgroup.WithContext(ctx)
+	} else {
+		eg = &errgroup.Group{}
+	}
+	if dbg.EnvBool("CHECK_KVIS_SEQUENTIAL", false) {
+		eg.SetLimit(1)
+	}
 	var integrityErr error
-	var keyCount uint64
+	var keyCount atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -74,23 +89,27 @@ func CheckKvis(tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Log
 		if !ok {
 			return fmt.Errorf("kvi not found for %s", kvPath)
 		}
-		keys, err := CheckKvi(kviPath, kvPath, kvCompression, failFast, logger)
-		if err == nil {
-			keyCount += keys
-			continue
-		}
-		if failFast {
+		eg.Go(func() error {
+			keys, err := CheckKvi(ctx, kviPath, kvPath, kvCompression, failFast, logger)
+			if err == nil {
+				keyCount.Add(keys)
+				return nil
+			}
+			if !failFast {
+				logger.Warn(err.Error())
+			}
 			return err
-		}
-		keyCount += keys
-		log.Warn(err.Error())
-		integrityErr = fmt.Errorf("%s: %w", ErrIntegrity, err)
+		})
 	}
-	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files), "keys", keyCount)
+	err := eg.Wait()
+	if err != nil {
+		return err
+	}
+	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files), "keys", keyCount.Load())
 	return integrityErr
 }
 
-func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
+func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
 	kviFileName := filepath.Base(kviPath)
 	kvFileName := filepath.Base(kvPath)
 	logger.Info("checking kvi", "kvi", kviFileName, "kv", kvFileName)
@@ -123,6 +142,8 @@ func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, 
 	var atValue bool
 	for kvReader.HasNext() {
 		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
 		case <-logTicker.C:
 			at := fmt.Sprintf("%d/%d", keyCount, kvi.KeyCount())
 			percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)

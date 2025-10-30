@@ -20,7 +20,7 @@ func CheckCommitmentKvi(ctx context.Context, db kv.TemporalRoDB, failFast bool, 
 		return err
 	}
 	defer tx.Rollback()
-	return CheckKvis(tx, kv.CommitmentDomain, failFast, logger)
+	return CheckKvis(ctx, tx, kv.CommitmentDomain, failFast, logger)
 }
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {
