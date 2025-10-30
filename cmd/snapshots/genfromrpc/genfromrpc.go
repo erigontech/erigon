@@ -741,9 +741,9 @@ var (
 
 func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool) (lastBlockNum uint64, err error) {
 	var (
-		batchSize  = uint64(20)
-		blockRPS   = 5000
-		receiptRPS = 30
+		batchSize                = uint64(20)
+		blockRPS, blockBurst     = 5000, 5
+		receiptRPS, receiptBurst = 20, 2
 
 		logInterval   = time.Second * 40
 		logEvery      = time.NewTicker(logInterval)
@@ -752,8 +752,8 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 
 	defer logEvery.Stop()
 
-	receiptClient.SetRequestLimit(rate.Limit(receiptRPS), 2)
-	client.SetRequestLimit(rate.Limit(blockRPS), 5)
+	receiptClient.SetRequestLimit(rate.Limit(receiptRPS), receiptBurst)
+	client.SetRequestLimit(rate.Limit(blockRPS), blockBurst)
 
 	for prev := startBlockNum; prev < endBlockNum; {
 		blocks, err := FetchBlocksBatch(client, receiptClient, prev, endBlockNum, batchSize, verify, isArbitrum)
@@ -773,7 +773,9 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 		select {
 		case <-logEvery.C:
 			blkSec := float64(prev-startBlockNum) / logInterval.Seconds()
-			log.Info("Progress", "block", prev-1, "hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
+			log.Info("Progress", "block", prev-1,
+				"toTip", common.PrettyCounter(endBlockNum-prev), "done%", fmt.Sprintf("%.2f", float64(endBlockNum-prev)/float64(endBlockNum)*100),
+				"hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
 			startBlockNum = prev
 
 			prevReceiptTime.Store(uint64(time.Now().Unix()))
