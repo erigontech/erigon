@@ -28,24 +28,22 @@ import (
 	"sync"
 	"sync/atomic"
 
-	goethkzg "github.com/crate-crypto/go-eth-kzg"
-	"github.com/spf13/afero"
-
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/spf13/afero"
 )
 
 const (
 	subdivisionSlot = 10_000
 )
 
-//go:generate mockgen -typed=true -destination=./mock_services/blob_storage_mock.go -package=mock_services . BlobStorage
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
@@ -309,17 +307,17 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		wg.Add(1)
 		go func(sds *sidecarsPayload) {
 			defer wg.Done()
-			blobs := make([]*goethkzg.Blob, len(sds.sidecars))
+			blobs := make([]gokzg4844.BlobRef, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
-				blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
+				blobs[i] = sidecar.Blob[:]
 			}
-			kzgCommitments := make([]goethkzg.KZGCommitment, len(sds.sidecars))
+			kzgCommitments := make([]gokzg4844.KZGCommitment, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
-				kzgCommitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
+				kzgCommitments[i] = gokzg4844.KZGCommitment(sidecar.KzgCommitment)
 			}
-			kzgProofs := make([]goethkzg.KZGProof, len(sds.sidecars))
+			kzgProofs := make([]gokzg4844.KZGProof, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
-				kzgProofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
+				kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
 			}
 			if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
 				errAtomic.Store(errors.New("sidecar is wrong"))

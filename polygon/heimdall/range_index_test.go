@@ -24,11 +24,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	polygondb "github.com/erigontech/erigon/polygon/db"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type rangeIndexTest struct {
@@ -42,15 +41,15 @@ func newRangeIndexTest(t *testing.T) rangeIndexTest {
 	ctx := context.Background()
 	logger := log.New()
 
-	db, err := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, tmpDir).
+	db, err := mdbx.New(kv.ChainDB, logger).
+		InMem(tmpDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{"RangeIndex": {}} }).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
 
 	require.NoError(t, err)
 
-	index := NewRangeIndex(polygondb.AsDatabase(db), "RangeIndex")
+	index := NewRangeIndex(polygoncommon.AsDatabase(db), "RangeIndex")
 
 	t.Cleanup(db.Close)
 

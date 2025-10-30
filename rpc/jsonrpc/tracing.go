@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -38,7 +39,6 @@ import (
 	polygontracer "github.com/erigontech/erigon/polygon/tracer"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
@@ -64,12 +64,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	if err != nil {
 		return err
 	}
-
-	if blockNumber == 0 {
-		stream.WriteNil()
-		return fmt.Errorf("genesis is not traceable")
-	}
-
 	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return err
@@ -240,7 +234,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	if err != nil {
 		return err
 	}
-
 	if !ok {
 		if chainConfig.Bor == nil {
 			stream.WriteNil()
@@ -249,6 +242,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 
 		// otherwise this may be a bor state sync transaction - check
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
+
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -257,17 +251,12 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 			stream.WriteNil()
 			return nil
 		}
-		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
+		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
 			return nil
 		}
 
 		isBorStateSyncTxn = true
-	}
-
-	if blockNum == 0 {
-		stream.WriteNil()
-		return fmt.Errorf("genesis is not traceable")
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -531,7 +520,11 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
-	rules := evm.ChainRules()
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := chainConfig.Rules(blockNum, blockCtx.Time, arbosVersion)
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
@@ -544,8 +537,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	stream.WriteArrayStart()
 	for bundleIndex, bundle := range bundles {
 		stream.WriteArrayStart()
-		// first change block context
-		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
+		// first change blockContext
+		blockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
 		// do not reset ibs, because we want to keep the overrides and state change
 		// ibs.Reset()
 		for txnIndex, txn := range bundle.Transactions {

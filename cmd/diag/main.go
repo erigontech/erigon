@@ -27,13 +27,15 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon/cmd/diag/db"
 	"github.com/erigontech/erigon/cmd/diag/downloader"
 	"github.com/erigontech/erigon/cmd/diag/stages"
 	sinfo "github.com/erigontech/erigon/cmd/diag/sysinfo"
 	"github.com/erigontech/erigon/cmd/diag/ui"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 
@@ -43,7 +45,7 @@ func main() {
 
 	app := cli.NewApp()
 	app.Name = "diagnostics"
-	app.Version = version.VersionWithCommit(version.GitCommit)
+	app.Version = params.VersionWithCommit(params.GitCommit)
 	app.EnableBashCompletion = true
 
 	app.Commands = []*cli.Command{
@@ -81,7 +83,7 @@ func main() {
 
 			var cancel context.CancelFunc
 
-			ctx.Context, cancel = context.WithCancel(ctx.Context) //nolint
+			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger)) //nolint
 
 			go handleTerminationSignals(cancel, logger)
 

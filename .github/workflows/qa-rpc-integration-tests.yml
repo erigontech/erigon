@@ -38,15 +38,15 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Clean Erigon Build Directory
         run: |
           make clean
 
-      - name: Build Erigon RPCDaemon and integration
+      - name: Build Erigon RPCDaemon
         run: |
-          make rpcdaemon integration
+          make rpcdaemon
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
@@ -59,12 +59,6 @@ jobs:
           rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
           echo "Backup chaindata"
           cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
-
-      - name: Run Migrations
-        working-directory: ${{ github.workspace }}/build/bin
-        run: |
-          echo "Running migrations on datadir..."
-          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
 
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
@@ -161,9 +155,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: |
-            ${{ env.TEST_RESULT_DIR }}
-            ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
+          path: ${{ env.TEST_RESULT_DIR }}
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'

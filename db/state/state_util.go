@@ -19,7 +19,7 @@ package state
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 // SaveExecV3PruneProgress saves latest pruned key in given table to the database.
@@ -54,9 +54,9 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 }
 
 // SaveExecV3PrunableProgress saves latest pruned key in given table to the database.
-func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step kv.Step) error {
+func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step uint64) error {
 	v := make([]byte, 8)
-	binary.BigEndian.PutUint64(v, uint64(step))
+	binary.BigEndian.PutUint64(v, step)
 	if err := db.Delete(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...)); err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step kv.Step) error {
 }
 
 // GetExecV3PrunableProgress retrieves saved progress of given table pruning from the database.
-func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step kv.Step, err error) {
+func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error) {
 	v, err := db.GetOne(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...))
 	if err != nil {
 		return 0, err
@@ -72,5 +72,5 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step kv.Step, err erro
 	if len(v) == 0 {
 		return 0, nil
 	}
-	return kv.Step(binary.BigEndian.Uint64(v)), nil
+	return binary.BigEndian.Uint64(v), nil
 }

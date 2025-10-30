@@ -23,16 +23,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type AAValidationResult struct {
@@ -54,6 +55,7 @@ type TxTask struct {
 	Withdrawals     types.Withdrawals
 	BlockHash       common.Hash
 	sender          *common.Address
+	SkipAnalysis    bool
 	TxIndex         int // -1 for block initialisation
 	Final           bool
 	Failed          bool
@@ -144,7 +146,7 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 	}
 
 	cumulativeGasUsed += t.GasUsed
-	if t.GasUsed == 0 && !t.Rules.IsArbitrum {
+	if t.GasUsed == 0  && !t.Rules.IsArbitrum {
 		msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
 		panic(msg)
 	}
@@ -185,7 +187,7 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 
 	// if the transaction created a contract, store the creation address in the receipt.
 	if t.TxAsMessage != nil && t.TxAsMessage.To() == nil {
-		receipt.ContractAddress = types.CreateAddress(*t.Sender(), t.Tx.GetNonce())
+		receipt.ContractAddress = crypto.CreateAddress(*t.Sender(), t.Tx.GetNonce())
 	}
 
 	return receipt

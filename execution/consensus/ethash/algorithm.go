@@ -34,7 +34,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/bitutil"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -368,7 +368,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 	var progress uint64
 	for i := 0; i < threads; i++ {
 		go func(id int) {
-			defer dbg.LogPanic()
+			defer debug.LogPanic()
 			defer pend.Done()
 
 			// Create a hasher to reuse between invocations

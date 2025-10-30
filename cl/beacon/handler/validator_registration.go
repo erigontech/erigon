@@ -21,7 +21,6 @@ import (
 	"net/http"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
 type ValidatorPreparationPayload struct {
@@ -33,7 +32,7 @@ func (a *ApiHandler) PostEthV1ValidatorPrepareBeaconProposal(w http.ResponseWrit
 	req := []ValidatorPreparationPayload{}
 	// decode request with json
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	for _, v := range req {

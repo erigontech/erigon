@@ -31,18 +31,19 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/execution/builder/buildercfg"
-	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -91,7 +92,7 @@ var Defaults = Config{
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
-		MaxReorgDepth:            dbg.MaxReorgDepth,
+		PersistReceiptsCacheV2:   true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -102,7 +103,7 @@ var Defaults = Config{
 	},
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
-	Miner: buildercfg.MiningConfig{
+	Miner: params.MiningConfig{
 		GasPrice: big.NewInt(common.GWei),
 		Recommit: 3 * time.Second,
 	},
@@ -121,8 +122,6 @@ var Defaults = Config{
 		ProduceE3:  true,
 	},
 }
-
-const DefaultChainDBPageSize = 16 * datasize.KB
 
 func init() {
 	home := os.Getenv("HOME")
@@ -217,7 +216,7 @@ type Config struct {
 	Whitelist map[uint64]common.Hash `toml:"-"`
 
 	// Mining options
-	Miner buildercfg.MiningConfig
+	Miner params.MiningConfig
 
 	// Ethash options
 	Ethash ethashcfg.Config
@@ -253,9 +252,6 @@ type Config struct {
 	InternalCL bool
 
 	OverrideOsakaTime *big.Int `toml:",omitempty"`
-
-	// Whether to avoid overriding chain config already stored in the DB
-	KeepStoredChainConfig bool
 
 	// Embedded Silkworm support
 	SilkwormExecution            bool
@@ -295,10 +291,12 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
+	UploadLocation   string
+	UploadFrom       rpc.BlockNumber
+	FrozenBlockLimit uint64
+
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
-	MaxReorgDepth            uint64
 	KeepExecutionProofs      bool
 	PersistReceiptsCacheV2   bool
-	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
 }

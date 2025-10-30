@@ -25,24 +25,38 @@ import (
 	"path"
 	"time"
 
-	"github.com/spf13/afero"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+
+	"golang.org/x/sync/semaphore"
+
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/handler"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/service"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/cl/validator/committee_subscription"
+	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+
+	"github.com/spf13/afero"
+
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
@@ -59,23 +73,13 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/cl/rpc"
-	"github.com/erigontech/erigon/cl/sentinel"
-	"github.com/erigontech/erigon/cl/sentinel/service"
+
 	"github.com/erigontech/erigon/cl/utils/bls"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/erigontech/erigon/cl/validator/committee_subscription"
-	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
-	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/snapshotsync"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
@@ -91,18 +95,18 @@ func OpenCaplinDatabase(ctx context.Context,
 	blobDbPath := path.Join(blobDir, "chaindata")
 
 	if wipeout {
-		dir.RemoveAll(dataDirIndexer)
-		dir.RemoveAll(blobDbPath)
+		os.RemoveAll(dataDirIndexer)
+		os.RemoveAll(blobDbPath)
 	}
 
 	os.MkdirAll(dbPath, 0700)
 	os.MkdirAll(dataDirIndexer, 0700)
 
-	db := mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
+	db := mdbx.New(kv.CaplinDB, log.New()).Path(dbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
 			return kv.ChaindataTablesCfg
 		}).MustOpen()
-	blobDB := mdbx.New(dbcfg.CaplinDB, log.New()).Path(blobDbPath).
+	blobDB := mdbx.New(kv.CaplinDB, log.New()).Path(blobDbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.ChaindataTablesCfg
 		}).MustOpen()
@@ -128,7 +132,7 @@ func OpenCaplinDatabase(ctx context.Context,
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader downloaderproto.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader proto_downloader.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
 
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -251,7 +255,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
-	dir.RemoveAll(caplinFcuPath)
+	os.RemoveAll(caplinFcuPath)
 	err = os.MkdirAll(caplinFcuPath, 0o755)
 	if err != nil {
 		return err
@@ -283,7 +287,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock)
 	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:                       config.CaplinDiscoveryAddr,
 		Port:                         int(config.CaplinDiscoveryPort),
@@ -323,7 +327,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
-	dataColumnSidecarService := services.NewDataColumnSidecarService(beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
+	dataColumnSidecarService := services.NewDataColumnSidecarService(beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, false)
@@ -431,11 +435,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			syncedDataManager,
 			statesReader,
 			sentinel,
-			version.GitTag,
+			params.GitTag,
 			&config.BeaconAPIRouter,
 			emitters,
 			blobStorage,
-			columnStorage,
 			csn,
 			validatorParameters,
 			attestationProducer,

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/google/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 type EonTracker interface {
@@ -143,7 +143,6 @@ func (et *KsmEonTracker) recentEon(index EonIndex) (Eon, bool) {
 }
 
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
 	unregisterBlockEventObserver := et.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
@@ -151,9 +150,8 @@ func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 		case blockEventC <- blockEvent:
 		}
 	})
-	defer unregisterBlockEventObserver()
-	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
 
+	defer unregisterBlockEventObserver()
 	for {
 		select {
 		case <-ctx.Done():

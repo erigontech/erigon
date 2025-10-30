@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 	jsassets "github.com/erigontech/erigon/eth/tracers/js/internal/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -232,12 +231,7 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 
 	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
-	blockContext := evmtypes.BlockContext{
-		BlockNumber:  env.BlockNumber,
-		Time:         env.Time,
-		ArbOSVersion: env.ArbOSVersion,
-	}
-	rules := blockContext.Rules(env.ChainConfig)
+	rules := env.ChainConfig.Rules(env.BlockNumber, env.Time, env.ArbOSVersion)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
 	t.ctx["gas"] = t.vm.ToValue(tx.GetGasLimit())
@@ -468,7 +462,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return nil
 		}
 		addr := common.BytesToAddress(a)
-		b := types.CreateAddress(addr, uint64(nonce)).Bytes()
+		b := crypto.CreateAddress(addr, uint64(nonce)).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -490,7 +484,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		code = common.CopyBytes(code)
 		codeHash := crypto.Keccak256(code)
-		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
+		b := crypto.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)

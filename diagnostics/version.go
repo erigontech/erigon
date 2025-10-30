@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/params"
 )
 
 const Version = 3
@@ -38,8 +38,8 @@ func SetupVersionAccess(metricsMux *http.ServeMux) {
 			Git  string `json:"gitCommit"`
 		}{
 			Node: Version,
-			Code: version.VersionWithMeta,
-			Git:  version.GitCommit,
+			Code: params.VersionWithMeta,
+			Git:  params.GitCommit,
 		})
 	})
 }

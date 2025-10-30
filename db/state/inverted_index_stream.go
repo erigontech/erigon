@@ -23,12 +23,11 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
-	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/recsplit/multiencseq"
-	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 )
 
 // InvertedIdxStreamFiles allows iteration over range of txn numbers
@@ -50,7 +49,7 @@ type InvertedIdxStreamFiles struct {
 	err     error
 
 	seq       *multiencseq.SequenceReader
-	accessors statecfg.Accessors
+	accessors Accessors
 	ii        *InvertedIndexRoTx
 }
 

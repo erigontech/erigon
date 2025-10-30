@@ -20,19 +20,17 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/stretchr/testify/require"
 )
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	return db
 }
 

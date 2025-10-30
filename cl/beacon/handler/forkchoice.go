@@ -52,7 +52,6 @@ func (a *ApiHandler) GetEthV1DebugBeaconForkChoice(w http.ResponseWriter, r *htt
 		"finalized_checkpoint": finalizedCheckpoint,
 		"fork_choice_nodes":    forkNodes,
 	}); err != nil {
-		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-		return
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

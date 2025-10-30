@@ -14,7 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state_test
+//go:build !nofuzz
+
+package state
 
 import (
 	"context"
@@ -27,25 +29,23 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
-	db, agg := testFuzzDbAndAggregatorv3(f, 10)
+	_db, agg := testFuzzDbAndAggregatorv3(f, 10)
+	db := wrapDbWithCtx(_db, agg)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -76,6 +76,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
+			domains.SetTxNum(txNum)
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(0),
@@ -124,8 +125,11 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		_, err := rwTx.PruneSmallBatches(context.Background(), time.Hour)
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		stat, err := AggTx(rwTx).prune(context.Background(), rwTx, 0, logEvery)
 		require.NoError(t, err)
+		t.Logf("Prune: %s", stat)
 
 		err = rwTx.Commit()
 		require.NoError(t, err)
@@ -154,18 +158,20 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 }
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
-	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	_db, agg := testFuzzDbAndAggregatorv3(f, 10)
+	db := wrapDbWithCtx(_db, agg)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
 	const txs = uint64(1000)
+
+	agg.commitmentValuesTransform = true
 
 	state := make(map[string][]byte)
 
@@ -187,6 +193,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
+			domains.SetTxNum(txNum)
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(txNum * 1e6),
@@ -224,8 +231,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		_, err := rwTx.PruneSmallBatches(context.Background(), time.Hour)
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		stat, err := AggTx(rwTx).prune(context.Background(), rwTx, 0, logEvery)
 		require.NoError(t, err)
+		t.Logf("Prune: %s", stat)
 
 		err = rwTx.Commit()
 		require.NoError(t, err)
@@ -235,20 +245,21 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	})
 }
 
-func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator) {
+func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.RwDB, *Aggregator) {
 	f.Helper()
 	require := require.New(f)
 	dirs := datadir.New(f.TempDir())
 	logger := log.New()
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(f, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
-	agg, err := state.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(f.Context(), db)
+	salt, err := GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(err)
+	agg, err := NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
 	require.NoError(err)
 	f.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
-	tdb, err := temporal.New(db, agg)
-	require.NoError(err)
-	return tdb, agg
+	agg.DisableFsync()
+	return db, agg
 }

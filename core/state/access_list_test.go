@@ -22,7 +22,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	dbstate "github.com/erigontech/erigon/db/state"
 )
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
@@ -83,9 +85,13 @@ func TestAccessList(t *testing.T) {
 	addr := common.HexToAddress
 	slot := common.HexToHash
 
-	_, tx, domains := NewTestRwTx(t)
+	_, tx, _ := NewTestTemporalDb(t)
 
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))

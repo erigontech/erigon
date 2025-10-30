@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type emptyBodyReadCloser struct{}
@@ -48,7 +47,7 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	requestHandler := poshttp.NewMockhttpRequestHandler(ctrl)
+	requestHandler := NewMockhttpRequestHandler(ctrl)
 	requestHandler.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{
@@ -60,12 +59,37 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 	heimdallClient := NewHttpClient(
 		"https://dummyheimdal.com",
 		logger,
-		poshttp.WithHttpRequestHandler(requestHandler),
-		poshttp.WithHttpRetryBackOff(100*time.Millisecond),
-		poshttp.WithHttpMaxRetries(5),
+		WithHttpRequestHandler(requestHandler),
+		WithHttpRetryBackOff(100*time.Millisecond),
+		WithHttpMaxRetries(5),
 	)
 
 	spanRes, err := heimdallClient.FetchSpan(ctx, 1534)
 	require.Nil(t, spanRes)
 	require.Error(t, err)
+}
+
+func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBody(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	requestHandler := NewMockhttpRequestHandler(ctrl)
+	requestHandler.EXPECT().
+		Do(gomock.Any()).
+		Return(&http.Response{
+			StatusCode: 200,
+			Body:       emptyBodyReadCloser{},
+		}, nil).
+		Times(2)
+	logger := testlog.Logger(t, log.LvlDebug)
+	heimdallClient := NewHttpClient(
+		"https://dummyheimdal.com",
+		logger,
+		WithHttpRequestHandler(requestHandler),
+		WithHttpRetryBackOff(time.Millisecond),
+		WithHttpMaxRetries(2),
+	)
+
+	spanRes, err := heimdallClient.FetchStateSyncEvents(ctx, 100, time.Now(), 0)
+	require.Nil(t, spanRes)
+	require.ErrorIs(t, err, ErrNoResponse)
 }

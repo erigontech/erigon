@@ -3,14 +3,11 @@
 package gdbme
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
-
-	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/erigon/cmd/utils"
 )
@@ -70,7 +67,7 @@ quit
 		fmt.Fprintln(os.Stderr, "Error: could not create temp file for LLDB script:", err)
 		os.Exit(1)
 	}
-	defer dir.RemoveFile(tmpFile.Name())
+	defer os.Remove(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(lldbScript)
 	closeErr := tmpFile.Close()
@@ -80,7 +77,7 @@ quit
 	}
 
 	fmt.Fprintln(os.Stderr, "Restarting under LLDB for crash diagnostics...")
-	cmd := exec.CommandContext(context.Background(), lldbPath, "-s", tmpFile.Name())
+	cmd := exec.Command(lldbPath, "-s", tmpFile.Name())
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

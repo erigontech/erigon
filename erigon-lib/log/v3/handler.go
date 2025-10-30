@@ -131,7 +131,7 @@ func (r *rotatingWriter) Close() error {
 // NetHandler opens a socket to the given address and writes records
 // over the connection.
 func NetHandler(network, addr string, fmtr Format) (Handler, error) {
-	conn, err := net.Dial(network, addr) //nolint:noctx
+	conn, err := net.Dial(network, addr)
 	if err != nil {
 		return nil, err
 	}

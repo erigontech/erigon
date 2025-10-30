@@ -23,13 +23,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/version"
 )
 
 var ( // Compile time interface checks
@@ -73,13 +72,13 @@ var ( // Compile time interface checks
 
 type DB struct {
 	kv.RwDB
-	stateFiles      *state.Aggregator
+	agg             *state.Aggregator
 	forkaggs        []*state.ForkableAgg
 	forkaggsEnabled bool
 }
 
 func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
-	tdb := &DB{RwDB: db, stateFiles: agg}
+	tdb := &DB{RwDB: db, agg: agg}
 	if len(forkaggs) > 0 {
 		tdb.forkaggs = make([]*state.ForkableAgg, len(forkaggs))
 		for i, forkagg := range forkaggs {
@@ -92,7 +91,7 @@ func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB
 	return tdb, nil
 }
 func (db *DB) EnableForkable()           { db.forkaggsEnabled = true }
-func (db *DB) Agg() any                  { return db.stateFiles }
+func (db *DB) Agg() any                  { return db.agg }
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
@@ -103,7 +102,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	}
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
-	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.aggtx = db.agg.BeginFilesRo()
 
 	if db.forkaggsEnabled {
 		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
@@ -142,7 +141,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
-	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.aggtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -179,7 +178,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
-	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.aggtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -198,13 +197,11 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	//db.stateFiles.Close()
+	db.agg.Close()
 	db.RwDB.Close()
 }
 
-func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
-	db.stateFiles.OnFilesChange(onChange, onDel)
-}
+func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
 
 type tx struct {
 	db               *DB
@@ -232,7 +229,7 @@ func (tx *tx) ForceReopenAggCtx() {
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
-func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+func (tx *tx) Agg() *state.Aggregator { return tx.db.agg }
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }
@@ -420,7 +417,7 @@ func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return tx.rangeAsOf(name, tx.RwTx, fromKey, toKey, asOfTs, asc, limit)
 }
 
-func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, err error) {
+func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, err error) {
 	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx)
 	if err != nil {
 		return nil, step, err
@@ -463,11 +460,11 @@ func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []by
 	return k, v, true, nil
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
+func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	return tx.getLatest(name, tx.Tx, k)
 }
 
-func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
+func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	return tx.getLatest(name, tx.RwTx, k)
 }
 
@@ -531,10 +528,10 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 
 // Write methods
 
-func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
 func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
@@ -555,15 +552,15 @@ func (tx *tx) rangeLatest(domain kv.Domain, dbTx kv.Tx, from, to []byte, limit i
 	return tx.aggtx.DebugRangeLatest(dbTx, domain, from, to, limit)
 }
 
-func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
+func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
 	return tx.getLatestFromDB(domain, tx.Tx, k)
 }
 
-func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
+func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
 	return tx.getLatestFromDB(domain, tx.RwTx, k)
 }
 
-func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, found bool, err error) {
+func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, found bool, err error) {
 	return tx.aggtx.DebugGetLatestFromDB(domain, k, dbTx)
 }
 
@@ -571,31 +568,30 @@ func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 
-func (db *DB) DomainTables(domain ...kv.Domain) []string {
-	return db.stateFiles.DomainTables(domain...)
-}
+func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
+func (db *DB) ReloadSalt() error                         { return db.agg.ReloadSalt() }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
-	return db.stateFiles.InvertedIdxTables(domain...)
+	return db.agg.InvertedIdxTables(domain...)
 }
-func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
+func (db *DB) ReloadFiles() error { return db.agg.ReloadFiles() }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
-	return db.stateFiles.BuildMissedAccessors(ctx, workers)
+	return db.agg.BuildMissedAccessors(ctx, workers)
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
-	db.stateFiles.MadvNormal()
+	db.agg.MadvNormal()
 	return db
 }
 
 func (db *DB) DisableReadAhead() {
-	db.stateFiles.DisableReadAhead()
+	db.agg.DisableReadAhead()
 }
 
 func (db *DB) Files() []string {
-	return db.stateFiles.Files()
+	return db.agg.Files()
 }
 
 func (db *DB) MergeLoop(ctx context.Context) error {
-	return db.stateFiles.MergeLoop(ctx)
+	return db.agg.MergeLoop(ctx)
 }
 
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
@@ -648,15 +644,25 @@ func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.RwTx)
 }
-
-func (tx *tx) dirs() datadir.Dirs   { return tx.aggtx.Dirs() }
-func (tx *Tx) Dirs() datadir.Dirs   { return tx.dirs() }
-func (tx *RwTx) Dirs() datadir.Dirs { return tx.dirs() }
-
 func (tx *tx) stepSize() uint64 {
 	return tx.aggtx.StepSize()
 }
-func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
+func (tx *Tx) StepSize() uint64 {
+	return tx.stepSize()
+}
 func (tx *RwTx) StepSize() uint64 {
 	return tx.stepSize()
+}
+
+func (tx *Tx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.Tx)
+}
+func (tx *RwTx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.RwTx)
+}
+func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.Tx)
+}
+func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
 }

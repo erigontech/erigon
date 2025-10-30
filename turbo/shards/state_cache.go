@@ -28,7 +28,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/execution/types/accounts"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 // LRU state cache consists of two structures - B-Tree and binary heap

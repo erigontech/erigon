@@ -9,11 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/execution/chain"
-
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	cmath "github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 var (

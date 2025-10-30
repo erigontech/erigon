@@ -20,14 +20,13 @@
 package core
 
 import (
-	"math/big"
-
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -88,7 +87,28 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	if !cfg.NoReceipts {
 		// by the txn
-		receipt = MakeReceipt(header.Number, header.Hash(), msg, txn, *gasUsed, result, ibs, evm)
+		receipt = &types.Receipt{Type: txn.Type(), CumulativeGasUsed: *gasUsed}
+		if result.Failed() {
+			receipt.Status = types.ReceiptStatusFailed
+		} else {
+			receipt.Status = types.ReceiptStatusSuccessful
+		}
+		receipt.TxHash = txn.Hash()
+		receipt.GasUsed = result.GasUsed
+		// if the transaction created a contract, store the creation address in the receipt.
+		if msg.To() == nil {
+			receipt.ContractAddress = crypto.CreateAddress(evm.Origin, txn.GetNonce())
+		}
+		// Set the receipt logs and create a bloom for filtering
+		receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash())
+		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+		receipt.BlockNumber = header.Number
+		receipt.TransactionIndex = uint(ibs.TxnIndex())
+
+		// If the transaction created a contract, store the creation address in the receipt.
+		if result.TopLevelDeployed != nil {
+			receipt.ContractAddress = *result.TopLevelDeployed
+		}
 	}
 
 	return receipt, result.ReturnData, err
@@ -103,6 +123,11 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
+
+	// Add addresses to access list if applicable
+	// about the transaction and calling mechanisms.
+	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
+
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
@@ -111,6 +136,11 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 
 func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine consensus.EngineReader, author *common.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
 	// Create a new context to be used in the EVM environment
+
+	// Add addresses to access list if applicable
+	// about the transaction and calling mechanisms.
+	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
+
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	return vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 }
@@ -195,7 +225,7 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 		receipt.GasUsed = result.GasUsed
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
-			receipt.ContractAddress = types.CreateAddress(evm.Origin, txn.GetNonce())
+			receipt.ContractAddress = crypto.CreateAddress(evm.Origin, txn.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash())
@@ -225,7 +255,7 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) (com
 
 	// Add addresses to access list if applicable
 	// about the transaction and calling mechanisms.
-	// cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
+	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs.(*state.IntraBlockState), config, cfg)
@@ -277,7 +307,6 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 		types.AccessList{},
 		false,
 		false,
-		false,
 		common.Num0,
 	)
 
@@ -294,40 +323,4 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 	//	evm.StateDB.AccessEvents().Merge(evm.AccessEvents)
 	//}
 	//evm.StateDB.Finalise(true)
-}
-func MakeReceipt(
-	blockNumber *big.Int,
-	blockHash common.Hash,
-	msg *types.Message,
-	txn types.Transaction,
-	cumulativeGasUsed uint64,
-	result *evmtypes.ExecutionResult,
-	ibs *state.IntraBlockState,
-	evm *vm.EVM,
-) *types.Receipt {
-	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed}
-	if result.Failed() {
-		receipt.Status = types.ReceiptStatusFailed
-	} else {
-		receipt.Status = types.ReceiptStatusSuccessful
-	}
-	receipt.TxHash = txn.Hash()
-	receipt.GasUsed = result.GasUsed
-	// In the case of blob transaction, we need to possibly unwrap and store the gas used by blobs
-	if t, ok := txn.(*types.BlobTxWrapper); ok {
-		txn = &t.Tx
-	}
-	if txn.Type() == types.BlobTxType {
-		receipt.BlobGasUsed = uint64(len(txn.GetBlobHashes()) * int(params.GasPerBlob))
-	}
-	// If the transaction created a contract, store the creation address in the receipt.
-	if msg.To() == nil {
-		receipt.ContractAddress = types.CreateAddress(evm.Origin, txn.GetNonce())
-	}
-	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)
-	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	receipt.BlockNumber = blockNumber
-	receipt.TransactionIndex = uint(ibs.TxnIndex())
-	return receipt
 }

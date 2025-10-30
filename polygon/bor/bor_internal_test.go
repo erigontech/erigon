@@ -26,10 +26,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -46,6 +47,10 @@ func (m mockBridgeReader) EventsWithinTime(context.Context, time.Time, time.Time
 	panic("mock")
 }
 
+func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
+	panic("mock")
+}
+
 var _ spanReader = mockSpanReader{}
 
 type mockSpanReader struct{}
@@ -54,7 +59,7 @@ func (m mockSpanReader) Span(context.Context, uint64) (*heimdall.Span, bool, err
 	panic("mock")
 }
 
-func (m mockSpanReader) Producers(context.Context, uint64) (*heimdall.ValidatorSet, error) {
+func (m mockSpanReader) Producers(context.Context, uint64) (*valset.ValidatorSet, error) {
 	panic("mock")
 }
 
@@ -63,7 +68,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	cr := consensus.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
-	bor := New(polychain.BorDevnet.Config, nil, nil, nil, nil, br, nil)
+	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, br, nil)
 
 	header := &types.Header{
 		Number: big.NewInt(112),
@@ -89,9 +94,8 @@ func TestCommitStatesIndore(t *testing.T) {
 				nil,
 				nil,
 				nil,
-				false, // checkNonce
-				false, // checkGas
-				false, // isFree
+				false,
+				false,
 				nil,
 			),
 		}, nil,

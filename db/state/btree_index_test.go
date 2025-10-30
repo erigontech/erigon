@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,9 +27,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
-	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func Test_BtreeIndex_Init(t *testing.T) {
@@ -46,7 +44,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	defer decomp.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r, background.NewProgressSet(), tmp, 1, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r, background.NewProgressSet(), tmp, 1, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, r)
@@ -195,7 +193,7 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 	defer decomp.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), compressed)
-	err = BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 }
 
@@ -408,27 +406,4 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []by
 	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 	return bytes.Compare(resBuf, k), resBuf, nil
 	//return b.getter.Match(k), result, nil
-}
-
-func TestNewBtIndex(t *testing.T) {
-	t.Parallel()
-	keyCount := 10000
-	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
-
-	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
-
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
-	require.NoError(t, err)
-	defer bt.Close()
-	defer kv.Close()
-	require.NotNil(t, kv)
-	require.NotNil(t, bt)
-	bplus := bt.bplus
-	require.GreaterOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM))
-
-	for i := 1; i < len(bt.bplus.mx); i++ {
-		require.NotZero(t, bt.bplus.mx[i].di)
-		require.NotZero(t, bt.bplus.mx[i].off)
-		require.NotEmpty(t, bt.bplus.mx[i].key)
-	}
 }

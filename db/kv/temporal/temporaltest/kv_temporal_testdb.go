@@ -20,41 +20,39 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon/db/config3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 )
 
 // nolint:thelper
 func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
-	return NewTestDBWithStepSize(tb, dirs, config3.DefaultStepSize)
-}
-
-func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
 
-	//TODO: create set of funcs for non-test code. Assert(tb == nil)
-
 	var rawDB kv.RwDB
-	ctx := context.Background()
 	if tb != nil {
-		ctx = tb.Context()
-		rawDB = memdb.NewTestDB(tb, dbcfg.ChainDB)
+		rawDB = memdb.NewTestDB(tb, kv.ChainDB)
 	} else {
-		rawDB = memdb.New(nil, dirs.DataDir, dbcfg.ChainDB)
+		rawDB = memdb.New(dirs.DataDir, kv.ChainDB)
 	}
 
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, rawDB)
+	salt, err := state.GetStateIndicesSalt(dirs, true, log.New())
+	if err != nil {
+		panic(err)
+	}
+	agg, err := state.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, rawDB, log.New())
+	if err != nil {
+		panic(err)
+	}
 	if err := agg.OpenFolder(); err != nil {
 		panic(err)
 	}
-
 	if tb != nil {
 		tb.Cleanup(agg.Close)
 	}

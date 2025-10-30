@@ -18,7 +18,6 @@ package dbg
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -29,95 +28,184 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-const ErigonEnvPrefix = "ERIGON_"
-
-// envLookup - auto-add ERIGON_ prefix to any declared ENV variable
-//
-//	User - can add/skip ERIGON_ prefix
-//	Developer - can add/skip ERIGON_ prefix
-func envLookup(envVarName string) (string, bool) {
-	if v, ok := os.LookupEnv(envVarName); ok {
-		if strings.HasPrefix(envVarName, ErigonEnvPrefix) {
-			log.Warn("[env]", envVarName, v)
-		} else {
-			log.Warn("[env] use ERIGON_ prefix for env", "var", envVarName)
-			log.Warn("[env]", envVarName, v)
-		}
-		return v, true
-	}
-	if v, ok := os.LookupEnv(ErigonEnvPrefix + envVarName); ok {
-		log.Warn("[env]", ErigonEnvPrefix+envVarName, v)
-		return v, true
-	}
-	return "", false
-}
-
 func EnvString(envVarName string, defaultVal string) string {
-	if v, _ := envLookup(envVarName); v != "" {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		log.Warn("[env]", envVarName, v)
+		return v
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		log.Warn("[env]", envVarName, v)
 		return v
 	}
 	return defaultVal
 }
 
 func EnvStrings(envVarName string, sep string, defaultVal []string) []string {
-	if v, _ := envLookup(envVarName); v != "" {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, v)
+		return strings.Split(v, sep)
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		log.Info("[env]", envVarName, v)
 		return strings.Split(v, sep)
 	}
 	return defaultVal
 }
 
 func EnvBool(envVarName string, defaultVal bool) bool {
-	v, _ := envLookup(envVarName)
-	if strings.EqualFold(v, "true") {
+	v, _ := os.LookupEnv(envVarName)
+	if v == "true" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, true)
 		return true
 	}
-	if strings.EqualFold(v, "false") {
+	if v == "false" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, false)
+		return false
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v == "true" {
+		log.Info("[env]", envVarName, true)
+		return true
+	}
+	if v == "false" {
+		log.Info("[env]", envVarName, false)
 		return false
 	}
 	return defaultVal
 }
-
 func EnvInt(envVarName string, defaultVal int) int {
-	if v, _ := envLookup(envVarName); v != "" {
-		return int(MustParseInt(v))
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		i := MustParseInt(v)
+		log.Info("[env]", envVarName, i)
+		return int(i)
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		i := MustParseInt(v)
+		log.Info("[env]", envVarName, i)
+		return int(i)
 	}
 	return defaultVal
 }
 
 func EnvUint(envVarName string, defaultVal uint64) uint64 {
-	if v, _ := envLookup(envVarName); v != "" {
-		return MustParseUint(v)
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		i := MustParseUint(v)
+		log.Info("[env]", envVarName, i)
+		return i
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		i := MustParseUint(v)
+		log.Info("[env]", envVarName, i)
+		return i
 	}
 	return defaultVal
 }
 
 func EnvInts(envVarName string, sep string, defaultVal []int64) []int64 {
-	if v, _ := envLookup(envVarName); v != "" {
-		return MustParseInts(v, sep)
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, v)
+		var ints []int64
+		for _, str := range strings.Split(v, sep) {
+			ints = append(ints, MustParseInt(str))
+		}
+		return ints
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		log.Info("[env]", envVarName, v)
+		var ints []int64
+		for _, str := range strings.Split(v, sep) {
+			ints = append(ints, MustParseInt(str))
+		}
+		return ints
 	}
 	return defaultVal
 }
 
 func EnvUints(envVarName string, sep string, defaultVal []uint64) []uint64 {
-	if v, _ := envLookup(envVarName); v != "" {
-		return MustParseUints(v, sep)
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, v)
+		var ints []uint64
+		for _, str := range strings.Split(v, sep) {
+			ints = append(ints, MustParseUint(str))
+		}
+		return ints
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		log.Info("[env]", envVarName, v)
+		var ints []uint64
+		for _, str := range strings.Split(v, sep) {
+			ints = append(ints, MustParseUint(str))
+		}
+		return ints
 	}
 	return defaultVal
 }
 
 func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteSize {
-	if v, _ := envLookup(envVarName); v != "" {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
 		val, err := datasize.ParseString(v)
 		if err != nil {
 			panic(err)
 		}
+		log.Info("[env]", envVarName, val)
+		return val
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		val, err := datasize.ParseString(v)
+		if err != nil {
+			panic(err)
+		}
+		log.Info("[env]", envVarName, val)
 		return val
 	}
 	return defaultVal
 }
 
 func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
-	if v, _ := envLookup(envVarName); v != "" {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, v)
+		val, err := time.ParseDuration(v)
+		if err != nil {
+			panic(err)
+		}
+		return val
+	}
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		log.Info("[env]", envVarName, v)
 		val, err := time.ParseDuration(v)
 		if err != nil {
 			panic(err)
@@ -125,6 +213,12 @@ func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
 		return val
 	}
 	return defaultVal
+}
+
+func WarnOnErigonPrefix(envVarName string) {
+	if !strings.HasPrefix(envVarName, "ERIGON_") {
+		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+	}
 }
 
 func MustParseInt(strNum string) int64 {
@@ -143,26 +237,4 @@ func MustParseUint(strNum string) uint64 {
 		panic(fmt.Errorf("%w, str: %s", err, strNum))
 	}
 	return parsed
-}
-func MustParseInts(strNum, separator string) []int64 {
-	if strings.EqualFold(strNum, "all") || strings.EqualFold(strNum, "true") {
-		return []int64{math.MaxInt64}
-	}
-	parts := strings.Split(strNum, separator)
-	ints := make([]int64, 0, len(parts))
-	for _, str := range parts {
-		ints = append(ints, MustParseInt(str))
-	}
-	return ints
-}
-func MustParseUints(strNum, separator string) []uint64 {
-	if strings.EqualFold(strNum, "all") || strings.EqualFold(strNum, "true") {
-		return []uint64{math.MaxUint64}
-	}
-	parts := strings.Split(strNum, separator)
-	ints := make([]uint64, 0, len(parts))
-	for _, str := range strings.Split(strNum, separator) {
-		ints = append(ints, MustParseUint(str))
-	}
-	return ints
 }

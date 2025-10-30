@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,14 +30,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestEvictionInUnexpectedOrder(t *testing.T) {
@@ -136,13 +137,13 @@ func TestEviction(t *testing.T) {
 	})
 	require.Equal(0, c.stateEvict.Len())
 	//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
-	c.OnNewBlock(&remoteproto.StateChangeBatch{
+	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId: id + 1,
-		ChangeBatch: []*remoteproto.StateChange{
+		ChangeBatch: []*remote.StateChange{
 			{
-				Direction: remoteproto.Direction_FORWARD,
-				Changes: []*remoteproto.AccountChange{{
-					Action:  remoteproto.Action_UPSERT,
+				Direction: remote.Direction_FORWARD,
+				Changes: []*remote.AccountChange{{
+					Action:  remote.Action_UPSERT,
 					Address: gointerfaces.ConvertAddressToH160(k1),
 					Data:    []byte{2},
 				}},
@@ -232,6 +233,8 @@ func TestAPI(t *testing.T) {
 		return res
 	}
 
+	counter := atomic.Int64{}
+	prevVals := map[string][]byte{}
 	put := func(k, v []byte) uint64 {
 		var txID uint64
 		err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
@@ -241,10 +244,11 @@ func TestAPI(t *testing.T) {
 				return err
 			}
 			defer d.Close()
-			txNum := uint64(0)
-			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil, 0); err != nil {
+			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, d.TxNum(), prevVals[string(k)], uint64(counter.Load())); err != nil {
 				return err
 			}
+			prevVals[string(k)] = v
+			counter.Add(1)
 			return d.Flush(ctx, tx)
 		})
 		require.NoError(err)
@@ -288,16 +292,16 @@ func TestAPI(t *testing.T) {
 	res3, res4 := get(k1, txID2), get(k2, txID2) // will see View of transaction 2
 	txID3 := put(k1[:], account2Enc)             // even if core already on block 3
 
-	c.OnNewBlock(&remoteproto.StateChangeBatch{
+	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID2,
 		PendingBlockBaseFee: 1,
-		ChangeBatch: []*remoteproto.StateChange{
+		ChangeBatch: []*remote.StateChange{
 			{
-				Direction:   remoteproto.Direction_FORWARD,
+				Direction:   remote.Direction_FORWARD,
 				BlockHeight: 2,
 				BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
-				Changes: []*remoteproto.AccountChange{{
-					Action:  remoteproto.Action_UPSERT,
+				Changes: []*remote.AccountChange{{
+					Action:  remote.Action_UPSERT,
 					Address: gointerfaces.ConvertAddressToH160(k1),
 					Data:    account2Enc,
 				}},
@@ -333,16 +337,16 @@ func TestAPI(t *testing.T) {
 	fmt.Printf("-----2\n")
 
 	res5, res6 := get(k1, txID3), get(k2, txID3) // will see View of transaction 3, even if notification has not enough changes
-	c.OnNewBlock(&remoteproto.StateChangeBatch{
+	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID3,
 		PendingBlockBaseFee: 1,
-		ChangeBatch: []*remoteproto.StateChange{
+		ChangeBatch: []*remote.StateChange{
 			{
-				Direction:   remoteproto.Direction_FORWARD,
+				Direction:   remote.Direction_FORWARD,
 				BlockHeight: 3,
 				BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
-				Changes: []*remoteproto.AccountChange{{
-					Action:  remoteproto.Action_UPSERT,
+				Changes: []*remote.AccountChange{{
+					Action:  remote.Action_UPSERT,
 					Address: gointerfaces.ConvertAddressToH160(k1),
 					Data:    account2Enc,
 				}},
@@ -380,16 +384,16 @@ func TestAPI(t *testing.T) {
 	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
 
-	c.OnNewBlock(&remoteproto.StateChangeBatch{
+	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID4,
 		PendingBlockBaseFee: 1,
-		ChangeBatch: []*remoteproto.StateChange{
+		ChangeBatch: []*remote.StateChange{
 			{
-				Direction:   remoteproto.Direction_UNWIND,
+				Direction:   remote.Direction_UNWIND,
 				BlockHeight: 2,
 				BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
-				Changes: []*remoteproto.AccountChange{{
-					Action:  remoteproto.Action_UPSERT,
+				Changes: []*remote.AccountChange{{
+					Action:  remote.Action_UPSERT,
 					Address: gointerfaces.ConvertAddressToH160(k1),
 					Data:    account4Enc,
 				}},
@@ -398,16 +402,16 @@ func TestAPI(t *testing.T) {
 	})
 	fmt.Printf("-----4\n")
 	txID5 := put(k1[:], account4Enc) // reorg to new chain
-	c.OnNewBlock(&remoteproto.StateChangeBatch{
+	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID5,
 		PendingBlockBaseFee: 1,
-		ChangeBatch: []*remoteproto.StateChange{
+		ChangeBatch: []*remote.StateChange{
 			{
-				Direction:   remoteproto.Direction_FORWARD,
+				Direction:   remote.Direction_FORWARD,
 				BlockHeight: 3,
 				BlockHash:   gointerfaces.ConvertHashToH256([32]byte{2}),
-				Changes: []*remoteproto.AccountChange{{
-					Action:  remoteproto.Action_UPSERT,
+				Changes: []*remote.AccountChange{{
+					Action:  remote.Action_UPSERT,
 					Address: gointerfaces.ConvertAddressToH160(k1),
 					Data:    account4Enc,
 				}},
@@ -474,8 +478,7 @@ func TestCode(t *testing.T) {
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		//todo: use kv.CodeDomain
-		//_ = tx.Put(kv.Code, k1[:], k2[:])
+		_ = tx.Put(kv.Code, k1[:], k2[:])
 		cacheView, _ := c.View(ctx, tx)
 		view := cacheView.(*CoherentView)
 

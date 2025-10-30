@@ -16,7 +16,7 @@
 
 package membatchwithdb
 
-import "github.com/erigontech/erigon/db/kv"
+import "github.com/erigontech/erigon-lib/kv"
 
 type entry struct {
 	k []byte

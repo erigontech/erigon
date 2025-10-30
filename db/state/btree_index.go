@@ -37,13 +37,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datastruct/existence"
-	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
-	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 const BtreeLogPrefix = "btree"
@@ -154,6 +152,7 @@ type BtIndexWriter struct {
 	args BtIndexWriterArgs
 
 	indexFileName string
+	tmpFilePath   string
 
 	numBuf      [8]byte
 	keysWritten uint64
@@ -185,7 +184,8 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 		args.Lvl = log.LvlTrace
 	}
 
-	btw := &BtIndexWriter{lvl: args.Lvl, logger: logger, args: args}
+	btw := &BtIndexWriter{lvl: args.Lvl, logger: logger, args: args,
+		tmpFilePath: args.IndexFile + ".tmp"}
 
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
@@ -236,8 +236,8 @@ func (btw *BtIndexWriter) Build() error {
 		return errors.New("already built")
 	}
 	var err error
-	if btw.indexF, err = dir.CreateTemp(btw.args.IndexFile); err != nil {
-		return fmt.Errorf("create temp index file for %s: %w", btw.args.IndexFile, err)
+	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {
+		return fmt.Errorf("create index file %s: %w", btw.args.IndexFile, err)
 	}
 	defer btw.indexF.Close()
 	btw.indexW = bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
@@ -283,7 +283,7 @@ func (btw *BtIndexWriter) Build() error {
 	if err = btw.indexF.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(btw.indexF.Name(), btw.args.IndexFile); err != nil {
+	if err = os.Rename(btw.tmpFilePath, btw.args.IndexFile); err != nil {
 		return err
 	}
 	return nil
@@ -299,7 +299,7 @@ func (btw *BtIndexWriter) fsync() error {
 		return nil
 	}
 	if err := btw.indexF.Sync(); err != nil {
-		btw.logger.Warn("couldn't fsync", "err", err, "file", btw.indexF.Name())
+		btw.logger.Warn("couldn't fsync", "err", err, "file", btw.tmpFilePath)
 		return err
 	}
 	return nil
@@ -330,7 +330,7 @@ type BtIndex struct {
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors Accessors) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
@@ -354,7 +354,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 	return d, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors statecfg.Accessors) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors Accessors) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
@@ -363,7 +363,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 	existenceFilterPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
 	var existenceFilter *existence.Filter
-	if accessors.Has(statecfg.AccessorExistence) {
+	if accessors.Has(AccessorExistence) {
 		var err error
 		useFuse := false
 		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath, useFuse)

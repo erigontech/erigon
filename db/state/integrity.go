@@ -7,17 +7,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"golang.org/x/sync/errgroup"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/estimate"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/recsplit/multiencseq"
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
+	"golang.org/x/sync/errgroup"
 )
 
 // search key in all files of all domains and print file names
@@ -97,11 +97,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			}
 			accessor := item.index
 			if accessor == nil {
-				fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(kv.Step(item.startTxNum/dt.stepSize), kv.Step(item.endTxNum/dt.stepSize)))
-				if err != nil {
-					panic(err)
-				}
-
+				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.aggStep, item.endTxNum/dt.aggStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
@@ -110,7 +106,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 				}
 				if exists {
 					var err error
-					accessor, err = dt.d.openHashMapAccessor(fPath)
+					accessor, err = recsplit.OpenIndex(fPath)
 					if err != nil {
 						_, fName := filepath.Split(fPath)
 						dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
@@ -146,7 +142,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 }
 
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
-	fromTxNum := fromStep * iit.ii.stepSize
+	fromTxNum := fromStep * iit.ii.aggregationStep
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
 

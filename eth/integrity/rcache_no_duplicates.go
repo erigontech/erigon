@@ -10,9 +10,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -36,11 +37,29 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 	fromBlock := uint64(1)
 	toBlock, _, _ := txNumsReader.FindBlockNum(tx, rcacheDomainProgress)
 
-	if err := ValidateDomainProgress(db, kv.RCacheDomain, txNumsReader); err != nil {
-		return err
+	{
+		log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
+		accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
+		diff := int(rcacheDomainProgress - accProgress)
+		if diff != 0 && diff != 1 {
+			// if no system tx -- nil is stored in rcache; so it might be atmost 1 ahead of accounts.
+			var execProgressBlock, execStartTxNum, execEndTxNum uint64
+			if execProgressBlock, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+				return err
+			}
+			if execStartTxNum, err = txNumsReader.Min(tx, execProgressBlock); err != nil {
+				return nil
+			}
+			if execEndTxNum, err = txNumsReader.Max(tx, execProgressBlock); err != nil {
+				return nil
+			}
+			err := fmt.Errorf("[integrity] RCacheDomain=%d (block=%d) not equal AccountDomain=%d, while execBlockProgress(block=%d, startTxNum=%d, endTxNum=%d)", rcacheDomainProgress, toBlock, accProgress, execProgressBlock, execStartTxNum, execEndTxNum)
+			log.Warn(err.Error())
+			return err
+		}
 	}
 
-	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
+	tx.Rollback()
 
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)

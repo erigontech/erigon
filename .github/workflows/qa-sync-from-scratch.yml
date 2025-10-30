@@ -15,11 +15,11 @@ concurrency:
 jobs:
   sync-from-scratch-test:
     runs-on: [self-hosted, qa, long-running]
-    timeout-minutes: 1440  # 24 hours
+    timeout-minutes: 740  # 12 hours plus 20 minutes
     strategy:
       fail-fast: false
       matrix:
-        chain: [ sepolia, hoodi, amoy, chiado ]  # Chain name as specified on the erigon command line
+        chain: [ sepolia, holesky, amoy, chiado ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -30,7 +30,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v4
 
     - name: Clean Erigon Build & Data Directories
       run: |
@@ -99,7 +99,7 @@ jobs:
         name: test-results-${{ env.CHAIN }}
         path: |
           ${{ github.workspace }}/result-${{ env.CHAIN }}.json
-          ${{ github.workspace }}/erigon_data/logs/
+          ${{ github.workspace }}/erigon_data/logs/erigon.log
 
     - name: Clean up Erigon data directory
       if: always()

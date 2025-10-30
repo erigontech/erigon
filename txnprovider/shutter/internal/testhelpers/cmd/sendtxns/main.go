@@ -29,10 +29,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/requests"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 )
 
 func main() {
@@ -78,14 +78,9 @@ func main() {
 }
 
 func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
-	spec, err := chainspec.ChainSpecByName(chain)
-	if err != nil {
-		return fmt.Errorf("failed to get chain spec for %s: %w", chain, err)
-	}
-	chainId := spec.Config.ChainID
-
+	chainId := chainspec.ChainConfigByChainName(chain).ChainID
 	rpcClient := requests.NewRequestGenerator(url, logger)
-	transactor := executiontests.NewTransactor(rpcClient, chainId)
+	transactor := testhelpers.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)
 	to := common.HexToAddress(toStr)
 	count, err := strconv.Atoi(countStr)
@@ -107,11 +102,6 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	for i := 0; i < count; i++ {
 		txn, err := transactor.SubmitSimpleTransfer(from, to, amount)
 		if err != nil {
-			if strings.Contains(err.Error(), "failed to get transaction count: Invalid params") {
-				logger.Warn("failed to get transaction count, retrying", "err", err)
-				time.Sleep(time.Second)
-				continue
-			}
 			return err
 		}
 		logger.Info("transaction sent", "hash", txn.Hash())

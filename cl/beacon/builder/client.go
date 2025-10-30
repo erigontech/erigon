@@ -116,7 +116,7 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	return header, nil
 }
 
-func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *cltypes.ExecutionRequests, error) {
+func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *cltypes.ExecutionRequests, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
 	path := "/eth/v1/builder/blinded_blocks"
 	isPostFulu := block.Version().AfterOrEqual(clparams.FuluVersion)
@@ -150,7 +150,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	}
 
 	var eth1Block *cltypes.Eth1Block
-	var blobsBundle *engine_types.BlobsBundle
+	var blobsBundle *engine_types.BlobsBundleV1
 	var executionRequests *cltypes.ExecutionRequests
 	switch resp.Version {
 	case "bellatrix", "capella":
@@ -160,26 +160,25 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 		}
 	case "deneb":
 		denebResp := &struct {
-			ExecutionPayload *cltypes.Eth1Block        `json:"execution_payload"`
-			BlobsBundle      *engine_types.BlobsBundle `json:"blobs_bundle"`
+			ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
+			BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
 		}{
 			ExecutionPayload: cltypes.NewEth1Block(clparams.DenebVersion, b.beaconConfig),
-			BlobsBundle:      &engine_types.BlobsBundle{},
+			BlobsBundle:      &engine_types.BlobsBundleV1{},
 		}
 		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
 			return nil, nil, nil, err
 		}
 		eth1Block = denebResp.ExecutionPayload
 		blobsBundle = denebResp.BlobsBundle
-	case "electra", "fulu":
-		version, _ := clparams.StringToClVersion(resp.Version)
+	case "electra":
 		denebResp := &struct {
-			ExecutionPayload  *cltypes.Eth1Block         `json:"execution_payload"`
-			BlobsBundle       *engine_types.BlobsBundle  `json:"blobs_bundle"`
-			ExecutionRequests *cltypes.ExecutionRequests `json:"execution_requests"`
+			ExecutionPayload  *cltypes.Eth1Block          `json:"execution_payload"`
+			BlobsBundle       *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+			ExecutionRequests *cltypes.ExecutionRequests  `json:"execution_requests"`
 		}{
-			ExecutionPayload:  cltypes.NewEth1Block(version, b.beaconConfig),
-			BlobsBundle:       &engine_types.BlobsBundle{},
+			ExecutionPayload:  cltypes.NewEth1Block(clparams.DenebVersion, b.beaconConfig),
+			BlobsBundle:       &engine_types.BlobsBundleV1{},
 			ExecutionRequests: cltypes.NewExecutionRequests(b.beaconConfig),
 		}
 		if err := json.Unmarshal(resp.Data, denebResp); err != nil {

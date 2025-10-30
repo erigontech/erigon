@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 
@@ -286,7 +285,9 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					break
 				} else {
 					page = sr.Result.Next
-					maps.Copy(accRangeErigon, sr.Result.Accounts)
+					for k, v := range sr.Result.Accounts {
+						accRangeErigon[k] = v
+					}
 				}
 				if needCompare {
 					var srGeth DebugAccountRange
@@ -300,7 +301,9 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 						break
 					} else {
 						pageGeth = srGeth.Result.Next
-						maps.Copy(accRangeGeth, srGeth.Result.Accounts)
+						for k, v := range srGeth.Result.Accounts {
+							accRangeGeth[k] = v
+						}
 					}
 					if !bytes.Equal(page, pageGeth) {
 						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)

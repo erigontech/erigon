@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,20 +31,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/config3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/recsplit"
-	"github.com/erigontech/erigon/db/recsplit/multiencseq"
-	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
@@ -51,7 +49,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -60,13 +58,13 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, Version: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
-	cfg.Accessors = statecfg.AccessorHashMap
-	ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
+	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg.salt.Store(&salt)
+	cfg.Accessors = AccessorHashMap
+	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
-	tb.Cleanup(ii.Close)
-	ii.salt.Store(&salt)
 	ii.DisableFsync()
+	tb.Cleanup(ii.Close)
 	return db, ii
 }
 
@@ -93,7 +91,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		icc, err := tx.CursorDupSort(ii.KeysTable)
+		icc, err := tx.CursorDupSort(ii.keysTable)
 		require.NoError(t, err)
 
 		count := 0
@@ -126,7 +124,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		collation, err := ii.collate(context.Background(), 0, tx)
 		require.NoError(t, err)
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
-		txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
+		txFrom, txTo := firstTxNumOfStep(0, ii.aggregationStep), firstTxNumOfStep(1, ii.aggregationStep)
 		ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 		// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
@@ -178,7 +176,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		it.Close()
 
 		// straight from pruned - not empty
-		icc, err := tx.CursorDupSort(ii.KeysTable)
+		icc, err := tx.CursorDupSort(ii.keysTable)
 		require.NoError(t, err)
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
@@ -190,7 +188,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		icc.Close()
 
 		// check second table
-		icc, err = tx.CursorDupSort(ii.ValuesTable)
+		icc, err = tx.CursorDupSort(ii.valuesTable)
 		require.NoError(t, err)
 		key, txn, err := icc.First()
 		t.Logf("key: %x, txn: %x", key, txn)
@@ -283,9 +281,11 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}
 
 	t.Parallel()
+
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -348,7 +348,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
+	for _, table := range []string{ii.keysTable, ii.valuesTable} {
 		var cur kv.Cursor
 		cur, err = tx.Cursor(table)
 		require.NoError(t, err)
@@ -507,22 +507,22 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	defer tx.Rollback()
 
 	// Leave the last 2 aggregation steps un-collated
-	for step := kv.Step(0); step < kv.Step(txs/ii.stepSize)-1; step++ {
+	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
 			bs, err := ii.collate(ctx, step, tx)
 			require.NoError(tb, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
-			ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
+			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(tb, err)
 			var found bool
 			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
-			maxSpan := ii.stepSize * config3.StepsInFrozenFile
+			maxSpan := ii.aggregationStep * config3.StepsInFrozenFile
 
 			for {
 				if stop := func() bool {
@@ -566,17 +566,17 @@ func TestInvIndexRanges(t *testing.T) {
 	defer tx.Rollback()
 
 	// Leave the last 2 aggregation steps un-collated
-	for step := kv.Step(0); step < kv.Step(txs/ii.stepSize)-1; step++ {
+	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
 			bs, err := ii.collate(ctx, step, tx)
 			require.NoError(t, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
-			ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
+			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(t, err)
 		}()
 	}
@@ -608,17 +608,14 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 	// Recreate InvertedIndex to scan the files
 	salt := uint32(1)
-	cfg := ii.InvIdxCfg
+	cfg := ii.iiCfg
+	cfg.salt.Store(&salt)
 
 	var err error
-	ii, err = NewInvertedIndex(cfg, 16, ii.dirs, logger)
+	ii, err = NewInvertedIndex(cfg, 16, logger)
 	require.NoError(err)
 	defer ii.Close()
-	ii.salt.Store(&salt)
-
-	scanDirsRes, err := scanDirs(ii.dirs)
-	require.NoError(err)
-	err = ii.openFolder(scanDirsRes)
+	err = ii.openFolder()
 	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
@@ -801,14 +798,12 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	fn := ff.src.decompressor.FilePath()
 	ii.Close()
 
-	err := dir.RemoveFile(fn)
+	err := os.Remove(fn)
 	require.NoError(t, err)
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	scanDirsRes, err := scanDirs(ii.dirs)
-	require.NoError(t, err)
-	err = ii.openFolder(scanDirsRes)
+	err = ii.openFolder()
 	require.NoError(t, err)
 	ii.Close()
 }

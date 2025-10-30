@@ -24,7 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func TestMainnet(t *testing.T) {

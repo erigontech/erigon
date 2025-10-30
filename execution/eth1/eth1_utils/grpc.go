@@ -25,23 +25,23 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
+func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 	difficulty := new(uint256.Int)
 	difficulty.SetFromBig(header.Difficulty)
 
-	var baseFeeReply *typesproto.H256
+	var baseFeeReply *types2.H256
 	if header.BaseFee != nil {
 		var baseFee uint256.Int
 		baseFee.SetFromBig(header.BaseFee)
 		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
 	}
 
-	h := &executionproto.Header{
+	h := &execution.Header{
 		ParentHash:      gointerfaces.ConvertHashToH256(header.ParentHash),
 		Coinbase:        gointerfaces.ConvertAddressToH160(header.Coinbase),
 		StateRoot:       gointerfaces.ConvertHashToH256(header.Root),
@@ -85,37 +85,37 @@ func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
 	return h
 }
 
-func HeadersToHeadersRPC(headers []*types.Header) []*executionproto.Header {
+func HeadersToHeadersRPC(headers []*types.Header) []*execution.Header {
 	if headers == nil {
 		return nil
 	}
-	ret := make([]*executionproto.Header, 0, len(headers))
+	ret := make([]*execution.Header, 0, len(headers))
 	for _, header := range headers {
 		ret = append(ret, HeaderToHeaderRPC(header))
 	}
 	return ret
 }
 
-func ConvertBlocksToRPC(blocks []*types.Block) []*executionproto.Block {
-	ret := []*executionproto.Block{}
+func ConvertBlocksToRPC(blocks []*types.Block) []*execution.Block {
+	ret := []*execution.Block{}
 	for _, block := range blocks {
 		ret = append(ret, ConvertBlockToRPC(block))
 	}
 	return ret
 }
 
-func ConvertBlockToRPC(block *types.Block) *executionproto.Block {
+func ConvertBlockToRPC(block *types.Block) *execution.Block {
 	h := HeaderToHeaderRPC(block.Header())
 	blockHash := block.Hash()
 	h.BlockHash = gointerfaces.ConvertHashToH256(blockHash)
 
-	return &executionproto.Block{
+	return &execution.Block{
 		Header: h,
 		Body:   ConvertRawBlockBodyToRpc(block.RawBody(), h.BlockNumber, blockHash),
 	}
 }
 
-func HeaderRpcToHeader(header *executionproto.Header) (*types.Header, error) {
+func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	var blockNonce types.BlockNonce
 	binary.BigEndian.PutUint64(blockNonce[:], header.Nonce)
 	h := &types.Header{
@@ -164,7 +164,7 @@ func HeaderRpcToHeader(header *executionproto.Header) (*types.Header, error) {
 	return h, nil
 }
 
-func HeadersRpcToHeaders(headers []*executionproto.Header) ([]*types.Header, error) {
+func HeadersRpcToHeaders(headers []*execution.Header) ([]*types.Header, error) {
 	if headers == nil {
 		return nil, nil
 	}
@@ -179,7 +179,7 @@ func HeadersRpcToHeaders(headers []*executionproto.Header) ([]*types.Header, err
 	return out, nil
 }
 
-func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal {
+func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 	if in == nil {
 		return nil
 	}
@@ -195,13 +195,13 @@ func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal 
 	return out
 }
 
-func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
+func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 	if in == nil {
 		return nil
 	}
-	out := make([]*typesproto.Withdrawal, 0, len(in))
+	out := make([]*types2.Withdrawal, 0, len(in))
 	for _, w := range in {
-		out = append(out, &typesproto.Withdrawal{
+		out = append(out, &types2.Withdrawal{
 			Index:          w.Index,
 			ValidatorIndex: w.Validator,
 			Address:        gointerfaces.ConvertAddressToH160(w.Address),
@@ -211,12 +211,12 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 	return out
 }
 
-func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash common.Hash) *executionproto.BlockBody {
+func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash common.Hash) *execution.BlockBody {
 	if in == nil {
 		return nil
 	}
 
-	return &executionproto.BlockBody{
+	return &execution.BlockBody{
 		BlockNumber:  blockNumber,
 		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
 		Transactions: in.Transactions,
@@ -225,8 +225,8 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash c
 	}
 }
 
-func ConvertRawBlockBodiesToRpc(in []*types.RawBody, blockNumbers []uint64, blockHashes []common.Hash) []*executionproto.BlockBody {
-	ret := []*executionproto.BlockBody{}
+func ConvertRawBlockBodiesToRpc(in []*types.RawBody, blockNumbers []uint64, blockHashes []common.Hash) []*execution.BlockBody {
+	ret := []*execution.BlockBody{}
 
 	for i, body := range in {
 		ret = append(ret, ConvertRawBlockBodyToRpc(body, blockNumbers[i], blockHashes[i]))
@@ -234,7 +234,7 @@ func ConvertRawBlockBodiesToRpc(in []*types.RawBody, blockNumbers []uint64, bloc
 	return ret
 }
 
-func ConvertRawBlockBodyFromRpc(in *executionproto.BlockBody) (*types.RawBody, error) {
+func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) (*types.RawBody, error) {
 	if in == nil {
 		return nil, nil
 	}
@@ -249,7 +249,7 @@ func ConvertRawBlockBodyFromRpc(in *executionproto.BlockBody) (*types.RawBody, e
 	}, nil
 }
 
-func ConvertBigIntFromRpc(in *typesproto.H256) *big.Int {
+func ConvertBigIntFromRpc(in *types2.H256) *big.Int {
 	if in == nil {
 		return nil
 	}
@@ -257,7 +257,7 @@ func ConvertBigIntFromRpc(in *typesproto.H256) *big.Int {
 	return base.ToBig()
 }
 
-func ConvertBigIntToRpc(in *big.Int) *typesproto.H256 {
+func ConvertBigIntToRpc(in *big.Int) *types2.H256 {
 	if in == nil {
 		return nil
 	}

@@ -27,15 +27,16 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -147,6 +148,24 @@ var (
 		Value: true,
 	}
 
+	UploadLocationFlag = cli.StringFlag{
+		Name:  "upload.location",
+		Usage: "Location to upload snapshot segments to",
+		Value: "",
+	}
+
+	UploadFromFlag = cli.StringFlag{
+		Name:  "upload.from",
+		Usage: "Blocks to upload from: number, or 'earliest' (start of the chain), 'latest' (last segment previously uploaded)",
+		Value: "latest",
+	}
+
+	FrozenBlockLimitFlag = cli.UintFlag{
+		Name:  "upload.snapshot.limit",
+		Usage: "Sets the maximum number of snapshot blocks to hold on the local disk when uploading",
+		Value: 1500000,
+	}
+
 	BadBlockFlag = cli.StringFlag{
 		Name:  "bad.block",
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
@@ -248,17 +267,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
 
-	// check if the prune.mode flag is not set to archive
-	persistenceReceiptsV2 := ctx.String(PruneModeFlag.Name) != prune.ArchiveMode.String()
-
-	// overwrite receipts persistence if the flag is set
-	if ctx.IsSet(utils.PersistReceiptsV2Flag.Name) {
-		persistenceReceiptsV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
-	}
-
-	if persistenceReceiptsV2 {
-		cfg.PersistReceiptsCacheV2 = true
-	}
+	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
 
 	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
 	if err != nil {
@@ -266,38 +275,37 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 
 	cfg.Prune = mode
-
-	if batchSize := ctx.String(BatchSizeFlag.Name); batchSize != "" {
-		if err := cfg.BatchSize.UnmarshalText([]byte(batchSize)); err != nil {
+	if ctx.String(BatchSizeFlag.Name) != "" {
+		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
+		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
 
-	if bufsize := ctx.String(EtlBufferSizeFlag.Name); bufsize != "" {
+	if ctx.String(EtlBufferSizeFlag.Name) != "" {
 		sizeVal := datasize.ByteSize(0)
-		if err := (&sizeVal).UnmarshalText([]byte(bufsize)); err != nil {
+		size := &sizeVal
+		err := size.UnmarshalText([]byte(ctx.String(EtlBufferSizeFlag.Name)))
+		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
-		etl.BufferOptimalSize = sizeVal
+		etl.BufferOptimalSize = *size
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
-	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
-		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
+	if ctx.String(BodyCacheLimitFlag.Name) != "" {
+		err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(ctx.String(BodyCacheLimitFlag.Name)))
+		if err != nil {
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
 		}
 	}
 
-	if loopThrottle := ctx.String(SyncLoopThrottleFlag.Name); loopThrottle != "" {
-		syncLoopThrottle, err := time.ParseDuration(loopThrottle)
+	if ctx.String(SyncLoopThrottleFlag.Name) != "" {
+		syncLoopThrottle, err := time.ParseDuration(ctx.String(SyncLoopThrottleFlag.Name))
 		if err != nil {
 			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}
 		cfg.Sync.LoopThrottle = syncLoopThrottle
-	}
-
-	if ctx.IsSet(utils.SnapDownloadToBlockFlag.Name) {
-		cfg.Sync.SnapshotDownloadToBlock = ctx.Uint64(utils.SnapDownloadToBlockFlag.Name)
 	}
 
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
@@ -308,6 +316,20 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopBlockLimit = limit
 	}
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
+
+	if location := ctx.String(UploadLocationFlag.Name); len(location) > 0 {
+		cfg.Sync.UploadLocation = location
+	}
+
+	if blockno := ctx.String(UploadFromFlag.Name); len(blockno) > 0 {
+		cfg.Sync.UploadFrom = rpc.AsBlockNumber(blockno)
+	} else {
+		cfg.Sync.UploadFrom = rpc.LatestBlockNumber
+	}
+
+	if limit := ctx.Uint(FrozenBlockLimitFlag.Name); limit > 0 {
+		cfg.Sync.FrozenBlockLimit = uint64(limit)
+	}
 
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))

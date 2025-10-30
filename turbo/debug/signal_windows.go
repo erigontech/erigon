@@ -23,14 +23,14 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	_debug "github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func ListenSignals(stack io.Closer, logger log.Logger) {
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, os.Interrupt)
-	dbg.GetSigC(&sigc)
+	_debug.GetSigC(&sigc)
 	defer signal.Stop(sigc)
 
 	<-sigc

@@ -185,11 +185,12 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 	op := vm.OpCode(opcode)
 	if (op == vm.SLOAD || op == vm.SSTORE) && stackLen >= 1 {
 		addr := scope.Address()
-
 		slot := common.Hash(stackData[stackLen-1].Bytes32())
-		a.list.addSlot(addr, slot)
-		if _, ok := a.createdContracts[addr]; !ok {
-			a.usedBeforeCreation[addr] = struct{}{}
+		if _, ok := a.excl[addr]; !ok {
+			a.list.addSlot(addr, slot)
+			if _, ok := a.createdContracts[addr]; !ok {
+				a.usedBeforeCreation[addr] = struct{}{}
+			}
 		}
 	}
 	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
@@ -214,7 +215,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		// contract address for CREATE can only be generated with state
 		if a.state != nil {
 			nonce, _ := a.state.GetNonce(scope.Address())
-			addr := types.CreateAddress(scope.Address(), nonce)
+			addr := crypto.CreateAddress(scope.Address(), nonce)
 			if _, ok := a.excl[addr]; !ok {
 				a.createdContracts[addr] = struct{}{}
 			}
@@ -230,7 +231,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		}
 		inithash := crypto.Keccak256(init)
 		salt := stackData[stackLen-4]
-		addr := types.CreateAddress2(scope.Address(), salt.Bytes32(), inithash)
+		addr := crypto.CreateAddress2(scope.Address(), salt.Bytes32(), inithash)
 		if _, ok := a.excl[addr]; !ok {
 			a.createdContracts[addr] = struct{}{}
 		}

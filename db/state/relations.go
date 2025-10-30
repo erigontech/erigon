@@ -1,7 +1,7 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 //// relations

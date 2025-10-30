@@ -20,8 +20,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/diagnostics/sysutils"
+	diaglib "github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/sysutils"
 )
 
 func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {

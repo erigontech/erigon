@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/chainspec"
 )
 
 func testConfig(t *testing.T, n NetworkType) {

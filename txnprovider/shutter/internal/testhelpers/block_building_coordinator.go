@@ -18,9 +18,7 @@ package testhelpers
 
 import (
 	"context"
-	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 )
@@ -52,20 +50,13 @@ func (c ShutterBlockBuildingCoordinator) BuildBlock(
 	txnPointer *uint64,
 	ips ...*shutter.IdentityPreimage,
 ) (*enginetypes.ExecutionPayload, error) {
-	// we send them for the next slot and wait for 1 slot duration to allow time for the keys to be received
 	slot := c.slotCalculator.CalcCurrentSlot()
-	nextSlot := slot + 1
-	err := c.dks.PublishDecryptionKeys(ctx, ekg, nextSlot, *txnPointer, ips, c.instanceId)
+	err := c.dks.PublishDecryptionKeys(ctx, ekg, slot, *txnPointer, ips, c.instanceId)
 	if err != nil {
 		return nil, err
 	}
 
-	err = common.Sleep(ctx, time.Duration(c.slotCalculator.SecondsPerSlot())*time.Second)
-	if err != nil {
-		return nil, err
-	}
-
-	block, err := c.mockCl.BuildBlock(ctx, WithBlockBuildingSlot(nextSlot))
+	block, err := c.mockCl.BuildBlock(ctx, WithBlockBuildingSlot(slot))
 	if err != nil {
 		return nil, err
 	}

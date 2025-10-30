@@ -26,30 +26,28 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -202,7 +200,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	}
 
 	t := time.Now()
-	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
+	var changeset *[kv.DomainLen][]kv.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
 		currentHash, ok, err := br.CanonicalHash(ctx, tx, currentBlock)
 		if err != nil {
@@ -219,15 +217,15 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		if err != nil {
 			return err
 		}
-		if changeSet == nil {
-			changeSet = &currentKeys
+		if changeset == nil {
+			changeset = &currentKeys
 		} else {
 			for i := range currentKeys {
-				changeSet[i] = changeset.MergeDiffSets(changeSet[i], currentKeys[i])
+				changeset[i] = state.MergeDiffSets(changeset[i], currentKeys[i])
 			}
 		}
 	}
-	if err := unwindExec3State(ctx, tx, domains, u.UnwindPoint, txNum, accumulator, changeSet, logger); err != nil {
+	if err := unwindExec3State(ctx, tx, domains, u.UnwindPoint, txNum, accumulator, changeset, logger); err != nil {
 		return fmt.Errorf("ParallelExecutionState.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
@@ -371,7 +369,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Ttx)
+	unwindToLimit, ok, err := txc.Ttx.Debug().CanUnwindBeforeBlockNum(u.UnwindPoint)
 	if err != nil {
 		return err
 	}
@@ -382,7 +380,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	if err = unwindExecutionStage(u, s, txc, ctx, cfg, logger); err != nil {
 		return err
 	}
-
 	if err = u.Done(txc.Tx); err != nil {
 		return err
 	}
@@ -445,7 +442,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
 	quickPruneTimeout := 250 * time.Millisecond
 
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if s.ForwardProgress > uint64(dbg.MaxReorgDepth) && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
@@ -458,7 +455,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if err := rawdb.PruneTable(
 			tx,
 			kv.ChangeSets3,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+			s.ForwardProgress-uint64(dbg.MaxReorgDepth),
 			ctx,
 			pruneDiffsLimitOnChainTip,
 			pruneTimeout,

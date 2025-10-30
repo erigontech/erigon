@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	snaptype "github.com/erigontech/erigon/db/snaptype"
+	snaptype "github.com/erigontech/erigon-lib/snaptype"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -316,13 +316,11 @@ func (c *MockEntityStoreLastEntityIdCall[TEntity]) DoAndReturn(f func(context.Co
 }
 
 // LastFrozenEntityId mocks base method.
-func (m *MockEntityStore[TEntity]) LastFrozenEntityId() (uint64, bool, error) {
+func (m *MockEntityStore[TEntity]) LastFrozenEntityId() uint64 {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "LastFrozenEntityId")
 	ret0, _ := ret[0].(uint64)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
+	return ret0
 }
 
 // LastFrozenEntityId indicates an expected call of LastFrozenEntityId.
@@ -338,19 +336,19 @@ type MockEntityStoreLastFrozenEntityIdCall[TEntity Entity] struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) Return(arg0 uint64, arg1 bool, arg2 error) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
-	c.Call = c.Call.Return(arg0, arg1, arg2)
+func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) Return(arg0 uint64) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) Do(f func() (uint64, bool, error)) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
+func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) Do(f func() uint64) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) DoAndReturn(f func() (uint64, bool, error)) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
+func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) DoAndReturn(f func() uint64) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -466,44 +464,6 @@ func (c *MockEntityStoreRangeFromBlockNumCall[TEntity]) Do(f func(context.Contex
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockEntityStoreRangeFromBlockNumCall[TEntity]) DoAndReturn(f func(context.Context, uint64) ([]TEntity, error)) *MockEntityStoreRangeFromBlockNumCall[TEntity] {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// RangeIndex mocks base method.
-func (m *MockEntityStore[TEntity]) RangeIndex() RangeIndex {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RangeIndex")
-	ret0, _ := ret[0].(RangeIndex)
-	return ret0
-}
-
-// RangeIndex indicates an expected call of RangeIndex.
-func (mr *MockEntityStoreMockRecorder[TEntity]) RangeIndex() *MockEntityStoreRangeIndexCall[TEntity] {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RangeIndex", reflect.TypeOf((*MockEntityStore[TEntity])(nil).RangeIndex))
-	return &MockEntityStoreRangeIndexCall[TEntity]{Call: call}
-}
-
-// MockEntityStoreRangeIndexCall wrap *gomock.Call
-type MockEntityStoreRangeIndexCall[TEntity Entity] struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockEntityStoreRangeIndexCall[TEntity]) Return(arg0 RangeIndex) *MockEntityStoreRangeIndexCall[TEntity] {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockEntityStoreRangeIndexCall[TEntity]) Do(f func() RangeIndex) *MockEntityStoreRangeIndexCall[TEntity] {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockEntityStoreRangeIndexCall[TEntity]) DoAndReturn(f func() RangeIndex) *MockEntityStoreRangeIndexCall[TEntity] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

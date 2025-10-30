@@ -4,13 +4,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon-lib/version"
 
-	"github.com/erigontech/erigon/db/config3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/stretchr/testify/require"
 )
 
 func setup(tb testing.TB) datadir.Dirs {
@@ -107,7 +106,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
-	p := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+	p := NewE3SnapSchemaBuilder(AccessorBTree|AccessorExistence, stepSize).
 		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressKeys).
 		BtIndex().
 		Existence().Build()
@@ -164,7 +163,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
-	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
 		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressKeys).
 		Accessor(dirs.SnapDomain).Build()
 
@@ -210,7 +209,7 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 func TestE3SnapSchemaForHistory(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
-	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
 		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressKeys).
 		Accessor(dirs.SnapAccessors).Build()
 
@@ -259,7 +258,7 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 func TestE3SnapSchemaForII(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
-	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
 		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone).
 		Accessor(dirs.SnapAccessors).Build()
 

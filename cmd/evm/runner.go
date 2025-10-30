@@ -35,25 +35,27 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core/genesiswrite"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/runtime"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -169,18 +171,26 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := temporaltest.NewTestDB(nil, datadir.New(os.TempDir()))
+	db := memdb.New(os.TempDir(), kv.ChainDB)
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		genesiswrite.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
+		core.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-
-	tx, err := db.BeginTemporalRw(context.Background())
+	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	tdb, err := temporal.New(db, agg)
+	if err != nil {
+		return err
+	}
+	tx, err := tdb.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -323,12 +333,7 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.Bool(DumpFlag.Name) {
 		rules := &chain.Rules{}
 		if chainConfig != nil {
-			blockContext := evmtypes.BlockContext{
-				BlockNumber:  runtimeConfig.BlockNumber.Uint64(),
-				Time:         runtimeConfig.Time.Uint64(),
-				ArbOSVersion: 0,
-			}
-			rules = blockContext.Rules(chainConfig)
+			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64(), runtimeConfig.Time.Uint64(), 0) // TODO arbitrum
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)
