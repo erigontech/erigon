@@ -119,9 +119,6 @@ func CheckKvi(kviPath string, kvPath string, kvCompression seg.FileCompression, 
 	var keyOffset, keyCount uint64
 	var atValue bool
 	for kvReader.HasNext() {
-		if keyCount == 10_000 {
-			time.Sleep(15 * time.Second)
-		}
 		select {
 		case <-logTicker.C:
 			rate := float64(keyCount) / time.Since(start).Seconds()
