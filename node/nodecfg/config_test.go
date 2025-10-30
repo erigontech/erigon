@@ -26,8 +26,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	node2 "github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
@@ -64,7 +65,7 @@ func TestDataDirCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temporary file: %v", err)
 	}
-	defer os.Remove(file.Name())
+	defer dir2.RemoveFile(file.Name())
 }
 
 // Tests that IPC paths are correctly resolved to valid endpoints of different

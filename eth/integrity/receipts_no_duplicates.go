@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -23,6 +24,10 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 
 	txNumsReader := blockReader.TxnumReader(ctx)
 
+	if err := ValidateDomainProgress(db, kv.ReceiptDomain, txNumsReader); err != nil {
+		return nil
+	}
+
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -30,19 +35,10 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	defer tx.Rollback()
 
 	receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
-
 	fromBlock := uint64(1)
 	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
 
-	{
-		log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
-		accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
-		if accProgress != receiptProgress {
-			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
-			log.Warn(err.Error())
-		}
-	}
-	tx.Rollback()
+	log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, ReceiptsNoDupsRange)
 }
@@ -115,6 +111,41 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 			default:
 			}
 		}
+	}
+	return nil
+}
+
+func ValidateDomainProgress(db kv.TemporalRoDB, domain kv.Domain, txNumsReader rawdbv3.TxNumsReader) (err error) {
+	tx, err := db.BeginTemporalRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	receiptProgress := tx.Debug().DomainProgress(domain)
+	accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
+	if accProgress > receiptProgress {
+		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+		// accProgress can be greater than domainProgress in some scenarios..
+		// e.g. account vs receipt
+		// like systemTx can update accounts, but no receipt is added for those tx.
+		// Similarly a series of empty blocks towards the end can cause big gaps...
+		// The message is kept because it might also happen due to problematic cases
+		// like StageCustomTrace execution not having gone through to the end leading to missing data in receipt/rcache.
+		msg := fmt.Sprintf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d); this might be okay, please check", domain.String(), receiptProgress, e1, accProgress, e2)
+		log.Warn(msg)
+		return nil
+	} else if accProgress < receiptProgress {
+		// something very wrong
+		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+		err := fmt.Errorf("[integrity] %s=%d (%d) is ahead of AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
+		log.Error(err.Error())
+		return err
+
 	}
 	return nil
 }

@@ -23,8 +23,7 @@ import (
 	"sync"
 	"time"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -36,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 var (
@@ -53,7 +53,7 @@ type CommitteeSubscribeMgmt struct {
 	ethClock     eth_clock.EthereumClock
 	beaconConfig *clparams.BeaconChainConfig
 	netConfig    *clparams.NetworkConfig
-	sentinel     sentinel.SentinelClient
+	sentinel     sentinelproto.SentinelClient
 	state        *state.CachingBeaconState
 	syncedData   *synced_data.SyncedDataManager
 	// subscriptions
@@ -68,7 +68,7 @@ func NewCommitteeSubscribeManagement(
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
-	sentinel sentinel.SentinelClient,
+	sentinel sentinelproto.SentinelClient,
 	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
 ) *CommitteeSubscribeMgmt {
@@ -124,7 +124,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 
 	epochDuration := time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
 	// set sentinel gossip expiration by subnet id
-	request := sentinel.RequestSubscribeExpiry{
+	request := sentinelproto.RequestSubscribeExpiry{
 		Topic:          gossip.TopicNameBeaconAttestation(subnetId),
 		ExpiryUnixSecs: uint64(time.Now().Add(epochDuration).Unix()), // expire after epoch
 	}

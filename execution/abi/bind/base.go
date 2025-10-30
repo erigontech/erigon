@@ -31,7 +31,6 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/event"
@@ -151,7 +150,7 @@ func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend Co
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
-	c.address = crypto.CreateAddress(opts.From, tx.GetNonce())
+	c.address = types.CreateAddress(opts.From, tx.GetNonce())
 	return c.address, tx, c, nil
 }
 

@@ -19,7 +19,6 @@ package state
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -27,15 +26,18 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
+
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -152,15 +154,38 @@ func (i *FilesItem) closeFiles() {
 	}
 }
 
+func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
+	if i.decompressor != nil {
+		relativePaths = append(relativePaths, i.decompressor.FilePath())
+	}
+	if i.index != nil {
+		relativePaths = append(relativePaths, i.index.FilePath())
+	}
+	if i.bindex != nil {
+		relativePaths = append(relativePaths, i.bindex.FilePath())
+	}
+	if i.existence != nil {
+		relativePaths = append(relativePaths, i.existence.FilePath)
+	}
+	var err error
+	for i := 0; i < len(relativePaths); i++ {
+		relativePaths[i], err = filepath.Rel(basePath, relativePaths[i])
+		if err != nil {
+			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
+		}
+	}
+	return relativePaths
+}
+
 func (i *FilesItem) closeFilesAndRemove() {
 	if i.decompressor != nil {
 		i.decompressor.Close()
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
-			if err := os.Remove(i.decompressor.FilePath()); err != nil {
+			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
 			}
-			if err := os.Remove(i.decompressor.FilePath() + ".torrent"); err != nil {
+			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
 			}
 		}
@@ -170,10 +195,10 @@ func (i *FilesItem) closeFilesAndRemove() {
 		i.index.Close()
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
-			if err := os.Remove(i.index.FilePath()); err != nil {
+			if err := dir.RemoveFile(i.index.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
-			if err := os.Remove(i.index.FilePath() + ".torrent"); err != nil {
+			if err := dir.RemoveFile(i.index.FilePath() + ".torrent"); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
 		}
@@ -181,27 +206,27 @@ func (i *FilesItem) closeFilesAndRemove() {
 	}
 	if i.bindex != nil {
 		i.bindex.Close()
-		if err := os.Remove(i.bindex.FilePath()); err != nil {
+		if err := dir.RemoveFile(i.bindex.FilePath()); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
-		if err := os.Remove(i.bindex.FilePath() + ".torrent"); err != nil {
+		if err := dir.RemoveFile(i.bindex.FilePath() + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
 		i.bindex = nil
 	}
 	if i.existence != nil {
 		i.existence.Close()
-		if err := os.Remove(i.existence.FilePath); err != nil {
+		if err := dir.RemoveFile(i.existence.FilePath); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
 		}
-		if err := os.Remove(i.existence.FilePath + ".torrent"); err != nil {
+		if err := dir.RemoveFile(i.existence.FilePath + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.existence.FilePath)
 		}
 		i.existence = nil
 	}
 }
 
-func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
+func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
 	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
 	var err error
 
@@ -270,7 +295,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 	invalidFileItemsLock := sync.Mutex{}
 	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+			fromStep, toStep := kv.Step(item.startTxNum/d.stepSize), kv.Step(item.endTxNum/d.stepSize)
 			if item.decompressor == nil {
 				fPathMask := d.kvFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -291,13 +316,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					continue
 				}
 
-				if !fileVer.Eq(d.version.DataKV.Current) {
-					if !fileVer.Less(d.version.DataKV.MinSupported) {
-						d.version.DataKV.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.DataKV)
-					}
+				if fileVer.Less(d.Version.DataKV.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					versionTooLowPanic(fName, d.Version.DataKV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -315,7 +336,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 			}
 
-			if item.index == nil && d.Accessors.Has(AccessorHashMap) {
+			if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
 				fPathMask := d.kviAccessorFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -323,13 +344,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorKVI.Current) {
-						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
-							d.version.AccessorKVI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorKVI)
-						}
+					if fileVer.Less(d.Version.AccessorKVI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.Version.AccessorKVI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -338,7 +355,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.bindex == nil && d.Accessors.Has(AccessorBTree) {
+			if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
 				fPathMask := d.kvBtAccessorFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -346,13 +363,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorBT.Current) {
-						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
-							d.version.AccessorBT.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorBT)
-						}
+					if fileVer.Less(d.Version.AccessorBT.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.Version.AccessorBT)
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -361,7 +374,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.existence == nil && d.Accessors.Has(AccessorExistence) {
+			if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
 				fPathMask := d.kvExistenceIdxFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -369,13 +382,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorKVEI.Current) {
-						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
-							d.version.AccessorKVEI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorKVEI)
-						}
+					if fileVer.Less(d.Version.AccessorKVEI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.Version.AccessorKVEI)
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -401,7 +410,7 @@ func (h *History) openDirtyFiles() error {
 	invalidFileItems := make([]*FilesItem, 0)
 	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+			fromStep, toStep := kv.Step(item.startTxNum/h.stepSize), kv.Step(item.endTxNum/h.stepSize)
 			if item.decompressor == nil {
 				fPathMask := h.vFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -421,13 +430,9 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if !fileVer.Eq(h.version.DataV.Current) {
-					if !fileVer.Less(h.version.DataV.MinSupported) {
-						h.version.DataV.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, h.version.DataV)
-					}
+				if fileVer.Less(h.Version.DataV.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					versionTooLowPanic(fName, h.Version.DataV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -442,7 +447,7 @@ func (h *History) openDirtyFiles() error {
 						// 	h.vAccessorFilePath(fromStep, toStep),
 						// }
 						// for _, fp := range itemPaths {
-						// 	err = os.Remove(fp)
+						// 	err = dir.Remove(fp)
 						// 	if err != nil {
 						// 		h.logger.Warn("[agg] History.openDirtyFiles cannot remove corrupted file", "err", err, "f", fp)
 						// 	}
@@ -466,13 +471,9 @@ func (h *History) openDirtyFiles() error {
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(h.version.AccessorVI.Current) {
-						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
-							h.version.AccessorVI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, h.version.AccessorVI)
-						}
+					if fileVer.Less(h.Version.AccessorVI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, h.Version.AccessorVI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -498,7 +499,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			item := item
-			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+			fromStep, toStep := kv.Step(item.startTxNum/ii.stepSize), kv.Step(item.endTxNum/ii.stepSize)
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
@@ -520,13 +521,9 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if !fileVer.Eq(ii.version.DataEF.Current) {
-					if !fileVer.Less(ii.version.DataEF.MinSupported) {
-						ii.version.DataEF.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, ii.version.DataEF)
-					}
+				if fileVer.Less(ii.Version.DataEF.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					versionTooLowPanic(fName, ii.Version.DataEF)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -553,13 +550,9 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					// don't interrupt on error. other files may be good
 				}
 				if ok {
-					if !fileVer.Eq(ii.version.AccessorEFI.Current) {
-						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
-							ii.version.AccessorEFI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, ii.version.AccessorEFI)
-						}
+					if fileVer.Less(ii.Version.AccessorEFI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, ii.Version.AccessorEFI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -604,7 +597,7 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
+func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
 	if trace {
@@ -652,7 +645,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l Accessors, checker fun
 	return newVisibleFiles
 }
 
-func checkForVisibility(item *FilesItem, l Accessors, trace bool) (canBeVisible bool) {
+func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canBeVisible bool) {
 	if item.canDelete.Load() {
 		if trace {
 			log.Warn("[dbg] canDelete=true", "f", item.decompressor.FileName())
@@ -665,21 +658,21 @@ func checkForVisibility(item *FilesItem, l Accessors, trace bool) (canBeVisible 
 		}
 		return false
 	}
-	if l.Has(AccessorBTree) && item.bindex == nil {
+	if l.Has(statecfg.AccessorBTree) && item.bindex == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
 		}
 		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 		return false
 	}
-	if l.Has(AccessorHashMap) && item.index == nil {
+	if l.Has(statecfg.AccessorHashMap) && item.index == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
 		}
 		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 		return false
 	}
-	if l.Has(AccessorExistence) && item.existence == nil {
+	if l.Has(statecfg.AccessorExistence) && item.existence == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: Existence not opened", "f", item.decompressor.FileName())
 		}
@@ -740,9 +733,9 @@ func (files visibleFiles) VisibleFiles() []VisibleFile {
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*FilesItem) {
+func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep kv.Step) []string) (l []*FilesItem) {
 	for _, item := range dirtyFiles {
-		fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
+		fromStep, toStep := kv.Step(item.startTxNum/aggregationStep), kv.Step(item.endTxNum/aggregationStep)
 		for _, fName := range accessorsFor(fromStep, toStep) {
 			exists, err := dir.FileExist(fName)
 			if err != nil {

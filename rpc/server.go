@@ -28,8 +28,8 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 
-	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const MetadataApi = "rpc"
