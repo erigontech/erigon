@@ -881,14 +881,14 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			return
 		case <-ticker.C:
 			// check peers count
-			peersCount, err := d.rpc.Peers()
-			if err != nil {
-				log.Warn("failed to get peers count", "err", err)
-				continue
-			}
-			if peersCount == 0 {
-				log.Info("[syncColumnDataWorker] no peers available, skipping sync")
-				continue
+			if d.rpc != nil {
+				if peersCount, err := d.rpc.Peers(); err != nil {
+					log.Warn("failed to get peers count", "err", err)
+					continue
+				} else if peersCount == 0 {
+					log.Info("[syncColumnDataWorker] no peers available, skipping sync")
+					continue
+				}
 			}
 
 			blocks := []*cltypes.SignedBlindedBeaconBlock{}
