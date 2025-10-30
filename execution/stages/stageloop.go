@@ -151,7 +151,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		tx.Commit()
 	}()
 
-	doms, err := state.NewSharedDomains(tx, logger)
+	doms, err := execctx.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			if err != nil {
 				return err
 			}
-			err = hook.AfterRun(tx, finishProgressBefore)
+			err = hook.AfterRun(tx, finishProgressBefore, false)
 			if err != nil {
 				return err
 			}

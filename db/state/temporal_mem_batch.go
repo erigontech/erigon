@@ -132,7 +132,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			dm.CachePutKeySize += putKeySize
 			dm.CachePutValueSize += putValueSize
 		} else {
-			sd.metrics.Domains[domain] = &DomainIOMetrics{
+			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
 				CachePutCount:     1,
 				CachePutSize:      putKeySize + putValueSize,
 				CachePutKeySize:   putKeySize,
@@ -162,7 +162,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		dm.CachePutKeySize += putKeySize
 		dm.CachePutValueSize += putValueSize
 	} else {
-		sd.metrics.Domains[domain] = &DomainIOMetrics{
+		sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
 			CachePutCount:     1,
 			CachePutSize:      putKeySize + putValueSize,
 			CachePutKeySize:   putKeySize,

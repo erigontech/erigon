@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -203,7 +203,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return canonical, nil
 }
 
-func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *state.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
+func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
@@ -281,7 +281,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if err != nil {
 		return nil, err
 	}
-	doms, err := state.NewSharedDomains(tx, e.logger)
+	doms, err := execctx.NewSharedDomains(tx, e.logger)
 	defer doms.Close()
 	defer tx.Rollback()
 

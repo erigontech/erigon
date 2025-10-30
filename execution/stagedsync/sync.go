@@ -284,7 +284,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialC
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 
-func (s *Sync) RunSnapshots(db kv.TemporalRwTx) error {
+func (s *Sync) RunSnapshots(db kv.TemporalRwDB) error {
 	for _, stage := range s.stages {
 		if stage.ID == stages.Snapshots {
 			_, err := s.runStage(stage, db, nil, nil, true, true, false)

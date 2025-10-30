@@ -336,7 +336,7 @@ type DomainMetrics struct {
 	Domains map[kv.Domain]*DomainIOMetrics
 }
 
-func (dm *DomainMetrics) updateCacheReads(domain kv.Domain, start time.Time) {
+func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
 	dm.CacheReadCount++
@@ -353,7 +353,7 @@ func (dm *DomainMetrics) updateCacheReads(domain kv.Domain, start time.Time) {
 	}
 }
 
-func (dm *DomainMetrics) updateDbReads(domain kv.Domain, start time.Time) {
+func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
 	dm.DbReadCount++
@@ -370,7 +370,7 @@ func (dm *DomainMetrics) updateDbReads(domain kv.Domain, start time.Time) {
 	}
 }
 
-func (dm *DomainMetrics) updateFileReads(domain kv.Domain, start time.Time) {
+func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
 	dm.FileReadCount++
