@@ -136,14 +136,16 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 	case stackLen >= 1 && (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT):
 		addr := common.Address(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
-		if t.env.ChainConfig.IsCancun(t.env.Time) {
-			// EIP-6780: Post Dancum/Cancun only delete if created in same transaction
-			if t.created[caller] {
+		if op == vm.SELFDESTRUCT {
+			if t.env.ChainConfig.IsCancun(t.env.Time) {
+				// EIP-6780: Post Dancum/Cancun only delete if created in same transaction
+				if t.created[caller] {
+					t.deleted[caller] = true
+				}
+			} else {
+				// EIP-6780: Pre Dancum/Cancun only delete if created in same transaction
 				t.deleted[caller] = true
 			}
-		} else {
-			// EIP-6780: Pre Dancum/Cancun only delete if created in same transaction
-			t.deleted[caller] = true
 		}
 
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
