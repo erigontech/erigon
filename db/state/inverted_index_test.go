@@ -806,7 +806,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		return txs
 	}
 
-	txCnt := uint64(1_000_000)
+	txCnt := uint64(10_000_000)
 	mod := uint64(1) * 31
 	db, ii := testDbAndInvertedIndex2(t, 16*1_000, log.New())
 	_ = filledInvIndexOfSize2(t, txCnt, mod, db, ii)
