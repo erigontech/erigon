@@ -42,6 +42,9 @@ func init() {
 }
 
 func trackRemovedFiles() {
+	// Use a single ticker to avoid leaking timers created by time.Tick
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case path := <-removedFilesChan:
@@ -49,7 +52,7 @@ func trackRemovedFiles() {
 				removedFiles = make([]string, 0)
 			}
 			removedFiles = append(removedFiles, path)
-		case <-time.Tick(30 * time.Second):
+		case <-ticker.C:
 			for _, path := range removedFiles {
 				if exists, _ := FileExist(path); exists {
 					panic("Removed file unexpectedly exists: " + path)
