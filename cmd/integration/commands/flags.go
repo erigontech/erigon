@@ -44,6 +44,8 @@ var (
 	chain                        string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                string
 
+	l2rpc, l2rpcReceipt string // L2 RPC addresses for arbitrum block dowloading
+
 	startTxNum uint64
 
 	dbWriteMap bool
@@ -186,11 +188,11 @@ func withUnwindTypes(cmd *cobra.Command) {
 }
 
 func withL2RPCaddress(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&cli.L2RPCAddrFlag.Name, cli.L2RPCAddrFlag.Name, "", cli.L2RPCAddrFlag.Usage)
+	cmd.Flags().StringVar(&l2rpc, cli.L2RPCAddrFlag.Name, "", cli.L2RPCAddrFlag.Usage)
 }
 
 func withL2RPCReceiptAddress(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&cli.L2RPCReceiptAddrFlag.Name, cli.L2RPCReceiptAddrFlag.Name, "", cli.L2RPCReceiptAddrFlag.Usage)
+	cmd.Flags().StringVar(&l2rpc, cli.L2RPCReceiptAddrFlag.Name, "", cli.L2RPCReceiptAddrFlag.Usage)
 }
 
 func withChaosMonkey(cmd *cobra.Command) {
