@@ -248,22 +248,6 @@ func ApplyArbTransactionVmenv(config *chain.Config, engine consensus.EngineReade
 // ProcessParentBlockHash stores the parent block hash in the history storage contract
 // as per EIP-2935/7709.
 func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
-	//if tracer := evm.Config.Tracer; tracer != nil {
-	//	onSystemCallStart(tracer, evm.GetVMContext())
-	//	if tracer.OnSystemCallEnd != nil {
-	//		defer tracer.OnSystemCallEnd()
-	//	}
-	//}
-	//tx
-	//msg := &Message{
-	//	From:      params.SystemAddress,
-	//	GasLimit:  30_000_000,
-	//	GasPrice:  common.Big0,
-	//	GasFeeCap: common.Big0,
-	//	GasTipCap: common.Big0,
-	//	To:        &params.HistoryStorageAddress,
-	//	Data:      prevHash.Bytes(),
-	//}
 	msg := types.NewMessage(
 		state.SystemAddress,
 		&params.HistoryStorageAddress,
