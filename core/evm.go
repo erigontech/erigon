@@ -98,6 +98,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Difficulty:       new(big.Int).Set(header.Difficulty),
 		BaseFee:          &baseFee,
 		GasLimit:         header.GasLimit,
+		BlockGasUsed:     header.GasUsed,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
 		BaseFeeInBlock:   baseFee.Clone(),
