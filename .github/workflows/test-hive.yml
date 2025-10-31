@@ -17,7 +17,7 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v5
         with:
-          repository: erigontech/hive
+          repository: ethereum/hive
           # ref: master
           path: hive
 
@@ -105,7 +105,8 @@ jobs:
           run_suite engine api 0
           # 3 failures out of 8 tests at time of writing
           run_suite engine auth 3
-          run_suite rpc compat 0
+          # 8 failures out of 194 tests, see https://github.com/ethereum/hive/pull/1355
+          run_suite rpc compat 8
         continue-on-error: true
 
       - name: Upload output log
