@@ -112,7 +112,7 @@ func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState 
 // Successor of [ForkchoiceUpdatedV3] post Cancun, with stricter check on params
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3
 func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.FuluVersion)
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.EIP7805Version)
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
@@ -147,7 +147,7 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/fulu.md#engine_newpayloadv5
 func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionListTransactions []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionListTransactions, clparams.FuluVersion)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionListTransactions, clparams.EIP7805Version)
 }
 
 // Returns the node's code and commit details in a slice

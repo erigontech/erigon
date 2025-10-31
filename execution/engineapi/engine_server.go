@@ -315,6 +315,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
+	if version >= clparams.EIP7805Version {
+		if inclusionListTransactions == nil {
+			return nil, &rpc.InvalidParamsError{Message: "inclusion list transactions missing"}
+		}
+	}
+
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
@@ -679,6 +685,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
+	}
+	if version >= clparams.EIP7805Version && payloadAttributes.InclusionList == nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr // Inclusion List missing
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)

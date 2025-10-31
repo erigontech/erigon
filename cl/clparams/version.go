@@ -28,6 +28,7 @@ const (
 	DenebVersion     StateVersion = 4
 	ElectraVersion   StateVersion = 5
 	FuluVersion      StateVersion = 6
+	EIP7805Version   StateVersion = 7
 )
 
 func (v StateVersion) String() string {
@@ -46,6 +47,8 @@ func (v StateVersion) String() string {
 		return "electra"
 	case FuluVersion:
 		return "fulu"
+	case EIP7805Version:
+		return "eip7806"
 	default:
 		panic("unsupported fork version")
 	}
@@ -88,6 +91,8 @@ func StringToClVersion(s string) (StateVersion, error) {
 		return ElectraVersion, nil
 	case "fulu":
 		return FuluVersion, nil
+	case "eip7805":
+		return EIP7805Version, nil
 	default:
 		return 0, fmt.Errorf("unsupported fork version %s", s)
 	}
