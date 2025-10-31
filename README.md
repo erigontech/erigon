@@ -282,19 +282,19 @@ Each service has own `./cmd/*/README.md` file.
 
 ### Embedded Consensus Layer
 
-Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Hoodi, Gnosis, Chiado.
+Built-in consensus for Ethereum Mainnet, Sepolia, Hoodi, Gnosis, Chiado.
 To use external Consensus Layer: `--externalcl`.
 
 ### Testnets
 
-If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, Holesky (or Amoy).
+If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, Hoodi (or Chiado).
 It syncs much quicker, and does not take so much disk space:
 
 ```sh
 git clone https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir=<your_datadir> --chain=holesky --prune.mode=full
+./build/bin/erigon --datadir=<your_datadir> --chain=hoodi --prune.mode=full
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location. Name of the

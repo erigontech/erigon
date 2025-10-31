@@ -2,7 +2,7 @@ package bench
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 )
 
 type agg struct {
@@ -27,7 +27,7 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 	for k := range keys {
 		blocks = append(blocks, k)
 	}
-	sort.Slice(blocks, func(i, j int) bool { return blocks[i] < blocks[j] })
+	slices.Sort(blocks)
 
 	out := ""
 	out += "FIRST-LATENCY (cold)\n"

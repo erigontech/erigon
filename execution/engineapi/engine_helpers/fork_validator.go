@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -51,11 +51,11 @@ const timingsCacheSize = 16
 // the maximum point from the current head, past which side forks are not validated anymore.
 const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there cannot be side forks in PoS deeper than 32 blocks from head.
 
-type validatePayloadFunc func(*state.SharedDomains, kv.TemporalRwTx, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
+type validatePayloadFunc func(*execctx.SharedDomains, kv.TemporalRwTx, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
 
 type ForkValidator struct {
 	// current memory batch containing chain head that extend canonical fork.
-	sharedDom *state.SharedDomains
+	sharedDom *execctx.SharedDomains
 	// notifications accumulated for the extending fork
 	extendingForkNotifications *shards.Notifications
 	// hash of chain head that extend canonical fork.
@@ -267,7 +267,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.TemporalRwTx, header *types.Heade
 		fv.sharedDom.Close()
 	}
 
-	fv.sharedDom, criticalError = state.NewSharedDomains(tx, logger)
+	fv.sharedDom, criticalError = execctx.NewSharedDomains(tx, logger)
 	if criticalError != nil {
 		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
 		return
@@ -297,7 +297,7 @@ func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shar
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
-func (fv *ForkValidator) validateAndStorePayload(sd *state.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	start := time.Now()
 	headersChain = append(headersChain, header)

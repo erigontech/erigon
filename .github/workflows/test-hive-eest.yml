@@ -45,6 +45,7 @@ jobs:
         # have access to our Docker secrets.
         if: |
           github.repository == 'erigontech/erigon' && 
+          github.actor != 'dependabot[bot]' &&
           (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
         uses: docker/login-action@v3
         with:
@@ -114,7 +115,7 @@ jobs:
           run_suite eest/consume-engine
         continue-on-error: true
       - name: Upload output log
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: hive-workspace-log
           path: hive/workspace/logs

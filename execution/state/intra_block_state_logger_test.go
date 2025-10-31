@@ -74,7 +74,7 @@ func TestStateLogger(t *testing.T) {
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{
-				{addr: common.Address{}, prev: *uint256.NewInt(0), new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
+				{addr: common.Address{}, prev: uint256.Int{}, new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
 				{addr: common.Address{}, prev: *uint256.NewInt(2), new: *uint256.NewInt(3), reason: tracing.BalanceChangeUnspecified},
 			},
 		},
@@ -93,7 +93,7 @@ func TestStateLogger(t *testing.T) {
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{
-				{addr: common.Address{}, prev: *uint256.NewInt(0), new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
+				{addr: common.Address{}, prev: uint256.Int{}, new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
 				{addr: common.Address{}, prev: *uint256.NewInt(2), new: *uint256.NewInt(1), reason: tracing.BalanceChangeUnspecified},
 			},
 		},
