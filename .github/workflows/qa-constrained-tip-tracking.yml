@@ -19,10 +19,10 @@ jobs:
           #  backend: Gnosis
           #  cgroup_name: constrained_res_64G
           #  prune_mode: archive_node
-    runs-on: [ self-hosted, qa, "${{ matrix.backend }}", tip-tracking-ext ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}", tip-tracking ]
     timeout-minutes: 780 # 13 hours
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.3/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-main/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
