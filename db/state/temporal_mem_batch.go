@@ -38,10 +38,10 @@ const (
 	put
 )
 
-type dataWithPrevStep struct {
-	data     []byte
-	prevStep kv.Step
-	dir      iodir
+type dataWithStep struct {
+	data []byte
+	step kv.Step
+	dir  iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
@@ -51,8 +51,8 @@ type TemporalMemBatch struct {
 	getCacheSize int
 
 	latestStateLock sync.RWMutex
-	domains         [kv.DomainLen]map[string]dataWithPrevStep
-	storage         *btree2.Map[string, dataWithPrevStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+	domains         [kv.DomainLen]map[string]dataWithStep
+	storage         *btree2.Map[string, dataWithStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
 	domainWriters   [kv.DomainLen]*DomainBufferedWriter
 	iiWriters       []*InvertedIndexBufferedWriter
@@ -65,7 +65,7 @@ type TemporalMemBatch struct {
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage: btree2.NewMap[string, dataWithPrevStep](128),
+		storage: btree2.NewMap[string, dataWithStep](128),
 		metrics: ioMetrics.(*changeset.DomainMetrics),
 	}
 	aggTx := AggTx(tx)
@@ -78,7 +78,7 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBa
 	}
 
 	for id, d := range aggTx.d {
-		sd.domains[id] = map[string]dataWithPrevStep{}
+		sd.domains[id] = map[string]dataWithStep{}
 		sd.domainWriters[id] = d.NewWriter()
 	}
 
@@ -149,7 +149,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		putKeySize += len(key)
 		putValueSize += len(val)
 	}
-	sd.domains[domain][key] = valWithPrevStep
+	sd.domains[domain][key] = valWithStep
 
 	sd.metrics.Lock()
 	sd.metrics.CachePutCount++
@@ -172,20 +172,20 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	sd.metrics.Unlock()
 }
 
-func (sd *TemporalMemBatch) GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool) {
+func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
 	keyS := toStringZeroCopy(key)
-	var dataWithPrevStep dataWithPrevStep
-	if table == kv.StorageDomain {
-		dataWithPrevStep, ok = sd.storage.Get(keyS)
-		return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
+	var dataWithStep dataWithStep
+	if domain == kv.StorageDomain {
+		dataWithStep, ok = sd.storage.Get(keyS)
+		return dataWithStep.data, dataWithStep.step, ok
 
 	}
 
-	dataWithPrevStep, ok = sd.domains[table][keyS]
-	return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
+	dataWithStep, ok = sd.domains[domain][keyS]
+	return dataWithStep.data, dataWithStep.step, ok
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
@@ -201,10 +201,10 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	for i := range sd.domains {
-		sd.domains[i] = map[string]dataWithPrevStep{}
+		sd.domains[i] = map[string]dataWithStep{}
 	}
 
-	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
+	sd.storage = btree2.NewMap[string, dataWithStep](128)
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
 	sd.metrics.CachePutCount = 0
@@ -222,7 +222,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
-	var ramIter btree2.MapIter[string, dataWithPrevStep]
+	var ramIter btree2.MapIter[string, dataWithStep]
 	if domain == kv.StorageDomain {
 		ramIter = sd.storage.Iter()
 	}
