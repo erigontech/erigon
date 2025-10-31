@@ -768,8 +768,8 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 		}
 
 		last := blocks[len(blocks)-1]
-		prev = last.NumberU64() + 1
 		lastBlockNum = prev
+		prev = last.NumberU64() + 1
 		lastBlockHash = last.Hash()
 
 		select {
