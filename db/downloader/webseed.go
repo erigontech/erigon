@@ -128,11 +128,12 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) e
 		fmt.Printf("%s\n", rep.ToString(false))
 	}
 	if failed {
-		merr := "error list:\n"
+		var merr strings.Builder
+		merr.WriteString("error list:\n")
 		for _, err := range supErr {
-			merr += fmt.Sprintf("%s\n", err)
+			merr.WriteString(fmt.Sprintf("%s\n", err))
 		}
-		return fmt.Errorf("webseed: some webseeds are not OK, details above| %s", merr)
+		return fmt.Errorf("webseed: some webseeds are not OK, details above| %s", merr.String())
 	}
 	return nil
 }

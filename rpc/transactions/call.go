@@ -53,6 +53,7 @@ type BlockOverrides struct {
 	BlockHash   *map[uint64]common.Hash `json:"blockHash"`
 	BeaconRoot  *common.Hash            `json:"beaconRoot"`
 	Withdrawals *types.Withdrawals      `json:"withdrawals"`
+	PrevRandao  *common.Hash            `json:"prevRandao"`
 }
 
 type BlockHashOverrides map[uint64]common.Hash
@@ -77,6 +78,9 @@ func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
 	if o.BaseFee != nil {
 		h.BaseFee = o.BaseFee.ToBig()
 	}
+	if o.PrevRandao != nil {
+		h.MixDigest = *o.PrevRandao
+	}
 	return h
 }
 
@@ -85,7 +89,7 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 		blockCtx.BlockNumber = uint64(*o.BlockNumber)
 	}
 	if o.BaseFee != nil {
-		blockCtx.BaseFee = o.BaseFee
+		blockCtx.BaseFee = *o.BaseFee
 	}
 	if o.Coinbase != nil {
 		blockCtx.Coinbase = *o.Coinbase

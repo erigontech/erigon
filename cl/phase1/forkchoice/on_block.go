@@ -274,16 +274,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
 	lastProcessedState.SetFinalizedCheckpoint(finalizedCheckpoint)
 	lastProcessedState.SetJustificationBits(justificationBits)
-	// Load next proposer indicies for the parent root
-	idxs := make([]uint64, 0, foreseenProposers)
-	for i := lastProcessedState.Slot() + 1; i < f.beaconCfg.SlotsPerEpoch; i++ {
-		idx, err := lastProcessedState.GetBeaconProposerIndexForSlot(i)
-		if err != nil {
-			return err
-		}
-		idxs = append(idxs, idx)
-	}
-	f.nextBlockProposers.Add(blockRoot, idxs)
+
 	// If the block is from a prior epoch, apply the realized values
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())

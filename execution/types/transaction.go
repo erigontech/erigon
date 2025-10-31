@@ -44,6 +44,7 @@ var (
 	ErrUnexpectedProtection = errors.New("transaction type does not supported EIP-155 protected signatures")
 	ErrInvalidTxType        = errors.New("transaction type not valid in this context")
 	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
+	errTrailingBytes        = errors.New("trailing bytes after rlp encoded transaction")
 )
 
 // Transaction types.
@@ -117,29 +118,46 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 }
 
 func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
+	// if the stream is in an enclosing RLP list (transactions list inside a block)
+	inBlock := s.MoreDataInList()
 	kind, _, err := s.Kind()
 	if err != nil {
 		return nil, err
 	}
-	if rlp.List == kind {
-		txn := &LegacyTx{}
-		if err = txn.DecodeRLP(s); err != nil {
+
+	var txn Transaction
+	switch kind {
+	case rlp.List:
+		legacy := &LegacyTx{}
+		if err := legacy.DecodeRLP(s); err != nil {
 			return nil, err
 		}
-		return txn, nil
-	}
-	if rlp.String != kind {
+		txn = legacy
+	case rlp.String:
+		// Decode the EIP-2718 typed txn envelope.
+		var b []byte
+		if b, err = s.Bytes(); err != nil {
+			return nil, err
+		}
+		if len(b) == 0 {
+			return nil, rlp.EOL
+		}
+		if txn, err = UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, fmt.Errorf("not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
 	}
-	// Decode the EIP-2718 typed txn envelope.
-	var b []byte
-	if b, err = s.Bytes(); err != nil {
-		return nil, err
+
+	if !inBlock {
+		if _, _, peekErr := s.Kind(); peekErr == nil {
+			return nil, errTrailingBytes
+		} else if !errors.Is(peekErr, io.EOF) && !errors.Is(peekErr, rlp.EOL) {
+			return nil, peekErr
+		}
 	}
-	if len(b) == 0 {
-		return nil, rlp.EOL
-	}
-	return UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs)
+
+	return txn, nil
 }
 
 // DecodeWrappedTransaction as similar to DecodeTransaction,
@@ -172,9 +190,6 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
-	}
-	if s.Remaining() != 0 {
-		return nil, errors.New("trailing bytes after rlp encoded transaction")
 	}
 	return tx, nil
 }
@@ -213,7 +228,7 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		return nil, err
 	}
 	if s.Remaining() != 0 {
-		return nil, errors.New("trailing bytes after rlp encoded transaction")
+		return nil, errTrailingBytes
 	}
 	return t, nil
 }

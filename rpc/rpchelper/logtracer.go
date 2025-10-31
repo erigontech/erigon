@@ -59,10 +59,10 @@ func (t *LogTracer) Hooks() *tracing.Hooks {
 	}
 }
 
-func (t *LogTracer) onEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *LogTracer) onEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.logs = append(t.logs, make([]*types.Log, 0))
-	if vm.OpCode(typ) != vm.DELEGATECALL && value != nil && !value.IsZero() {
-		t.captureTransfer(from, to, value)
+	if vm.OpCode(typ) != vm.DELEGATECALL && !value.IsZero() {
+		t.captureTransfer(from, to, &value)
 	}
 }
 

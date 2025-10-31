@@ -16,6 +16,6 @@
 
 package vm
 
-func MemoryGasCost(mem *Memory, newMemSize uint64) (uint64, error) {
-	return memoryGasCost(mem, newMemSize)
+func MemoryGasCost(callContext *CallContext, newMemSize uint64) (uint64, error) {
+	return memoryGasCost(callContext, newMemSize)
 }

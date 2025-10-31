@@ -89,34 +89,35 @@ type args struct {
 }
 
 func createABI(name string, stateMutability, payable *string, inputs []args) (abi.ABI, error) {
-	sig := fmt.Sprintf(`[{ "type" : "function", "name" : "%v" `, name)
+	var sig strings.Builder
+	sig.WriteString(fmt.Sprintf(`[{ "type" : "function", "name" : "%v" `, name))
 	if stateMutability != nil {
-		sig += fmt.Sprintf(`, "stateMutability": "%v" `, *stateMutability)
+		sig.WriteString(fmt.Sprintf(`, "stateMutability": "%v" `, *stateMutability))
 	}
 	if payable != nil {
-		sig += fmt.Sprintf(`, "payable": %v `, *payable)
+		sig.WriteString(fmt.Sprintf(`, "payable": %v `, *payable))
 	}
 	if len(inputs) > 0 {
-		sig += `, "inputs" : [ {`
+		sig.WriteString(`, "inputs" : [ {`)
 		for i, inp := range inputs {
-			sig += fmt.Sprintf(`"name" : "%v", "type" : "%v" `, inp.name, inp.typ)
+			sig.WriteString(fmt.Sprintf(`"name" : "%v", "type" : "%v" `, inp.name, inp.typ))
 			if i+1 < len(inputs) {
-				sig += ","
+				sig.WriteString(",")
 			}
 		}
-		sig += "} ]" //nolint:goconst
-		sig += `, "outputs" : [ {`
+		sig.WriteString("} ]") //nolint:goconst
+		sig.WriteString(`, "outputs" : [ {`)
 		for i, inp := range inputs {
-			sig += fmt.Sprintf(`"name" : "%v", "type" : "%v" `, inp.name, inp.typ)
+			sig.WriteString(fmt.Sprintf(`"name" : "%v", "type" : "%v" `, inp.name, inp.typ))
 			if i+1 < len(inputs) {
-				sig += ","
+				sig.WriteString(",")
 			}
 		}
-		sig += "} ]"
+		sig.WriteString("} ]")
 	}
-	sig += `}]`
+	sig.WriteString(`}]`)
 
-	return abi.JSON(strings.NewReader(sig))
+	return abi.JSON(strings.NewReader(sig.String()))
 }
 
 func runFuzzer(input []byte) int {

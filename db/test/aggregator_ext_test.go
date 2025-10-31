@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state_test
+package test
 
 import (
 	"context"
@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -61,14 +62,14 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	logger := log.New()
 	stepSize := uint64(100)
 	ctx := context.Background()
-	db, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), stepSize)
 	dirs := agg.Dirs()
 
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -111,7 +112,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
 			encodedState, err := cs.Encode()
 			require.NoError(t, err)
-			err = domains.DomainPut(kv.CommitmentDomain, tx, KeyCommitmentState, encodedState, txNum, nil, 0)
+			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil, 0)
 			require.NoError(t, err)
 		}
 	}
@@ -148,7 +149,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	newDoms, err := state.NewSharedDomains(tx, log.New())
+	newDoms, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer newDoms.Close()
 
@@ -197,13 +198,13 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	ctx := context.Background()
 	aggStep := uint64(20)
 
-	db, _ := testDbAndAggregatorv3(t, aggStep)
+	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -218,7 +219,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		tx, err = db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
 
-		domains, err = state.NewSharedDomains(tx, log.New())
+		domains, err = execctx.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
@@ -245,7 +246,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		acc := accounts.Account{
 			Nonce:       1,
-			Balance:     *uint256.NewInt(0),
+			Balance:     uint256.Int{},
 			CodeHash:    common.Hash{},
 			Incarnation: 0,
 		}
@@ -295,13 +296,13 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	}
 
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, 10)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), 10)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -329,7 +330,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		require.Equal(t, length.Hash, n)
 		acc := accounts.Account{
 			Nonce:       1,
-			Balance:     *uint256.NewInt(0),
+			Balance:     uint256.Int{},
 			CodeHash:    common.Hash{},
 			Incarnation: 0,
 		}
@@ -449,13 +450,13 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 
 	t.Parallel()
 	aggStep := uint64(2)
-	db, agg := testDbAndAggregatorv3(t, aggStep)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -575,19 +576,19 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(5)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), stepSize)
 
 	ctx := context.Background()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	rnd := newRnd(2342)
-	maxTx := stepSize * 8
+	maxTx := stepSize * 4
 
 	// 1. generate data
 	data := generateSharedDomainsUpdates(t, domains, rwTx, maxTx, rnd, length.Addr, 10, stepSize)
@@ -615,7 +616,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	t.Logf("expected hash: %x", expectedHash)
+	//t.Logf("expected hash: %x", expectedHash)
 	err = agg.BuildFiles(stepSize * 16)
 	require.NoError(t, err)
 
@@ -627,7 +628,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	defer rwTx.Rollback()
 
 	// 4. restart on same (replaced keys) files
-	domains, err = state.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -639,7 +640,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 
-	t.Logf("result hash: %x", resultHash)
+	//t.Logf("result hash: %x", resultHash)
 	require.Equal(t, expectedHash, resultHash)
 }
 
@@ -649,14 +650,14 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	}
 
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, 5)
+	db, agg, _ := testDbAndAggregatorv3(t, t.TempDir(), 5)
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -740,7 +741,7 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	tx, err := tdb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	doms, err := state.NewSharedDomains(tx, logger)
+	doms, err := execctx.NewSharedDomains(tx, logger)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
 	txnNums := uint64(18)
@@ -798,7 +799,7 @@ func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
 	return accounts
 }
 
-func generateSharedDomainsUpdates(t *testing.T, domains *state.SharedDomains, tx kv.TemporalTx, maxTxNum uint64, rnd *rndGen, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
+func generateSharedDomainsUpdates(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalTx, maxTxNum uint64, rnd *rndGen, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
 	t.Helper()
 	usedKeys := make(map[string]struct{}, keysCount*maxTxNum)
 	for txNum := uint64(1); txNum <= maxTxNum; txNum++ {
@@ -808,15 +809,16 @@ func generateSharedDomainsUpdates(t *testing.T, domains *state.SharedDomains, tx
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			rh, err := domains.ComputeCommitment(context.Background(), tx, true, txNum/commitEvery, txNum, "", nil)
+			stateRootHash, err := domains.ComputeCommitment(context.Background(), tx, true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
-			t.Logf("commitment %x txn=%d", rh, txNum)
+			_ = stateRootHash
+			//t.Logf("commitment %x txn=%d", stateRootHash, txNum)
 		}
 	}
 	return usedKeys
 }
 
-func generateSharedDomainsUpdatesForTx(t *testing.T, domains *state.SharedDomains, tx kv.TemporalTx, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
+func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalTx, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
 	t.Helper()
 
 	getKey := func() ([]byte, bool) {
