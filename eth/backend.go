@@ -720,7 +720,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil || config.ElBlockDownloaderV2
+	sentryMcDisableBlockDownload := chainConfig.Bor != nil || config.ElBlockDownloaderV2 || chainConfig.IsArbitrum()
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
