@@ -9,7 +9,6 @@ import (
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -256,7 +255,7 @@ func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, a
 	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, accounts.NilKey, vr.txIndex); ok {
 		account.Nonce = update
 	}
-	if update, ok := versionedUpdate[common.Hash](vr.versionMap, address, CodeHashPath, accounts.NilKey, vr.txIndex); ok {
+	if update, ok := versionedUpdate[accounts.CodeHash](vr.versionMap, address, CodeHashPath, accounts.NilKey, vr.txIndex); ok {
 		account.CodeHash = update
 	}
 	return account

@@ -21,6 +21,7 @@ import (
 	"unique"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 type Address unique.Handle[common.Address]
@@ -151,4 +152,60 @@ func (k StorageKey) Cmp(o StorageKey) int {
 	}
 
 	return k.Value().Cmp(o.Value())
+}
+
+type CodeHash unique.Handle[common.Hash]
+
+var ZeroCodeHash = InternCodeHash(common.Hash{})
+var NilCodeHash = CodeHash{}
+var EmptyCodeHash = InternCodeHash(empty.CodeHash)
+
+func InternCodeHash(k common.Hash) CodeHash {
+	return CodeHash(unique.Make(k))
+}
+
+func (h CodeHash) IsNil() bool {
+	return h == NilCodeHash
+}
+
+func (h CodeHash) IsEmpty() bool {
+	return h == EmptyCodeHash || h == ZeroCodeHash || h == NilCodeHash
+}
+
+func (h CodeHash) IsZero() bool {
+	return h == NilCodeHash || h == ZeroCodeHash
+}
+
+func (h CodeHash) Value() common.Hash {
+	return unique.Handle[common.Hash](h).Value()
+}
+
+func (h CodeHash) String() string {
+	if h == NilCodeHash {
+		return "<nil>"
+	}
+	return h.Value().String()
+}
+
+func (h CodeHash) Format(s fmt.State, c rune) {
+	if h == NilCodeHash {
+		s.Write([]byte("<nil>"))
+	}
+	h.Value().Format(s, c)
+}
+
+func (h CodeHash) Cmp(o CodeHash) int {
+	switch {
+	case h == NilCodeHash:
+		switch {
+		case o == NilCodeHash:
+			return 0
+		default:
+			return -1
+		}
+	case o == NilCodeHash:
+		return +1
+	}
+
+	return h.Value().Cmp(o.Value())
 }

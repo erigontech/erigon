@@ -19,7 +19,6 @@ package state
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -44,7 +43,7 @@ func (cw *CachedWriter) UpdateAccountData(address accounts.Address, original, ac
 	return nil
 }
 
-func (cw *CachedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (cw *CachedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if err := cw.w.UpdateAccountCode(address, 1, codeHash, code); err != nil {
 		return err
 	}

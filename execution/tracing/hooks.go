@@ -40,7 +40,7 @@ type OpContext interface {
 	CallValue() uint256.Int
 	CallInput() []byte
 	Code() []byte
-	CodeHash() common.Hash
+	CodeHash() accounts.CodeHash
 }
 
 // IntraBlockState gives tracers access to the whole state.
@@ -153,7 +153,7 @@ type (
 	NonceChangeHook = func(addr accounts.Address, prev, new uint64)
 
 	// CodeChangeHook is called when the code of an account changes.
-	CodeChangeHook = func(addr accounts.Address, prevCodeHash common.Hash, prevCode []byte, codeHash common.Hash, code []byte)
+	CodeChangeHook = func(addr accounts.Address, prevCodeHash accounts.CodeHash, prevCode []byte, codeHash accounts.CodeHash, code []byte)
 
 	// StorageChangeHook is called when the storage of an account changes.
 	StorageChangeHook = func(addr accounts.Address, slot accounts.StorageKey, prev, new uint256.Int)

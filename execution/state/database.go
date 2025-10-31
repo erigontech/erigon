@@ -24,7 +24,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -54,7 +53,7 @@ type HistoricalStateReader interface {
 
 type StateWriter interface {
 	UpdateAccountData(address accounts.Address, original, account *accounts.Account) error
-	UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error
+	UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error
 	DeleteAccount(address accounts.Address, original *accounts.Account) error
 	WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error
 	CreateContract(address accounts.Address) error
@@ -87,7 +86,7 @@ func (nw *NoopWriter) DeleteAccount(address accounts.Address, original *accounts
 	return nil
 }
 
-func (nw *NoopWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (nw *NoopWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if nw.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}

@@ -1167,7 +1167,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, row int, hashedK
 	account.Balance = accountUpdate.Balance
 	account.Initialised = true
 	account.Root = accountUpdate.Storage
-	account.CodeHash = accountUpdate.CodeHash
+	account.CodeHash = accounts.InternCodeHash(accountUpdate.CodeHash)
 
 	addrHash, err := compactKey(hashedKey[:64])
 	if err != nil {
@@ -1182,7 +1182,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, row int, hashedK
 	} else {
 		code = codeWithHash.Code
 		// sanity check
-		if account.CodeHash != codeWithHash.CodeHash {
+		if account.CodeHash.Value() != codeWithHash.CodeHash {
 			return nil, fmt.Errorf("account.CodeHash(%x)!=codeReads[%x].CodeHash(%x)", account.CodeHash, addrHash, codeWithHash.CodeHash)
 		}
 	}

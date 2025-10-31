@@ -26,10 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
@@ -39,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
-
-var emptyHash = common.Hash{}
 
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	// Precompiled contracts can be overridden, otherwise determine the active set based on chain rules
@@ -255,7 +251,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	} else {
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		var codeHash common.Hash
+		var codeHash accounts.CodeHash
 		codeHash, err = evm.intraBlockState.ResolveCodeHash(addr)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -351,16 +347,16 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 
 type codeAndHash struct {
 	code []byte
-	hash common.Hash
+	hash accounts.CodeHash
 }
 
 func NewCodeAndHash(code []byte) *codeAndHash {
 	return &codeAndHash{code: code}
 }
 
-func (c *codeAndHash) Hash() common.Hash {
-	if c.hash == emptyHash {
-		c.hash = crypto.Keccak256Hash(c.code)
+func (c *codeAndHash) Hash() accounts.CodeHash {
+	if c.hash.IsZero() {
+		c.hash = accounts.InternCodeHash(crypto.Keccak256Hash(c.code))
 	}
 	return c.hash
 }
@@ -436,7 +432,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	if err != nil {
 		return nil, accounts.NilAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != empty.CodeHash) || hasStorage {
+	if nonce != 0 || !contractHash.IsEmpty() || hasStorage {
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining, 0, tracing.GasChangeCallFailedExecution)
@@ -537,7 +533,7 @@ func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining uint64
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create2(caller accounts.Address, code []byte, gasRemaining uint64, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
-	contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), codeAndHash.Hash().Bytes()))
+	contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), codeAndHash.Hash()))
 	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout)
 }
 

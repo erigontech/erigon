@@ -142,7 +142,7 @@ type (
 	codeChange struct {
 		account     accounts.Address
 		prevcode    []byte
-		prevhash    common.Hash
+		prevhash    accounts.CodeHash
 		wasCommited bool
 	}
 

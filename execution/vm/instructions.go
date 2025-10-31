@@ -631,12 +631,13 @@ func opExtCodeHash(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (
 	if empty {
 		slot.Clear()
 	} else {
-		var codeHash common.Hash
+		var codeHash accounts.CodeHash
 		codeHash, err = interpreter.evm.IntraBlockState().GetCodeHash(address)
 		if err != nil {
 			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		slot.SetBytes(codeHash.Bytes())
+		codeHashValue := codeHash.Value()
+		slot.SetBytes(codeHashValue[:])
 	}
 	return pc, nil, nil
 }

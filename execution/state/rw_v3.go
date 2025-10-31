@@ -615,7 +615,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	return nil
 }
 
-func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}

@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -562,7 +561,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		if stateObject.code != nil {
 			return len(stateObject.code), nil
 		}
-		if stateObject.data.CodeHash == empty.CodeHash {
+		if stateObject.data.CodeHash.IsEmpty() {
 			return 0, nil
 		}
 		return sdb.stateReader.ReadAccountCodeSize(addr)
@@ -577,7 +576,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			if s.code != nil {
 				return len(s.code), nil
 			}
-			if s.data.CodeHash == empty.CodeHash {
+			if s.data.CodeHash.IsEmpty() {
 				return 0, nil
 			}
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -602,30 +601,30 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (common.Hash, error) {
+func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr)
 		if err != nil {
-			return common.Hash{}, err
+			return accounts.NilCodeHash, err
 		}
 		if stateObject == nil || stateObject.deleted {
-			return common.Hash{}, nil
+			return accounts.NilCodeHash, nil
 		}
 		return stateObject.data.CodeHash, nil
 	}
 
-	hash, _, _, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, common.Hash{},
-		func(v common.Hash) common.Hash { return v },
-		func(s *stateObject) (common.Hash, error) {
+	hash, _, _, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, accounts.NilCodeHash,
+		func(v accounts.CodeHash) accounts.CodeHash { return v },
+		func(s *stateObject) (accounts.CodeHash, error) {
 			if s == nil || s.deleted {
-				return common.Hash{}, nil
+				return accounts.NilCodeHash, nil
 			}
 			return s.data.CodeHash, nil
 		})
 	return hash, err
 }
 
-func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (common.Hash, error) {
+func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
 	// eip-7702
 	dd, ok, err := sdb.GetDelegatedDesignation(addr)
 
@@ -634,7 +633,7 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (common.Hash,
 	}
 
 	if err != nil {
-		return common.Hash{}, err
+		return accounts.NilCodeHash, err
 	}
 
 	return sdb.GetCodeHash(addr)
@@ -786,7 +785,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		}
 
 		if stateObject.data.Empty() {
-			sdb.versionWritten(addr, BalancePath, accounts.NilKey, uint256.Int{})
+			versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 			}
@@ -818,7 +817,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		return err
 	}
 	stateObject.SetBalance(update, wasCommited, reason)
-	sdb.versionWritten(addr, BalancePath, accounts.NilKey, update)
+	versionWritten(sdb, addr, BalancePath, accounts.NilKey, update)
 	return nil
 }
 
@@ -960,7 +959,7 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 	update := u256.Sub(prev, amount)
 	stateObject.SetBalance(update, wasCommited, reason)
 	if sdb.versionMap != nil {
-		sdb.versionWritten(addr, BalancePath, accounts.NilKey, update)
+		versionWritten(sdb, addr, BalancePath, accounts.NilKey, update)
 	}
 	return nil
 }
@@ -976,7 +975,7 @@ func (sdb *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int
 		return err
 	}
 	stateObject.SetBalance(amount, !sdb.hasWrite(addr, BalancePath, accounts.NilKey), reason)
-	sdb.versionWritten(addr, BalancePath, accounts.NilKey, stateObject.Balance())
+	versionWritten(sdb, addr, BalancePath, accounts.NilKey, stateObject.Balance())
 	return nil
 }
 
@@ -992,7 +991,7 @@ func (sdb *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64) error 
 	}
 
 	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, NoncePath, accounts.NilKey))
-	sdb.versionWritten(addr, NoncePath, accounts.NilKey, stateObject.Nonce())
+	versionWritten(sdb, addr, NoncePath, accounts.NilKey, stateObject.Nonce())
 	return nil
 }
 
@@ -1022,11 +1021,11 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	if err != nil {
 		return err
 	}
-	codeHash := crypto.Keccak256Hash(code)
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	stateObject.SetCode(codeHash, code, !sdb.hasWrite(addr, CodePath, accounts.NilKey))
-	sdb.versionWritten(addr, CodePath, accounts.NilKey, code)
-	sdb.versionWritten(addr, CodeHashPath, accounts.NilKey, codeHash)
-	sdb.versionWritten(addr, CodeSizePath, accounts.NilKey, len(code))
+	versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
+	versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
+	versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
 	return nil
 }
 
@@ -1075,7 +1074,7 @@ func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 		return err
 	}
 	if stateObject.SetState(key, value, force) {
-		sdb.versionWritten(addr, StatePath, key, value)
+		versionWritten(sdb, addr, StatePath, key, value)
 	}
 	return nil
 }
@@ -1152,8 +1151,8 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
 
-	sdb.versionWritten(addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
-	sdb.versionWritten(addr, BalancePath, accounts.NilKey, uint256.Int{})
+	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
+	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 
 	return true, nil
 }
@@ -1345,7 +1344,7 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
 	data := newobj.data
-	sdb.versionWritten(addr, AddressPath, accounts.NilKey, &data)
+	versionWritten(sdb, addr, AddressPath, accounts.NilKey, &data)
 	return newobj
 }
 
@@ -1441,8 +1440,8 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
-	sdb.versionRead(addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
-	sdb.versionWritten(addr, BalancePath, accounts.NilKey, newObj.Balance())
+	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
+	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
 
 	return nil
 }
@@ -1824,15 +1823,17 @@ func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, slot account
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
-		sdb.versionRead(addr, AddressPath, accounts.NilKey, source, version, &data)
+		versionRead[*accounts.Account](sdb, addr, AddressPath, accounts.NilKey, source, version, &data)
 	}
 }
 
-func (sdb *IntraBlockState) versionWritten(addr accounts.Address, path AccountPath, key accounts.StorageKey, val any) {
+func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, val T) {
 	if sdb.versionMap != nil {
 		if sdb.versionedWrites == nil {
 			sdb.versionedWrites = WriteSet{}
 		}
+
+		val := val // avoid escape if no versioned map
 
 		vw := VersionedWrite{
 			Address: addr,
@@ -1850,7 +1851,7 @@ func (sdb *IntraBlockState) versionWritten(addr accounts.Address, path AccountPa
 	}
 }
 
-func (sdb *IntraBlockState) versionRead(addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val any) {
+func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val any) {
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}

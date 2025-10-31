@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain/params"
@@ -298,7 +297,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
-		if codeHash != empty.CodeHash && codeHash != (common.Hash{}) {
+		if !codeHash.IsEmpty() {
 			// common.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
@@ -654,7 +653,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
-			if codeHash != empty.CodeHash && codeHash != (common.Hash{}) {
+			if !codeHash.IsEmpty() {
 				// check for delegation
 				_, ok, err := st.state.GetDelegatedDesignation(authority)
 				if err != nil {

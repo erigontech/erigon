@@ -25,7 +25,6 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -54,13 +53,13 @@ type Contract struct {
 	analysis  bitvec         // Locally cached result of JUMPDEST analysis
 
 	Code     []byte
-	CodeHash common.Hash
+	CodeHash accounts.CodeHash
 
 	value uint256.Int
 }
 
 type JumpDestCache struct {
-	*simplelru.LRU[common.Hash, bitvec]
+	*simplelru.LRU[accounts.CodeHash, bitvec]
 	hit, total int
 	trace      bool
 }
@@ -71,7 +70,7 @@ var (
 )
 
 func NewJumpDestCache(limit int) *JumpDestCache {
-	c, err := simplelru.NewLRU[common.Hash, bitvec](limit, nil)
+	c, err := simplelru.NewLRU[accounts.CodeHash, bitvec](limit, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -117,7 +116,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	// Do we have a contract hash already?
 	// If we do have a hash, that means it's a 'regular' contract. For regular
 	// contracts ( not temporary initcode), we store the analysis in a map
-	if c.CodeHash != (common.Hash{}) {
+	if !c.CodeHash.IsZero() {
 		// Does parent context have the analysis?
 		c.jumpdests.total++
 		analysis, exist := c.jumpdests.Get(c.CodeHash)

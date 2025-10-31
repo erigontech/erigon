@@ -737,7 +737,7 @@ func (tds *TrieDbState) ReadAccountCode(address accounts.Address) (code []byte, 
 		// storing the latest code hash
 		codeHash := crypto.Keccak256Hash(code)
 		tds.currentBuffer.codeReads[addrHash] = witnesstypes.CodeWithHash{Code: code, CodeHash: codeHash}
-		tds.retainListBuilder.ReadCode(codeHash, code)
+		tds.retainListBuilder.ReadCode(accounts.InternCodeHash(codeHash), code)
 	}
 	return code, err
 }
@@ -772,7 +772,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize 
 		// storing the latest code hash
 		tds.currentBuffer.codeSizeReads[addrHash] = codeHash
 		// FIXME: support codeSize in witnesses if makes sense
-		tds.retainListBuilder.ReadCode(codeHash, code)
+		tds.retainListBuilder.ReadCode(accounts.InternCodeHash(codeHash), code)
 	}
 	return codeSize, nil
 }
@@ -826,7 +826,7 @@ func (tsw *TrieStateWriter) DeleteAccount(address accounts.Address, original *ac
 	return nil
 }
 
-func (tsw *TrieStateWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (tsw *TrieStateWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if tsw.tds.resolveReads {
 		tsw.tds.retainListBuilder.CreateCode(codeHash)
 	}

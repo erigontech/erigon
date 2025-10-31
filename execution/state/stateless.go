@@ -251,8 +251,8 @@ func (s *Stateless) DeleteAccount(address accounts.Address, original *accounts.A
 
 // UpdateAccountCode is a part of the StateWriter interface
 // This implementation adds the code to the codeMap to make it available for further accesses
-func (s *Stateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	s.codeUpdates[codeHash] = code
+func (s *Stateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+	s.codeUpdates[codeHash.Value()] = code
 
 	if s.trace {
 		fmt.Printf("Stateless: UpdateAccountCode %x codeHash %x\n", address, codeHash)

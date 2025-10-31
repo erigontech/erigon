@@ -179,7 +179,7 @@ func (ctx *CallContext) Code() []byte {
 	return ctx.Contract.Code
 }
 
-func (ctx *CallContext) CodeHash() common.Hash {
+func (ctx *CallContext) CodeHash() accounts.CodeHash {
 	return ctx.Contract.CodeHash
 }
 

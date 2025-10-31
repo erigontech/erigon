@@ -120,8 +120,8 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 		so.data.Balance.SetUint64(0)
 		so.data.Initialised = true
 	}
-	if so.data.CodeHash == (common.Hash{}) {
-		so.data.CodeHash = empty.CodeHash
+	if so.data.CodeHash.IsEmpty() {
+		so.data.CodeHash = accounts.EmptyCodeHash
 	}
 	if so.data.Root == (common.Hash{}) {
 		so.data.Root = empty.RootHash
@@ -347,7 +347,7 @@ func (so *stateObject) Code() ([]byte, error) {
 	if so.code != nil {
 		return so.code, nil
 	}
-	if so.data.CodeHash == empty.CodeHash {
+	if so.data.CodeHash.IsEmpty() {
 		return nil, nil
 	}
 
@@ -367,7 +367,7 @@ func (so *stateObject) Code() ([]byte, error) {
 	return code, nil
 }
 
-func (so *stateObject) SetCode(codeHash common.Hash, code []byte, wasCommited bool) error {
+func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommited bool) error {
 	prevcode, err := so.Code()
 	if err != nil {
 		return err
@@ -385,7 +385,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte, wasCommited bo
 	return nil
 }
 
-func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
+func (so *stateObject) setCode(codeHash accounts.CodeHash, code []byte) {
 	so.code = code
 	so.data.CodeHash = codeHash
 	so.dirtyCode = true
