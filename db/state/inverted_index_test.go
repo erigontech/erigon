@@ -748,10 +748,10 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 }
 
 func TestInvIndexPruningPerf(t *testing.T) {
-	t.Skip("for manual benchmarks ")
+	//t.Skip("for manual benchmarks ")
 	testDbAndInvertedIndex2 := func(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
 		tb.Helper()
-		dirs := datadir.New("/Users/alex/data/remove_me_test")
+		dirs := datadir.New("/erigon-data/remove_me_test")
 		keysTable := "Keys"
 		indexTable := "Index"
 		db := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).WriteMap(true).PageSize(4 * 1024).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
@@ -806,9 +806,9 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		return txs
 	}
 
-	txCnt := uint64(1_000) * 10_000
+	txCnt := uint64(1_000) * 100_000
 	mod := uint64(1) * 31
-	db, ii := testDbAndInvertedIndex2(t, 16*1_000, log.New())
+	db, ii := testDbAndInvertedIndex2(t, 16*10_000, log.New())
 	_ = filledInvIndexOfSize2(t, txCnt, mod, db, ii)
 	defer ii.Close()
 
