@@ -525,12 +525,12 @@ func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 	var fileRequests []*rcloneRequest
 
 	if strings.HasPrefix(c.remoteFs, "http") {
-		var headers string
+		var headers strings.Builder
 		var comma string
 
 		for header, values := range c.headers {
 			for _, value := range values {
-				headers += fmt.Sprintf("%s%s=%s", comma, header, value)
+				headers.WriteString(fmt.Sprintf("%s%s=%s", comma, header, value))
 				comma = ","
 			}
 		}
@@ -545,7 +545,7 @@ func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 					SrcFs: rcloneFs{
 						Type:    "http",
 						Url:     c.remoteFs,
-						Headers: headers,
+						Headers: headers.String(),
 					},
 					SrcRemote: file,
 					DstFs:     c.localFs,
