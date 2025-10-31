@@ -900,7 +900,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkVersion:   0x05000000,
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
-	FuluForkEpoch:        math.MaxUint64,
+	FuluForkEpoch:        411392,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -992,7 +992,10 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Fulu
 	ValidatorCustodyRequirement:      8,
 	BalancePerAdditionalCustodyGroup: 32_000_000_000,
-	BlobSchedule:                     []BlobParameters{},
+	BlobSchedule: []BlobParameters{
+		{412672, 15},
+		{419072, 21},
+	},
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -1199,6 +1202,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
 	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
+	cfg.BlobSchedule = []BlobParameters{}
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1243,6 +1247,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
+	cfg.BlobSchedule = []BlobParameters{}
 	cfg.InitializeForkSchedule()
 	return cfg
 }
