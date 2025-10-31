@@ -62,6 +62,15 @@ func (r *revisions) snapshot(journal *journal) int {
 	return id
 }
 
+func (r *revisions) returnSnapshot(id int) {
+	if lv := len(r.valid); lv > 0 && r.valid[lv-1].id == id {
+		r.valid = r.valid[0 : lv-1]
+		if r.nextId == id+1 {
+			r.nextId = id
+		}
+	}
+}
+
 func (r *revisions) reset() {
 	if r != nil {
 		r.valid = r.valid[:0]
@@ -791,11 +800,13 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		}
 
 		if stateObject.data.Empty() {
-			versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
-			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+			if _, ok := sdb.journal.dirties[addr]; !ok {
+				versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
+				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+					fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+				}
+				sdb.touch(addr)
 			}
-			sdb.touch(addr)
 		}
 
 		return nil
@@ -1453,11 +1464,15 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 }
 
 // Snapshot returns an identifier for the current revision of the state.
-func (sdb *IntraBlockState) Snapshot() int {
+func (sdb *IntraBlockState) PushSnapshot() int {
 	if sdb.revisions == nil {
 		sdb.revisions = revisionsPool.Get().(*revisions)
 	}
 	return sdb.revisions.snapshot(sdb.journal)
+}
+
+func (sdb *IntraBlockState) PopSnapshot(snapshot int) {
+	sdb.revisions.returnSnapshot(snapshot)
 }
 
 // RevertToSnapshot reverts all state changes made since the given revision.

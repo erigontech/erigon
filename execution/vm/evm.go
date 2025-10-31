@@ -219,7 +219,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 	}
 
-	snapshot := evm.intraBlockState.Snapshot()
+	snapshot := evm.intraBlockState.PushSnapshot()
+	defer evm.intraBlockState.PopSnapshot(snapshot)
 
 	if typ == CALL {
 		exist, err := evm.intraBlockState.Exist(addr)
@@ -302,10 +303,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 			gas = 0
 		}
-		// TODO: consider clearing up unused snapshots:
-		//} else {
-		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
+
 	return ret, gas, err
 }
 
@@ -440,7 +439,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		return nil, accounts.NilAddress, 0, err
 	}
 	// Create a new account on the state
-	snapshot := evm.intraBlockState.Snapshot()
+	snapshot := evm.intraBlockState.PushSnapshot()
+	defer evm.intraBlockState.PopSnapshot(snapshot)
+
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
