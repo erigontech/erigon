@@ -22,7 +22,6 @@ package stages_test
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -422,28 +421,6 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	require.NoError(err)
 	if have.Cmp(want) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
-	}
-}
-
-// Tests that the insertion functions detect banned hashes.
-func TestBadBlockHashes(t *testing.T) { testBadHashes(t) }
-
-func testBadHashes(t *testing.T) {
-	t.Parallel()
-	t.Skip("to support this error in Erigon")
-	// Create a pristine chain and database
-	m := newCanonical(t, 0)
-	var err error
-
-	// Create a chain, ban a hash and try to import
-	chain := makeBlockChain(current(m, nil), 3, m, 10)
-
-	core.BadHashes[chain.Headers[2].Hash()] = true
-	defer func() { delete(core.BadHashes, chain.Headers[2].Hash()) }()
-
-	err = m.InsertChain(chain)
-	if !errors.Is(err, core.ErrBlacklistedHash) {
-		t.Errorf("error mismatch: have: %v, want: %v", err, core.ErrBlacklistedHash)
 	}
 }
 
