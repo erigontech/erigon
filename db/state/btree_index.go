@@ -91,6 +91,19 @@ func (c *Cursor) Value() []byte {
 	return c.value
 }
 
+func (c *Cursor) nextNoRead() bool {
+	if c.d+1 >= c.ef.Count() {
+		return false
+	}
+
+	c.d++
+
+	offset := c.ef.Get(c.d)
+	c.getter.Reset(offset)
+
+	return true
+}
+
 func (c *Cursor) Next() bool { // could return error instead
 	if !c.next() {
 		// c.Close()
@@ -118,6 +131,20 @@ func (c *Cursor) next() bool {
 	}
 	c.d++
 	return true
+}
+
+func (c *Cursor) resetNoRead(di uint64, g *seg.Reader) error {
+	if c.d >= c.ef.Count() {
+		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
+	}
+
+	c.d = di
+	c.getter = g
+
+	offset := c.ef.Get(c.d)
+	c.getter.Reset(offset)
+
+	return nil
 }
 
 func (c *Cursor) Reset(di uint64, g *seg.PagedReader, seekKey []byte) error {

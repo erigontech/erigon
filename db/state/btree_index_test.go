@@ -198,13 +198,14 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressCfg seg.
 }
 
 func TestBtree_Seek2(t *testing.T) {
-	t.Skip("issue #15028")
+	//t.Skip("issue #15028")
 
 	t.Parallel()
 
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 1_200_000, 1024
+	M := 1024
+	keyCount := 10 * M
 
 	compressCfg := seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg}
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressCfg)

@@ -314,21 +314,26 @@ func (b *BpsTree) Seek(g *seg.PagedReader, seekKey []byte) (cur *Cursor, err err
 	// }
 	var m uint64
 	var cmp int
+
 	for l < r {
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
 			// m = l
 			if cur.d == 0 {
-				cur.Reset(l, g, seekKey)
+				cur.resetNoRead(l, g, seekKey)
 			} else {
-				cur.Next()
+				cur.nextNoRead()
 			}
+
+			cur.key, _ = g.Next(cur.key[:0])
 
 			cmp = bytes.Compare(cur.key, seekKey)
 			if cmp < 0 {
 				l++
 				continue
 			}
+
+			cur.value, _ = g.Next(cur.value[:0])
 			return cur, nil
 		}
 
