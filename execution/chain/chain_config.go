@@ -373,9 +373,6 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 		if c.PragueTime != nil {
 			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
 		}
-		if c.OsakaTime != nil {
-			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
-		}
 
 		// Override with supplied values
 		val, ok := c.BlobSchedule["cancun"]
