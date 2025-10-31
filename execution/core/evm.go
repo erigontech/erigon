@@ -71,7 +71,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		*prevRandDao = header.MixDigest
 	}
 
-	var blobBaseFee *uint256.Int
+	var blobBaseFee uint256.Int
 	if header.ExcessBlobGas != nil {
 		var err error
 		blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
@@ -97,7 +97,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Coinbase:         beneficiary,
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,
-		BaseFee:          &baseFee,
+		BaseFee:          baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
@@ -112,7 +112,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	return evmtypes.TxContext{
 		Origin:     msg.From(),
-		GasPrice:   msg.GasPrice(),
+		GasPrice:   *msg.GasPrice(),
 		BlobHashes: msg.BlobHashes(),
 	}
 }
@@ -201,10 +201,11 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) (can bool, err error) {
+func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount uint256.Int) (can bool, err error) {
 	balance, err := db.GetBalance(addr)
 
 	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr) {
+		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {
 			if !can {
 				fmt.Printf("%d (%d.%d) Can't transfer %d from %x: %d\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount, addr, &balance)
@@ -215,5 +216,5 @@ func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint2
 	if err != nil {
 		return false, err
 	}
-	return !balance.Lt(amount), nil
+	return !balance.Lt(&amount), nil
 }

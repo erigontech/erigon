@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"time"
 	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
@@ -38,10 +37,10 @@ const (
 	put
 )
 
-type dataWithPrevStep struct {
-	data     []byte
-	prevStep kv.Step
-	dir      iodir
+type dataWithStep struct {
+	data []byte
+	step kv.Step
+	dir  iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
@@ -51,21 +50,22 @@ type TemporalMemBatch struct {
 	getCacheSize int
 
 	latestStateLock sync.RWMutex
-	domains         [kv.DomainLen]map[string]dataWithPrevStep
-	storage         *btree2.Map[string, dataWithPrevStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+	domains         [kv.DomainLen]map[string]dataWithStep
+	storage         *btree2.Map[string, dataWithStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
-	domainWriters [kv.DomainLen]*DomainBufferedWriter
-	iiWriters     []*InvertedIndexBufferedWriter
+	domainWriters   [kv.DomainLen]*DomainBufferedWriter
+	iiWriters       []*InvertedIndexBufferedWriter
+	forkableWriters map[kv.ForkableId]kv.BufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
-	metrics                   *DomainMetrics
+	metrics                   *changeset.DomainMetrics
 }
 
-func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage: btree2.NewMap[string, dataWithPrevStep](128),
-		metrics: metrics,
+		storage: btree2.NewMap[string, dataWithStep](128),
+		metrics: ioMetrics.(*changeset.DomainMetrics),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -77,8 +77,13 @@ func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemB
 	}
 
 	for id, d := range aggTx.d {
-		sd.domains[id] = map[string]dataWithPrevStep{}
+		sd.domains[id] = map[string]dataWithStep{}
 		sd.domainWriters[id] = d.NewWriter()
+	}
+
+	sd.forkableWriters = make(map[kv.ForkableId]kv.BufferedWriter)
+	for _, id := range tx.Debug().AllForkableIds() {
+		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter()
 	}
 
 	return sd
@@ -104,10 +109,10 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
+	valWithStep := dataWithStep{data: val, step: kv.Step(txNum / sd.stepSize)}
 	putSize := 0
 	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
+		if old, ok := sd.storage.Set(key, valWithStep); ok {
 			putSize += len(val) - len(old.data)
 		} else {
 			putSize += len(key) + len(val)
@@ -120,7 +125,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			dm.CachePutCount++
 			dm.CachePutSize += putSize
 		} else {
-			sd.metrics.Domains[domain] = &DomainIOMetrics{
+			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
 				CachePutCount: 1,
 				CachePutSize:  putSize,
 			}
@@ -134,13 +139,13 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	} else {
 		putSize += len(key) + len(val)
 	}
-	sd.domains[domain][key] = valWithPrevStep
+	sd.domains[domain][key] = valWithStep
 
 	if dm, ok := sd.metrics.Domains[domain]; ok {
 		dm.CachePutCount++
 		dm.CachePutSize += putSize
 	} else {
-		sd.metrics.Domains[domain] = &DomainIOMetrics{
+		sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
 			CachePutCount: 1,
 			CachePutSize:  putSize,
 		}
@@ -151,20 +156,20 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	sd.metrics.Unlock()
 }
 
-func (sd *TemporalMemBatch) GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool) {
+func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
 	keyS := toStringZeroCopy(key)
-	var dataWithPrevStep dataWithPrevStep
-	if table == kv.StorageDomain {
-		dataWithPrevStep, ok = sd.storage.Get(keyS)
-		return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
+	var dataWithStep dataWithStep
+	if domain == kv.StorageDomain {
+		dataWithStep, ok = sd.storage.Get(keyS)
+		return dataWithStep.data, dataWithStep.step, ok
 
 	}
 
-	dataWithPrevStep, ok = sd.domains[table][keyS]
-	return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
+	dataWithStep, ok = sd.domains[domain][keyS]
+	return dataWithStep.data, dataWithStep.step, ok
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
@@ -180,10 +185,10 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	for i := range sd.domains {
-		sd.domains[i] = map[string]dataWithPrevStep{}
+		sd.domains[i] = map[string]dataWithStep{}
 	}
 
-	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
+	sd.storage = btree2.NewMap[string, dataWithStep](128)
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
 	sd.metrics.CachePutSize = 0
@@ -197,7 +202,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
-	var ramIter btree2.MapIter[string, dataWithPrevStep]
+	var ramIter btree2.MapIter[string, dataWithStep]
 	if domain == kv.StorageDomain {
 		ramIter = sd.storage.Iter()
 	}
@@ -249,6 +254,14 @@ func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uin
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
+func (sd *TemporalMemBatch) PutForkable(id kv.ForkableId, num kv.Num, v []byte) error {
+	f, ok := sd.forkableWriters[id]
+	if !ok {
+		return fmt.Errorf("forkable not found: %s", Registry.Name(id))
+	}
+	return f.Put(num, v)
+}
+
 func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
 		d.Close()
@@ -256,9 +269,11 @@ func (sd *TemporalMemBatch) Close() {
 	for _, iiWriter := range sd.iiWriters {
 		iiWriter.close()
 	}
+	for _, fWriter := range sd.forkableWriters {
+		fWriter.Close()
+	}
 }
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
-	defer mxFlushTook.ObserveDuration(time.Now())
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
@@ -300,6 +315,15 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		w.close()
+	}
+	for _, w := range sd.forkableWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
+		}
+		w.Close()
 	}
 	return nil
 }

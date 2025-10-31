@@ -174,14 +174,6 @@ var (
 		"enr:-KG4QF7z4LUdMfgwvh-fS-MDv_1hPSUCqGfyOWGLNJuoBHKFAMSHz8geQn8v3qDDbuSQKud3WIAjKqR4gqJoLBUEJ08ZhGV0aDKQDc1ElgAAAG___________4JpZIJ2NIJpcIQjzq5ciXNlY3AyNTZrMaECt7YO363pV54d3QdgnluL5kxzhCR_k0yM9C-G6bqMGoKDdGNwgiMog3VkcIIjKA",
 		"enr:-LK4QCUTEmZrT1AgCKdyVgwnHL5J0VSoxsyjruAtwo-owBTBVEOyAnQRVNXlcW5aL-ycntk5oHDrKCR-DXZAlUAKpjEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCdM7Z1BAAAb___________gmlkgnY0gmlwhCPSfheJc2VjcDI1NmsxoQNpdf8U9pzsU9m6Hzgd1rmTI-On-QImJnkZBGqDp4org4N0Y3CCIyiDdWRwgiMo",
 	}...)
-	HoleskyBootstrapNodes = append(MainnetBootstrapNodes, []string{
-		"enr:-Ku4QFo-9q73SspYI8cac_4kTX7yF800VXqJW4Lj3HkIkb5CMqFLxciNHePmMt4XdJzHvhrCC5ADI4D_GkAsxGJRLnQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQORcM6e19T1T9gi7jxEZjk_sjVLGFscUNqAY9obgZaxbIN1ZHCCIyk",
-		"enr:-Ku4QPG7F72mbKx3gEQEx07wpYYusGDh-ni6SNkLvOS-hhN-BxIggN7tKlmalb0L5JPoAfqD-akTZ-gX06hFeBEz4WoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhJK-DYCJc2VjcDI1NmsxoQKLVXFOhp2uX6jeT0DvvDpPcU8FWMjQdR4wMuORMhpX24N1ZHCCIyk",
-		"enr:-LK4QPxe-mDiSOtEB_Y82ozvxn9aQM07Ui8A-vQHNgYGMMthfsfOabaaTHhhJHFCBQQVRjBww_A5bM1rf8MlkJU_l68Eh2F0dG5ldHOIAADAAAAAAACEZXRoMpBpt9l0BAFwAAABAAAAAAAAgmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQJu6T9pclPObAzEVQ53DpVQqjadmVxdTLL-J3h9NFoCeIN0Y3CCIyiDdWRwgiMo",
-		"enr:-Ly4QGbOw4xNel5EhmDsJJ-QhC9XycWtsetnWoZ0uRy381GHdHsNHJiCwDTOkb3S1Ade0SFQkWJX_pgb3g8Jfh93rvMBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBpt9l0BAFwAAABAAAAAAAAgmlkgnY0gmlwhJK-DYCJc2VjcDI1NmsxoQOxKv9sv3zKF8GDewgFGGHKP5HCZZpPpTrwl9eXKAWGxIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-LS4QG0uV4qvcpJ-HFDJRGBmnlD3TJo7yc4jwK8iP7iKaTlfQ5kZvIDspLMJhk7j9KapuL9yyHaZmwTEZqr10k9XumyCEcmHYXR0bmV0c4gAAAAABgAAAIRldGgykGm32XQEAXAAAAEAAAAAAACCaWSCdjSCaXCErK4j-YlzZWNwMjU2azGhAgfWRBEJlb7gAhXIB5ePmjj2b8io0UpEenq1Kl9cxStJg3RjcIIjKIN1ZHCCIyg",
-		"enr:-Le4QLoE1wFHSlGcm48a9ZESb_MRLqPPu6G0vHqu4MaUcQNDHS69tsy-zkN0K6pglyzX8m24mkb-LtBcbjAYdP1uxm4BhGV0aDKQabfZdAQBcAAAAQAAAAAAAIJpZIJ2NIJpcIQ5gR6Wg2lwNpAgAUHQBwEQAAAAAAAAADR-iXNlY3AyNTZrMaEDPMSNdcL92uNIyCsS177Z6KTXlbZakQqxv3aQcWawNXeDdWRwgiMohHVkcDaCI4I",
-	}...)
 	HoodiBootstrapNodes = []string{
 		"enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
 		"enr:-Ku4QLVumWTwyOUVS4ajqq8ZuZz2ik6t3Gtq0Ozxqecj0qNZWpMnudcvTs-4jrlwYRQMQwBS8Pvtmu4ZPP2Lx3i2t7YBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhNEmfKCJc2VjcDI1NmsxoQLdRlI8aCa_ELwTJhVN8k7km7IDc3pYu-FMYBs5_FiigIN1ZHCCIyk",
@@ -302,27 +294,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
 
-	chainspec.HoleskyChainID: {
-		GossipMaxSize:                   10485760,
-		GossipMaxSizeBellatrix:          15728640,
-		MaxChunkSize:                    15728640, // 15 MiB
-		AttestationSubnetCount:          64,
-		AttestationPropagationSlotRange: 32,
-		AttestationSubnetPrefixBits:     6,
-		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
-		RespTimeout:                     ConfigDurationSec(RespTimeout),
-		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
-		Eth2key:                         "eth2",
-		AttSubnetKey:                    "attnets",
-		SyncCommsSubnetKey:              "syncnets",
-		CgcKey:                          "cgc",
-		NfdKey:                          "nfd",
-		MinimumPeersInSubnetSearch:      20,
-		BootNodes:                       HoleskyBootstrapNodes,
-	},
-
 	chainspec.HoodiChainID: {
 		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
@@ -365,11 +336,6 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	},
 	chainspec.ChiadoChainID: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
-	},
-	chainspec.HoleskyChainID: {
-		"https://beaconstate-holesky.chainsafe.io/eth/v2/debug/beacon/states/finalized",
-		"https://holesky.beaconstate.info/eth/v2/debug/beacon/states/finalized",
-		"https://checkpoint-sync.holesky.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.HoodiChainID: {
 		"https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
@@ -675,13 +641,14 @@ type BeaconChainConfig struct {
 
 // GetBlobParameters returns the blob parameters at a given epoch
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
-	// Iterate through schedule in desceding order
-	for i := range b.BlobSchedule {
+	// Iterate through schedule in desc order
+	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
 		entry := b.BlobSchedule[i]
 		if epoch >= entry.Epoch {
 			return entry
 		}
 	}
+
 	// Default to Electra parameters if no matching schedule entry
 	return BlobParameters{
 		Epoch:            b.ElectraForkEpoch,
@@ -729,9 +696,9 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
-	// sort blob schedule by epoch in descending order
+	// sort blob schedule by epoch in ascending order
 	sort.Slice(b.BlobSchedule, func(i, j int) bool {
-		return b.BlobSchedule[i].Epoch > b.BlobSchedule[j].Epoch
+		return b.BlobSchedule[i].Epoch < b.BlobSchedule[j].Epoch
 	})
 }
 
@@ -899,7 +866,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkVersion:   0x05000000,
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
-	FuluForkEpoch:        math.MaxUint64,
+	FuluForkEpoch:        411392,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -991,7 +958,10 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Fulu
 	ValidatorCustodyRequirement:      8,
 	BalancePerAdditionalCustodyGroup: 32_000_000_000,
-	BlobSchedule:                     []BlobParameters{},
+	BlobSchedule: []BlobParameters{
+		{412672, 15},
+		{419072, 21},
+	},
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -1053,54 +1023,6 @@ func sepoliaConfig() BeaconChainConfig {
 
 	cfg.InitializeForkSchedule()
 	return cfg
-}
-
-func holeskyConfig() BeaconChainConfig {
-	cfg := MainnetBeaconConfig
-	cfg.ConfigName = "holesky"
-	cfg.MinGenesisActiveValidatorCount = 16384
-	cfg.MinGenesisTime = 1695902100
-	cfg.GenesisForkVersion = 0x01017000
-	cfg.GenesisDelay = 300
-	cfg.SecondsPerSlot = 12
-	cfg.Eth1FollowDistance = 2048
-	cfg.DepositChainID = chainspec.HoleskyChainID
-	cfg.DepositNetworkID = chainspec.HoleskyChainID
-
-	cfg.AltairForkEpoch = 0
-	cfg.AltairForkVersion = 0x02017000
-	cfg.BellatrixForkEpoch = 0
-	cfg.BellatrixForkVersion = 0x03017000
-	cfg.CapellaForkEpoch = 256
-	cfg.CapellaForkVersion = 0x04017000
-	cfg.DenebForkEpoch = 29696
-	cfg.DenebForkVersion = 0x05017000
-	cfg.ElectraForkEpoch = 115968
-	cfg.ElectraForkVersion = 0x06017000
-	cfg.FuluForkEpoch = 165120
-	cfg.FuluForkVersion = 0x07017000
-	cfg.TerminalTotalDifficulty = "0"
-	cfg.TerminalBlockHash = [32]byte{}
-	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
-	cfg.DepositContractAddress = "0x4242424242424242424242424242424242424242"
-	cfg.BaseRewardFactor = 64
-	cfg.SlotsPerEpoch = 32
-	cfg.EpochsPerSyncCommitteePeriod = 256
-	cfg.InactivityScoreBias = 4
-	cfg.InactivityScoreRecoveryRate = 16
-	cfg.EjectionBalance = 28000000000
-	cfg.MinPerEpochChurnLimit = 4
-	cfg.ChurnLimitQuotient = 1 << 16
-	cfg.ProposerScoreBoost = 40
-
-	cfg.BlobSchedule = []BlobParameters{
-		{166400, 15},
-		{167936, 21},
-	}
-
-	cfg.InitializeForkSchedule()
-	return cfg
-
 }
 
 func hoodiConfig() BeaconChainConfig {
@@ -1197,6 +1119,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
+	cfg.BlobSchedule = []BlobParameters{}
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1241,6 +1165,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
+	cfg.BlobSchedule = []BlobParameters{}
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1307,7 +1232,6 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
 	chainspec.MainnetChainID: mainnetConfig(),
 	chainspec.SepoliaChainID: sepoliaConfig(),
-	chainspec.HoleskyChainID: holeskyConfig(),
 	chainspec.HoodiChainID:   hoodiConfig(),
 	chainspec.GnosisChainID:  gnosisConfig(),
 	chainspec.ChiadoChainID:  chiadoConfig(),
@@ -1434,9 +1358,6 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	case networkname.Chiado:
 		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.ChiadoChainID)
 		return networkCfg, beaconCfg, chainspec.ChiadoChainID, nil
-	case networkname.Holesky:
-		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.HoleskyChainID)
-		return networkCfg, beaconCfg, chainspec.HoleskyChainID, nil
 	case networkname.Hoodi:
 		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.HoodiChainID)
 		return networkCfg, beaconCfg, chainspec.HoodiChainID, nil
@@ -1496,7 +1417,6 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // Check if chain with a specific ID is supported or not
 func EmbeddedSupported(id uint64) bool {
 	return id == chainspec.MainnetChainID ||
-		id == chainspec.HoleskyChainID ||
 		id == chainspec.SepoliaChainID ||
 		id == chainspec.GnosisChainID ||
 		id == chainspec.ChiadoChainID ||
@@ -1508,7 +1428,6 @@ func SupportBackfilling(networkId uint64) bool {
 		networkId == chainspec.SepoliaChainID ||
 		networkId == chainspec.GnosisChainID ||
 		networkId == chainspec.ChiadoChainID ||
-		networkId == chainspec.HoleskyChainID ||
 		networkId == chainspec.HoodiChainID
 }
 

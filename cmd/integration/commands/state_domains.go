@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -134,7 +135,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -174,7 +175,7 @@ var compactDomains = &cobra.Command{
 			panic("can't build index when replace-in-datadir=false (consider removing --build-idx)")
 		}
 
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -532,7 +533,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := dbstate.NewSharedDomains(temporalTx, logger)
+	domains, err := execctx.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return err
 	}

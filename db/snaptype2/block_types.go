@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"path/filepath"
 
 	"github.com/erigontech/erigon/common"
@@ -33,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -47,7 +47,6 @@ func init() {
 	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.Holesky, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Hoodi, ethereumTypes)
 }
 
@@ -188,10 +187,27 @@ var (
 					}
 				}()
 				firstBlockNum := sn.From
-
-				bodiesSegment, err := seg.NewDecompressor(sn.As(Bodies).Path)
+				bodiesPathPattern, err := version.ReplaceVersionWithMask(sn.As(Bodies).Path)
 				if err != nil {
-					return fmt.Errorf("can't open %s for indexing: %w", sn.As(Bodies).Name(), err)
+					return fmt.Errorf("can't replace path with mask %s for indexing in bodies: %w", sn.As(Bodies).Path, err)
+				}
+				bodiesPath, bVer, ok, err := version.FindFilesWithVersionsByPattern(bodiesPathPattern)
+				if err != nil {
+					return fmt.Errorf("can't find files with vers by pattern due to err %s for indexing in bodies: %w", bodiesPathPattern, err)
+				}
+				if !ok {
+					return fmt.Errorf("can't find files with vers by pattern %s for indexing in bodies", bodiesPathPattern)
+				}
+				if bVer.Less(statecfg.Schema.BodiesBlock.Version.DataSeg.MinSupported) {
+					verToPanic := version.Versions{
+						Current:      bVer,
+						MinSupported: statecfg.Schema.BodiesBlock.Version.DataSeg.MinSupported,
+					}
+					version.VersionTooLowPanic(filepath.Base(bodiesPath), verToPanic)
+				}
+				bodiesSegment, err := seg.NewDecompressor(bodiesPath)
+				if err != nil {
+					return fmt.Errorf("can't open %s for indexing in bodies: %w", sn.As(Bodies).Path, err)
 				}
 				defer bodiesSegment.Close()
 
@@ -200,9 +216,27 @@ var (
 					return err
 				}
 
-				d, err := seg.NewDecompressor(sn.Path)
+				txPathPattern, err := version.ReplaceVersionWithMask(sn.Path)
 				if err != nil {
-					return fmt.Errorf("can't open %s for indexing: %w", sn.Path, err)
+					return fmt.Errorf("can't replace path with mask %s for indexing in txs: %w", sn.Path, err)
+				}
+				txPath, tVer, ok, err := version.FindFilesWithVersionsByPattern(txPathPattern)
+				if err != nil {
+					return fmt.Errorf("can't find files with vers by pattern due to err %s for indexing in txs: %w", txPathPattern, err)
+				}
+				if !ok {
+					return fmt.Errorf("can't find files with vers by pattern %s for indexing in txs", txPathPattern)
+				}
+				if tVer.Less(statecfg.Schema.TransactionsBlock.Version.DataSeg.MinSupported) {
+					verToPanic := version.Versions{
+						Current:      tVer,
+						MinSupported: statecfg.Schema.TransactionsBlock.Version.DataSeg.MinSupported,
+					}
+					version.VersionTooLowPanic(filepath.Base(txPath), verToPanic)
+				}
+				d, err := seg.NewDecompressor(txPath)
+				if err != nil {
+					return fmt.Errorf("can't open %s for indexing in transactions: %w", sn.Path, err)
 				}
 				defer d.Close()
 				if d.Count() != expectedCount {

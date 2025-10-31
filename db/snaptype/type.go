@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -182,7 +183,7 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 		if !fileVer.Less(i.Version.MinSupported) {
 			i.Version.Current = fileVer
 		} else {
-			panic("Version is too low, try to rm idx files")
+			panic("FileVersion is too low, try to rm idx files")
 			//return false
 		}
 	}
@@ -351,14 +352,7 @@ func (s snapType) IdxFileName(ver version.Version, from uint64, to uint64, index
 		index = []Index{s.indexes[0]}
 	} else {
 		i := index[0]
-		found := false
-
-		for _, index := range s.indexes {
-			if i == index {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(s.indexes, i)
 
 		if !found {
 			return ""

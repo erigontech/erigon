@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"maps"
 	"math/big"
 	"math/bits"
 
@@ -58,7 +59,14 @@ type PrecompiledContract interface {
 	Name() string
 }
 
-func Precompiles(chainRules *chain.Rules) map[common.Address]PrecompiledContract {
+// PrecompiledContracts contains the precompiled contracts supported at the given fork.
+type PrecompiledContracts map[common.Address]PrecompiledContract
+
+func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
+	return maps.Clone(Precompiles(chainRules))
+}
+
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
@@ -83,7 +91,7 @@ func Precompiles(chainRules *chain.Rules) map[common.Address]PrecompiledContract
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
 // contracts used in the Frontier and Homestead releases.
-var PrecompiledContractsHomestead = map[common.Address]PrecompiledContract{
+var PrecompiledContractsHomestead = PrecompiledContracts{
 	common.BytesToAddress([]byte{1}): &ecrecover{},
 	common.BytesToAddress([]byte{2}): &sha256hash{},
 	common.BytesToAddress([]byte{3}): &ripemd160hash{},
@@ -92,7 +100,7 @@ var PrecompiledContractsHomestead = map[common.Address]PrecompiledContract{
 
 // PrecompiledContractsByzantium contains the default set of pre-compiled Ethereum
 // contracts used in the Byzantium release.
-var PrecompiledContractsByzantium = map[common.Address]PrecompiledContract{
+var PrecompiledContractsByzantium = PrecompiledContracts{
 	common.BytesToAddress([]byte{1}): &ecrecover{},
 	common.BytesToAddress([]byte{2}): &sha256hash{},
 	common.BytesToAddress([]byte{3}): &ripemd160hash{},
@@ -105,7 +113,7 @@ var PrecompiledContractsByzantium = map[common.Address]PrecompiledContract{
 
 // PrecompiledContractsIstanbul contains the default set of pre-compiled Ethereum
 // contracts used in the Istanbul release.
-var PrecompiledContractsIstanbul = map[common.Address]PrecompiledContract{
+var PrecompiledContractsIstanbul = PrecompiledContracts{
 	common.BytesToAddress([]byte{1}): &ecrecover{},
 	common.BytesToAddress([]byte{2}): &sha256hash{},
 	common.BytesToAddress([]byte{3}): &ripemd160hash{},
@@ -119,7 +127,7 @@ var PrecompiledContractsIstanbul = map[common.Address]PrecompiledContract{
 
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
-var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
+var PrecompiledContractsBerlin = PrecompiledContracts{
 	common.BytesToAddress([]byte{1}): &ecrecover{},
 	common.BytesToAddress([]byte{2}): &sha256hash{},
 	common.BytesToAddress([]byte{3}): &ripemd160hash{},
@@ -131,7 +139,7 @@ var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{9}): &blake2F{},
 }
 
-var PrecompiledContractsCancun = map[common.Address]PrecompiledContract{
+var PrecompiledContractsCancun = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x01}): &ecrecover{},
 	common.BytesToAddress([]byte{0x02}): &sha256hash{},
 	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
@@ -144,7 +152,7 @@ var PrecompiledContractsCancun = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
 }
 
-var PrecompiledContractsNapoli = map[common.Address]PrecompiledContract{
+var PrecompiledContractsNapoli = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
 	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
 	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
@@ -157,7 +165,7 @@ var PrecompiledContractsNapoli = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
-var PrecompiledContractsBhilai = map[common.Address]PrecompiledContract{
+var PrecompiledContractsBhilai = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
 	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
 	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
@@ -177,7 +185,7 @@ var PrecompiledContractsBhilai = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
-var PrecompiledContractsPrague = map[common.Address]PrecompiledContract{
+var PrecompiledContractsPrague = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x01}): &ecrecover{},
 	common.BytesToAddress([]byte{0x02}): &sha256hash{},
 	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
@@ -197,7 +205,7 @@ var PrecompiledContractsPrague = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
 }
 
-var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
+var PrecompiledContractsOsaka = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
 	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
 	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
@@ -765,6 +773,7 @@ func runBn254Pairing(input []byte) ([]byte, error) {
 	if success {
 		return true32Byte, nil
 	}
+
 	return false32Byte, nil
 }
 
@@ -965,7 +974,10 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
 	r := new(bls12381.G1Affine)
-	r.MultiExp(points, scalars, ecc.MultiExpConfig{})
+	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
+	if err != nil {
+		return nil, err
+	}
 
 	// Encode the G1 point to 128 bytes
 	return encodePointG1(r), nil
@@ -1067,7 +1079,10 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
 	r := new(bls12381.G2Affine)
-	r.MultiExp(points, scalars, ecc.MultiExpConfig{})
+	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
+	if err != nil {
+		return nil, err
+	}
 
 	// Encode the G2 point to 256 bytes.
 	return encodePointG2(r), nil

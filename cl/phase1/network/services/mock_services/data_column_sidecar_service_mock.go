@@ -13,7 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	sentinelproto "github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -39,6 +41,83 @@ func NewMockDataColumnSidecarService(ctrl *gomock.Controller) *MockDataColumnSid
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockDataColumnSidecarService) EXPECT() *MockDataColumnSidecarServiceMockRecorder {
 	return m.recorder
+}
+
+// DecodeGossipMessage mocks base method.
+func (m *MockDataColumnSidecarService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.DataColumnSidecar, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", data, version)
+	ret0, _ := ret[0].(*cltypes.DataColumnSidecar)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
+func (mr *MockDataColumnSidecarServiceMockRecorder) DecodeGossipMessage(data, version any) *MockDataColumnSidecarServiceDecodeGossipMessageCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockDataColumnSidecarService)(nil).DecodeGossipMessage), data, version)
+	return &MockDataColumnSidecarServiceDecodeGossipMessageCall{Call: call}
+}
+
+// MockDataColumnSidecarServiceDecodeGossipMessageCall wrap *gomock.Call
+type MockDataColumnSidecarServiceDecodeGossipMessageCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDataColumnSidecarServiceDecodeGossipMessageCall) Return(arg0 *cltypes.DataColumnSidecar, arg1 error) *MockDataColumnSidecarServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDataColumnSidecarServiceDecodeGossipMessageCall) Do(f func(*sentinelproto.GossipData, clparams.StateVersion) (*cltypes.DataColumnSidecar, error)) *MockDataColumnSidecarServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDataColumnSidecarServiceDecodeGossipMessageCall) DoAndReturn(f func(*sentinelproto.GossipData, clparams.StateVersion) (*cltypes.DataColumnSidecar, error)) *MockDataColumnSidecarServiceDecodeGossipMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// IsMyGossipMessage mocks base method.
+func (m *MockDataColumnSidecarService) IsMyGossipMessage(name string) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsMyGossipMessage", name)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsMyGossipMessage indicates an expected call of IsMyGossipMessage.
+func (mr *MockDataColumnSidecarServiceMockRecorder) IsMyGossipMessage(name any) *MockDataColumnSidecarServiceIsMyGossipMessageCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMyGossipMessage", reflect.TypeOf((*MockDataColumnSidecarService)(nil).IsMyGossipMessage), name)
+	return &MockDataColumnSidecarServiceIsMyGossipMessageCall{Call: call}
+}
+
+// MockDataColumnSidecarServiceIsMyGossipMessageCall wrap *gomock.Call
+type MockDataColumnSidecarServiceIsMyGossipMessageCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDataColumnSidecarServiceIsMyGossipMessageCall) Return(arg0 bool) *MockDataColumnSidecarServiceIsMyGossipMessageCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDataColumnSidecarServiceIsMyGossipMessageCall) Do(f func(string) bool) *MockDataColumnSidecarServiceIsMyGossipMessageCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDataColumnSidecarServiceIsMyGossipMessageCall) DoAndReturn(f func(string) bool) *MockDataColumnSidecarServiceIsMyGossipMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // ProcessMessage mocks base method.

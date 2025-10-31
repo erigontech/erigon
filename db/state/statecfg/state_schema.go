@@ -413,8 +413,8 @@ func AdjustReceiptCurrentVersionIfNeeded(dirs datadir.Dirs, logger log.Logger) e
 		logger.Info("adjusting receipt current version to v1.1")
 
 		// else v1.0 -- need to adjust version
-		Schema.ReceiptDomain.Version.DataKV = version.V1_1_standart
-		Schema.ReceiptDomain.Hist.Version.DataV = version.V1_1_standart
+		Schema.ReceiptDomain.FileVersion.DataKV = version.V1_1_standart
+		Schema.ReceiptDomain.Hist.FileVersion.DataV = version.V1_1_standart
 
 		return nil
 	})

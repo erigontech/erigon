@@ -496,7 +496,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxns.Txns[i], minedTxns.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 					return err
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}
@@ -516,7 +516,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					}
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}

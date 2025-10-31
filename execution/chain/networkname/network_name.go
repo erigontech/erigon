@@ -23,7 +23,6 @@ import (
 
 const (
 	Mainnet             = "mainnet"
-	Holesky             = "holesky"
 	Sepolia             = "sepolia"
 	Hoodi               = "hoodi"
 	Dev                 = "dev"
@@ -39,7 +38,6 @@ const (
 
 var All = []string{
 	Mainnet,
-	Holesky,
 	Sepolia,
 	Hoodi,
 	Mumbai,

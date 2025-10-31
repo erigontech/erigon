@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"math/rand"
+	"runtime"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestOpenFolder(t *testing.T) {
@@ -28,6 +30,7 @@ func TestOpenFolder(t *testing.T) {
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
@@ -80,7 +83,7 @@ func TestOpenFolder(t *testing.T) {
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
-	ch := agg.BuildFiles(RootNum(amount))
+	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -116,7 +119,9 @@ func TestOpenFolder(t *testing.T) {
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
 
+	agg.Close()
 	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
@@ -144,6 +149,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
@@ -167,7 +173,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount))
+	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -182,7 +188,9 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(lastBodyFile))
 
 	// now open folder and check visiblefiles
+	agg.Close()
 	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
@@ -202,6 +210,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	bodies.unaligned = true
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
@@ -226,7 +235,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount))
+	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -241,7 +250,9 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(lastBodyFile))
 
 	// now open folder and check visiblefiles
+	agg.Close()
 	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
@@ -256,9 +267,10 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	hfreezer, bfreezer := &inspectingFreezer{t: t, currentFreezer: header.freezer}, &inspectingFreezer{t: t, currentFreezer: bodies.freezer}
 	header.freezer = hfreezer
 	bodies.freezer = bfreezer
-	agg.Close()
 
+	agg.Close()
 	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 	require.NoError(t, agg.OpenFolder())
@@ -266,7 +278,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	// nothing for headers
 	bfreezer.Expect(20, 30)
 
-	ch = agg.BuildFiles(RootNum(amount))
+	ch = agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -285,6 +297,7 @@ func TestClose(t *testing.T) {
 	bodies.unaligned = true
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
@@ -301,7 +314,7 @@ func TestClose(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount))
+	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -345,6 +358,7 @@ func TestMergedFileGet(t *testing.T) {
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
@@ -398,49 +412,32 @@ func TestMergedFileGet(t *testing.T) {
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
-	checkBuildFilesFn := func(mergeDisabled bool) {
-		agg.SetMergeDisabled(mergeDisabled)
-		for i := range amount {
-			ch := agg.BuildFiles(RootNum(i + 1))
-			select {
-			case <-ch:
-			case <-time.After(time.Second * 30):
-				t.Fatal("timeout")
-			}
-		}
+	agg.SetMergeDisabled(false)
+	require.NoError(t, agg.BuildFiles(RootNum(amount)))
 
-		snapCfg := Registry.SnapshotConfig(headerId)
-		var nDirtyFiles, nVisibleFiles int
-		if mergeDisabled {
-			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
-			nVisibleFiles = nDirtyFiles
-		} else {
-			nVisibleFiles = int(calculateNumberOfFiles(uint64(amount), snapCfg))
-			nDirtyFiles = nVisibleFiles
-		}
+	snapCfg := Registry.SnapshotConfig(headerId)
+	nVisibleFiles := int(calculateNumberOfFiles(uint64(amount), snapCfg))
+	nDirtyFiles := nVisibleFiles
 
-		// check dirty files count
-		headerF, bodyF := agg.marked[0], agg.marked[1]
-		headerItems := headerF.snaps.dirtyFiles.Items()
-		bodyItems := bodyF.snaps.dirtyFiles.Items()
-		require.Equal(t, nDirtyFiles, len(headerItems))
-		require.Equal(t, nDirtyFiles, len(bodyItems))
+	// check dirty files count
+	headerF, bodyF := agg.marked[0], agg.marked[1]
+	headerItems := headerF.snaps.dirtyFiles.Items()
+	bodyItems := bodyF.snaps.dirtyFiles.Items()
+	require.Equal(t, nDirtyFiles, len(headerItems))
+	require.Equal(t, nDirtyFiles, len(bodyItems))
 
-		// check visiblefiles count
-		require.Equal(t, nVisibleFiles, len(headerF.snaps.visibleFiles()))
-		require.Equal(t, nVisibleFiles, len(bodyF.snaps.visibleFiles()))
+	// check visiblefiles count
+	require.Equal(t, nVisibleFiles, len(headerF.snaps.visibleFiles()))
+	require.Equal(t, nVisibleFiles, len(bodyF.snaps.visibleFiles()))
 
-		aggTx = agg.BeginTemporalTx()
-		defer aggTx.Close()
-		rwtx, err = db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer rwtx.Commit()
-		headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
-		checkGet(headerTx, bodyTx, rwtx)
-	}
+	aggTx = agg.BeginTemporalTx()
+	defer aggTx.Close()
+	rwtx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+	headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
+	checkGet(headerTx, bodyTx, rwtx)
 
-	checkBuildFilesFn(true)
-	checkBuildFilesFn(false)
 }
 
 func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
@@ -451,14 +448,16 @@ func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
+func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (kv.ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
-	headerId := registerEntity(dirs, "headers")
+	headerId := kv.ForkableId(1)
+	cfg := registerEntity(dirs, "headers", headerId)
 
-	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), headerId, log,
+	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.Headers, ValuesOnCompressedPage: 1}
+	builder := NewSimpleAccessorBuilder(NewAccessorArgs(false, false, fcfg.ValuesOnCompressedPage, cfg.RootNumPerStep), headerId, dirs.Tmp, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, IdentityRootRelationInstance, log,
+	ma, err := NewMarkedForkable(headerId, fcfg, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder),
 		App_WithUpdateCanonical())
@@ -467,21 +466,28 @@ func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	freezer := &SimpleMarkedFreezer{mfork: ma}
 	ma.SetFreezer(freezer)
 	t.Cleanup(func() {
+		ma.Close()
 		db.Close()
+		// cleans up closed/orphaned files on windows;
+		// prevents "cannot access the file because it is being used by another process" error
+		runtime.GC()
 		cleanupFiles(t, ma.snaps, dirs)
 	})
 
 	return headerId, ma
 }
 
-func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
+func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (kv.ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
-	bodyId := registerEntity(dirs, "bodies")
+	bodyId := kv.ForkableId(2)
+	cfg := registerEntity(dirs, "bodies", bodyId)
 
-	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), bodyId, log,
+	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.BlockBody, ValuesOnCompressedPage: 1}
+	args := NewAccessorArgs(false, false, fcfg.ValuesOnCompressedPage, cfg.RootNumPerStep)
+	builder := NewSimpleAccessorBuilder(args, bodyId, dirs.Tmp, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(bodyId, kv.BlockBody, kv.HeaderCanonical, IdentityRootRelationInstance, log,
+	ma, err := NewMarkedForkable(bodyId, fcfg, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder))
 	require.NoError(t, err)
@@ -489,25 +495,31 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	freezer := &SimpleMarkedFreezer{mfork: ma}
 	ma.SetFreezer(freezer)
 	t.Cleanup(func() {
+		ma.Close()
 		db.Close()
+		runtime.GC()
 		cleanupFiles(t, ma.snaps, dirs)
 	})
 
 	return bodyId, ma
 }
 
-func registerEntity(dirs datadir.Dirs, name string) ForkableId {
+func registerEntity(dirs datadir.Dirs, name string, id kv.ForkableId) *SnapshotConfig {
 	stepSize := uint64(10)
-	return registerEntityWithSnapshotConfig(dirs, name, NewSnapshotConfig(&SnapshotCreationConfig{
+	schema := NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)
+
+	snapCfg := NewSnapshotConfig(&SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{80, 160},
 		MinimumSize:    10,
 		SafetyMargin:   5,
-	}, NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
+	}, schema)
+	registerEntityWithSnapshotConfig(dirs, id, name, snapCfg)
+	return snapCfg
 }
 
-func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *SnapshotConfig) ForkableId {
-	return RegisterForkable(name, dirs, nil, WithSnapshotConfig(cfg))
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, id kv.ForkableId, name string, cfg *SnapshotConfig) {
+	RegisterForkable(name, id, dirs, nil, WithSnapshotConfig(cfg))
 }
 
 func calculateNumberOfFiles(amount uint64, snapConfig *SnapshotConfig) (nfiles uint64) {
@@ -587,7 +599,7 @@ func (i *inspectingFreezer) Expect(from, to RootNum) {
 	i.expectTo = append(i.expectTo, uint64(to))
 }
 
-func (i *inspectingFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error {
+func (i *inspectingFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) (NumMetadata, error) {
 	require.GreaterOrEqual(i.t, len(i.expectFrom), 1)
 	require.Equal(i.t, i.expectFrom[0], uint64(from))
 	require.Equal(i.t, i.expectTo[0], uint64(to))

@@ -41,23 +41,23 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *dbstate.SharedDomains, maxBlockNum uint64) (
+func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *execctx.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
 	txNumsReader := cfg.blockReader.TxnumReader(ctx)
@@ -121,7 +121,7 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg,
-	doms *dbstate.SharedDomains, rwTx kv.TemporalRwTx,
+	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
@@ -163,7 +163,7 @@ func ExecV3(ctx context.Context,
 	var err error
 	if !inMemExec {
 		var err error
-		doms, err = dbstate.NewSharedDomains(applyTx, log.New())
+		doms, err = execctx.NewSharedDomains(applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
@@ -231,7 +231,7 @@ func ExecV3(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx)
+	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 	blockNum = doms.BlockNum()
 
 	if maxBlockNum < blockNum {
@@ -247,7 +247,7 @@ func ExecV3(ctx context.Context,
 	if !execStage.CurrentSyncCycle.IsInitialCycle {
 		var clean func()
 
-		readAhead, clean = exec3.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
+		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
 	}
 
@@ -337,7 +337,7 @@ func ExecV3(ctx context.Context,
 					se.lastCommittedTxNum = se.domains().TxNum()
 
 					commitStart := time.Now()
-					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 					applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
 					if err != nil {
 						return err
@@ -449,7 +449,7 @@ type txExecutor struct {
 	cfg              ExecuteBlockCfg
 	agg              *dbstate.Aggregator
 	rs               *state.StateV3Buffered
-	doms             *dbstate.SharedDomains
+	doms             *execctx.SharedDomains
 	u                Unwinder
 	isMining         bool
 	inMemExec        bool
@@ -457,7 +457,7 @@ type txExecutor struct {
 	logger           log.Logger
 	logPrefix        string
 	progress         *Progress
-	taskExecMetrics  *exec3.WorkerMetrics
+	taskExecMetrics  *exec.WorkerMetrics
 	blockExecMetrics *blockExecMetrics
 	hooks            *tracing.Hooks
 
@@ -484,7 +484,7 @@ func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
 }
 
-func (te *txExecutor) domains() *dbstate.SharedDomains {
+func (te *txExecutor) domains() *execctx.SharedDomains {
 	return te.doms
 }
 
@@ -600,7 +600,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			var b *types.Block
 			err := tx.Apply(ctx, func(tx kv.Tx) error {
-				b, err = exec3.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
+				b, err = exec.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
 				return err
 			})
 			if err != nil {
@@ -659,10 +659,21 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 				inputTxNum++
 			}
 
+			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
+
+			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
+			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
+			var exhausted *ErrLoopExhausted
+			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
+				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
+					exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+				}
+			}
+
 			te.execRequests <- &execRequest{
 				b.Number().Uint64(), b.Hash(),
 				core.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				txTasks, applyResults, false,
+				txTasks, applyResults, false, exhausted,
 			}
 
 			mxExecBlocks.Add(1)
@@ -671,15 +682,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 				// after history execution no offset will be required
 				offsetFromBlockBeginning = 0
 			}
-
-			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
-
-			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
-			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
-			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-				if blockLimit > 0 && startBlockNum-blockNum+1 >= blockLimit {
-					return &ErrLoopExhausted{From: blockNum, To: blockNum, Reason: "block limit reached"}
-				}
+			if exhausted != nil {
+				break
 			}
 		}
 
@@ -745,7 +749,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
+func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx)
 	}
@@ -841,7 +845,7 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *dbstate.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
