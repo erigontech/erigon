@@ -107,6 +107,9 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
+func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
+	return kv.Step(dt.files.EndTxNum() / dt.stepSize)
+}
 func (ht *HistoryRoTx) FirstStepNotInFiles() kv.Step {
 	return kv.Step(ht.files.EndTxNum() / ht.stepSize)
 }

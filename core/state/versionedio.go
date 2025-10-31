@@ -92,15 +92,6 @@ func (s ReadSet) Len() int {
 	return l
 }
 
-func (s ReadSet) Delete(addr common.Address, key AccountKey) {
-	if reads, ok := s[addr]; ok {
-		delete(reads, key)
-		if len(reads) == 0 {
-			delete(s, addr)
-		}
-	}
-}
-
 type WriteSet map[common.Address]map[AccountKey]*VersionedWrite
 
 func (s WriteSet) Set(v VersionedWrite) {
@@ -156,7 +147,7 @@ type VersionedRead struct {
 }
 
 func (vr VersionedRead) String() string {
-	return fmt.Sprintf("(%s) %x %s: %s", vr.Source.VersionedString(vr.Version), vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("%x %s (%s): %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source.VersionedString(vr.Version), valueString(vr.Path, vr.Val))
 }
 
 type VersionedWrite struct {
@@ -211,13 +202,12 @@ func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap,
 	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
 }
 
-func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
-	vr.stateReader.SetTrace(trace, tracePrefix)
-}
-
 func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		if account, ok := r.Val.(*accounts.Account); ok {
+			if addr := fmt.Sprintf("%x", address); addr == "9ead03f7136fc6b4bdb0780b00a1c14ae5a8b6d0" {
+				fmt.Println(addr, "ReadAccountData - reads", account.Nonce)
+			}
 			updated := vr.applyVersionedUpdates(address, *account)
 			return &updated, nil
 		}
@@ -368,7 +358,8 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 
 	cmpMap := map[common.Address]map[AccountKey]struct{}{}
 
-	for _, vw := range cmpSet {
+	for i := 0; i < len(cmpSet); i++ {
+		vw := cmpSet[i]
 		keys, ok := cmpMap[vw.Address]
 		if !ok {
 			keys = map[AccountKey]struct{}{}
@@ -386,21 +377,32 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 	return false
 }
 
-func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountPath, key common.Hash, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
+func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountPath, key common.Hash, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr)
 
 		if err != nil || readStorage == nil {
-			return defaultV, StorageRead, UnknownVersion, err
+			return defaultV, StorageRead, err
 		}
 		val, err := readStorage(so)
-		return val, StorageRead, UnknownVersion, err
+		return val, StorageRead, err
 	}
 
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
-		return defaultV, StorageRead, UnknownVersion, nil
-	} else if res := s.versionMap.Read(addr, SelfDestructPath, common.Hash{}, s.txIndex); res.Status() == MVReadResultDone {
-		return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+		return defaultV, StorageRead, nil
+	} else if dres := s.versionMap.Read(addr, SelfDestructPath, common.Hash{}, s.txIndex); dres.Status() == MVReadResultDone {
+		return defaultV, MapRead, nil
+	}
+
+	if !commited {
+		if vw, ok := s.versionedWrite(addr, path, key); ok {
+			if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+				fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val))
+			}
+
+			val := vw.Val.(T)
+			return val, WriteSetRead, nil
+		}
 	}
 
 	res := s.versionMap.Read(addr, path, key, s.txIndex)
@@ -416,172 +418,103 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		},
 	}
 
-	if !commited {
-		if vw, ok := s.versionedWrite(addr, path, key); ok {
-			if res.Status() == MVReadResultDone {
-				if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
-					if vr.Version != pr.Version {
-						if vr.Version.TxIndex > s.dep {
-							s.dep = vr.Version.TxIndex
-						}
-
-						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, pr.Val))
-						}
-
-						if s.versionedReads == nil {
-							s.versionedReads = ReadSet{}
-						}
-						s.versionedReads.Set(vr)
-						panic(ErrDependency)
-					}
-				}
-			}
-
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-				fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val))
-			}
-
-			val := vw.Val.(T)
-			return val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
-		}
-	}
-
 	switch res.Status() {
 	case MVReadResultDone:
 		vr.Source = MapRead
 
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
-				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-					fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
+				if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+					fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
 				}
 
-				return pr.Val.(T), vr.Source, vr.Version, nil
+				return pr.Val.(T), MapRead, nil
 			}
 
-			if vr.Version.TxIndex > s.dep {
-				s.dep = vr.Version.TxIndex
+			if vr.Version.TxIndex > pr.Version.TxIndex || vr.Version.Incarnation > pr.Version.Incarnation {
+				if vr.Version.TxIndex > s.dep {
+					s.dep = vr.Version.TxIndex
+				}
+
+				if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+					fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
+				}
+
+				if s.versionedReads == nil {
+					s.versionedReads = ReadSet{}
+				}
+				s.versionedReads.Set(vr)
+
+				panic(ErrDependency)
 			}
-
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-				fmt.Printf("%d (%d.%d) RD DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
-			}
-
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-
-			s.versionedReads.Set(vr)
-
-			panic(ErrDependency)
 		}
 
 		var ok bool
 		if v, ok = res.Value().(T); !ok {
-			return defaultV, MapRead, vr.Version, fmt.Errorf("unexpected type: %T", res.Value())
+			return defaultV, MapRead, fmt.Errorf("unexpected type: %T", res.Value())
 		}
 
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
+		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
 		}
 
 		if copyV == nil {
-			return v, MapRead, vr.Version, nil
+			return v, MapRead, nil
 		}
 
 		vr.Val = copyV(v)
 
 	case MVReadResultDependency:
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) MP DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key})
+		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key})
 		}
 
-		if res.DepIdx() > s.dep {
-			s.dep = res.DepIdx()
-		}
+		s.dep = res.DepIdx()
 		vr.Source = MapRead
+
 		if s.versionedReads == nil {
 			s.versionedReads = ReadSet{}
 		}
 		s.versionedReads.Set(vr)
+
 		panic(ErrDependency)
 
 	case MVReadResultNone:
 		if versionedReads := s.versionedReads; versionedReads != nil {
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
+					if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+						fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
 					}
 
-					return pr.Val.(T), ReadSetRead, pr.Version, nil
-				}
-
-				if pr.Source == MapRead {
-					if path == BalancePath || path == NoncePath || path == CodeHashPath {
-						if _, source, version, _ := versionedRead(s, addr, AddressPath, common.Hash{}, false, nil,
-							func(v *accounts.Account) *accounts.Account { return v }, nil); source == pr.Source && version == pr.Version {
-							return pr.Val.(T), ReadSetRead, pr.Version, nil
-						}
-					}
-
-					// a previous dependency has been removed from the map
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-						fmt.Printf("%d (%d.%d) RM DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
-					}
-
-					if pr.Version.TxIndex > s.dep {
-						s.dep = pr.Version.TxIndex
-					}
-
-					panic(ErrDependency)
+					return pr.Val.(T), ReadSetRead, nil
 				}
 			}
 		}
 
 		if readStorage == nil {
-			return defaultV, UnknownSource, UnknownVersion, nil
+			return defaultV, UnknownSource, nil
 		}
 
-		var so *stateObject
-		var err error
+		vr.Source = StorageRead
+		so, err := s.getStateObject(addr)
 
-		if path == BalancePath || path == NoncePath || path == CodeHashPath {
-			readAccount, source, version, err := versionedRead(s, addr, AddressPath, common.Hash{}, false, nil,
-				func(v *accounts.Account) *accounts.Account { return v }, nil)
-
-			if err != nil {
-				return defaultV, source, UnknownVersion, err
-			}
-
-			if readAccount != nil {
-				vr.Source = source
-				vr.Version = version
-				so = newObject(s, addr, readAccount, readAccount)
-			}
-		}
-
-		if so == nil {
-			vr.Source = StorageRead
-			so, err = s.getStateObject(addr)
-			if err != nil {
-				return defaultV, StorageRead, UnknownVersion, err
-			}
+		if err != nil {
+			return defaultV, StorageRead, nil
 		}
 
 		if v, err = readStorage(so); err != nil {
-			return defaultV, StorageRead, UnknownVersion, err
+			return defaultV, StorageRead, nil
 		}
 
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, v))
+		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) RD %s %x %s: %s\n", s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, valueString(path, v))
 		}
 
 		vr.Val = copyV(v)
 
 	default:
-		return defaultV, UnknownSource, UnknownVersion, nil
+		return defaultV, UnknownSource, nil
 	}
 
 	if s.versionedReads == nil {
@@ -589,17 +522,18 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 	}
 	s.versionedReads.Set(vr)
 
-	return v, vr.Source, vr.Version, nil
+	return v, vr.Source, nil
 }
 
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
-	inputs     []versionedReadSet
+	inputs     []ReadSet
 	outputs    []VersionedWrites // write sets that should be checked during validation
 	outputsSet []map[common.Address]map[AccountKey]struct{}
+	allOutputs []VersionedWrites // entire write sets in MVHashMap. allOutputs should always be a parent set of outputs
 }
 
-func (io *VersionedIO) Inputs() []versionedReadSet {
+func (io *VersionedIO) Inputs() []ReadSet {
 	return io.inputs
 }
 
@@ -607,19 +541,7 @@ func (io *VersionedIO) ReadSet(txnIdx int) ReadSet {
 	if len(io.inputs) <= txnIdx+1 {
 		return nil
 	}
-	return io.inputs[txnIdx+1].readSet
-}
-
-func (io *VersionedIO) ReadSetIncarnation(txnIdx int) int {
-	if len(io.inputs) <= txnIdx+1 {
-		return -1
-	}
-
-	if io.inputs[txnIdx+1].readSet != nil {
-		return io.inputs[txnIdx+1].incarnation
-	}
-
-	return 0
+	return io.inputs[txnIdx+1]
 }
 
 func (io *VersionedIO) WriteSet(txnIdx int) VersionedWrites {
@@ -627,6 +549,13 @@ func (io *VersionedIO) WriteSet(txnIdx int) VersionedWrites {
 		return nil
 	}
 	return io.outputs[txnIdx+1]
+}
+
+func (io *VersionedIO) AllWriteSet(txnIdx int) VersionedWrites {
+	if len(io.allOutputs) <= txnIdx+1 {
+		return nil
+	}
+	return io.allOutputs[txnIdx+1]
 }
 
 func (io *VersionedIO) WriteCount() (count int64) {
@@ -639,8 +568,8 @@ func (io *VersionedIO) WriteCount() (count int64) {
 
 func (io *VersionedIO) ReadCount() (count int64) {
 	for _, input := range io.inputs {
-		if input.readSet != nil {
-			count += int64(input.readSet.Len())
+		if input != nil {
+			count += int64(input.Len())
 		}
 	}
 
@@ -648,10 +577,10 @@ func (io *VersionedIO) ReadCount() (count int64) {
 }
 
 func (io *VersionedIO) HasReads(txnIdx int) bool {
-	if len(io.inputs) <= txnIdx+1 {
+	if len(io.outputsSet) <= txnIdx+1 {
 		return false
 	}
-	return len(io.inputs[txnIdx+1].readSet) > 0
+	return len(io.outputsSet[txnIdx+1]) > 0
 }
 
 func (io *VersionedIO) HasWritten(txnIdx int, addr common.Address, path AccountPath, key common.Hash) bool {
@@ -662,35 +591,23 @@ func (io *VersionedIO) HasWritten(txnIdx int, addr common.Address, path AccountP
 	return ok
 }
 
-type versionedReadSet struct {
-	incarnation int
-	readSet     ReadSet
-}
-
-func (s versionedReadSet) Scan(yield func(input *VersionedRead) bool) {
-	if s.readSet != nil {
-		s.readSet.Scan(yield)
-	}
-}
-
 func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
-		inputs:     make([]versionedReadSet, numTx+1),
+		inputs:     make([]ReadSet, numTx+1),
 		outputs:    make([]VersionedWrites, numTx+1),
 		outputsSet: make([]map[common.Address]map[AccountKey]struct{}, numTx+1),
+		allOutputs: make([]VersionedWrites, numTx+1),
 	}
 }
 
-func (io *VersionedIO) RecordReads(txVersion Version, input ReadSet) {
-	if len(io.inputs) <= txVersion.TxIndex+1 {
-		io.inputs = append(io.inputs, make([]versionedReadSet, txVersion.TxIndex+2-len(io.inputs))...)
+func (io *VersionedIO) RecordReads(txId int, input ReadSet) {
+	if len(io.inputs) <= txId+1 {
+		io.inputs = append(io.inputs, make([]ReadSet, txId+2-len(io.inputs))...)
 	}
-	io.inputs[txVersion.TxIndex+1] = versionedReadSet{txVersion.Incarnation, input}
+	io.inputs[txId+1] = input
 }
 
-func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
-	txId := txVersion.TxIndex
-
+func (io *VersionedIO) RecordWrites(txId int, output VersionedWrites) {
 	if len(io.outputs) <= txId+1 {
 		io.outputs = append(io.outputs, make([]VersionedWrites, txId+2-len(io.outputs))...)
 	}
@@ -709,6 +626,13 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
 		}
 		keys[AccountKey{v.Path, v.Key}] = struct{}{}
 	}
+}
+
+func (io *VersionedIO) RecordAllWrites(txId int, output VersionedWrites) {
+	if len(io.allOutputs) <= txId+1 {
+		io.allOutputs = append(io.allOutputs, make([]VersionedWrites, txId+2-len(io.allOutputs))...)
+	}
+	io.allOutputs[txId+1] = output
 }
 
 type DAG struct {
@@ -747,9 +671,9 @@ func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {
 		}
 
 		for j := i - 1; j >= 0; j-- {
-			txFrom := deps.outputs[j]
+			txFrom := deps.allOutputs[j]
 
-			if HasReadDep(txFrom, txTo.readSet) {
+			if HasReadDep(txFrom, txTo) {
 				var txFromId string
 				if _, ok := ids[j]; ok {
 					txFromId = ids[j]
@@ -808,9 +732,9 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 		newDependencies[i] = map[int]bool{}
 
 		for j := 0; j <= i-1; j++ {
-			txFrom := deps.outputs[j]
+			txFrom := deps.allOutputs[j]
 
-			newDependencies = depsHelper(newDependencies, txFrom, txTo.readSet, i, j)
+			newDependencies = depsHelper(newDependencies, txFrom, txTo, i, j)
 		}
 	}
 

@@ -18,16 +18,16 @@ package state
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/holiman/uint256"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -37,115 +37,122 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
-type StateV3 struct {
-	domains *dbstate.SharedDomains
-	logger  log.Logger
+var execTxsDone = metrics.NewCounter(`exec_txs_done`)
+
+// ParallelExecutionState - mainly designed for parallel transactions execution. It does separate:
+//   - execution
+//   - re-try execution if conflict-resolution
+//   - collect state changes for conflict-resolution
+//   - apply state-changes independently from execution and even in another goroutine (by ApplyState func)
+//   - track which txNums state-changes was applied
+type ParallelExecutionState struct {
+	domains      *dbstate.SharedDomains
+	tx           kv.TemporalTx
+	triggerLock  sync.Mutex
+	triggers     map[uint64]*TxTask
+	senderTxNums map[common.Address]uint64
+
+	isBor bool
+
+	logger log.Logger
+
 	syncCfg ethconfig.Sync
 	trace   bool
 }
 
-func NewStateV3(domains *dbstate.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
-	return &StateV3{
-		domains: domains,
-		logger:  logger,
-		syncCfg: syncCfg,
+func NewParallelExecutionState(domains *dbstate.SharedDomains, tx kv.Tx, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *ParallelExecutionState {
+	return &ParallelExecutionState{
+		domains:      domains,
+		tx:           tx.(kv.TemporalTx),
+		triggers:     map[uint64]*TxTask{},
+		senderTxNums: map[common.Address]uint64{},
+		logger:       logger,
+		syncCfg:      syncCfg,
+		isBor:        isBor,
 		//trace: true,
 	}
 }
 
-func (rs *StateV3) SetTrace(trace bool) {
-	rs.trace = trace
+func (rs *ParallelExecutionState) ReTry(txTask *TxTask, in *QueueWithRetry) {
+	txTask.Reset()
+	in.ReTry(txTask)
+}
+func (rs *ParallelExecutionState) AddWork(ctx context.Context, txTask *TxTask, in *QueueWithRetry) {
+	txTask.Reset()
+	in.Add(ctx, txTask)
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, rules *chain.Rules) error {
-	domains := rs.domains
-	if stateUpdates.BTreeG != nil {
-		var err error
-		stateUpdates.Scan(func(update *stateUpdate) bool {
-			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
-				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
-					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, update.address)
-				}
-				//del, before create: to clanup code/storage
-				if err = domains.DomainDel(kv.CodeDomain, roTx, update.address[:], txNum, nil, 0); err != nil {
-					return false
-				}
-				if err = domains.DomainDelPrefix(kv.StorageDomain, roTx, update.address[:], txNum); err != nil {
-					return false
-				}
+func (rs *ParallelExecutionState) RegisterSender(txTask *TxTask) bool {
+	//TODO: it deadlocks on panic, fix it
+	defer func() {
+		rec := recover()
+		if rec != nil {
+			fmt.Printf("panic?: %s,%s\n", rec, dbg.Stack())
+		}
+	}()
+	rs.triggerLock.Lock()
+	defer rs.triggerLock.Unlock()
+	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender()]
+	if deferral {
+		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
+		// So we add this data dependency as a trigger
+		//fmt.Printf("trigger[%d] sender [%x]<=%x\n", lastTxNum, *txTask.Sender, txTask.Tx.Hash())
+		rs.triggers[lastTxNum] = txTask
+	}
+	//fmt.Printf("senderTxNums[%x]=%d\n", *txTask.Sender, txTask.TxNum)
+	rs.senderTxNums[*txTask.Sender()] = txTask.TxNum
+	return !deferral
+}
+
+func (rs *ParallelExecutionState) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWithRetry) (count int) {
+	execTxsDone.Inc()
+
+	rs.triggerLock.Lock()
+	defer rs.triggerLock.Unlock()
+	if triggered, ok := rs.triggers[txNum]; ok {
+		in.ReTry(triggered)
+		count++
+		delete(rs.triggers, txNum)
+	}
+	if sender != nil {
+		if lastTxNum, ok := rs.senderTxNums[*sender]; ok && lastTxNum == txNum {
+			// This is the last transaction so far with this sender, remove
+			delete(rs.senderTxNums, *sender)
+		}
+	}
+	return count
+}
+
+func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *dbstate.SharedDomains) error {
+	var acc accounts.Account
+
+	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
+	if txTask.WriteLists != nil {
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
+			list, ok := txTask.WriteLists[domain.String()]
+			if !ok {
+				continue
 			}
 
-			if update.bufferedAccount != nil {
-				if update.data != nil {
-					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
-						fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
+			for i, key := range list.Keys {
+				if list.Vals[i] == nil {
+					if err := domains.DomainDel(domain, rs.tx, []byte(key), txTask.TxNum, nil, 0); err != nil {
+						return err
 					}
-					if err = domains.DomainPut(kv.AccountsDomain, roTx, update.address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
-						return false
+				} else {
+					if err := domains.DomainPut(domain, rs.tx, []byte(key), list.Vals[i], txTask.TxNum, nil, 0); err != nil {
+						return err
 					}
-				}
-
-				if update.code != nil {
-					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
-						code := update.code
-						if len(code) > 40 {
-							code = code[:40]
-						}
-						fmt.Printf("%d apply:put code: %x %x\n", blockNum, update.address, code)
-					}
-					if err = domains.DomainPut(kv.CodeDomain, roTx, update.address[:], update.code, txNum, nil, 0); err != nil {
-						return false
-					}
-				}
-
-				if update.storage != nil {
-					update.storage.Scan(func(i storageItem) bool {
-						composite := append(update.address[:], i.key[:]...)
-						v := i.value.Bytes()
-						if len(v) == 0 {
-							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
-								fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, i.key)
-							}
-							if err = domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
-								return false
-							}
-						} else {
-							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
-								fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
-							}
-							if err = domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
-								return false
-							}
-						}
-						return true
-					})
-
-					if err != nil {
-						return false
-					}
-				}
-			} else if update.deleteAccount {
-				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address)) {
-					fmt.Printf("%d apply:del account: %x\n", blockNum, update.address)
-				}
-				if err = domains.DomainDel(kv.AccountsDomain, roTx, update.address[:], txNum, nil, 0); err != nil {
-					return false
 				}
 			}
-			return true
-		})
-
-		if err != nil {
-			return err
 		}
 	}
 
-	var acc accounts.Account
-	emptyRemoval := rules.IsSpuriousDragon
-	for addr, increase := range balanceIncreases {
+	emptyRemoval := txTask.Rules.IsSpuriousDragon
+	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
 		addrBytes := addr.Bytes()
-		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, roTx, addrBytes)
+		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, rs.tx, addrBytes)
 		if err != nil {
 			return err
 		}
@@ -155,20 +162,14 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 				return err
 			}
 		}
-<<<<<<< HEAD
 		acc.Balance.Add(&acc.Balance, &increase.Amount)
 		if !increase.IsEscrow && emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			if err := domains.DomainDel(kv.AccountsDomain, rs.tx, addrBytes, txTask.TxNum, enc0, step0); err != nil {
-=======
-		acc.Balance.Add(&acc.Balance, &increase)
-		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrBytes, txNum, enc0, step0); err != nil {
->>>>>>> ec7e6d31d6 (Parallel ExecV3 Processing (#16922))
 				return err
 			}
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
-			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrBytes, enc1, txNum, enc0, step0); err != nil {
+			if err := domains.DomainPut(kv.AccountsDomain, rs.tx, addrBytes, enc1, txTask.TxNum, enc0, step0); err != nil {
 				return err
 			}
 		}
@@ -176,81 +177,83 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 	return nil
 }
 
-func (rs *StateV3) Domains() *dbstate.SharedDomains {
+func (rs *ParallelExecutionState) Domains() *dbstate.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) SetTxNum(blockNum, txNum uint64) {
+func (rs *ParallelExecutionState) TemporalGetter() kv.TemporalGetter {
+	return rs.domains.AsGetter(rs.tx)
+}
+
+func (rs *ParallelExecutionState) TemporalPutDel() kv.TemporalPutDel {
+	return rs.domains.AsPutDel(rs.tx)
+}
+
+func (rs *ParallelExecutionState) SetTxNum(txNum, blockNum uint64) {
 	rs.domains.SetTxNum(txNum)
 	rs.domains.SetBlockNum(blockNum)
 }
 
-func (rs *StateV3) ApplyTxState(ctx context.Context,
-	roTx kv.TemporalTx,
-	blockNum uint64,
-	txNum uint64,
-	accountUpdates StateUpdates,
-	balanceIncreases map[common.Address]uint256.Int,
-	receipt *types.Receipt,
-	logs []*types.Log,
-	traceFroms map[common.Address]struct{},
-	traceTos map[common.Address]struct{},
-	config *chain.Config,
-	rules *chain.Rules,
-	historyExecution bool) error {
-	if historyExecution {
+func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask) error {
+	if txTask.HistoryExecution {
 		return nil
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyUpdates(roTx, blockNum, txNum, accountUpdates, balanceIncreases, rules); err != nil {
-		return fmt.Errorf("StateV3.ApplyState: %w", err)
+	if err := rs.applyState(txTask, rs.domains); err != nil {
+		return fmt.Errorf("ParallelExecutionState.ApplyState: %w", err)
+	}
+	returnReadList(txTask.ReadLists)
+	returnWriteList(txTask.WriteLists)
+
+	if err := rs.ApplyLogsAndTraces(txTask, rs.domains); err != nil {
+		return fmt.Errorf("ParallelExecutionState.ApplyLogsAndTraces: %w", err)
 	}
 
-	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, logs, traceFroms, traceTos); err != nil {
-		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
-	}
-
-	if (txNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ && !dbg.DiscardCommitment() {
+	if (txTask.TxNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum, fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
+		_, err := rs.domains.ComputeCommitment(ctx, true, txTask.BlockNum, txTask.TxNum, fmt.Sprintf("applying step %d", txTask.TxNum/rs.domains.StepSize()))
 		if err != nil {
 			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
 		}
 	}
 
+	txTask.ReadLists, txTask.WriteLists = nil, nil
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}) error {
-	domains := rs.domains
-	for addr := range traceFroms {
-		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:], txNum); err != nil {
+func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *dbstate.SharedDomains) error {
+	for addr := range txTask.TraceFroms {
+		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:], txTask.TxNum); err != nil {
 			return err
 		}
 	}
 
-	for addr := range traceTos {
-		if err := domains.IndexAdd(kv.TracesToIdx, addr[:], txNum); err != nil {
+	for addr := range txTask.TraceTos {
+		if err := domains.IndexAdd(kv.TracesToIdx, addr[:], txTask.TxNum); err != nil {
 			return err
 		}
 	}
 
-	for _, lg := range logs {
-		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txNum); err != nil {
+	for _, lg := range txTask.Logs {
+		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txTask.TxNum); err != nil {
 			return err
 		}
 		for _, topic := range lg.Topics {
-			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:], txNum); err != nil {
+			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:], txTask.TxNum); err != nil {
 				return err
 			}
 		}
 	}
 
 	if rs.syncCfg.PersistReceiptsCacheV2 {
-		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
+		var receipt *types.Receipt
+		if txTask.TxIndex >= 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
+			receipt = txTask.BlockReceipts[txTask.TxIndex]
+		}
+		if err := rawdb.WriteReceiptCacheV2(domains.AsPutDel(rs.tx), receipt, txTask.TxNum); err != nil {
 			return err
 		}
 	}
@@ -258,138 +261,26 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 	return nil
 }
 
-func (rs *StateV3) SizeEstimate() (r uint64) {
+func (rs *ParallelExecutionState) DoneCount() uint64 {
+	return execTxsDone.GetValueUint64()
+}
+
+func (rs *ParallelExecutionState) SizeEstimate() (r uint64) {
 	if rs.domains != nil {
 		r += rs.domains.SizeEstimate()
 	}
 	return r
 }
 
-type storageItem struct {
-	key   common.Hash
-	value uint256.Int
+func (rs *ParallelExecutionState) ReadsValid(readLists map[string]*dbstate.KvList) bool {
+	return false
 }
 
-var deleted accounts.Account
-
-type bufferedAccount struct {
-	originalIncarnation uint64
-	data                *accounts.Account
-	code                []byte
-	storage             *btree.BTreeG[storageItem]
-}
-
-type stateUpdate struct {
-	*bufferedAccount
-	address       common.Address
-	deleteAccount bool
-}
-
-func newStateUpdates() StateUpdates {
-	return StateUpdates{
-		btree.NewBTreeGOptions[*stateUpdate](func(a, b *stateUpdate) bool {
-			return a.address.Cmp(b.address) < 0
-		}, btree.Options{NoLocks: true}),
-	}
-}
-
-type StateUpdates struct {
-	*btree.BTreeG[*stateUpdate]
-}
-
-func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
-	if v.BTreeG == nil {
-		return
-	}
-
-	v.Scan(func(update *stateUpdate) bool {
-		if traceAll || dbg.TraceAccount(update.address) {
-			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
-				fmt.Printf("%d del code+storage: %x\n", blockNum, update.address)
-			}
-
-			if update.bufferedAccount != nil {
-				if update.data != nil {
-					fmt.Printf("%d put account: %x Balance:[%d],Nonce:[%d],CodeHash:[%x]\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
-				}
-
-				if update.code != nil {
-					code := update.code
-					if len(code) > 40 {
-						code = code[:40]
-					}
-					fmt.Printf("%d put code: %x %x\n", blockNum, update.address, code)
-				}
-
-				if update.storage != nil {
-					update.storage.Scan(func(i storageItem) bool {
-						if i.value.ByteLen() == 0 {
-							fmt.Printf("%d del storage: %x %x\n", blockNum, update.address, i.key)
-						} else {
-							fmt.Printf("%d put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
-						}
-						return true
-					})
-				}
-			} else if update.deleteAccount {
-				fmt.Printf("%d del account: %x\n", blockNum, update.address)
-			}
-		}
-		return true
-	})
-}
-
-func (v StateUpdates) UpdateCount() int {
-	updateCount := 0
-
-	if v.BTreeG != nil {
-		v.Scan(func(update *stateUpdate) bool {
-			if update.deleteAccount {
-				updateCount++
-			}
-			if update.bufferedAccount != nil {
-				if update.data != nil {
-					updateCount++
-				}
-				if update.storage != nil {
-					updateCount += update.storage.Len()
-				}
-			}
-			return true
-		})
-	}
-
-	return updateCount
-}
-
-type StateV3Buffered struct {
-	*StateV3
-	accounts      map[common.Address]*bufferedAccount
-	accountsMutex *sync.RWMutex
-}
-
-func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
-	bufferedState := &StateV3Buffered{
-		StateV3:       state,
-		accounts:      map[common.Address]*bufferedAccount{},
-		accountsMutex: &sync.RWMutex{},
-	}
-	return bufferedState
-}
-
-func (s *StateV3Buffered) WithDomains(domains *dbstate.SharedDomains) *StateV3Buffered {
-	return &StateV3Buffered{
-		StateV3:       NewStateV3(domains, s.syncCfg, s.logger),
-		accounts:      s.accounts,
-		accountsMutex: s.accountsMutex,
-	}
-}
-
-// BufferedWriter - used by parallel workers to accumulate updates and then send them to conflict-resolution.
-type BufferedWriter struct {
-	rs           *StateV3Buffered
+// StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
+type StateWriterBufferedV3 struct {
+	rs           *ParallelExecutionState
 	trace        bool
-	writeSet     StateUpdates
+	writeLists   map[string]*dbstate.KvList
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
@@ -398,169 +289,123 @@ type BufferedWriter struct {
 	txNum        uint64
 }
 
-func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *BufferedWriter {
-	return &BufferedWriter{
+func NewStateWriterBufferedV3(rs *ParallelExecutionState, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
+	return &StateWriterBufferedV3{
 		rs:          rs,
-		writeSet:    newStateUpdates(),
+		writeLists:  newWriteList(),
 		accumulator: accumulator,
-		//trace:       true,
+		//trace:      true,
 	}
 }
 
-func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
+func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
 	w.txNum = txNum
 	w.rs.domains.SetTxNum(txNum)
 }
-func (w *BufferedWriter) SetTx(tx kv.Tx) {}
+func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) {}
 
-func (w *BufferedWriter) WriteSet() StateUpdates {
-	return w.writeSet
+func (w *StateWriterBufferedV3) ResetWriteSet() {
+	w.writeLists = newWriteList()
+	w.accountPrevs = nil
+	w.accountDels = nil
+	w.storagePrevs = nil
+	w.codePrevs = nil
 }
 
-func (w *BufferedWriter) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+func (w *StateWriterBufferedV3) WriteSet() map[string]*dbstate.KvList {
+	return w.writeLists
+}
+
+func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
-func (w *BufferedWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("BufferedWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
-
-	if w.accumulator != nil {
-		w.accumulator.ChangeAccount(address, account.Incarnation, accounts.SerialiseV3(account))
-	}
-
-	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		update = &stateUpdate{&bufferedAccount{
-			originalIncarnation: original.Incarnation,
-			data:                account,
-		}, address, false}
-		w.writeSet.Set(update)
-	} else {
-		if original.Incarnation < update.originalIncarnation {
-			update.originalIncarnation = original.Incarnation
+	if original.Incarnation > account.Incarnation {
+		//del, before create: to clanup code/storage
+		if err := w.rs.domains.DomainDel(kv.CodeDomain, w.rs.tx, address[:], w.txNum, nil, 0); err != nil {
+			return err
 		}
-		update.data = account
-	}
 
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
-	if !ok || obj.data == &deleted {
-		obj = &bufferedAccount{}
+		if err := w.rs.domains.IteratePrefix(kv.StorageDomain, address[:], w.rs.tx, func(k, v []byte, step kv.Step) (bool, error) {
+			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
+			return true, nil
+		}); err != nil {
+			return err
+		}
 	}
-	obj.originalIncarnation = original.Incarnation
-	obj.data = account
-	w.rs.accounts[address] = obj
-	w.rs.accountsMutex.Unlock()
+	value := accounts.SerialiseV3(account)
+	if w.accumulator != nil {
+		w.accumulator.ChangeAccount(address, account.Incarnation, value)
+	}
+	w.writeLists[kv.AccountsDomain.String()].Push(string(address[:]), value)
 
 	return nil
 }
 
-func (w *BufferedWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeCode(address, incarnation, code)
 	}
-
-	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		w.writeSet.Set(&stateUpdate{&bufferedAccount{code: code}, address, false})
-	} else {
-		update.code = code
-	}
-
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
-	if !ok || obj.data == &deleted {
-		obj = &bufferedAccount{}
-		w.rs.accounts[address] = obj
-	}
-	obj.code = code
-	w.rs.accountsMutex.Unlock()
-
+	w.writeLists[kv.CodeDomain.String()].Push(string(address[:]), code)
 	return nil
 }
 
-func (w *BufferedWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
 	if w.accumulator != nil {
 		w.accumulator.DeleteAccount(address)
 	}
+	w.writeLists[kv.AccountsDomain.String()].Push(string(address.Bytes()), nil)
 
-	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		w.writeSet.Set(&stateUpdate{nil, address, true})
-	} else {
-		update.bufferedAccount = nil
-		update.deleteAccount = true
-	}
+	//if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+	//	return err
+	//}
+	//commitment delete already has been applied via account
+	//if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+	//	return err
+	//}
 
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
-	if !ok {
-		obj = &bufferedAccount{
-			data: &deleted,
-		}
-		w.rs.accounts[address] = obj
-	}
-	*obj = bufferedAccount{data: &deleted}
-	w.rs.accountsMutex.Unlock()
 	return nil
 }
 
-func (w *BufferedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
-
-	update, ok := w.writeSet.Get(&stateUpdate{address: address})
-	if !ok {
-		update = &stateUpdate{&bufferedAccount{}, address, false}
-		w.writeSet.Set(update)
-	}
-
-	if update.storage == nil {
-		update.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
-			return a.key.Cmp(b.key) > 0
-		}, btree.Options{NoLocks: true})
-	}
-
-	update.storage.Set(storageItem{key, value})
-
+	compositeS := string(append(address[:], key.Bytes()...))
+	w.writeLists[kv.StorageDomain.String()].Push(compositeS, value.Bytes())
 	if w.trace {
-		fmt.Printf("BufferedWriter: storage: %x,%x,%x\n", address, key, &value)
+		fmt.Printf("storage: %x,%x,%x\n", address, key, value.Bytes())
 	}
-
 	if w.accumulator != nil {
-		vb := value.Bytes32()
-		w.accumulator.ChangeStorage(address, incarnation, key, vb[32-value.ByteLen():])
+		v := value.Bytes()
+		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
-
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
-	if !ok || obj.data == &deleted {
-		obj = &bufferedAccount{}
-		w.rs.accounts[address] = obj
-	}
-	if obj.storage == nil {
-		obj.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
-			return a.key.Cmp(b.key) > 0
-		}, btree.Options{NoLocks: true})
-	}
-
-	obj.storage.Set(storageItem{key, value})
-
-	w.rs.accountsMutex.Unlock()
 	return nil
 }
 
-func (w *BufferedWriter) CreateContract(address common.Address) error {
+func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
 
+	//seems don't need delete code here - tests starting fail
+	//err := w.rs.domains.IteratePrefix(kv.StorageDomain, address[:], func(k, v []byte) error {
+	//	w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+	//	return nil
+	//})
+	//if err != nil {
+	//	return err
+	//}
 	return nil
 }
 
@@ -582,6 +427,11 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 }
 
 func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
+func (w *Writer) ResetWriteSet()    {}
+
+func (w *Writer) WriteSet() map[string]*dbstate.KvList {
+	return nil
+}
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
@@ -589,7 +439,7 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 
 func (w *Writer) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
@@ -648,8 +498,7 @@ func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64,
 	if original == value {
 		return nil
 	}
-
-	composite := append(address[:], key[:]...)
+	composite := append(address[:], key.Bytes()...)
 	v := value.Bytes()
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
@@ -680,60 +529,51 @@ func (w *Writer) CreateContract(address common.Address) error {
 }
 
 type ReaderV3 struct {
-	txNum       uint64
-	trace       bool
-	tracePrefix string
-	getter      kv.TemporalGetter
+	txNum     uint64
+	trace     bool
+	tx        kv.TemporalGetter
+	composite []byte
 }
 
-func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
+func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
-		//trace:  true,
-		getter: getter,
+		tx:        tx,
+		composite: make([]byte, 20+32),
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()      {}
-func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
-
-func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
-	r.trace = trace
-	if tplen := len(tracePrefix); tplen > 0 && tracePrefix[tplen-1] != ' ' {
-		tracePrefix += " "
-	}
-	r.tracePrefix = tracePrefix
-}
+func (r *ReaderV3) DiscardReadList()                    {}
+func (r *ReaderV3) SetTxNum(txNum uint64)               { r.txNum = txNum }
+func (r *ReaderV3) SetTx(tx kv.TemporalTx)              {}
+func (r *ReaderV3) ReadSet() map[string]*dbstate.KvList { return nil }
+func (r *ReaderV3) SetTrace(trace bool)                 { r.trace = trace }
+func (r *ReaderV3) ResetReadSet()                       {}
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, address[:])
+	_, _, hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	_, acc, err := r.readAccountData(address)
-	return acc, err
-}
-
-func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Account, error) {
-	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, address[:])
+	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(enc) == 0 {
 		if r.trace {
-			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, address, r.txNum)
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
 		}
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	var acc accounts.Account
 	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
-	return enc, &acc, nil
+	return &acc, nil
 }
 
 func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
@@ -741,50 +581,47 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 }
 
 func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
-	var composite [20 + 32]byte
-	copy(composite[0:20], address[0:20])
-	copy(composite[20:], key[:])
-	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-
-	ok := enc != nil
+	r.composite = append(append(r.composite[:0], address[:]...), key[:]...)
+	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite)
 	var res uint256.Int
-	if ok {
-		(&res).SetBytes(enc)
-	}
 
+	if err != nil {
+		return res, false, err
+	}
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d\n", r.tracePrefix, address, key, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d\n", r.tracePrefix, address, key, &res, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
 		}
 	}
 
+	ok := enc != nil
+	if ok {
+		(&res).SetBytes(enc)
+	}
 	return res, ok, err
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, address[:])
+	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountCode [%x] => [%x], txNum: %d\n", r.tracePrefix, address, enc, r.txNum)
+		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
 	return enc, nil
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address common.Address) (int, error) {
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, address[:])
+	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return 0, err
 	}
 	size := len(enc)
 	if r.trace {
-		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, address, size, r.txNum)
+		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
 	}
 	return size, nil
 }
@@ -793,215 +630,201 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 	return 0, nil
 }
 
-type bufferedReader struct {
-	reader        *ReaderV3
-	bufferedState *StateV3Buffered
+type ReaderParallelV3 struct {
+	txNum     uint64
+	trace     bool
+	sd        *dbstate.SharedDomains
+	tx        kv.TemporalTx
+	composite []byte
+
+	discardReadList bool
+	readLists       map[string]*dbstate.KvList
 }
 
-func NewBufferedReader(bufferedState *StateV3Buffered, reader *ReaderV3) StateReader {
-	return &bufferedReader{reader: reader, bufferedState: bufferedState}
-}
-
-func (r *bufferedReader) SetTrace(trace bool, tracePrefix string) {
-	r.reader.SetTrace(trace, tracePrefix)
-}
-
-func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	var data *accounts.Account
-
-	r.bufferedState.accountsMutex.RLock()
-	if so, ok := r.bufferedState.accounts[address]; ok {
-		data = so.data
+func NewReaderParallelV3(sd *dbstate.SharedDomains) *ReaderParallelV3 {
+	return &ReaderParallelV3{
+		//trace:     true,
+		sd:        sd,
+		readLists: newReadList(),
+		composite: make([]byte, 20+32),
 	}
-	r.bufferedState.accountsMutex.RUnlock()
-
-	if data != nil {
-		if data == &deleted {
-			if r.reader.trace {
-				fmt.Printf("%sReadAccountData (buf)[%x] => [empty]\n", r.reader.tracePrefix, address)
-			}
-			return nil, nil
-		}
-		if r.reader.trace {
-			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.tracePrefix, address, data.Nonce, &data.Balance, data.CodeHash)
-		}
-
-		result := *data
-		return &result, nil
-	}
-
-	return r.reader.ReadAccountData(address)
 }
 
-func (r *bufferedReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
-	var data *accounts.Account
+func (r *ReaderParallelV3) DiscardReadList()                    { r.discardReadList = true }
+func (r *ReaderParallelV3) SetTxNum(txNum uint64)               { r.txNum = txNum }
+func (r *ReaderParallelV3) SetTx(tx kv.TemporalTx)              { r.tx = tx }
+func (r *ReaderParallelV3) ReadSet() map[string]*dbstate.KvList { return r.readLists }
+func (r *ReaderParallelV3) SetTrace(trace bool)                 { r.trace = trace }
+func (r *ReaderParallelV3) ResetReadSet()                       { r.readLists = newReadList() }
 
-	r.bufferedState.accountsMutex.RLock()
-	if so, ok := r.bufferedState.accounts[address]; ok {
-		data = so.data
+func (r *ReaderParallelV3) HasStorage(address common.Address) (bool, error) {
+	firstK, firstV, hasStorage, err := r.sd.HasPrefix(kv.StorageDomain, address[:], r.tx)
+	if err != nil {
+		return false, err
 	}
-	r.bufferedState.accountsMutex.RUnlock()
+	if !r.discardReadList {
+		r.readLists[kv.StorageDomain.String()].Push(string(firstK), firstV)
+	}
+	return hasStorage, nil
+}
 
-	if data != nil {
-		if data == &deleted {
-			return nil, nil
+func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, r.tx, address[:])
+	if err != nil {
+		return nil, err
+	}
+	if !r.discardReadList {
+		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
+		r.readLists[kv.AccountsDomain.String()].Push(string(address[:]), enc)
+	}
+	if len(enc) == 0 {
+		if r.trace {
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
 		}
-		result := *data
-		return &result, nil
+		return nil, nil
 	}
 
-	return r.reader.ReadAccountDataForDebug(address)
+	var acc accounts.Account
+	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+	}
+	return &acc, nil
 }
 
-func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-
-	if ok {
-		if so.data == &deleted {
-			if r.reader.trace {
-				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [empty]\n", r.reader.tracePrefix, address, key)
-			}
-			r.bufferedState.accountsMutex.RUnlock()
-			return uint256.Int{}, false, nil
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, r.tx, address[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		if r.trace {
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
 		}
-
-		if so.storage != nil {
-			item, ok := so.storage.Get(storageItem{key: key})
-
-			if ok {
-				if r.reader.trace {
-					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x]\n", r.reader.tracePrefix, address, key, &item.value)
-				}
-				r.bufferedState.accountsMutex.RUnlock()
-				return item.value, true, nil
-			}
-		}
+		return nil, nil
 	}
 
-	r.bufferedState.accountsMutex.RUnlock()
-
-	return r.reader.ReadAccountStorage(address, key)
+	var acc accounts.Account
+	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+	}
+	return &acc, nil
 }
 
-func (r *bufferedReader) HasStorage(address common.Address) (bool, error) {
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-
-	if ok {
-		if so.data == &deleted {
-			r.bufferedState.accountsMutex.RUnlock()
-			return false, nil
-		}
-
-		if so.storage != nil && so.storage.Len() > 0 {
-			// TODO - we really need to return the first key
-			// for this we need to order the list of hashes
-			r.bufferedState.accountsMutex.RUnlock()
-			return true, nil
+func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
+	r.composite = append(append(r.composite[:0], address[:]...), key[:]...)
+	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.tx, r.composite)
+	if err != nil {
+		return uint256.Int{}, false, err
+	}
+	if !r.discardReadList {
+		r.readLists[kv.StorageDomain.String()].Push(string(r.composite), enc)
+	}
+	if r.trace {
+		if enc == nil {
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
+		} else {
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
 		}
 	}
-	r.bufferedState.accountsMutex.RUnlock()
-	return r.reader.HasStorage(address)
+	var res uint256.Int
+	(&res).SetBytes(enc)
+	return res, true, nil
 }
 
-func (r *bufferedReader) ReadAccountCode(address common.Address) ([]byte, error) {
-	var code []byte
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-	if ok {
-		if so.data == &deleted {
-			r.bufferedState.accountsMutex.RUnlock()
-			return nil, nil
+func (r *ReaderParallelV3) ReadAccountCode(address common.Address) ([]byte, error) {
+	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	if !r.discardReadList {
+		r.readLists[kv.CodeDomain.String()].Push(string(address[:]), enc)
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
+	}
+	return enc, nil
+}
+
+func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address) (int, error) {
+	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:])
+	if err != nil {
+		return 0, err
+	}
+	if !r.discardReadList {
+		var sizebuf [8]byte
+		binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
+		r.readLists[dbstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
+	}
+	size := len(enc)
+	if r.trace {
+		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
+	}
+	return size, nil
+}
+
+func (r *ReaderParallelV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
+var writeListPool = sync.Pool{
+	New: func() any {
+		return map[string]*dbstate.KvList{
+			kv.AccountsDomain.String(): {},
+			kv.StorageDomain.String():  {},
+			kv.CodeDomain.String():     {},
 		}
-
-		if len(so.code) != 0 {
-			code = so.code
-		}
-	}
-	r.bufferedState.accountsMutex.RUnlock()
-
-	if len(code) != 0 {
-		return so.code, nil
-	}
-
-	return r.reader.ReadAccountCode(address)
+	},
 }
 
-func (r *bufferedReader) ReadAccountCodeSize(address common.Address) (int, error) {
-	var code []byte
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-	if ok {
-		if so.data == &deleted {
-			r.bufferedState.accountsMutex.RUnlock()
-			return 0, nil
-		}
-
-		if len(so.code) != 0 {
-			code = so.code
-		}
+func newWriteList() map[string]*dbstate.KvList {
+	v := writeListPool.Get().(map[string]*dbstate.KvList)
+	for _, tbl := range v {
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
-
-	r.bufferedState.accountsMutex.RUnlock()
-
-	if len(code) != 0 {
-		return len(code), nil
+	return v
+	//return writeListPool.Get().(map[string]*dbstate.KvList)
+}
+func returnWriteList(v map[string]*dbstate.KvList) {
+	if v == nil {
+		return
 	}
-
-	return r.reader.ReadAccountCodeSize(address)
-}
-
-func (r *bufferedReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	var incarnation uint64
-
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-	if ok && so.data != nil {
-		incarnation = so.data.Incarnation
-	}
-	r.bufferedState.accountsMutex.RUnlock()
-
-	if ok {
-		return incarnation, nil
-	}
-
-	return r.reader.ReadAccountIncarnation(address)
-}
-
-func (r *bufferedReader) SetGetter(getter kv.TemporalGetter) {
-	r.reader.getter = getter
-}
-
-func (r *bufferedReader) DiscardReadList() {
-	r.reader.DiscardReadList()
-}
-
-type ReadLists map[string]*dbstate.KvList
-
-func (v ReadLists) Return() {
-	returnReadList(v)
+	//for _, tbl := range v {
+	//	clear(tbl.Keys)
+	//	clear(tbl.Vals)
+	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	//}
+	writeListPool.Put(v)
 }
 
 var readListPool = sync.Pool{
 	New: func() any {
-		return ReadLists{
+		return map[string]*dbstate.KvList{
 			kv.AccountsDomain.String(): {},
 			kv.CodeDomain.String():     {},
+			dbstate.CodeSizeTableFake:  {},
 			kv.StorageDomain.String():  {},
 		}
 	},
 }
 
-func newReadList() ReadLists {
-	v := readListPool.Get().(ReadLists)
+func newReadList() map[string]*dbstate.KvList {
+	v := readListPool.Get().(map[string]*dbstate.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
-	//return readListPool.Get().(map[string]*state.KvList)
+	//return readListPool.Get().(map[string]*dbstate.KvList)
 }
-func returnReadList(v ReadLists) {
+func returnReadList(v map[string]*dbstate.KvList) {
 	if v == nil {
 		return
 	}

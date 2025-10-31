@@ -18,7 +18,6 @@ package stagedsync_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,7 +35,6 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
 
-	os.Setenv("MOCK_SENTRY_LOG_LEVEL", "info")
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 
 	stageCfg := stagedsync.StageCustomTraceCfg([]string{"receipt"}, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
@@ -91,7 +89,6 @@ func TestCustomTraceDomainProgressConsistency(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
 
-	os.Setenv("MOCK_SENTRY_LOG_LEVEL", "info")
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 
 	require.NoError(m.DB.Update(m.Ctx, func(tx kv.RwTx) error {

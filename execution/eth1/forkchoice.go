@@ -474,7 +474,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
-
 		err = tx.Commit()
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)

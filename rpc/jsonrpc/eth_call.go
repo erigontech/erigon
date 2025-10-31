@@ -446,7 +446,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
-		domains.SetTrace(false, false)
+		domains.SetTrace(false)
 	}
 
 	// touch account

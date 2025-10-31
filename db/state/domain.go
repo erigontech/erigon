@@ -622,10 +622,6 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	}
 }
 
-func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
-	return kv.Step(dt.files.EndTxNum() / dt.stepSize)
-}
-
 // Collation is the set of compressors created after aggregation
 type Collation struct {
 	HistoryCollation
@@ -1388,17 +1384,11 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(k)
-
-	getFromFileCache := dt.getFromFileCache
-
-	if useCache && getFromFileCache == nil {
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = dt.visible.newGetFromFileCache()
-		}
-		getFromFileCache = dt.getFromFileCache
+	if useCache && dt.getFromFileCache == nil {
+		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
-	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
-		if cv, ok := getFromFileCache.Get(hi); ok {
+	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
+		if cv, ok := dt.getFromFileCache.Get(hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1587,7 +1577,7 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 	return dt.btReaders[i]
 }
 
-var errSdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
+var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
 
 func (dt *DomainRoTx) closeValsCursor() {
 	if dt.valsC != nil {
@@ -1598,13 +1588,17 @@ func (dt *DomainRoTx) closeValsCursor() {
 	}
 }
 
+type canCheckClosed interface {
+	IsClosed() bool
+}
+
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.valsC != nil { // run in assert mode only
 		if asserts {
 			if tx.ViewID() != dt.valCViewID {
-				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", errSdTxImmutabilityInvariant, dt.d.FilenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
+				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", sdTxImmutabilityInvariant, dt.d.FilenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
 			}
-			if mc, ok := dt.valsC.(interface{ IsClosed() bool }); ok && mc.IsClosed() {
+			if mc, ok := dt.valsC.(canCheckClosed); !ok && mc.IsClosed() {
 				panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.FilenameBase))
 			}
 			// if dt.d.largeValues {
@@ -1657,15 +1651,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
 	} else {
-		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
-			defer func() {
-				if rec := recover(); rec != nil {
-					fmt.Println(fmt.Sprintf("%p: seek failed for: %d", dt, roTx.ViewID()), "reason", rec, "stack", dbg.Stack())
-					err = fmt.Errorf("paniced ")
-				}
-			}()
-			return valsC.SeekExact(key)
-		}()
+		_, stepWithVal, err := valsC.SeekExact(key)
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
 		}
@@ -1674,6 +1660,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		}
 
 		v = stepWithVal[8:]
+
 		foundInvStep = stepWithVal[:8]
 	}
 
@@ -1683,16 +1670,12 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		return v, foundStep, true, nil
 	}
 
-	return nil, 0, false, err
+	return nil, 0, false, nil
 }
 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
-	return dt.getLatest(key, roTx, nil, time.Time{})
-}
-
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}
@@ -1714,17 +1697,10 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *DomainMetrics, 
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found {
-		if metrics != nil {
-			metrics.updateDbReads(dt.name, start)
-		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
-	if metrics != nil {
-		metrics.updateFileReads(dt.name, start)
-	}
-
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)
 	}

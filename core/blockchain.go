@@ -229,17 +229,17 @@ func ExecuteBlockEphemerally(
 	return execRs, nil
 }
 
-func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) string {
+func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
 	if len(receipts) == 0 {
 		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
-		return ""
+		return
 	}
 
 	// note we do not return errors from this func since this is a debug-only
 	// informative feature that is best-effort and should not interfere with execution
 	if len(receipts) != len(txns) {
 		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
-		return ""
+		return
 	}
 
 	marshalled := make([]map[string]interface{}, 0, len(receipts))
@@ -251,10 +251,10 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 	result, err := json.Marshal(marshalled)
 	if err != nil {
 		logger.Error("marshalling error when logging receipts", "err", err)
-		return ""
+		return
 	}
 
-	return string(result)
+	logger.Info("marshalled receipts", "result", string(result))
 }
 
 func rlpHash(x interface{}) (h common.Hash) {
@@ -405,13 +405,6 @@ var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
 func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if gasUsed != h.GasUsed {
-		var txgas string
-		sep := ""
-		for _, receipt := range receipts {
-			txgas += fmt.Sprintf("%s%d=%d", sep, receipt.TransactionIndex, receipt.GasUsed)
-			sep = ", "
-		}
-		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", gasUsed, "txgas", txgas)
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
 	}
@@ -420,7 +413,6 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
-
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
@@ -432,9 +424,7 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 				return nil
 			}
 			if dbg.LogHashMismatchReason() {
-				if result := logReceipts(receipts, txns, chainConfig, h, logger); len(result) > 0 {
-					logger.Info("marshalled receipts", "block", h.Number.Uint64(), "result", string(result))
-				}
+				logReceipts(receipts, txns, chainConfig, h, logger)
 			}
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
@@ -445,12 +435,6 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
 		}
 	}
-
-	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		result := logReceipts(receipts, txns, chainConfig, h, logger)
-		fmt.Println(h.Number.Uint64(), "receipts", result)
-	}
-
 	return nil
 }
 

@@ -149,28 +149,6 @@ func (p *ConcurrentPatriciaHashed) SetTrace(b bool) {
 		p.mounts[i].SetTrace(b)
 	}
 }
-func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
-	p.root.SetTraceDomain(b)
-	for i := range p.mounts {
-		p.mounts[i].SetTraceDomain(b)
-	}
-}
-func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
-	capture := p.root.GetCapture(truncate)
-	if truncate {
-		for i := range p.mounts {
-			p.mounts[i].SetCapture(nil)
-		}
-	}
-	return capture
-}
-
-func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
-	p.root.SetCapture(capture)
-	for i := range p.mounts {
-		p.mounts[i].SetCapture(capture)
-	}
-}
 
 // pass -1 to enable trace just for root trie
 func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {
@@ -255,7 +233,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 }
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
-func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
+func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	// start := time.Now()
 	// wasConcurrent := updates.IsConcurrentCommitment()
 	// updCount := updates.Size()
@@ -267,7 +245,7 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	case true:
 		rootHash, err = updates.ParallelHashSort(ctx, p)
 	default:
-		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress)
+		rootHash, err = p.root.Process(ctx, updates, logPrefix)
 	}
 	if err != nil {
 		return nil, err

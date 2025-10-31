@@ -18,12 +18,10 @@ package dbg
 
 import (
 	"context"
-	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
-	"strings"
 	"sync"
 	"time"
 
@@ -79,19 +77,13 @@ var (
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
 	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
-	TraceLogs            = EnvBool("TRACE_LOGS", false)
-	TraceGas             = EnvBool("TRACE_GAS", false)
-	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
-	TraceApply           = EnvBool("TRACE_APPLY", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
-	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
+	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)
 	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-
-	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
-	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+	TraceDeletion        = EnvBool("TRACE_DELETION", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -269,66 +261,4 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 			SaveHeapProfileNearOOM(opts...)
 		}
 	}
-}
-
-var tracedBlocks map[uint64]struct{}
-var traceAllBlocks bool
-var tracedTxIndexes map[int64]struct{}
-
-func TraceBlock(blockNum uint64) bool {
-	if tracedBlocks == nil {
-		tracedBlocks = map[uint64]struct{}{}
-		if len(TraceBlocks) == 1 && TraceBlocks[0] == math.MaxUint64 {
-			traceAllBlocks = true
-		}
-		for _, blockNum := range TraceBlocks {
-			tracedBlocks[blockNum] = struct{}{}
-		}
-	}
-
-	if traceAllBlocks {
-		return true
-	}
-
-	_, ok := tracedBlocks[blockNum]
-	return ok
-}
-
-func TraceTx(blockNum uint64, txIndex int) bool {
-	if !TraceBlock(blockNum) {
-		return false
-	}
-
-	if tracedTxIndexes == nil {
-		tracedTxIndexes = map[int64]struct{}{}
-		for _, index := range TraceTxIndexes {
-			tracedTxIndexes[index] = struct{}{}
-		}
-	}
-
-	if len(tracedTxIndexes) != 0 {
-		if _, ok := tracedTxIndexes[int64(txIndex)]; !ok {
-			return false
-		}
-	}
-
-	return true
-}
-
-var tracedAccounts map[common.Address]struct{} = func() map[common.Address]struct{} {
-	ta := map[common.Address]struct{}{}
-	for _, account := range TraceAccounts {
-		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
-		ta[common.HexToAddress(account)] = struct{}{}
-	}
-	return ta
-}()
-
-func TraceAccount(addr common.Address) bool {
-	_, ok := tracedAccounts[addr]
-	return ok
-}
-
-func TracingAccounts() bool {
-	return len(tracedAccounts) > 0
 }

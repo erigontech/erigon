@@ -29,7 +29,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon/core/tracing"
@@ -90,6 +89,11 @@ type stateObject struct {
 	createdContract bool // true if this object represents a newly created contract
 }
 
+// empty returns whether the account is considered empty.
+func (so *stateObject) empty() bool {
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.CodeHash)
+}
+
 func (s *stateObject) deepCopy(db *IntraBlockState) *stateObject {
 	stateObject := &stateObject{db: db, address: s.address}
 	stateObject.data.Copy(&s.data)
@@ -139,6 +143,17 @@ func (so *stateObject) markSelfdestructed() {
 	so.selfdestructed = true
 }
 
+func (so *stateObject) touch() {
+	so.db.journal.append(touchChange{
+		account: so.address,
+	})
+	if so.address == ripemd {
+		// Explicitly put it in the dirty-cache, which is otherwise generated from
+		// flattened journals.
+		so.db.journal.dirty(so.address)
+	}
+}
+
 // GetState returns a value from account storage.
 func (so *stateObject) GetState(key common.Hash, out *uint256.Int) bool {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
@@ -176,14 +191,10 @@ func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) erro
 		return nil
 	}
 	// Load from DB in case it is missing.
-	if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address)) {
-		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
-	}
 	readStart := time.Now()
 	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, key)
 	so.db.storageReadDuration += time.Since(readStart)
 	so.db.storageReadCount++
-	so.db.stateReader.SetTrace(false, "")
 
 	if err != nil {
 		out.Clear()
@@ -218,7 +229,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 	var commited bool
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, _, _, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
+	prev, _, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -273,12 +284,7 @@ func (so *stateObject) setState(key common.Hash, value uint256.Int) {
 // updateStotage writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateStotage(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
-		blockOriginValue := so.blockOriginStorage[key]
-		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address)) {
-			fmt.Printf("%d (%d.%d) Update Storage (%T): %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version,
-				stateWriter, so.address, key, blockOriginValue.Hex(), value.Hex())
-		}
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, blockOriginValue, value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, so.blockOriginStorage[key], value); err != nil {
 			return err
 		}
 		so.originStorage[key] = value
@@ -291,11 +297,10 @@ func (so *stateObject) printTrie() {
 	}
 }
 
-func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
+func (so *stateObject) SetBalance(amount uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
-		account:     &so.address,
-		prev:        so.data.Balance,
-		wasCommited: wasCommited,
+		account: &so.address,
+		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
 		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
@@ -333,32 +338,27 @@ func (so *stateObject) Code() ([]byte, error) {
 		return nil, nil
 	}
 
-	if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address)) {
-		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
-	}
 	readStart := time.Now()
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
-	so.db.codeReadDuration += time.Since(readStart)
-	so.db.codeReadCount++
-	so.db.stateReader.SetTrace(false, "")
+	so.db.storageReadDuration += time.Since(readStart)
+	so.db.storageReadCount++
 
 	if err != nil {
-		return nil, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
+		return nil, fmt.Errorf("can't code for %x: %w", so.Address(), err)
 	}
 	so.code = code
 	return code, nil
 }
 
-func (so *stateObject) SetCode(codeHash common.Hash, code []byte, wasCommited bool) error {
+func (so *stateObject) SetCode(codeHash common.Hash, code []byte) error {
 	prevcode, err := so.Code()
 	if err != nil {
 		return err
 	}
 	so.db.journal.append(codeChange{
-		account:     &so.address,
-		prevhash:    so.data.CodeHash,
-		prevcode:    prevcode,
-		wasCommited: wasCommited,
+		account:  &so.address,
+		prevhash: so.data.CodeHash,
+		prevcode: prevcode,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
 		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
@@ -373,11 +373,10 @@ func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 	so.dirtyCode = true
 }
 
-func (so *stateObject) SetNonce(nonce uint64, wasCommited bool) {
+func (so *stateObject) SetNonce(nonce uint64) {
 	so.db.journal.append(nonceChange{
-		account:     &so.address,
-		prev:        so.data.Nonce,
-		wasCommited: wasCommited,
+		account: &so.address,
+		prev:    so.data.Nonce,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
 		so.db.tracingHooks.OnNonceChange(so.address, so.data.Nonce, nonce)
