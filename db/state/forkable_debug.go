@@ -1,5 +1,7 @@
 package state
 
+import "github.com/erigontech/erigon/db/kv"
+
 type forkableAggDirtyFilesRoTx struct {
 	closed       bool
 	markedRoTx   []*forkableDirtyFilesRoTx
@@ -25,8 +27,8 @@ func (f *forkableDirtyFilesRoTx) Close() {
 }
 
 type MissedAccessorForkAggFiles struct {
-	unmarked map[ForkableId]*MissedFilesMap
-	marked   map[ForkableId]*MissedFilesMap
+	unmarked map[kv.ForkableId]*MissedFilesMap
+	marked   map[kv.ForkableId]*MissedFilesMap
 }
 
 func (m *MissedAccessorForkAggFiles) IsEmpty() bool {
@@ -67,8 +69,8 @@ func (r *ForkableAgg) DebugBeginDirtyFilesRo() *forkableAggDirtyFilesRoTx {
 // need dirty files lock
 func (r *forkableAggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorForkAggFiles) {
 	mf = &MissedAccessorForkAggFiles{
-		unmarked: make(map[ForkableId]*MissedFilesMap),
-		marked:   make(map[ForkableId]*MissedFilesMap),
+		unmarked: make(map[kv.ForkableId]*MissedFilesMap),
+		marked:   make(map[kv.ForkableId]*MissedFilesMap),
 	}
 
 	for _, m := range r.markedRoTx {

@@ -21,7 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 // CachedWriter is a wrapper for an instance of type StateWriter

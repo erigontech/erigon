@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
@@ -117,6 +118,11 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, stepsInFroz
 
 		produce: true,
 	}, nil
+}
+
+type HasAgg interface {
+	Agg() any
+	ForkableAgg(kv.ForkableId) any
 }
 
 // GetStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -1029,7 +1035,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
 		//     can't interrupt by ctrl+c and leave dirt in DB
-		stat, err := at.prune(context.Background(), tx, pruneLimit, aggLogEvery)
+		stat, err := at.prune(context.Background(), tx, pruneLimit, furiousPrune || aggressivePrune, aggLogEvery)
 		if err != nil {
 			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
@@ -1198,8 +1204,10 @@ func (at *AggregatorRoTx) GreedyPruneHistory(ctx context.Context, domain kv.Doma
 	return nil
 }
 
-func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
-	defer mxPruneTookAgg.ObserveDuration(time.Now())
+func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, aggressiveMode bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
+	if !aggressiveMode {
+		defer mxPruneTookAgg.ObserveDuration(time.Now())
+	}
 
 	if limit == 0 {
 		limit = uint64(math.MaxUint64)
@@ -1794,14 +1802,18 @@ func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to 
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	return at.d[name].GetAsOf(k, ts, tx)
+	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
+	if name == kv.CommitmentDomain && !ok {
+		v, _, ok, err = at.GetLatest(name, k, tx)
+	}
+	return v, ok, err
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
 	return at.getLatest(domain, k, tx, nil, time.Time{})
 }
 
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, metrics, start)
 	}
@@ -1812,7 +1824,7 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metric
 	}
 	if ok {
 		if metrics != nil {
-			metrics.updateDbReads(domain, start)
+			metrics.UpdateDbReads(domain, start)
 		}
 		return v, step, true, nil
 	}
@@ -1822,7 +1834,7 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metric
 		return nil, kv.Step(0), false, err
 	}
 	if metrics != nil {
-		metrics.updateFileReads(domain, start)
+		metrics.UpdateFileReads(domain, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err

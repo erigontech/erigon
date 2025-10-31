@@ -18,6 +18,8 @@ package ethapi
 
 // This file stores proxy-objects for `internal` package
 import (
+	"maps"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -29,9 +31,7 @@ func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[st
 		return nil, err
 	}
 
-	for k, v := range additional {
-		fields[k] = v
-	}
+	maps.Copy(fields, additional)
 
 	return fields, err
 }
@@ -43,9 +43,7 @@ func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Tra
 		return nil, err
 	}
 
-	for k, v := range additional {
-		fields[k] = v
-	}
+	maps.Copy(fields, additional)
 
 	return fields, err
 }

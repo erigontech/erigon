@@ -6,6 +6,8 @@ import (
 	"path"
 	"path/filepath"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -15,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"golang.org/x/sync/errgroup"
 )
 
 /*
@@ -25,7 +26,7 @@ Can be embedded in other marker/relational/appending entities.
 type ProtoForkable struct {
 	freezer Freezer
 
-	id       ForkableId
+	id       kv.ForkableId
 	snapCfg  *SnapshotConfig
 	fschema  SnapNameSchema
 	cfg      *statecfg.ForkableCfg
@@ -39,7 +40,7 @@ type ProtoForkable struct {
 	dirs   datadir.Dirs
 }
 
-func NewProto(id ForkableId, builders []AccessorIndexBuilder, freezer Freezer, dirs datadir.Dirs, logger log.Logger) *ProtoForkable {
+func NewProto(id kv.ForkableId, builders []AccessorIndexBuilder, freezer Freezer, dirs datadir.Dirs, logger log.Logger) *ProtoForkable {
 	return &ProtoForkable{
 		id:       id,
 		snapCfg:  Registry.SnapshotConfig(id),
@@ -246,7 +247,7 @@ func (a *ProtoForkable) FilesWithMissedAccessors() *MissedFilesMap {
 // proto_forkable_rotx
 
 type ProtoForkableTx struct {
-	id               ForkableId
+	id               kv.ForkableId
 	files            visibleFiles
 	m                []NumMetadata
 	a                *ProtoForkable
@@ -319,7 +320,7 @@ func (a *ProtoForkable) BeginNoFilesRo() *ProtoForkableTx {
 	}
 }
 
-func (a *ProtoForkableTx) Id() ForkableId { return a.id }
+func (a *ProtoForkableTx) Id() kv.ForkableId { return a.id }
 
 func (a *ProtoForkableTx) Close() {
 	if a.files == nil {

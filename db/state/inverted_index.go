@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -32,19 +31,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/db/snaptype"
-
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -56,6 +50,9 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 type InvertedIndex struct {
@@ -291,27 +288,7 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 }
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
-	protectFiles := make(map[string]struct{}, len(fNames))
-	for _, f := range fNames {
-		protectFiles[f] = struct{}{}
-	}
-	var toClose []*FilesItem
-	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
-					continue
-				}
-			}
-
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		item.closeFiles()
-		ii.dirtyFiles.Delete(item)
-	}
+	closeWhatNotInList(ii.dirtyFiles, fNames)
 }
 
 func (ii *InvertedIndex) Tables() []string { return []string{ii.KeysTable, ii.ValuesTable} }
@@ -916,42 +893,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 
 	return stat, err
-}
-
-func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator1 {
-	var ii1 InvertedIterator1
-	ii1.hasNextInDb = true
-	ii1.roTx = roTx
-	ii1.indexTable = iit.ii.ValuesTable
-	for _, item := range iit.files {
-		if item.endTxNum <= startTxNum {
-			continue
-		}
-		if item.startTxNum >= endTxNum {
-			break
-		}
-		if item.endTxNum >= endTxNum {
-			ii1.hasNextInDb = false
-		}
-		g := iit.dataReader(item.src.decompressor)
-		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				return ii1
-			}
-			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: wrapper, key: key, val: val, txNum: ^item.endTxNum})
-			ii1.hasNextInFiles = true
-		}
-	}
-	binary.BigEndian.PutUint64(ii1.startTxKey[:], startTxNum)
-	ii1.startTxNum = startTxNum
-	ii1.endTxNum = endTxNum
-	ii1.advanceInDb()
-	ii1.advanceInFiles()
-	ii1.advance()
-	return ii1
 }
 
 // collate [stepFrom, stepTo)

@@ -18,7 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type Generator struct {
@@ -248,7 +248,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
-		var sharedDomains *dbstate.SharedDomains
+		var sharedDomains *execctx.SharedDomains
 		defer func() {
 			if sharedDomains != nil {
 				sharedDomains.Close()
@@ -259,7 +259,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 		if calculatePostState {
 
-			sharedDomains, err = dbstate.NewSharedDomains(tx, log.Root())
+			sharedDomains, err = execctx.NewSharedDomains(tx, log.Root())
 			if err != nil {
 				return nil, err
 			}
@@ -275,7 +275,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 
 			// commitment are indexed by txNum of the first tx (system-tx) of the block
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 			if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 				return nil, err
 			}
@@ -337,7 +337,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 
 			// calculate state root after tx identified by txNum (txNim+1)
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipt", nil)
 			if err != nil {
 				return nil, err
@@ -430,21 +430,26 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
-	sharedDomains, err := dbstate.NewSharedDomains(tx, log.Root())
-	if err != nil {
-		return nil, err
-	}
-	defer sharedDomains.Close()
+	var sharedDomains *execctx.SharedDomains
+	defer func() {
+		if sharedDomains != nil {
+			sharedDomains.Close()
+		}
+	}()
 
 	var stateWriter state.StateWriter
 	var minTxNum uint64
 	if calculatePostState {
+		sharedDomains, err = execctx.NewSharedDomains(tx, log.Root())
+		if err != nil {
+			return nil, err
+		}
 		minTxNum, err = g.txNumReader.Min(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
-		sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
+		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 		if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 			return nil, err
 		}
@@ -483,7 +488,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			// calculate state root after tx identified by txNum (txNim+1)
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipts", nil)
 			if err != nil {
 				return nil, err

@@ -24,22 +24,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkDecompress(b *testing.B) {
+func BenchmarkDecompressNext(b *testing.B) {
 	t := new(testing.T)
-	d := prepareDict(t, 100_000)
+	d := prepareDict(t, 1, 1_000)
 	defer d.Close()
 
-	b.Run("next", func(b *testing.B) {
+	b.Run("buf", func(b *testing.B) {
 		b.ReportAllocs()
-		var buf []byte
+		var k []byte
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
-			buf, _ = g.Next(buf[:0])
-			if !g.HasNext() {
-				g.Reset(0)
+			g.Reset(0)
+			for g.HasNext() {
+				k, _ = g.Next(k[:0])
+				if len(k) > 0 {
+					_, _ = k[0], k[len(k)-1]
+				}
 			}
 		}
 	})
+	b.Run("heap", func(b *testing.B) {
+		b.ReportAllocs()
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			g.Reset(0)
+			for g.HasNext() {
+				k, _ := g.Next(nil)
+				if len(k) > 0 {
+					_, _ = k[0], k[len(k)-1]
+				}
+			}
+		}
+	})
+}
+
+func BenchmarkDecompressSkip(b *testing.B) {
+	t := new(testing.T)
+	d := prepareDict(t, 1, 1_000)
+	defer d.Close()
+
 	b.Run("skip", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
@@ -50,6 +73,7 @@ func BenchmarkDecompress(b *testing.B) {
 			}
 		}
 	})
+
 	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
