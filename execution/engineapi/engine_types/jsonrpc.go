@@ -65,7 +65,7 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
-	InclusionList         InclusionList       `json:"inclusionListTransactions"`
+	InclusionList         types.InclusionList `json:"inclusionListTransactions"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -125,8 +125,6 @@ type ClientVersionV1 struct {
 	Version string `json:"version" gencodec:"required"`
 	Commit  string `json:"commit" gencodec:"required"`
 }
-
-type InclusionList [][]byte
 
 func (c ClientVersionV1) String() string {
 	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
@@ -302,39 +300,4 @@ func ConvertPayloadId(payloadId uint64) *hexutil.Bytes {
 	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
 	ret := hexutil.Bytes(encodedPayloadId)
 	return &ret
-}
-
-func (inclusionList InclusionList) MarshalJSON() ([]byte, error) {
-	inclusionListHex := make([]hexutil.Bytes, len(inclusionList))
-
-	for i, tx := range inclusionList {
-		inclusionListHex[i] = tx
-	}
-	return json.Marshal(inclusionListHex)
-}
-
-func (inclusionList *InclusionList) UnmarshalJSON(input []byte) error {
-	var inclusionListHex []hexutil.Bytes
-	if err := json.Unmarshal(input, &inclusionListHex); err != nil {
-		return err
-	}
-
-	*inclusionList = make([][]byte, len(inclusionListHex))
-	for i, tx := range inclusionListHex {
-		(*inclusionList)[i] = tx
-	}
-	return nil
-}
-
-func ConvertInclusionListToTransactions(inclusionList InclusionList) (types.Transactions, error) {
-	txs, err := types.DecodeTransactions(inclusionList)
-	if err != nil {
-		return nil, err
-	}
-
-	return txs, nil
-}
-
-func ConvertTransactionstoInclusionList(txs types.Transactions) (InclusionList, error) {
-	return types.MarshalTransactionsBinary(txs)
 }

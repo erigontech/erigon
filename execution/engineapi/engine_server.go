@@ -63,7 +63,7 @@ var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
 
 type inclusionListItem struct {
 	parentHash    common.Hash
-	inclusionList engine_types.InclusionList
+	inclusionList types.InclusionList
 }
 
 type EngineServer struct {
@@ -192,7 +192,7 @@ func (s *EngineServer) validateInclusionList(payload *engine_types.ExecutionPayl
 	inclusionListTxHashes := make(map[common.Hash]bool)
 	for _, txBytes := range inclusionListTransactions {
 		// Decode the transaction to get its hash
-		inclusionTxns, err := engine_types.ConvertInclusionListToTransactions([][]byte{txBytes})
+		inclusionTxns, err := types.ConvertInclusionListToTransactions([][]byte{txBytes})
 		if err != nil {
 			s.logger.Debug("Failed to decode inclusion list transaction", "err", err)
 			continue // Skip invalid transactions
@@ -204,7 +204,7 @@ func (s *EngineServer) validateInclusionList(payload *engine_types.ExecutionPayl
 
 	payloadTxHashes := make(map[common.Hash]bool)
 	for _, txBytes := range payload.Transactions {
-		payloadTxns, err := engine_types.ConvertInclusionListToTransactions([][]byte{txBytes})
+		payloadTxns, err := types.ConvertInclusionListToTransactions([][]byte{txBytes})
 		if err != nil {
 			continue // skip invalid transactions
 		}

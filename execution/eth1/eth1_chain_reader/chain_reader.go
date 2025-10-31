@@ -403,6 +403,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsToRpc(attributes.Withdrawals),
 		ParentHash:            gointerfaces.ConvertHashToH256(baseHash),
+		InclusionList:         attributes.InclusionList,
 	}
 	if attributes.ParentBeaconBlockRoot != nil {
 		request.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*attributes.ParentBeaconBlockRoot)

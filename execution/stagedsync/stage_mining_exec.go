@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -200,7 +199,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 		// After processing normal transactions, add inclusion list transactions if they exist
 		if len(cfg.inclusionList) > 0 {
-			inclusionTxns, err := engine_types.ConvertInclusionListToTransactions(cfg.inclusionList)
+			inclusionTxns, err := types.ConvertInclusionListToTransactions(cfg.inclusionList)
 			if err != nil {
 				logger.Error("Failed to decode inclusion list transactions", "err", err)
 			} else if len(inclusionTxns) > 0 {
@@ -299,6 +298,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
+	// ExecBlockV3 will now handle inclusion list validation internally
 	if err = ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger, true); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err

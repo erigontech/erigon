@@ -74,6 +74,7 @@ type Config struct {
 	CancunTime   *big.Int `json:"cancunTime,omitempty"`
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
+	EIP7805Time  *big.Int `json:"eip7805Time,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -208,13 +209,14 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, EIP7805: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
 		c.ChainID,
 		c.TerminalTotalDifficulty,
 		timestampToTime(c.ShanghaiTime),
 		timestampToTime(c.CancunTime),
 		timestampToTime(c.PragueTime),
 		timestampToTime(c.OsakaTime),
+		timestampToTime(c.EIP7805Time),
 		timestampToTime(c.Bpo1Time),
 		timestampToTime(c.Bpo2Time),
 		timestampToTime(c.Bpo3Time),
@@ -342,6 +344,11 @@ func (c *Config) IsPrague(time uint64) bool {
 // IsOsaka returns whether time is either equal to the Osaka fork time or greater.
 func (c *Config) IsOsaka(time uint64) bool {
 	return isForked(c.OsakaTime, time)
+}
+
+// IsEIP7805 returns whether time is either equal to the EIP7805 fork time or greater.
+func (c *Config) IsEIP7805(time uint64) bool {
+	return isForked(c.EIP7805Time, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) *common.Address {
@@ -683,7 +690,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka                                 bool
+	IsPrague, IsOsaka, IsEIP7805                      bool
 	IsAura                                            bool
 }
 

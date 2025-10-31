@@ -207,7 +207,7 @@ func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash)
 	return nil, err
 }
 
-func (e *EngineServer) GetInclusionListV1(ctx context.Context, parentHash common.Hash) (*engine_types.InclusionList, error) {
+func (e *EngineServer) GetInclusionListV1(ctx context.Context, parentHash common.Hash) (*types.InclusionList, error) {
 	if inclusionList := e.getInclusionList(parentHash); inclusionList != nil {
 		return &inclusionList, nil
 	}
@@ -237,7 +237,7 @@ func (e *EngineServer) GetInclusionListV1(ctx context.Context, parentHash common
 		inclusionListSize += len(rlpTx)
 	}
 
-	result, err := engine_types.ConvertTransactionstoInclusionList(transactions)
+	result, err := types.ConvertTransactionstoInclusionList(transactions)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +245,7 @@ func (e *EngineServer) GetInclusionListV1(ctx context.Context, parentHash common
 	return &result, nil
 }
 
-func (e *EngineServer) addInclusionList(parentHash common.Hash, inclusionList engine_types.InclusionList) {
+func (e *EngineServer) addInclusionList(parentHash common.Hash, inclusionList types.InclusionList) {
 	e.inclusionListItemsLock.Lock()
 	defer e.inclusionListItemsLock.Unlock()
 
@@ -256,7 +256,7 @@ func (e *EngineServer) addInclusionList(parentHash common.Hash, inclusionList en
 	}
 }
 
-func (e *EngineServer) getInclusionList(parentHash common.Hash) engine_types.InclusionList {
+func (e *EngineServer) getInclusionList(parentHash common.Hash) types.InclusionList {
 	e.inclusionListItemsLock.Lock()
 	defer e.inclusionListItemsLock.Unlock()
 

@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // EngineAPI Beacon chain communication endpoint
@@ -44,5 +45,5 @@ type EngineAPI interface {
 	GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error)
 	GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)
 	GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error)
-	GetInclusionListV1(ctx context.Context, parentHash common.Hash) (*engine_types.InclusionList, error)
+	GetInclusionListV1(ctx context.Context, parentHash common.Hash) (*types.InclusionList, error)
 }

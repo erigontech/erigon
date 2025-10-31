@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -68,16 +69,17 @@ type RejectedTx struct {
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        common.Hash           `json:"stateRoot"`
-	TxRoot           common.Hash           `json:"txRoot"`
-	ReceiptRoot      common.Hash           `json:"receiptsRoot"`
-	LogsHash         common.Hash           `json:"logsHash"`
-	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts        `json:"receipts"`
-	Rejected         RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt        `json:"-"`
+	StateRoot          common.Hash           `json:"stateRoot"`
+	TxRoot             common.Hash           `json:"txRoot"`
+	ReceiptRoot        common.Hash           `json:"receiptsRoot"`
+	LogsHash           common.Hash           `json:"logsHash"`
+	Bloom              types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Receipts           types.Receipts        `json:"receipts"`
+	Rejected           RejectedTxs           `json:"rejected,omitempty"`
+	Difficulty         *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed            math.HexOrDecimal64   `json:"gasUsed"`
+	StateSyncReceipt   *types.Receipt        `json:"-"`
+	InclusionListValid bool                  `json:"inclusionListValid"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -155,7 +157,17 @@ func ExecuteBlockEphemerally(
 			}
 		}
 	}
+	// vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
 
+	// Validate inclusion list transactions for ephemeral execution
+	inclusionListValid := true
+	inclusionList := block.InclusionListTransactions()
+	if len(inclusionList) > 0 && chainConfig.IsEIP7805(header.Time) {
+		inclusionListValid = ValidateInclusionListTransactions(inclusionList, block, chainConfig, ibs)
+		if !inclusionListValid && !vmConfig.StatelessExec {
+			return nil, fmt.Errorf("inclusion list constraints not satisfied for block %d", block.NumberU64())
+		}
+	}
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
 		if dbg.LogHashMismatchReason() {
@@ -192,15 +204,16 @@ func ExecuteBlockEphemerally(
 	blockLogs := ibs.Logs()
 	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
-		StateRoot:   newRoot,
-		TxRoot:      types.DeriveSha(includedTxs),
-		ReceiptRoot: receiptSha,
-		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
-		Receipts:    receipts,
-		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
-		GasUsed:     math.HexOrDecimal64(*gasUsed),
-		Rejected:    rejectedTxs,
+		StateRoot:          newRoot,
+		TxRoot:             types.DeriveSha(includedTxs),
+		ReceiptRoot:        receiptSha,
+		Bloom:              bloom,
+		LogsHash:           rlpHash(blockLogs),
+		Receipts:           receipts,
+		Difficulty:         (*math.HexOrDecimal256)(header.Difficulty),
+		GasUsed:            math.HexOrDecimal64(*gasUsed),
+		Rejected:           rejectedTxs,
+		InclusionListValid: inclusionListValid,
 	}
 
 	if chainConfig.Bor != nil {
@@ -427,4 +440,72 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 		}
 	}
 	return nil
+}
+
+// ValidateInclusionListTransactions verifies that all transactions in the inclusion list
+// are either included in the block or cannot be appended at the end of the block.
+// Returns true if the block satisfies the inclusion list constraints.
+func ValidateInclusionListTransactions(inclusionList types.Transactions, block *types.Block, chainConfig *chain.Config, ibs *state.IntraBlockState) bool {
+	// Build a set of transaction hashes that are included in the block
+	includedTxs := make(map[common.Hash]bool)
+	for _, txn := range block.Transactions() {
+		includedTxs[txn.Hash()] = true
+	}
+
+	header := block.Header()
+	gasLeft := block.GasLimit() - block.GasUsed()
+	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
+
+	// Check each inclusion list transaction
+	for _, txn := range inclusionList {
+		// Transaction is included - constraint satisfied
+		if includedTxs[txn.Hash()] {
+			continue
+		}
+
+		// Blob transactions are not subject to inclusion list constraints
+		if txn.Type() == types.BlobTxType {
+			continue
+		}
+
+		// Check if transaction cannot be included due to gas limit
+		if txn.GetGasLimit() > gasLeft {
+			continue
+		}
+
+		// Check sender validity
+		from, err := txn.Sender(*signer)
+		if err != nil {
+			continue
+		}
+
+		// Check if transaction cannot be included due to insufficient balance
+		balance, err := ibs.GetBalance(from)
+		if err != nil {
+			continue
+		}
+
+		// Calculate transaction cost (feeCap * gasLimit + value)
+		cost := new(uint256.Int).Mul(txn.GetFeeCap(), uint256.NewInt(txn.GetGasLimit()))
+		cost.Add(cost, txn.GetValue())
+
+		if balance.Cmp(cost) < 0 {
+			continue
+		}
+
+		// Check if transaction cannot be included due to incorrect nonce
+		nonce, err := ibs.GetNonce(from)
+		if err != nil {
+			continue
+		}
+		if nonce != txn.GetNonce() {
+			continue
+		}
+
+		// Transaction could have been included but wasn't - validation fails
+		return false
+	}
+
+	// All transactions are either included or cannot be included
+	return true
 }

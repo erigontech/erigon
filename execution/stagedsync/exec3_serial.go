@@ -72,6 +72,28 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
+
+					// Validate inclusion list if EIP7805 (FOCIL) fork is active
+					if !se.isMining && se.cfg.chainConfig.IsEIP7805(txTask.Header.Time) {
+						// Read the full block to get inclusion list transactions
+						block, err := se.cfg.blockReader.BlockByNumber(ctx, se.applyTx, txTask.BlockNum)
+						if err != nil {
+							return fmt.Errorf("failed to read block for inclusion list validation: %w", err)
+						}
+						if block != nil {
+							inclusionList := block.InclusionListTransactions()
+							if len(inclusionList) > 0 {
+								// Create state reader for validation using SharedDomains
+								stateReader := state.NewReaderV3(se.doms.AsGetter(se.applyTx))
+								ibs := state.New(stateReader)
+
+								if !core.ValidateInclusionListTransactions(inclusionList, block, se.cfg.chainConfig, ibs) {
+									return fmt.Errorf("%w: block %d does not satisfy inclusion list constraints", consensus.ErrInvalidBlock, txTask.BlockNum)
+								}
+								se.logger.Debug("Inclusion list validation passed", "block", txTask.BlockNum, "inclusion_txns", len(inclusionList))
+							}
+						}
+					}
 				}
 
 				se.outputBlockNum.SetUint64(txTask.BlockNum)

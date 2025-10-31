@@ -732,6 +732,7 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
+	inclusionList Transactions
 	// caches
 	size atomic.Uint64
 }
@@ -1299,6 +1300,11 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 	}
 }
 
+// InclusionListTransactions returns the inclusion list transactions of the block.
+func (b *Block) InclusionListTransactions() Transactions {
+	return b.inclusionList
+}
+
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
@@ -1439,10 +1445,11 @@ func (b *Block) Copy() *Block {
 	}
 
 	newB := &Block{
-		header:       CopyHeader(b.header),
-		uncles:       uncles,
-		transactions: CopyTxs(b.transactions),
-		withdrawals:  withdrawals,
+		header:        CopyHeader(b.header),
+		uncles:        uncles,
+		transactions:  CopyTxs(b.transactions),
+		withdrawals:   withdrawals,
+		inclusionList: b.inclusionList,
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1456,10 +1463,22 @@ func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy.mutable = false
 	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
-		header:       headerCopy,
-		transactions: b.transactions,
-		uncles:       b.uncles,
-		withdrawals:  b.withdrawals,
+		header:        headerCopy,
+		transactions:  b.transactions,
+		uncles:        b.uncles,
+		withdrawals:   b.withdrawals,
+		inclusionList: b.inclusionList,
+	}
+}
+
+// WithInclusionListTransactions sets the inclusion list transactions of the block.
+func (b *Block) WithInclusionListTransactions(inclusionList Transactions) *Block {
+	return &Block{
+		header:        b.header,
+		transactions:  b.transactions,
+		uncles:        b.uncles,
+		withdrawals:   b.withdrawals,
+		inclusionList: inclusionList,
 	}
 }
 
