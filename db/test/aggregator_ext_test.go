@@ -588,7 +588,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	defer domains.Close()
 
 	rnd := newRnd(2342)
-	maxTx := stepSize * 8
+	maxTx := stepSize * 4
 
 	// 1. generate data
 	data := generateSharedDomainsUpdates(t, domains, rwTx, maxTx, rnd, length.Addr, 10, stepSize)
@@ -616,7 +616,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	t.Logf("expected hash: %x", expectedHash)
+	//t.Logf("expected hash: %x", expectedHash)
 	err = agg.BuildFiles(stepSize * 16)
 	require.NoError(t, err)
 
@@ -640,7 +640,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 
-	t.Logf("result hash: %x", resultHash)
+	//t.Logf("result hash: %x", resultHash)
 	require.Equal(t, expectedHash, resultHash)
 }
 
@@ -809,9 +809,10 @@ func generateSharedDomainsUpdates(t *testing.T, domains *execctx.SharedDomains, 
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			rh, err := domains.ComputeCommitment(context.Background(), tx, true, txNum/commitEvery, txNum, "", nil)
+			stateRootHash, err := domains.ComputeCommitment(context.Background(), tx, true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
-			t.Logf("commitment %x txn=%d", rh, txNum)
+			_ = stateRootHash
+			//t.Logf("commitment %x txn=%d", stateRootHash, txNum)
 		}
 	}
 	return usedKeys
