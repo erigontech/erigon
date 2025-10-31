@@ -440,6 +440,9 @@ func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, del bool) *types.RawBo
 }
 
 func (bd *BodyDownload) ClearBodyCache() {
+	if bd.bodyCache == nil {
+		return
+	}
 	bd.bodyCache.Clear(true)
 }
 
