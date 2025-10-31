@@ -743,7 +743,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 	var (
 		batchSize                = uint64(20)
 		blockRPS, blockBurst     = 5000, 5
-		receiptRPS, receiptBurst = 30, 2
+		receiptRPS, receiptBurst = 500, 4
 
 		logInterval   = time.Second * 40
 		logEvery      = time.NewTicker(logInterval)
