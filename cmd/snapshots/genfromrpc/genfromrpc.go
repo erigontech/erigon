@@ -752,7 +752,9 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 
 	defer logEvery.Stop()
 
-	receiptClient.SetRequestLimit(rate.Limit(receiptRPS), receiptBurst)
+	if receiptClient != nil {
+		receiptClient.SetRequestLimit(rate.Limit(receiptRPS), receiptBurst)
+	}
 	client.SetRequestLimit(rate.Limit(blockRPS), blockBurst)
 
 	for prev := startBlockNum; prev < endBlockNum; {
