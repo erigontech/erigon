@@ -278,7 +278,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 			b.Fatalf("failed to create call tracer: %v", err)
 		}
 		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
-		snap := statedb.Snapshot()
+		snap := statedb.PushSnapshot()
 		st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 		if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 			b.Fatalf("failed to execute transaction: %v", err)
@@ -287,6 +287,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 			b.Fatal(err)
 		}
 		statedb.RevertToSnapshot(snap, nil)
+		statedb.PopSnapshot(snap)
 	}
 }
 
