@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -1046,6 +1047,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := toBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
+			log.Info("TouchKey", "key", hexutil.Encode(keyBytes), "hashedKey", hexutil.Encode(hashedKey))
 
 			var err error
 			if !t.sortPerNibble {

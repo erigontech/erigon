@@ -26,6 +26,8 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
@@ -134,6 +136,9 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		return
 	}
 
+	if domain == kv.CommitmentDomain {
+		log.Info("CommitmentDomainPut", "key", hexutil.Encode(toBytesZeroCopy(key)), "txNum", txNum)
+	}
 	if old, ok := sd.domains[domain][key]; ok {
 		putSize += len(val) - len(old.data)
 	} else {
