@@ -236,6 +236,21 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 				modified = true
 				postAccount.Code = newCode
 			}
+
+			newCodeHash := common.Hash{}
+			if len(newCode) > 0 {
+				newCodeHash = crypto.Keccak256Hash(newCode)
+			}
+
+			prevCodeHash := common.Hash{}
+			if t.pre[addr].CodeHash != nil {
+				prevCodeHash = *t.pre[addr].CodeHash
+			}
+
+			if newCodeHash != prevCodeHash {
+				modified = true
+				postAccount.CodeHash = &newCodeHash
+			}
 		}
 
 		if !t.config.DisableStorage {
