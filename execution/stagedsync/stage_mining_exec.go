@@ -459,7 +459,8 @@ func addTransactionsToMiningBlock(
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
-		snap := ibs.Snapshot()
+		snap := ibs.PushSnapshot()
+		defer ibs.PopSnapshot(snap)
 
 		if txn.Type() == types.AccountAbstractionTxType {
 			aaTxn := txn.(*types.AccountAbstractionTransaction)

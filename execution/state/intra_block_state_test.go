@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -92,14 +93,14 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 		{
 			name: "SetBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.SetBalance(addr, *uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
+				s.SetBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.AddBalance(addr, *uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
+				s.AddBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
@@ -155,7 +156,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 			fn: func(a testAction, s *IntraBlockState) {
 				data := make([]byte, 2)
 				binary.BigEndian.PutUint16(data, uint16(a.args[0]))
-				s.AddLog(&types.Log{Address: addr, Data: data})
+				s.AddLog(&types.Log{Address: addr.Value(), Data: data})
 			},
 			args: make([]int64, 1),
 		},
@@ -169,7 +170,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 			name: "AddSlotToAccessList",
 			fn: func(a testAction, s *IntraBlockState) {
 				s.AddSlotToAccessList(addr,
-					common.Hash{byte(a.args[0])})
+					accounts.InternKey(common.Hash{byte(a.args[0])}))
 			},
 			args: make([]int64, 1),
 		},
@@ -179,7 +180,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
-				s.SetTransientState(addr, key, *val)
+				s.SetTransientState(addr, accounts.InternKey(key), *val)
 			},
 			args: make([]int64, 2),
 		},
@@ -187,7 +188,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 	action := actions[r.Intn(len(actions))]
 	var nameargs []string //nolint:prealloc
 	if !action.noAddr {
-		nameargs = append(nameargs, addr.Hex())
+		nameargs = append(nameargs, addr.String())
 	}
 	for i := range action.args {
 		action.args[i] = rand.Int63n(100)
@@ -203,7 +204,7 @@ func (*snapshotTest) Generate(r *rand.Rand, size int) reflect.Value {
 	// Generate random actions.
 	addrs := make([]accounts.Address, 50)
 	for i := range addrs {
-		addrs[i][0] = byte(i)
+		addrs[i] = accounts.InternAddress(common.Address{byte(i)})
 	}
 	actions := make([]testAction, size)
 	for i := range actions {
@@ -252,7 +253,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 	)
 	for i, action := range test.actions {
 		if len(test.snapshots) > sindex && i == test.snapshots[sindex] {
-			snapshotRevs[sindex] = state.Snapshot()
+			snapshotRevs[sindex] = state.PushSnapshot()
 			sindex++
 		}
 		action.fn(action, state)
@@ -265,6 +266,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 			action.fn(action, checkstate)
 		}
 		state.RevertToSnapshot(snapshotRevs[sindex], nil)
+		state.PopSnapshot(snapshotRevs[sindex])
 		if err := test.checkEqual(state, checkstate); err != nil {
 			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%w", sindex, err)
 			return false
@@ -364,9 +366,8 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		}
 		if obj != nil {
 			for key, value := range obj.dirtyStorage {
-				var out uint256.Int
-				checkstate.GetState(addr, key, &out)
-				if !checkeq("GetState("+key.Hex()+")", out, value) {
+				out, _ := checkstate.GetState(addr, key)
+				if !checkeq("GetState("+key.String()+")", out, value) {
 					return err
 				}
 			}
@@ -377,9 +378,8 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		}
 		if obj != nil {
 			for key, value := range obj.dirtyStorage {
-				var out uint256.Int
-				state.GetState(addr, key, &out)
-				if !checkeq("GetState("+key.Hex()+")", out, value) {
+				out, _ := state.GetState(addr, key)
+				if !checkeq("GetState("+key.String()+")", out, value) {
 					return err
 				}
 			}
@@ -401,7 +401,7 @@ func TestTransientStorage(t *testing.T) {
 	t.Parallel()
 	state := New(nil)
 
-	key := common.Hash{0x01}
+	key := accounts.InternKey(common.Hash{0x01})
 	value := uint256.NewInt(2)
 	addr := accounts.Address{}
 
@@ -430,28 +430,27 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	mvhm := NewVersionMap()
+	reader := NewReaderV3(domains.AsGetter(tx))
 
-	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	s := NewWithVersionMap(reader, mvhm)
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
-		sCopy := s.Copy()
+		sCopy := NewWithVersionMap(reader, mvhm)
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
 
-	addr := common.HexToAddress("0x01")
-	key := common.HexToHash("0x01")
-	val := *uint256.NewInt(1)
-	balance := *uint256.NewInt(100)
-
-	var v uint256.Int
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	val := u256.U64(1)
+	balance := u256.U64(100)
 
 	// Tx0 read
-	states[0].GetState(addr, key, &v)
-
+	v, err := states[0].GetState(addr, key)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx1 write
@@ -461,14 +460,16 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx1 read
-	states[1].GetState(addr, key, &v)
+	v, err = states[1].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
 	// Tx2 read
-	states[2].GetState(addr, key, &v)
+	v, err = states[2].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
@@ -478,17 +479,20 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	states[3].Selfdestruct(addr)
 
 	// Within Tx 3, the state should not change before finalize
-	states[3].GetState(addr, key, &v)
+	v, err = states[3].GetState(addr, key)
+	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 
 	// After finalizing Tx 3, the state will change
 	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
-	states[3].GetState(addr, key, &v)
+	v, err = states[3].GetState(addr, key)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(false), true, "")
 
 	// Tx4 read
-	states[4].GetState(addr, key, &v)
+	v, err = states[4].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err = states[4].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -503,21 +507,23 @@ func TestVersionMapRevert(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	mvhm := NewVersionMap()
-	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	reader := NewReaderV3(domains.AsGetter(tx))
+
+	s := NewWithVersionMap(reader, mvhm)
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
-		sCopy := s.Copy()
+		sCopy := NewWithVersionMap(reader, mvhm)
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
 
-	addr := common.HexToAddress("0x01")
-	key := common.HexToHash("0x01")
-	val := *uint256.NewInt(1)
-	balance := *uint256.NewInt(100)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	val := u256.U64(1)
+	balance := u256.U64(100)
 
 	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
@@ -525,23 +531,24 @@ func TestVersionMapRevert(t *testing.T) {
 	states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
 
-	var v uint256.Int
-
 	// Tx1 perform some ops and then revert
-	snapshot := states[1].Snapshot()
-	states[1].AddBalance(addr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified)
-	states[1].SetState(addr, key, *uint256.NewInt(1))
-	states[1].GetState(addr, key, &v)
+	snapshot := states[1].PushSnapshot()
+	states[1].AddBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified)
+	states[1].SetState(addr, key, u256.U64(1))
+	v, err := states[1].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
-	assert.Equal(t, *uint256.NewInt(200), b)
-	assert.Equal(t, *uint256.NewInt(1), v)
+	assert.Equal(t, u256.U64(200), b)
+	assert.Equal(t, u256.U64(1), v)
 
 	states[1].Selfdestruct(addr)
 
 	states[1].RevertToSnapshot(snapshot, nil)
+	states[1].PopSnapshot(snapshot)
 
-	states[1].GetState(addr, key, &v)
+	v, err = states[1].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err = states[1].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
@@ -550,7 +557,8 @@ func TestVersionMapRevert(t *testing.T) {
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx2 check the state and balance
-	states[2].GetState(addr, key, &v)
+	v, err = states[2].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
@@ -564,30 +572,31 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	mvhm := NewVersionMap()
-	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	reader := NewReaderV3(domains.AsGetter(tx))
+	s := NewWithVersionMap(reader, mvhm)
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
-		sCopy := s.Copy()
+		sCopy := NewWithVersionMap(reader, mvhm)
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
 
-	addr := common.HexToAddress("0x01")
-	key := common.HexToHash("0x01")
-	val := *uint256.NewInt(1)
-	balance := *uint256.NewInt(100)
-
-	var v uint256.Int
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	val := u256.U64(1)
+	balance := u256.U64(100)
 
 	// Tx0 read
-	states[0].GetState(addr, key, &v)
+	v, err := states[0].GetState(addr, key)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx0 write
 	states[0].SetState(addr, key, val)
-	states[0].GetState(addr, key, &v)
+	v, err = states[0].GetState(addr, key)
+	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
 
@@ -598,7 +607,8 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx2 read
-	states[2].GetState(addr, key, &v)
+	v, err = states[2].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err := states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
@@ -618,11 +628,13 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	}()
 
 	// Tx2 read again should get default (empty) vals because its dependency Tx1 is marked as estimate
-	states[2].GetState(addr, key, &v)
+	v, err = states[2].GetState(addr, key)
+	assert.NoError(t, err)
 	states[2].GetBalance(addr)
 
 	// Tx1 read again should get Tx0 vals
-	states[1].GetState(addr, key, &v)
+	v, err = states[1].GetState(addr, key)
+	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 }
 
@@ -633,25 +645,24 @@ func TestVersionMapOverwrite(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	mvhm := NewVersionMap()
-	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	reader := NewReaderV3(domains.AsGetter(tx))
+	s := NewWithVersionMap(reader, mvhm)
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
-		sCopy := s.Copy()
+		sCopy := NewWithVersionMap(reader, mvhm)
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
 
-	addr := common.HexToAddress("0x01")
-	key := common.HexToHash("0x01")
-	val1 := *uint256.NewInt(1)
-	balance1 := *uint256.NewInt(100)
-	val2 := *uint256.NewInt(2)
-	balance2 := *uint256.NewInt(200)
-
-	var v uint256.Int
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	val1 := u256.U64(1)
+	balance1 := u256.U64(100)
+	val2 := u256.U64(2)
+	balance2 := u256.U64(200)
 
 	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
@@ -662,7 +673,8 @@ func TestVersionMapOverwrite(t *testing.T) {
 	// Tx1 write
 	states[1].SetState(addr, key, val2)
 	states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified)
-	states[1].GetState(addr, key, &v)
+	v, err := states[1].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
@@ -671,7 +683,8 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance2, b)
 
 	// Tx2 read should get Tx1's value
-	states[2].GetState(addr, key, &v)
+	v, err = states[2].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
@@ -686,14 +699,16 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	// Tx2 read should get Tx0's value
 	states[2].versionedReads = nil
-	states[2].GetState(addr, key, &v)
+	v, err = states[2].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
 	assert.Equal(t, balance1, b)
 
 	// Tx1 read should get Tx0's value
-	states[1].GetState(addr, key, &v)
+	v, err = states[1].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err = states[1].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
@@ -708,7 +723,8 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	// Tx2 read again should get default vals
 	states[2].versionedReads = nil
-	states[2].GetState(addr, key, &v)
+	v, err = states[2].GetState(addr, key)
+	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -722,23 +738,24 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	mvhm := NewVersionMap()
-	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	reader := NewReaderV3(domains.AsGetter(tx))
+	s := NewWithVersionMap(reader, mvhm)
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
-		sCopy := s.Copy()
+		sCopy := NewWithVersionMap(reader, mvhm)
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
 
-	addr := common.HexToAddress("0x01")
-	key1 := common.HexToHash("0x01")
-	key2 := common.HexToHash("0x02")
-	val1 := *uint256.NewInt(1)
-	balance1 := *uint256.NewInt(100)
-	val2 := *uint256.NewInt(2)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key1 := accounts.InternKey(common.HexToHash("0x01"))
+	key2 := accounts.InternKey(common.HexToHash("0x02"))
+	val1 := u256.U64(1)
+	balance1 := u256.U64(100)
+	val2 := u256.U64(2)
 
 	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
@@ -749,37 +766,41 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
 
 	// Tx1 write
-	tx1Snapshot := states[1].Snapshot()
+	tx1Snapshot := states[1].PushSnapshot()
 	states[1].SetState(addr, key1, val1)
 	states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
-	var v uint256.Int
-
 	// Tx1 read
-	states[1].GetState(addr, key1, &v)
+	v, err := states[1].GetState(addr, key1)
+	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 	// Tx1 should see empty value in key2
-	states[1].GetState(addr, key2, &v)
+	v, err = states[1].GetState(addr, key2)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx2 read
-	states[2].GetState(addr, key2, &v)
+	v, err = states[2].GetState(addr, key2)
+	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
 	// Tx2 should see values written by Tx1
-	states[2].GetState(addr, key1, &v)
+	v, err = states[2].GetState(addr, key1)
+	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 
 	// Tx3 read
-	states[3].GetState(addr, key1, &v)
+	v, err = states[3].GetState(addr, key1)
+	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
-	states[3].GetState(addr, key2, &v)
+	v, err = states[3].GetState(addr, key2)
+	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
 	b, err = states[3].GetBalance(addr)
 	assert.NoError(t, err)
@@ -794,31 +815,36 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx3 read
 	states[3].versionedReads = nil
-	states[3].GetState(addr, key1, &v)
+	v, err = states[3].GetState(addr, key1)
+	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
 	b, err = states[3].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 	// Tx3 should see empty value in key2
-	states[3].GetState(addr, key2, &v)
+	v, err = states[3].GetState(addr, key2)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
+	states[1].PopSnapshot(tx1Snapshot)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 	// map deletes necessary here as they happen in scheduler not ibs
 	states[1].versionMap.Delete(addr, StatePath, key1, 1, true)
 	states[1].versionMap.Delete(addr, StatePath, key2, 1, true)
-	states[1].versionMap.Delete(addr, BalancePath, common.Hash{}, 1, true)
+	states[1].versionMap.Delete(addr, BalancePath, accounts.NilKey, 1, true)
 
 	// Tx3 read
 	// we need to flush the local state objects as we're not
 	// resetting the state - which is artificial for the test
 	states[3].stateObjects = map[accounts.Address]*stateObject{}
 	states[3].versionedReads = nil
-	states[3].GetState(addr, key1, &v)
+	v, err = states[3].GetState(addr, key1)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
-	states[3].GetState(addr, key2, &v)
+	v, err = states[3].GetState(addr, key2)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 	b, err = states[3].GetBalance(addr)
 	assert.NoError(t, err)
@@ -833,9 +859,11 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx3 read
 	states[3].versionedReads = nil
-	states[3].GetState(addr, key1, &v)
+	v, err = states[3].GetState(addr, key1)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
-	states[3].GetState(addr, key2, &v)
+	v, err = states[3].GetState(addr, key2)
+	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 	b, err = states[3].GetBalance(addr)
 	assert.NoError(t, err)
@@ -848,30 +876,29 @@ func TestApplyVersionedWrites(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	mvhm := NewVersionMap()
-	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	reader := NewReaderV3(domains.AsGetter(tx))
+	s := NewWithVersionMap(reader, mvhm)
 
-	sClean := s.Copy()
-	sClean.versionMap = nil
-
-	sSingleProcess := sClean.Copy()
+	sClean := New(reader)
+	sSingleProcess := New(reader)
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
-		sCopy := s.Copy()
+		sCopy := NewWithVersionMap(reader, mvhm)
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
 
-	addr1 := common.HexToAddress("0x01")
-	addr2 := common.HexToAddress("0x02")
-	addr3 := common.HexToAddress("0x03")
-	key1 := common.HexToHash("0x01")
-	key2 := common.HexToHash("0x02")
-	val1 := *uint256.NewInt(1)
+	addr1 := accounts.InternAddress(common.HexToAddress("0x01"))
+	addr2 := accounts.InternAddress(common.HexToAddress("0x02"))
+	addr3 := accounts.InternAddress(common.HexToAddress("0x03"))
+	key1 := accounts.InternKey(common.HexToHash("0x01"))
+	key2 := accounts.InternKey(common.HexToHash("0x02"))
+	val1 := u256.U64(1)
 	balance1 := uint256.NewInt(100)
-	val2 := *uint256.NewInt(2)
+	val2 := u256.U64(2)
 	balance2 := uint256.NewInt(200)
 	code := []byte{1, 2, 3}
 

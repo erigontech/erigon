@@ -702,7 +702,7 @@ func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey, value *uint256.Int) error {
+func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	versionedValue, source, _, err := versionedRead(sdb, addr, StatePath, key, true, u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
@@ -715,13 +715,11 @@ func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key account
 			return value, nil
 		})
 
-	*value = versionedValue
-
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, value)
+		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, versionedValue)
 	}
 
-	return err
+	return versionedValue, err
 }
 
 func (sdb *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, error) {

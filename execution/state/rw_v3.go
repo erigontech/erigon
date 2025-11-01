@@ -24,7 +24,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -459,7 +458,7 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 	return nil
 }
 
-func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
