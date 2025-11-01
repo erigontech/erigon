@@ -23,8 +23,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
@@ -143,8 +141,7 @@ func gasSStore(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize u
 	if current.Eq(value) { // noop (1)
 		return params.NetSstoreNoopGas, nil
 	}
-	var original uint256.Int
-	evm.IntraBlockState().GetCommittedState(callContext.Address(), key, &original)
+	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.NetSstoreInitGas, nil
@@ -199,8 +196,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, scopeGas uint64, memor
 		return params.SloadGasEIP2200, nil
 	}
 
-	var original uint256.Int
-	evm.IntraBlockState().GetCommittedState(callContext.Address(), key, &original)
+	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.SstoreSetGasEIP2200, nil

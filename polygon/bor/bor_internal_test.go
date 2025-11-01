@@ -71,7 +71,7 @@ func TestCommitStatesIndore(t *testing.T) {
 		Time:   1744000028,
 	}
 
-	contractAddr := common.HexToAddress("a1")
+	contractAddr := accounts.InternAddress(common.HexToAddress("a1"))
 
 	cr.EXPECT().GetHeaderByNumber(uint64(96)).Return(&types.Header{
 		Number: big.NewInt(96),
@@ -80,8 +80,8 @@ func TestCommitStatesIndore(t *testing.T) {
 	br.EXPECT().EventsWithinTime(gomock.Any(), time.Unix(1744000000-128, 0), time.Unix(1744000028-128, 0)).Return(
 		[]*types.Message{
 			types.NewMessage(
-				common.HexToAddress(""),
-				&contractAddr,
+				accounts.ZeroAddress,
+				contractAddr,
 				0,
 				uint256.NewInt(0),
 				0,

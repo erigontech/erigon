@@ -97,7 +97,7 @@ func BenchmarkJumpDest(b *testing.B) {
 	for b.Loop() {
 		contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}, c)
 		contract.Code = code
-		contract.CodeHash = hash
+		contract.CodeHash = accounts.InternCodeHash(hash)
 
 		b.StartTimer()
 		for i := range contract.Code {
