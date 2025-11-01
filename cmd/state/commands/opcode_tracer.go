@@ -303,8 +303,8 @@ func (ot *opcodeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tra
 		// fill in the missing data in the entry
 		currentEntry.TxHash = new(common.Hash)
 		currentEntry.TxHash.SetBytes(currentTxHash.Bytes())
-		currentEntry.CodeHash = new(common.Hash)
-		currentEntry.CodeHash.SetBytes(scope.CodeHash().Bytes())
+		codeHashValue := scope.CodeHash().Value()
+		currentEntry.CodeHash = &codeHashValue
 		currentEntry.CodeSize = len(scope.Code())
 		if ot.saveOpcodes {
 			currentEntry.Opcodes = make([]opcode, 0, 200)

@@ -7,7 +7,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -110,7 +109,7 @@ func (p *Printer) OnNonceChange(a accounts.Address, prev, new uint64) {
 	fmt.Printf("OnNonceChange: a=%v, prev=%v, new=%v\n", a, prev, new)
 }
 
-func (p *Printer) OnCodeChange(a accounts.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
+func (p *Printer) OnCodeChange(a accounts.Address, prevCodeHash accounts.CodeHash, prev []byte, codeHash accounts.CodeHash, code []byte) {
 	fmt.Printf("OnCodeChange: a=%v, prevCodeHash=%v, prev=%s, codeHash=%v, code=%s\n", a, prevCodeHash, hexutil.Bytes(prev), codeHash, hexutil.Bytes(code))
 }
 

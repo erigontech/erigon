@@ -21,7 +21,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -172,7 +171,7 @@ func (bsstt *borStateSyncTxnTracer) OnNonceChange(a accounts.Address, prev, new 
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnCodeChange(a accounts.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
+func (bsstt *borStateSyncTxnTracer) OnCodeChange(a accounts.Address, prevCodeHash accounts.CodeHash, prev []byte, codeHash accounts.CodeHash, code []byte) {
 	if bsstt.Tracer.OnCodeChange != nil {
 		bsstt.Tracer.OnCodeChange(a, prevCodeHash, prev, codeHash, code)
 	}

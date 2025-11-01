@@ -111,8 +111,8 @@ func TestBodyStorage(t *testing.T) {
 	signer1 := types.MakeSigner(chainspec.Mainnet.Config, 1, 0)
 	body := &types.Body{
 		Transactions: []types.Transaction{
-			mustSign(types.NewTransaction(1, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
-			mustSign(types.NewTransaction(2, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+			mustSign(types.NewTransaction(1, testAddr, &u256.Num1, 1, &u256.Num1, nil), *signer1),
+			mustSign(types.NewTransaction(2, testAddr, &u256.Num1, 2, &u256.Num1, nil), *signer1),
 		},
 		Uncles: []*types.Header{{Extra: []byte("test header")}},
 	}
@@ -479,8 +479,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 	ctx := m.Ctx
 
 	// Create a live block since we need metadata to reconstruct the receipt
-	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
-	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
+	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), &u256.Num1, 1, &u256.Num1, nil)
+	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), &u256.Num2, 2, &u256.Num2, nil)
 
 	header := &types.Header{Number: big.NewInt(1)}
 	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
@@ -802,8 +802,8 @@ func TestBadBlocks(t *testing.T) {
 		signer1 := types.MakeSigner(chainspec.Mainnet.Config, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
-				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
-				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number, testAddr, &u256.Num1, 1, &u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, &u256.Num1, 2, &u256.Num1, nil), *signer1),
 			},
 			Uncles: []*types.Header{{Extra: []byte("test header")}},
 		}

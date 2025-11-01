@@ -490,7 +490,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return nil
 		}
 		code = common.CopyBytes(code)
-		codeHash := crypto.Keccak256(code)
+		codeHash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(code)))
 		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {

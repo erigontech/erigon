@@ -276,7 +276,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 
 	// Execute the message.
-	snapshot := statedb.Snapshot()
+	snapshot := statedb.PushSnapshot()
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
 	res, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
@@ -287,6 +287,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	if err != nil {
 		statedb.RevertToSnapshot(snapshot, err)
 	}
+	statedb.PopSnapshot(snapshot)
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
 		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
 	}
@@ -384,22 +385,23 @@ func vmTestBlockHash(n uint64) (common.Hash, error) {
 
 func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {
 	// Derive sender from private key if present.
-	var from common.Address
+	var from accounts.Address
 	if len(tx.PrivateKey) > 0 {
 		key, err := crypto.ToECDSA(tx.PrivateKey)
 		if err != nil {
 			return nil, fmt.Errorf("invalid private key: %v", err)
 		}
-		from = crypto.PubkeyToAddress(key.PublicKey)
+		from = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 	}
 
 	// Parse recipient if present.
-	var to *common.Address
+	var to accounts.Address
 	if tx.To != "" {
-		to = new(common.Address)
+		var txto common.Address
 		if err := to.UnmarshalText([]byte(tx.To)); err != nil {
 			return nil, fmt.Errorf("invalid to address: %v", err)
 		}
+		to = accounts.InternAddress(txto)
 	}
 
 	// Get values specific to this post state.

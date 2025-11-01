@@ -438,7 +438,7 @@ func (t *Tracer) OnNonceChange(address accounts.Address, oldNonce, newNonce uint
 	})
 }
 
-func (t *Tracer) OnCodeChange(address accounts.Address, prevCodeHash common.Hash, prevCode []byte, newCodeHash common.Hash, newCode []byte) {
+func (t *Tracer) OnCodeChange(address accounts.Address, prevCodeHash accounts.CodeHash, prevCode []byte, newCodeHash accounts.CodeHash, newCode []byte) {
 	if t.recordOptions.DisableOnCodeChangeRecording {
 		return
 	}
@@ -450,9 +450,9 @@ func (t *Tracer) OnCodeChange(address accounts.Address, prevCodeHash common.Hash
 	t.traces.Append(Trace{
 		OnCodeChange: &OnCodeChangeTrace{
 			Address:      address.Value(),
-			PrevCodeHash: prevCodeHash,
+			PrevCodeHash: prevCodeHash.Value(),
 			PrevCode:     prevCode,
-			NewCodeHash:  newCodeHash,
+			NewCodeHash:  newCodeHash.Value(),
 			NewCode:      newCode,
 		},
 	})

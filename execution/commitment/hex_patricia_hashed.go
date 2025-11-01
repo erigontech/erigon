@@ -1182,7 +1182,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, row int, hashedK
 	} else {
 		code = codeWithHash.Code
 		// sanity check
-		if account.CodeHash.Value() != codeWithHash.CodeHash {
+		if account.CodeHash != codeWithHash.CodeHash {
 			return nil, fmt.Errorf("account.CodeHash(%x)!=codeReads[%x].CodeHash(%x)", account.CodeHash, addrHash, codeWithHash.CodeHash)
 		}
 	}

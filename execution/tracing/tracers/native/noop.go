@@ -24,7 +24,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -86,7 +85,7 @@ func (*noopTracer) OnBalanceChange(a accounts.Address, prev, new uint256.Int, re
 
 func (*noopTracer) OnNonceChange(a accounts.Address, prev, new uint64) {}
 
-func (*noopTracer) OnCodeChange(a accounts.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
+func (*noopTracer) OnCodeChange(a accounts.Address, prevCodeHash accounts.CodeHash, prev []byte, codeHash accounts.CodeHash, code []byte) {
 }
 
 func (*noopTracer) OnStorageChange(a accounts.Address, k accounts.StorageKey, prev, new uint256.Int) {

@@ -476,7 +476,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
-	proof.CodeHash = acc.CodeHash
+	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie

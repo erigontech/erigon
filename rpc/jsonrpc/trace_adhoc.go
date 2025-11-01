@@ -699,7 +699,7 @@ func (sd *StateDiff) UpdateAccountData(address accounts.Address, original, accou
 	return nil
 }
 
-func (sd *StateDiff) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (sd *StateDiff) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}

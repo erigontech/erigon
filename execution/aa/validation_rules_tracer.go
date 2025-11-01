@@ -167,7 +167,7 @@ func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from accounts.Addre
 	}
 
 	if t.isDelegatedAccount(code) && from != t.senderAddress {
-		t.err = fmt.Errorf("delegated account %s can only be used as sender")
+		t.err = fmt.Errorf("delegated account %s can only be used as sender", from)
 		return
 	}
 
