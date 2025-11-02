@@ -148,7 +148,9 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 			continue
 		}
 		keyBuf, _ = kvReader.Next(keyBuf[:0])
-		logger.Trace("checking kvi for", "key", hex.EncodeToString(keyBuf), "offset", keyOffset, "kvi", kviFileName)
+		if logger.Enabled(ctx, log.LvlTrace) {
+			logger.Trace("checking kvi for", "key", hex.EncodeToString(keyBuf), "offset", keyOffset, "kvi", kviFileName)
+		}
 		keyCount++
 		atValue = true
 		kviOffset, ok := kviReader.Lookup(keyBuf)
