@@ -17,6 +17,7 @@
 package integrity
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -134,16 +135,19 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		eg.SetLimit(1)
 	}
 	var integrityErr error
-	var keyCount, derefCount atomic.Uint64
+	var keyCount, accDerefs, accNonDerefs, storageDerefs, storageNonDerefs atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
 		}
 		eg.Go(func() error {
-			keys, derefs, err := checkCommitmentKvDeref(ctx, file, aggTx.StepSize(), failFast, logger)
+			counts, err := checkCommitmentKvDeref(ctx, file, aggTx.StepSize(), failFast, logger)
 			if err == nil {
-				keyCount.Add(keys)
-				derefCount.Add(derefs)
+				keyCount.Add(counts.branchKeyCount)
+				accDerefs.Add(counts.accDerefCount)
+				accNonDerefs.Add(counts.accNonDerefCount)
+				storageDerefs.Add(counts.storageDerefCount)
+				storageNonDerefs.Add(counts.storageNonDerefCount)
 				return nil
 			}
 			if !failFast {
@@ -156,23 +160,39 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	if err != nil {
 		return err
 	}
-	logger.Info("checked commitment kvs dereference in", "files", len(files), "keys", keyCount.Load(), "derefs", derefCount.Load())
+	logger.Info(
+		"checked commitment kvs dereference in",
+		"files", len(files),
+		"keys", keyCount.Load(),
+		"accDerefs", accDerefs.Load(),
+		"accNonDerefs", accNonDerefs.Load(),
+		"storageDerefs", storageDerefs.Load(),
+		"storageNonDerefs", storageNonDerefs.Load(),
+	)
 	return integrityErr
 }
 
-func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (uint64, uint64, error) {
+type derefCounts struct {
+	branchKeyCount       uint64
+	accDerefCount        uint64
+	accNonDerefCount     uint64
+	storageDerefCount    uint64
+	storageNonDerefCount uint64
+}
+
+func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 	if !state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum) {
 		logger.Info("checking commitment defer skipped, file not within threshold", "file", fileName)
-		return 0, 0, nil
+		return derefCounts{}, nil
 	}
 	logger.Info("checking commitment deref in", "file", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 	commDecomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
-		return 0, 0, err
+		return derefCounts{}, err
 	}
 	defer commDecomp.Close()
 	commDecomp.MadvSequential()
@@ -180,42 +200,57 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 	accReader, accDecompClose, err := deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
 	if err != nil {
-		return 0, 0, err
+		return derefCounts{}, err
 	}
 	defer accDecompClose()
 	storageReader, storageDecompClose, err := deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
 	if err != nil {
-		return 0, 0, err
+		return derefCounts{}, err
 	}
 	defer storageDecompClose()
 	totalKeys := uint64(commDecomp.Count()) / 2
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
 	var branchKeyBuf, branchValueBuf, newBranchValueBuf, plainKeyBuf []byte
-	var keyCount, derefCount uint64
+	var counts derefCounts
 	var integrityErr error
 	for commReader.HasNext() {
 		select {
 		case <-ctx.Done():
-			return 0, 0, ctx.Err()
+			return derefCounts{}, ctx.Err()
 		case <-logTicker.C:
-			at := fmt.Sprintf("%d/%d", keyCount, totalKeys)
-			percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(totalKeys)*100)
-			rate := float64(keyCount) / time.Since(start).Seconds()
-			eta := time.Duration(float64(totalKeys-keyCount)/rate) * time.Second
-			logger.Info("checking commitment deref progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "derefs", derefCount, "kv", fileName)
+			at := fmt.Sprintf("%d/%d", counts.branchKeyCount, totalKeys)
+			percent := fmt.Sprintf("%.1f%%", float64(counts.branchKeyCount)/float64(totalKeys)*100)
+			rate := float64(counts.branchKeyCount) / time.Since(start).Seconds()
+			eta := time.Duration(float64(totalKeys-counts.branchKeyCount)/rate) * time.Second
+			logger.Info(
+				"checking commitment deref progress",
+				"at", at,
+				"p", percent,
+				"k/s", rate,
+				"eta", eta,
+				"accDerefs", counts.accDerefCount,
+				"accNonDerefs", counts.accNonDerefCount,
+				"storageDerefs", counts.storageDerefCount,
+				"storageNonDerefs", counts.storageNonDerefCount,
+				"kv", fileName,
+			)
 		default: // proceed
 		}
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
 		if !commReader.HasNext() {
 			err = errors.New("invalid key/value pair during decompression")
 			if failFast {
-				return 0, 0, err
+				return derefCounts{}, err
 			}
 			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			logger.Warn(err.Error())
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
+		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			logger.Info("skipping state key", "valueLen", len(branchValueBuf), "file", fileName)
+			continue
+		}
 		branchData := commitment.BranchData(branchValue)
 		_, err = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) (newKey []byte, err error) {
 			logger.Trace(
@@ -227,6 +262,14 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			)
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
+					logger.Trace(
+						"skipping, not a storage reference",
+						"branchKey", hex.EncodeToString(branchKey),
+						"addr", common.BytesToAddress(key[:length.Addr]),
+						"hash", common.BytesToHash(key[length.Addr:]),
+						"file", fileName,
+					)
+					counts.storageNonDerefCount++
 					return nil, nil // not a referenced key, nothing to check
 				}
 				offset, err := checkOffsetDeref(key, uint64(storageReader.Size()))
@@ -249,10 +292,26 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 					return nil, nil
 				}
-				derefCount++
+				counts.storageDerefCount++
+				logger.Trace(
+					"dereferenced storage key",
+					"branchKey", hex.EncodeToString(branchKey),
+					"key", hex.EncodeToString(key),
+					"offset", offset,
+					"addr", common.BytesToAddress(plainKey[:length.Addr]),
+					"hash", common.BytesToHash(plainKey[length.Addr:]),
+					"file", fileName,
+				)
 				return plainKey, nil
 			}
 			if len(key) == length.Addr {
+				logger.Trace(
+					"skipping, not an account reference",
+					"branchKey", hex.EncodeToString(branchKey),
+					"addr", common.BytesToAddress(key[:length.Addr]),
+					"file", fileName,
+				)
+				counts.accNonDerefCount++
 				return nil, nil // not a referenced key, nothing to check
 			}
 			offset, err := checkOffsetDeref(key, uint64(accReader.Size()))
@@ -275,15 +334,23 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 				return nil, nil
 			}
-			derefCount++
-			return nil, nil
+			counts.accDerefCount++
+			logger.Trace(
+				"dereferenced account key",
+				"branchKey", hex.EncodeToString(branchKey),
+				"key", hex.EncodeToString(key),
+				"offset", offset,
+				"addr", common.BytesToAddress(plainKey),
+				"file", fileName,
+			)
+			return plainKey, nil
 		})
 		if err != nil {
-			return 0, 0, err
+			return derefCounts{}, err
 		}
-		keyCount++
+		counts.branchKeyCount++
 	}
-	return keyCount, derefCount, integrityErr
+	return counts, integrityErr
 }
 
 func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain) (*seg.Reader, func(), error) {
