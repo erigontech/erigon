@@ -248,7 +248,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
-			logger.Info("skipping state key", "valueLen", len(branchValueBuf), "file", fileName)
+			logger.Info("skipping state key", "valueLen", len(branchValue), "file", fileName)
 			continue
 		}
 		branchData := commitment.BranchData(branchValue)
