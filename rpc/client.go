@@ -592,9 +592,6 @@ func (c *Client) dispatch(codec ServerCodec) {
 			conn.handler.logger.Trace("RPC connection read error", "err", err)
 			// A read error is fatal for the connection, and all pending requests must be cancelled, including any
 			// that might still be considered in-flight.
-			if lastOp != nil {
-				conn.handler.removeRequestOp(lastOp)
-			}
 			conn.close(err, nil)
 			reading = false
 
