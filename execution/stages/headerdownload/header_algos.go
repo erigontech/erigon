@@ -28,7 +28,6 @@ import (
 	"io"
 	"math/big"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -307,7 +306,7 @@ func (hd *HeaderDownload) logAnchorState() {
 		sb.WriteString(fmt.Sprintf(", next retry in %v", anchor.nextRetryTime.Sub(currentTime)))
 		ss = append(ss, sb.String())
 	}
-	sort.Strings(ss)
+	slices.Sort(ss)
 	hd.logger.Debug("[downloader] Queue sizes", "anchors", hd.anchorTree.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
 	for _, s := range ss {
 		hd.logger.Debug(s)

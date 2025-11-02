@@ -25,7 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -315,7 +315,7 @@ func (s DistinctNetSet) String() string {
 		keys = append(keys, k.(string))
 		return true
 	})
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for i, k := range keys {
 		var ip net.IP
 		if k[0] == '4' {

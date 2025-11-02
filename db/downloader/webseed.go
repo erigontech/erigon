@@ -22,7 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -147,8 +147,8 @@ type WebSeedCheckReport struct {
 }
 
 func (w *WebSeedCheckReport) sort() {
-	sort.Strings(w.missingTorrents)
-	sort.Strings(w.danglingTorrents)
+	slices.Sort(w.missingTorrents)
+	slices.Sort(w.danglingTorrents)
 }
 
 func (w *WebSeedCheckReport) OK() bool {
