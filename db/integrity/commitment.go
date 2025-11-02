@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -213,7 +214,10 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	totalKeys := uint64(commDecomp.Count()) / 2
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
-	var branchKeyBuf, branchValueBuf, newBranchValueBuf, plainKeyBuf []byte
+	branchKeyBuf := make([]byte, 0, datasize.MB.Bytes())
+	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
+	newBranchValueBuf := make([]byte, 0, datasize.MB.Bytes())
+	plainKeyBuf := make([]byte, 0, datasize.MB.Bytes())
 	var counts derefCounts
 	var integrityErr error
 	for commReader.HasNext() {
@@ -255,22 +259,26 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		}
 		branchData := commitment.BranchData(branchValue)
 		_, err = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) (newKey []byte, err error) {
-			logger.Trace(
-				"checking commitment deref for branch",
-				"branchKey", hex.EncodeToString(branchKey),
-				"key", hex.EncodeToString(key),
-				"isStorage", isStorage,
-				"kv", fileName,
-			)
+			if logger.Enabled(ctx, log.LvlTrace) {
+				logger.Trace(
+					"checking commitment deref for branch",
+					"branchKey", hex.EncodeToString(branchKey),
+					"key", hex.EncodeToString(key),
+					"isStorage", isStorage,
+					"kv", fileName,
+				)
+			}
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
-					logger.Trace(
-						"skipping, not a storage reference",
-						"branchKey", hex.EncodeToString(branchKey),
-						"addr", common.BytesToAddress(key[:length.Addr]),
-						"hash", common.BytesToHash(key[length.Addr:]),
-						"kv", fileName,
-					)
+					if logger.Enabled(ctx, log.LvlTrace) {
+						logger.Trace(
+							"skipping, not a storage reference",
+							"branchKey", hex.EncodeToString(branchKey),
+							"addr", common.BytesToAddress(key[:length.Addr]),
+							"hash", common.BytesToHash(key[length.Addr:]),
+							"kv", fileName,
+						)
+					}
 					counts.storageNonDerefCount++
 					return nil, nil // not a referenced key, nothing to check
 				}
@@ -295,24 +303,28 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					return nil, nil
 				}
 				counts.storageDerefCount++
-				logger.Trace(
-					"dereferenced storage key",
-					"branchKey", hex.EncodeToString(branchKey),
-					"key", hex.EncodeToString(key),
-					"offset", offset,
-					"addr", common.BytesToAddress(plainKey[:length.Addr]),
-					"hash", common.BytesToHash(plainKey[length.Addr:]),
-					"kv", fileName,
-				)
+				if logger.Enabled(ctx, log.LvlTrace) {
+					logger.Trace(
+						"dereferenced storage key",
+						"branchKey", hex.EncodeToString(branchKey),
+						"key", hex.EncodeToString(key),
+						"offset", offset,
+						"addr", common.BytesToAddress(plainKey[:length.Addr]),
+						"hash", common.BytesToHash(plainKey[length.Addr:]),
+						"kv", fileName,
+					)
+				}
 				return plainKey, nil
 			}
 			if len(key) == length.Addr {
-				logger.Trace(
-					"skipping, not an account reference",
-					"branchKey", hex.EncodeToString(branchKey),
-					"addr", common.BytesToAddress(key[:length.Addr]),
-					"kv", fileName,
-				)
+				if logger.Enabled(ctx, log.LvlTrace) {
+					logger.Trace(
+						"skipping, not an account reference",
+						"branchKey", hex.EncodeToString(branchKey),
+						"addr", common.BytesToAddress(key[:length.Addr]),
+						"kv", fileName,
+					)
+				}
 				counts.accNonDerefCount++
 				return nil, nil // not a referenced key, nothing to check
 			}
@@ -337,14 +349,16 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return nil, nil
 			}
 			counts.accDerefCount++
-			logger.Trace(
-				"dereferenced account key",
-				"branchKey", hex.EncodeToString(branchKey),
-				"key", hex.EncodeToString(key),
-				"offset", offset,
-				"addr", common.BytesToAddress(plainKey),
-				"kv", fileName,
-			)
+			if logger.Enabled(ctx, log.LvlTrace) {
+				logger.Trace(
+					"dereferenced account key",
+					"branchKey", hex.EncodeToString(branchKey),
+					"key", hex.EncodeToString(key),
+					"offset", offset,
+					"addr", common.BytesToAddress(plainKey),
+					"kv", fileName,
+				)
+			}
 			return plainKey, nil
 		})
 		if err != nil {
