@@ -188,8 +188,14 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if !state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum) {
-		logger.Info("checking commitment defer skipped, file not within threshold", "file", fileName)
+	if !state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum) {
+		logger.Info(
+			"checking commitment defer skipped, file not above min",
+			"file", fileName,
+			"startTxNum", startTxNum,
+			"endTxNum", endTxNum,
+			"steps", (endTxNum-startTxNum)/stepSize,
+		)
 		return derefCounts{}, nil
 	}
 	logger.Info("checking commitment deref in", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
