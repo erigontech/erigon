@@ -62,7 +62,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool,
 		startTxNum := file.StartRootNum()
 		endTxNum := file.EndRootNum()
 		maxTxNum := endTxNum - 1
-		logger.Info("checking commitment root in", "file", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
+		logger.Info("checking commitment root in", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 		v, ok, start, end, err := aggTx.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
 		if err != nil {
 			return err
@@ -117,6 +117,7 @@ func CheckCommitmentKvi(ctx context.Context, db kv.TemporalRoDB, failFast bool, 
 }
 
 func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {
+	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -162,6 +163,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	}
 	logger.Info(
 		"checked commitment kvs dereference in",
+		"dur", time.Since(start),
 		"files", len(files),
 		"keys", keyCount.Load(),
 		"accDerefs", accDerefs.Load(),
@@ -189,7 +191,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		logger.Info("checking commitment defer skipped, file not within threshold", "file", fileName)
 		return derefCounts{}, nil
 	}
-	logger.Info("checking commitment deref in", "file", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
+	logger.Info("checking commitment deref in", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 	commDecomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
 		return derefCounts{}, err
@@ -258,7 +260,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				"branchKey", hex.EncodeToString(branchKey),
 				"key", hex.EncodeToString(key),
 				"isStorage", isStorage,
-				"file", fileName,
+				"kv", fileName,
 			)
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
@@ -267,7 +269,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 						"branchKey", hex.EncodeToString(branchKey),
 						"addr", common.BytesToAddress(key[:length.Addr]),
 						"hash", common.BytesToHash(key[length.Addr:]),
-						"file", fileName,
+						"kv", fileName,
 					)
 					counts.storageNonDerefCount++
 					return nil, nil // not a referenced key, nothing to check
@@ -300,7 +302,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					"offset", offset,
 					"addr", common.BytesToAddress(plainKey[:length.Addr]),
 					"hash", common.BytesToHash(plainKey[length.Addr:]),
-					"file", fileName,
+					"kv", fileName,
 				)
 				return plainKey, nil
 			}
@@ -309,7 +311,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					"skipping, not an account reference",
 					"branchKey", hex.EncodeToString(branchKey),
 					"addr", common.BytesToAddress(key[:length.Addr]),
-					"file", fileName,
+					"kv", fileName,
 				)
 				counts.accNonDerefCount++
 				return nil, nil // not a referenced key, nothing to check
@@ -341,7 +343,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				"key", hex.EncodeToString(key),
 				"offset", offset,
 				"addr", common.BytesToAddress(plainKey),
-				"file", fileName,
+				"kv", fileName,
 			)
 			return plainKey, nil
 		})
@@ -350,6 +352,16 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		}
 		counts.branchKeyCount++
 	}
+	logger.Info(
+		"checked commitment kv dereference in",
+		"dur", time.Since(start),
+		"keys", counts.branchKeyCount,
+		"accDerefs", counts.accDerefCount,
+		"accNonDerefs", counts.accNonDerefCount,
+		"storageDerefs", counts.storageDerefCount,
+		"storageNonDerefs", counts.storageNonDerefCount,
+		"kv", fileName,
+	)
 	return counts, integrityErr
 }
 
