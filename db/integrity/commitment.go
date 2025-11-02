@@ -190,7 +190,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	endTxNum := file.EndRootNum()
 	if !state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum) {
 		logger.Info(
-			"checking commitment defer skipped, file not above min",
+			"checking commitment deref skipped, file not above min steps",
 			"file", fileName,
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,
