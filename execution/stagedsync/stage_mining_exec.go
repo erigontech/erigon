@@ -121,7 +121,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
 	defer mb.Close()
-	simSd, err := execctx.NewSharedDomains(mb, logger)
+	simSd, err := execctx.NewSharedDomains(ctx, mb, logger)
 	if err != nil {
 		return err
 	}

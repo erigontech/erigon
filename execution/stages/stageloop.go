@@ -151,7 +151,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		tx.Commit()
 	}()
 
-	doms, err := execctx.NewSharedDomains(tx, logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
@@ -601,7 +601,7 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Close()
 
-	sd, err := execctx.NewSharedDomains(mb, logger)
+	sd, err := execctx.NewSharedDomains(ctx, mb, logger)
 	if err != nil {
 		return err
 	}

@@ -161,7 +161,7 @@ func ExecV3(ctx context.Context,
 	var err error
 	if !inMemExec {
 		var err error
-		doms, err = execctx.NewSharedDomains(applyTx, log.New())
+		doms, err = execctx.NewSharedDomains(ctx, applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, commitmentdb.ErrBehindCommitment) {

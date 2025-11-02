@@ -281,7 +281,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if err != nil {
 		return nil, err
 	}
-	doms, err := execctx.NewSharedDomains(tx, e.logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	defer doms.Close()
 	defer tx.Rollback()
 
@@ -290,7 +290,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}

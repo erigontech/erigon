@@ -168,7 +168,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(tx, logger1)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger1)
 	if err != nil {
 		return err
 	}

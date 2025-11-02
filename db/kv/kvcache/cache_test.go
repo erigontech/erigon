@@ -236,7 +236,7 @@ func TestAPI(t *testing.T) {
 		var txID uint64
 		err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			txID = tx.ViewID()
-			d, err := execctx.NewSharedDomains(tx, log.New())
+			d, err := execctx.NewSharedDomains(ctx, tx, log.New())
 			if err != nil {
 				return err
 			}

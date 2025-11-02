@@ -72,8 +72,8 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 	}
 }
 
-func isDomainAheadOfBlocks(tx kv.TemporalRwTx, logger log.Logger) bool {
-	doms, err := execctx.NewSharedDomains(tx, logger)
+func isDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err)
 		return errors.Is(err, commitmentdb.ErrBehindCommitment)
@@ -254,7 +254,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	sd, err := execctx.NewSharedDomains(tx, e.logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
 		return
 	}
@@ -396,7 +396,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 	}
-	if isDomainAheadOfBlocks(tx, e.logger) {
+	if isDomainAheadOfBlocks(ctx, tx, e.logger) {
 		if err := sd.Flush(ctx, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -432,9 +432,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	flushExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
-	stateFlushingInParallel := flushExtendingFork && e.syncCfg.ParallelStateFlushing
-	if flushExtendingFork {
+	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
+	stateFlushingInParallel := mergeExtendingFork && e.syncCfg.ParallelStateFlushing
+	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if stateFlushingInParallel {
 			// Send forkchoice early (We already know the fork is valid)
@@ -448,6 +448,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
+
+		sd.SeekCommitment(ctx, tx)
 	}
 	// Run the forkchoice
 	initialCycle := limitedBigJump
@@ -592,7 +594,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
 		logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64(), "txnum", txnum, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0))}
-		if flushExtendingFork {
+		if mergeExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
 			if !e.syncCfg.ParallelStateFlushing {
 				totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]

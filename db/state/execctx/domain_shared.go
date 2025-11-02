@@ -83,7 +83,7 @@ type SharedDomains struct {
 	metrics           changeset.DomainMetrics
 }
 
-func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -100,7 +100,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
+	if err := sd.SeekCommitment(ctx, tx); err != nil {
 		return nil, err
 	}
 

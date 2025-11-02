@@ -864,14 +864,20 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		suffix += " "
 	}
 
-	vals := []interface{}{
+	var vals []interface{}
+
+	if mode == "done" {
+		vals = []interface{}{"in", interval}
+	}
+
+	vals = append(vals, []interface{}{
 		"blk", blk,
 		"blks", blks,
 		"blk/s", common.PrettyCounter(float64(blks) / interval.Seconds()),
 		"txs", common.PrettyCounter(txs),
 		"tx/s", common.PrettyCounter(txsSec),
 		"gas/s", common.PrettyCounter(gasSec),
-	}
+	}...)
 
 	if len(extraVals) > 0 {
 		vals = append(vals, extraVals...)

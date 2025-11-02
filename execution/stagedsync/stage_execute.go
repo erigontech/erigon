@@ -139,7 +139,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	br := cfg.blockReader
 
 	if doms == nil {
-		doms, err = execctx.NewSharedDomains(rwTx, logger)
+		doms, err = execctx.NewSharedDomains(ctx, rwTx, logger)
 		if err != nil {
 			return err
 		}

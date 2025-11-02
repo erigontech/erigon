@@ -141,7 +141,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			if rec := recover(); rec != nil {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err)
+				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
 				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
 			}
@@ -224,8 +224,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					if !dbg.DiscardCommitment() {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
-							applyResult.Exhausted != nil ||
-							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+							applyResult.Exhausted != nil || (flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 
 							resetExecGauges(ctx)
 
@@ -337,10 +336,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									applyResult.BlockNum, applyResult.BlockHash, applyResult.ParentHash,
 									rwTx, pe.cfg, execStage, pe.logger, u)
 							}
+
+							<-logCommittedDone // make sure no async mutations by LogCommitted can happen at this point
 							// fix these here - they will contain estimates after commit logging
-							select {
-							case <-logCommittedDone: // make sure no async mutations by LogCommitted can happen at this point
-							}
 							pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
 							pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
 							uncommittedBlocks = 0
@@ -366,7 +364,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.Exhausted != nil {
 						return applyResult.Exhausted
 					}
-
 					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
 						changeSet = &changeset.StateChangeSet{}
 						pe.domains().SetChangesetAccumulator(changeSet)

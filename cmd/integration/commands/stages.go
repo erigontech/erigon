@@ -607,7 +607,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
-	domains, err := execctx.NewSharedDomains(tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
@@ -927,7 +927,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 	if execProgress == 0 {
-		doms, err := execctx.NewSharedDomains(tx, log.New())
+		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		if err != nil {
 			panic(err)
 		}
@@ -943,7 +943,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	doms, err := execctx.NewSharedDomains(tx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	if err != nil {
 		return err
 	}
