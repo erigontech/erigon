@@ -100,9 +100,12 @@ func (r *revisions) revertToSnapshot(revid int) int {
 		}
 		panic(fmt.Errorf("revision id %v cannot be reverted (idx=%v,len=%v,id=%v)", revid, idx, len(r.valid), id))
 	}
-	snapshot := r.valid[idx].journalIndex
+	snapshot := r.valid[idx]
 	r.valid = r.valid[:idx]
-	return snapshot
+	if r.nextId == snapshot.id+1 {
+		r.nextId = snapshot.id
+	}
+	return snapshot.journalIndex
 }
 
 var revisionsPool = sync.Pool{
