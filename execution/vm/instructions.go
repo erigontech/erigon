@@ -391,13 +391,21 @@ func opBalance(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint
 }
 
 func opOrigin(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	originVal := interpreter.evm.Origin.Value()
-	scope.Stack.push(*new(uint256.Int).SetBytes(originVal[:]))
+	if origin := interpreter.evm.Origin; origin.IsNil() {
+		scope.Stack.push(uint256.Int{})
+	} else {
+		originVal := origin.Value()
+		scope.Stack.push(*new(uint256.Int).SetBytes(originVal[:]))
+	}
 	return pc, nil, nil
 }
 func opCaller(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	caller := scope.Contract.Caller().Value()
-	scope.Stack.push(*new(uint256.Int).SetBytes(caller[:]))
+	if caller := scope.Contract.Caller(); caller.IsNil() {
+		scope.Stack.push(uint256.Int{})
+	} else {
+		callerValue := caller.Value()
+		scope.Stack.push(*new(uint256.Int).SetBytes(callerValue[:]))
+	}
 	return pc, nil, nil
 }
 
@@ -682,8 +690,12 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	coinbaseValue := interpreter.evm.Context.Coinbase.Value()
-	scope.Stack.push(*new(uint256.Int).SetBytes(coinbaseValue[:]))
+	if coinbase := interpreter.evm.Context.Coinbase; coinbase.IsNil() {
+		scope.Stack.push(uint256.Int{})
+	} else {
+		coinbaseValue := coinbase.Value()
+		scope.Stack.push(*new(uint256.Int).SetBytes(coinbaseValue[:]))
+	}
 	return pc, nil, nil
 }
 
