@@ -88,6 +88,9 @@ func setDefaults(cfg *Config) {
 		}
 	}
 
+	if cfg.Origin.IsNil() {
+		cfg.Origin = accounts.ZeroAddress
+	}
 	if cfg.Difficulty == nil {
 		cfg.Difficulty = new(big.Int)
 	}
