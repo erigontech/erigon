@@ -9,7 +9,7 @@ Erigon is primarily controlled using the command line, started using the `./buil
 Using the command-line options allows for configurations, and several functionalities can be called using sub commands. To add a configuration flag to the command line simply add the argument and, optionally, its value:
 
 ```shell
-./build/bin/erigon [flag]
+./build/bin/erigon [options]
 ```
 
 for example:
@@ -18,7 +18,7 @@ for example:
 ./build/bin/erigon --http.addr="0.0.0.0"
 ```
 
-See [here](configuring-erigon.md) how to configure Erigon with the available flags.
+See [here](configuring-erigon.md) how to configure Erigon with the available options (aka flags).
 
 ## All-in-One Client
 

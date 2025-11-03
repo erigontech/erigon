@@ -13,7 +13,7 @@ WSL enables you to run a complete GNU/Linux environment natively within Windows,
 
 ### Building Erigon
 
-Once WSL 2 is set up, you can build and run Erigonexactly as you would on a regular Linux distribution.
+Once WSL 2 is set up, you can build and run Erigon exactly as you would on a regular Linux distribution.
 
 {% content-ref url="linux-and-macos.md" %}
 [linux-and-macos.md](linux-and-macos.md)

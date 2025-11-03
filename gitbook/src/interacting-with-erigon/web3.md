@@ -24,8 +24,4 @@ The `web3` namespace provides utility methods that are part of the standard Ethe
 * No special configuration is required to use these methods
 * They are available on both HTTP and WebSocket connections
 
-## API documentation
-
-For the API documentation refer to official Ethereum documentation available at
-
-[https://ethereum.org/developers/docs/apis/json-rpc/#web3\_clientversion](https://ethereum.org/developers/docs/apis/json-rpc/#web3_clientversion)
+{% include "../.gitbook/includes/api-documentation-2.md" %}

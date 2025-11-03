@@ -6,16 +6,11 @@ description: >-
 
 # Interacting with Erigon
 
-The [RPC daemon](../fundamentals/modules/rpc-daemon.md) is a fundamental component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component.
-
-{% content-ref url="../fundamentals/modules/rpc-daemon.md" %}
-[rpc-daemon.md](../fundamentals/modules/rpc-daemon.md)
-{% endcontent-ref %}
-
-The Erigon RPC Service supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../fundamentals/modules/rpc-daemon.md), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
 * [`eth`](eth.md): Standard Ethereum API.
 * [`erigon`](erigon.md): Erigon-specific extensions.
+* [`engine`](../summary/interacting-with-erigon/engine.md): The JSON-RPC Interface for Execution and Consensus Layer Communication.
 * [`web3`](web3.md): Web3 compatibility API.
 * [`net`](net.md): Network information API.
 * [`debug`](debug.md): Debugging and tracing API.
@@ -28,6 +23,12 @@ The Erigon RPC Service supports various API namespaces, which can be enabled or 
 * [`gRPC`](grpc.md): API for lower-level data access.
 
 {% include "../.gitbook/includes/warning-admin_-and-debug_-....md" %}
+
+For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis/api-documentation/).
+
+{% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
+
+{% embed url="https://ethereum.github.io/execution-apis/api-documentation/" %}
 
 ## Erigon RPC Transports
 
@@ -134,9 +135,7 @@ Erigon uses the standard GraphQL documented by Geth at [https://geth.ethereum.or
 
 ## Interacting with the RPC
 
-You can easily interact with these APIs just like you would with any Ethereum client.
-
-You can use `curl`, a programming language with a low-level library, or tools like Foundry to interact with the chain at the exposed HTTP or WebSocket port.
+You can easily interact with these APIs using `curl`, a programming language with a low-level library, or tools like [Foundry](https://getfoundry.sh/) to interact with the chain at the exposed HTTP or WebSocket port.
 
 To enable all APIs using an HTTP transport:
 
@@ -155,18 +154,4 @@ cast rpc admin_nodeInfo
 cast rpc debug_traceTransaction <tx_hash>
 cast rpc erigon_forks
 ```
-
-## Modular Architecture
-
-Erigon supports running components as separate processes. The RPC daemon can run independently from the main Erigon node:
-
-```bash
-# Start main Erigon node
-erigon --http=false --private.api.addr=localhost:9090
-
-# Start separate RPC daemon
-rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
-```
-
-This modular approach allows for better resource management and scalability.
 

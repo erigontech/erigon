@@ -1,5 +1,19 @@
 ---
 description: 'Your Erigon Guide: Core Features, Setup Instructions, and Essential Links'
+layout:
+  width: default
+  title:
+    visible: true
+  description:
+    visible: true
+  tableOfContents:
+    visible: true
+  outline:
+    visible: true
+  pagination:
+    visible: true
+  metadata:
+    visible: true
 ---
 
 # Introduction

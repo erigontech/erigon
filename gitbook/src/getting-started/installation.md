@@ -8,7 +8,7 @@ To use Erigon, you must first install the software. You have several installatio
 
 #### Before You Begin
 
-* Always check the list of releases for the latest [Release Notes](https://github.com/erigontech/erigon/releases).
+Always check the list of releases for the latest [Release Notes](https://github.com/erigontech/erigon/releases).
 
 #### Installation and Management Topics
 
@@ -18,4 +18,4 @@ You can find detailed instructions for the following methods:
 * [Windows](installation/windows.md)
 * [Docker](installation/docker.md)
 * [Upgrading from a previous version](installation/upgrading.md)
-* Migrating from another client like Geth (see [here](installation/migrating-from-geth.md) for specific instructions).
+* [Migrating from another client](installation/migrating-from-geth.md) like Geth, Netherming, Besu or Reth.

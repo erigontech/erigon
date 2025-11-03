@@ -1,5 +1,5 @@
 ---
-description: How to install and run Erigon 3 Windows
+description: How to install and run Erigon on Windows
 ---
 
 # Windows
@@ -14,6 +14,6 @@ Since pre-compiled binaries are not available for Windows, users must choose one
 
 ### ⚠️ Key Considerations
 
-* WSL Version: Only WSL Version 2 is supported.
-* Data Location is Critical: For the best performance using WSL 2, the Erigon data directory (`datadir`) must be hosted on the native Linux filesystem within WSL.
-* Overall Performance: If configured optimally (i.e., data on the native Linux filesystem), WSL 2 offers the best performance profile, making it the superior choice for high-throughput nodes, despite being medium in difficulty.
+* **WSL Version**: Only WSL Version 2 is supported.
+* **Data Location is Critical**: For the best performance using WSL 2, the Erigon data directory (`datadir`) must be hosted on the native Linux filesystem within WSL.
+* **Overall Performance**: If configured optimally (i.e., data on the native Linux filesystem), WSL 2 offers the best performance profile, making it the superior choice for high-throughput nodes, despite being medium in difficulty.

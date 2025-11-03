@@ -1,7 +1,10 @@
-# `trace` RPC Namespace
+---
+description: Inspecting Transaction Execution with Trace, VMTrace, and StateDiff
+---
 
-The `trace` module is for getting a deeper insight into transaction processing.
-It includes two sets of calls the transaction trace filtering API and the ad-hoc tracing API.
+# trace
+
+The `trace` module is for getting a deeper insight into transaction processing. It includes two sets of calls the transaction trace filtering API and the ad-hoc tracing API.
 
 In order to use the Transaction-Trace Filtering API, Erigon must be fully synced with the argument `trace` in `http.api` flag.
 
@@ -13,31 +16,36 @@ As for the Ad-hoc Tracing API, as long the blocks have not yet been pruned, the 
 
 ## The Ad-hoc Tracing API
 
-The ad-hoc tracing API allows you to perform a number of different diagnostics on calls or transactions,
-either historical ones from the chain or hypothetical ones not yet mined. The diagnostics include:
+The ad-hoc tracing API allows you to perform diagnostics on calls or transactions—whether they are historical ones from the chain or hypothetical ones not yet mined. As long as the blocks have not yet been pruned, the RPC calls will work.
 
-- `trace` **Transaction trace**. An equivalent trace to that in the previous section.
-- `vmTrace` **Virtual Machine execution trace**. Provides a full trace of the VM's state throughout the execution of the transaction, including for any subcalls.
-- `stateDiff` **State difference**. Provides information detailing all altered portions of the Ethereum state made due to the execution of the transaction.
+The diagnostics are requested by providing a configuration object that specifies the tracer type to be executed, allowing for deep insight into EVM execution:
 
-There are three means of providing a transaction to execute; either providing the same information as when making
-a call using `eth_call` (see `trace_call`), through providing raw, signed, transaction data as when using
-`eth_sendRawTransaction` (see `trace_rawTransaction`) or simply a transaction hash for a previously mined
-transaction (see `trace_replayTransaction`). In the latter case, your node must be in archive mode or the
-transaction should be within the most recent 1000 blocks.
+* `trace`: Provides a Transaction Trace, showing the sequence of all external calls, internal messages, and value transfers that occurred during execution.
+* `vmTrace`: Provides a Virtual Machine Execution Trace, delivering a full step-by-step trace of the EVM's state throughout the transaction, including all opcodes and gas usage.
+* `stateDiff`: Provides a State Difference, detailing all altered portions of the Ethereum state (e.g., storage, balances, nonces) resulting from the transaction's execution.
+
+#### Providing a Transaction to Trace
+
+There are three primary ways to specify the transaction to be traced:
+
+1. Hypothetical Call: Providing the transaction information (like sender, recipient, and data) as if making a call using `eth_call` (see `trace_call`).
+2. Raw Transaction: Providing raw, signed transaction data, as when using `eth_sendRawTransaction` (see `trace_rawTransaction`).
+3. Mined Transaction: Providing a transaction hash for a previously mined transaction (see `trace_replayTransaction`).
+
+{% hint style="info" %}
+**Note**: For replaying mined transactions, your node must be in archive mode, or the transaction must be within the most recent 1000 blocks.
+{% endhint %}
 
 ## The Transaction-Trace Filtering API
 
-These APIs allow you to get a full *externality* trace on any transaction executed throughout the Erigon chain.
-Unlike the log filtering API, you are able to search and filter based only upon address information.
-Information returned includes the execution of all `CREATE`s, `SUICIDE`s and all variants of `CALL` together
-with input data, output data, gas usage, amount transferred and the success status of each individual action.
+These APIs allow you to get a full _externality_ trace on any transaction executed throughout the Erigon chain. Unlike the log filtering API, you are able to search and filter based only upon address information. Information returned includes the execution of all `CREATE`s, `SUICIDE`s and all variants of `CALL` together with input data, output data, gas usage, amount transferred and the success status of each individual action.
 
 ### `traceAddress` field
 
-The `traceAddress` field of all returned traces, gives the exact location in the call trace [index in root, index in first `CALL`, index in second `CALL`, ...].
+The `traceAddress` field of all returned traces, gives the exact location in the call trace \[index in root, index in first `CALL`, index in second `CALL`, ...].
 
 i.e. if the trace is:
+
 ```
 A
   CALLs B
@@ -45,6 +53,7 @@ A
   CALLs C
     CALLs G
 ```
+
 then it should look something like:
 
 `[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]`
@@ -52,42 +61,48 @@ then it should look something like:
 ## JSON-RPC methods
 
 #### Ad-hoc Tracing
-- [trace_call](#trace_call)
-- [trace_callMany](#trace_callmany)
-- [trace_rawTransaction](#trace_rawtransaction)
-- [trace_replayBlockTransactions](#trace_replayblocktransactions)
-- [trace_replayTransaction](#trace_replaytransaction)
+
+* [trace\_call](trace.md#trace_call)
+* [trace\_callMany](trace.md#trace_callmany)
+* [trace\_rawTransaction](trace.md#trace_rawtransaction)
+* [trace\_replayBlockTransactions](trace.md#trace_replayblocktransactions)
+* [trace\_replayTransaction](trace.md#trace_replaytransaction)
 
 #### Transaction-Trace Filtering
-- [trace_block](#trace_block)
-- [trace_filter](#trace_filter)
-- [trace_get](#trace_get)
-- [trace_transaction](#trace_transaction)
+
+* [trace\_block](trace.md#trace_block)
+* [trace\_filter](trace.md#trace_filter)
+* [trace\_get](trace.md#trace_get)
+* [trace\_transaction](trace.md#trace_transaction)
 
 ## JSON-RPC API Reference
 
-### trace_call
+### trace\_call
 
 Executes the given call and returns a number of possible traces for it.
 
 #### Parameters
 
-0. `Object` - [Transaction object] where `from` field is optional and `nonce` field is omitted.
-0. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-0. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Object` - \[Transaction object] where `from` field is optional and `nonce` field is omitted.
+2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+3. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
 
 #### Returns
 
-- `Array` - Block traces
+* `Array` - Block traces
 
 #### Example
 
 Request
+
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_call","params":[{ ... },["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
+
 ```js
 {
   "id": 1,
@@ -112,14 +127,14 @@ Response
 
 ***
 
-### trace_callMany
+### trace\_callMany
 
 Performs multiple call traces on top of the same block. i.e. transaction `n` will be executed on top of a pending block with all `n-1` transactions applied (traced) first. Allows to trace dependent transactions.
 
 #### Parameters
 
-0. `Array` - List of trace calls with the type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-0. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'`, `'earliest'` or `'pending'`, see the [default block parameter](#the-default-block-parameter).
+1. `Array` - List of trace calls with the type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'`, `'earliest'` or `'pending'`, see the [default block parameter](trace.md#the-default-block-parameter).
 
 ```js
 params: [
@@ -147,16 +162,20 @@ params: [
 
 #### Returns
 
-- `Array` - Array of the given transactions' traces
+* `Array` - Array of the given transactions' traces
 
 #### Example
 
 Request
+
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_callMany","params":[[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
+
 ```js
 {
   "id": 1,
@@ -212,34 +231,38 @@ Response
 
 ***
 
-### trace_rawTransaction
+### trace\_rawTransaction
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces
 
 #### Parameters
 
-0. `Data` - Raw transaction data.
-0. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+1. `Data` - Raw transaction data.
+2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 
+{% code overflow="wrap" %}
 ```js
 params: [
   "0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",
   ["trace"]
 ]
 ```
+{% endcode %}
 
 #### Returns
 
-- `Object` - Block traces.
+* `Object` - Block traces.
 
 #### Example
 
 Request
+
 ```bash
 curl --data '{"method":"trace_rawTransaction","params":["0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 Response
+
 ```js
 {
   "id": 1,
@@ -264,14 +287,14 @@ Response
 
 ***
 
-### trace_replayBlockTransactions
+### trace\_replayBlockTransactions
 
 Replays all transactions in a block returning the requested traces for each transaction.
 
 #### Parameters
 
-0. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
-0. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 
 ```js
 params: [
@@ -282,16 +305,18 @@ params: [
 
 #### Returns
 
-- `Array` - Block transactions traces.
+* `Array` - Block transactions traces.
 
 #### Example
 
 Request
+
 ```bash
 curl --data '{"method":"trace_replayBlockTransactions","params":["0x2ed119",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 Response
+
 ```js
 {
   "id": 1,
@@ -320,14 +345,14 @@ Response
 
 ***
 
-### trace_replayTransaction
+### trace\_replayTransaction
 
 Replays a transaction, returning the traces.
 
 #### Parameters
 
-0. `Hash` - Transaction hash.
-0. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+1. `Hash` - Transaction hash.
+2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 
 ```js
 params: [
@@ -338,16 +363,18 @@ params: [
 
 #### Returns
 
-- `Object` - Block traces.
+* `Object` - Block traces.
 
 #### Example
 
 Request
+
 ```bash
 curl --data '{"method":"trace_replayTransaction","params":["0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 Response
+
 ```js
 {
   "id": 1,
@@ -372,13 +399,13 @@ Response
 
 ***
 
-### trace_block
+### trace\_block
 
 Returns traces created at given block.
 
 #### Parameters
 
-0. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
 
 ```js
 params: [
@@ -388,16 +415,20 @@ params: [
 
 #### Returns
 
-- `Array` - Block traces.
+* `Array` - Block traces.
 
 #### Example
 
 Request
+
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_block","params":["0x2ed119"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
+
 ```js
 {
   "id": 1,
@@ -431,19 +462,19 @@ Response
 
 ***
 
-### trace_filter
+### trace\_filter
 
 Returns traces matching given filter
 
 #### Parameters
 
-0. `Object` - The filter object
-    - `fromBlock`:   `Quantity` or `Tag` - (optional) From this block.
-    - `toBlock`:   `Quantity` or `Tag` - (optional) To this block.
-    - `fromAddress`:   `Array` - (optional) Sent from these addresses.
-    - `toAddress`:   `Address` - (optional) Sent to these addresses.
-    - `after`:   `Quantity` - (optional) The offset trace number
-    - `count`:   `Quantity` - (optional) Integer number of traces to display in a batch.
+1. `Object` - The filter object
+   * `fromBlock`: `Quantity` or `Tag` - (optional) From this block.
+   * `toBlock`: `Quantity` or `Tag` - (optional) To this block.
+   * `fromAddress`: `Array` - (optional) Sent from these addresses.
+   * `toAddress`: `Address` - (optional) Sent to these addresses.
+   * `after`: `Quantity` - (optional) The offset trace number
+   * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
 
 ```js
 params: [{
@@ -457,16 +488,20 @@ params: [{
 
 #### Returns
 
-- `Array` - Traces matching given filter
+* `Array` - Traces matching given filter
 
 #### Example
 
 Request
+
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_filter","params":[{"fromBlock":"0x2ed0c4","toBlock":"0x2ed128","toAddress":["0x8bbB73BCB5d553B5A556358d27625323Fd781D37"],"after":1000,"count":100}],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
+
 ```js
 {
   "id": 1,
@@ -500,14 +535,14 @@ Response
 
 ***
 
-### trace_get
+### trace\_get
 
 Returns trace at given position.
 
 #### Parameters
 
-0. `Hash` - Transaction hash.
-0. `Array` - Index positions of the traces.
+1. `Hash` - Transaction hash.
+2. `Array` - Index positions of the traces.
 
 ```js
 params: [
@@ -518,16 +553,20 @@ params: [
 
 #### Returns
 
-- `Object` - Trace object
+* `Object` - Trace object
 
 #### Example
 
 Request
+
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_get","params":["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",["0x0"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
+
 ```js
 {
   "id": 1,
@@ -560,30 +599,36 @@ Response
 
 ***
 
-### trace_transaction
+### trace\_transaction
 
 Returns all traces of given transaction
 
 #### Parameters
 
-0. `Hash` - Transaction hash
+1. `Hash` - Transaction hash
 
+{% code overflow="wrap" %}
 ```js
 params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]
 ```
+{% endcode %}
 
 #### Returns
 
-- `Array` - Traces of given transaction
+* `Array` - Traces of given transaction
 
 #### Example
 
 Request
+
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_transaction","params":["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
+
 ```js
 {
   "id": 1,

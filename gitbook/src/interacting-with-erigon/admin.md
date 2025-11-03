@@ -1,3 +1,7 @@
+---
+description: Security-Sensitive Methods for Node Operators
+---
+
 # admin
 
 The `admin` namespace provides administrative methods for managing the Erigon node, including peer management and node information retrieval. These methods are designed for node operators and developers who need to monitor and control various aspects of the Erigon client's operation.

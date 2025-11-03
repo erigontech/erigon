@@ -30,19 +30,19 @@ The values in the table below refer to the --datadir directory as of September 2
 
 {% tabs %}
 {% tab title="Ethereum mainnet" %}
-| **Sync Mode**  | **Disk Size (Required)** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ------------------------ | --------------------------- | ------------------ | --------------------- |
-| Archive        | 1.77 TB                  | 4 TB                        | 32 GB              | 64 GB                 |
-| Full (Default) | 920 GB                   | 2 TB                        | 16 GB              | 32 GB                 |
-| Minimal        | 350 GB                   | 1 TB                        | 16 GB              | 64 GB                 |
+| **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
+| Archive        | 1.77 TB                | 4 TB                        | 32 GB              | 64 GB                 |
+| Full (Default) | 920 GB                 | 2 TB                        | 16 GB              | 32 GB                 |
+| Minimal        | 350 GB                 | 1 TB                        | 16 GB              | 64 GB                 |
 {% endtab %}
 
 {% tab title="Gnosis Chain" %}
-| **Sync Mode**  | **Disk Size (Required)** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ------------------------ | --------------------------- | ------------------ | --------------------- |
-| Archive        | 539 GB                   | 1 TB                        | 16 GB              | 32 GB                 |
-| Full (Default) | 462 GB                   | 1 TB                        | 8 GB               | 16 GB                 |
-| Minimal        | 128 GB                   | 500 GB                      | 8 GB               | 16 GB                 |
+| **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
+| Archive        | 539 GB                 | 1 TB                        | 16 GB              | 32 GB                 |
+| Full (Default) | 462 GB                 | 1 TB                        | 8 GB               | 16 GB                 |
+| Minimal        | 128 GB                 | 500 GB                      | 8 GB               | 16 GB                 |
 {% endtab %}
 
 {% tab title="Polygon" %}
@@ -50,11 +50,11 @@ The values in the table below refer to the --datadir directory as of September 2
 The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
 {% endhint %}
 
-| **Sync Mode**  | **Disk Size (Required)** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ------------------------ | --------------------------- | ------------------ | --------------------- |
-| Archive        | 4.85 TB                  | 8 TB                        | 64 GB              | 128 GB                |
-| Full (Default) | 3.3 TB                   | 4 TB                        | 32 GB              | 64 GB                 |
-| Minimal        | 1.2 TB                   | 2 TB                        | 32 GB              | 64 GB                 |
+| **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
+| Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
+| Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
+| Minimal        | 1.2 TB                 | 2 TB                        | 32 GB              | 64 GB                 |
 {% endtab %}
 {% endtabs %}
 

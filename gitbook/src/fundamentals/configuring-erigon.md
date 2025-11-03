@@ -4,7 +4,7 @@ description: Customizing your Erigon node
 
 # Configuring Erigon
 
-The Erigon 3 CLI has a wide range of flags that can be used to customize its behavior. There are 3 ways to configure Erigon, listed by priority:
+The Erigon CLI has a wide range of flags that can be used to customize its behavior. There are 3 ways to configure Erigon, listed by priority:
 
 * [Command line options](configuring-erigon.md#command-line-options) (flags)
 * [Configuration file](configuring-erigon.md#configuration-file)

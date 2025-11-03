@@ -37,8 +37,4 @@ The `net` namespace is enabled by default in Erigon's RPC daemon and provides es
 * The current implementation shows some limitations noted in the documentation, such as hardcoded return values in certain scenarios.
 * `net_peerCount` specifically counts only internal sentries, which may not reflect the total peer count in distributed setups.
 
-## API documentation
-
-For the API documentation refer to official Ethereum documentation available at
-
-[https://ethereum.org/developers/docs/apis/json-rpc/#net\_version](https://ethereum.org/developers/docs/apis/json-rpc/#net_version)
+{% include "../.gitbook/includes/api-documentation-2.md" %}

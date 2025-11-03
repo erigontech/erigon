@@ -2,11 +2,73 @@
 description: How to build Erigon in Linux and MacOS from source
 ---
 
-# Build Erigon from source
+# Build from source
+
+{% hint style="warning" %}
+### ⚠️ Warning: Installing Erigon from Source
+
+Installing Erigon directly from source requires a strong foundation in Command Line Interface (CLI) operations and Linux/Unix environments.
+
+This method is significantly more difficult than using [pre-built binaries](pre-built-binaries.md) or [Docker](docker.md) images. You will be responsible for resolving dependency issues, configuring build tools, and manually managing all compilation and execution steps.
+
+If you are a casual user or lack CLI expertise, we strongly recommend using the official pre-built binaries or Docker documentation.
+{% endhint %}
+
+## 1. Software Requirements
+
+If you intend to build Erigon from source, you must first meet the necessary prerequisites.
+
+{% tabs %}
+{% tab title="Linux" %}
+### Git
+
+Git is a tool that helps download and manage the Erigon source code. To install Git, visit [https://git-scm.com/downloads](https://git-scm.com/downloads).
+
+### Build essential and Cmake
+
+Install **Build-essential** and **Cmake**:
+
+```bash
+sudo apt install build-essential cmake -y
+```
+
+### Go Programming Language
+
+Erigon utilizes Go (also known as Golang) version 1.24 or newer for part of its development. It is recommended to have a fresh Go installation. If you have an older version, consider deleting the `/usr/local/go` folder (you may need to use `sudo`) and re-extract the new version in its place.
+
+To install the latest Go version, visit the official documentation at [https://golang.org/doc/install](https://golang.org/doc/install).
+
+### C++ Compiler
+
+This turns the C++ part of Erigon's code into a program your computer can run. You can use either **Clang** or **GCC**:
+
+* For **Clang** follow the instructions at [https://clang.llvm.org/get\_started.html](https://clang.llvm.org/get_started.html);
+* For **GCC** (version 10 or newer): [https://gcc.gnu.org/install/index.html](https://gcc.gnu.org/install/index.html).
+{% endtab %}
+
+{% tab title="macOS" %}
+### Git
+
+Git is a tool that helps download and manage the Erigon source code. To install Git, visit [https://git-scm.com/downloads](https://git-scm.com/downloads).
+
+### Go Programming Language
+
+Erigon utilizes Go (also known as Golang) version 1.24 or newer for part of its development. It is recommended to have a fresh Go installation. If you have an older version, consider deleting the `/usr/local/go` folder (you may need to use `sudo`) and re-extract the new version in its place.
+
+To install the latest Go version, visit the official documentation at [https://golang.org/doc/install](https://golang.org/doc/install).
+
+### C++ Compiler
+
+This turns the C++ part of Erigon's code into a program your computer can run. You can use either **Clang** or **GCC**:
+
+* For **Clang** follow the instructions at [https://clang.llvm.org/get\_started.html](https://clang.llvm.org/get_started.html);
+* For **GCC** (version 10 or newer): [https://gcc.gnu.org/install/index.html](https://gcc.gnu.org/install/index.html).
+{% endtab %}
+{% endtabs %}
+
+## 2. Building Erigon from Source
 
 The basic Erigon configuration is suitable for most users who simply want to run a node. To ensure you are building a specific, stable release, use Git tags.
-
-####
 
 {% stepper %}
 {% step %}
@@ -50,12 +112,12 @@ make -j<n> erigon
 
 The resulting executable binary will be created in the `./build/bin/erigon` path.
 
-#### Running Erigon
+## 3. Running Erigon
 
 After installation, you can run Erigon from your terminal:
 
 ```bash
-erigon [options]
+./build/bin/erigon [options]
 ```
 
 See Basic Usage for more info.

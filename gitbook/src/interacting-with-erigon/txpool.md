@@ -1,3 +1,7 @@
+---
+description: Inspecting Unconfirmed Transactions in Erigon
+---
+
 # txpool
 
 The `txpool` namespace provides methods for inspecting and managing the transaction pool (mempool) in Erigon. These methods allow you to view pending, queued, and base fee transactions, providing insight into the current state of unconfirmed transactions. In Erigon, the `txpool` namespace is implemented through the `TxPoolAPI` interface and `TxPoolAPIImpl` struct.
@@ -35,9 +39,9 @@ The txpool namespace must be explicitly enabled using the `--http.api` flag when
 
 ### Availability
 
-* The txpool namespace is available when included in the `--http.api` flag
+* The `txpool` namespace is available when included in the `--http.api` flag
 * Methods are marked as "remote" in the documentation, indicating they communicate with external services
-* All txpool methods are available on both HTTP and WebSocket connections
+* All `txpool` methods are available on both HTTP and WebSocket connections
 
 ***
 
@@ -51,9 +55,11 @@ None
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -78,9 +84,11 @@ Returns the content of the transaction pool for a specific sender address, showi
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"txpool_contentFrom","params":["0xb60e8dd61c5d32be8058bb8eb970870f07233155"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -103,9 +111,11 @@ None
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 

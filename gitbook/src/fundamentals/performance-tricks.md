@@ -1,5 +1,5 @@
 ---
-description: 'Optimizing Erigon 3 Performance: Sync Speed, Cloud Drives, and Memory Tuning'
+description: 'Optimizing Erigon Performance: Sync Speed, Cloud Drives, and Memory Tuning'
 ---
 
 # Performance Tricks

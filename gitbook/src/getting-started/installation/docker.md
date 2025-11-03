@@ -17,10 +17,6 @@ The Docker image works on **Intel/AMD computers** (linux/amd64) and **Apple Sili
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
 * Images are stored at [https://hub.docker.com/r/erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
 
-{% hint style="info" %}
-&#x20;By default, the Docker image only includes the main `erigon` binary. Other tools like `downloader`, `rpcdaemon`, or `sentry` are available but need to be built separately if you want to use them as standalone services.&#x20;
-{% endhint %}
-
 ### Prerequisites
 
 {% tabs %}
@@ -57,15 +53,11 @@ docker pull erigontech/erigon:<version_tag>
 
 &#x20;For example:
 
-```sh
-docker pull erigontech/erigon:v3.2.1
-```
+{% include "../../.gitbook/includes/docker-pull-erigontech-erig....md" %}
 {% endstep %}
 
 {% step %}
 ### Start the Erigon container
-
-
 
 Start the Erigon container in your terminal:
 
@@ -97,9 +89,7 @@ Additional flags can be added to configure Erigon with several options.
 [configuring-erigon.md](../../fundamentals/configuring-erigon.md)
 {% endcontent-ref %}
 
-{% hint style="success" %}
-Press `Ctrl+C` in the terminal to stop Erigon.
-{% endhint %}
+{% include "../../.gitbook/includes/press-ctrl+c-in-the-termina....md" %}
 
 ### Optional: Setup dedicated user <a href="#optional-setup-dedicated-user" id="optional-setup-dedicated-user"></a>
 

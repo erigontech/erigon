@@ -1,5 +1,5 @@
 ---
-description: 'Configuring Erigon 3: Understanding Pruning Modes'
+description: 'Configuring Erigon: Understanding Pruning Modes'
 ---
 
 # Sync Modes

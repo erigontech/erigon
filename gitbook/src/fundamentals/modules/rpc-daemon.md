@@ -4,7 +4,7 @@ description: Remote Procedure Call Daemon
 
 # RPC Daemon
 
-The RPC daemon is a crucial component of Erigon, enabling JSON remote procedure calls (RPC) and providing access to various [APIs](../../interacting-with-erigon/interacting-with-erigon.md).  It's designed for flexible deployment, capable of running both internally (in-process) or externally (out-of-process).&#x20;
+The RPC daemon is a vital part of Erigon, as it implements the **RPC Service** by processing JSON remote procedure calls (RPCs). This is what allows clients to access Erigon's APIs. Its flexible architecture means it can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
 
 ### RPC Deployment Modes
 
@@ -18,6 +18,10 @@ For a comprehensive understanding and the latest instructions, the official docu
 * **Local Access**: This documentation is also contained in your locally compiled Erigon folder at `/cmd/rpcdaemon`.
 * **Remote Running Instructions**: For detailed instructions on running RPC in Remote mode, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
 
+{% hint style="success" %}
+To interact with the **RPC Service** visit the dedicated page [Interacting with Erigon](../../interacting-with-erigon/interacting-with-erigon.md).
+{% endhint %}
+
 ## Command Line Options
 
 When running RPC daemon in Local or Remote deployment mode, use this command to display available options for RPCdaemon digit:
@@ -28,6 +32,7 @@ When running RPC daemon in Local or Remote deployment mode, use this command to 
 
 The `--help` flag listing is reproduced below for your convenience.
 
+{% code overflow="wrap" %}
 ```
 rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access
 
@@ -118,3 +123,4 @@ Flags:
       --ws.api.subscribelogs.channelsize int        Size of the channel used for websocket logs subscriptions (default 8192)
       --ws.compression                              Enable Websocket compression (RFC 7692)
 ```
+{% endcode %}

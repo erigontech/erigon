@@ -1,3 +1,7 @@
+---
+description: Accessing Polygon Validator and Bor Consensus Data
+---
+
 # bor
 
 The `bor` namespace provides Polygon-specific RPC methods that are only available when running Erigon on Polygon networks (Mainnet, Amoy testnet, etc.). These methods expose functionality specific to the Bor consensus engine, including validator information, snapshots, and proposer sequences.
