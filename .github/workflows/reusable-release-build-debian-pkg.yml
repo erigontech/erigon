@@ -105,7 +105,7 @@ jobs:
       - name: Upload artifact amd64.deb
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
         with:
-          name: ${{ inputs.application }}_${{ inputs.version }}_amd64.deb
+          name: ${{ inputs.application }}_v${{ inputs.version }}_amd64.deb
           path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_amd64.deb
           retention-days: 5
           compression-level: 0
@@ -114,7 +114,7 @@ jobs:
       - name: Upload artifact amd64.deb.checksum
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
         with:
-          name: ${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
+          name: ${{ inputs.application }}_v${{ inputs.version }}_amd64.deb.checksum
           path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
           retention-days: 5
           compression-level: 0
@@ -123,7 +123,7 @@ jobs:
       - name: Upload artifact arm64.deb
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
         with:
-          name: ${{ inputs.application }}_${{ inputs.version }}_arm64.deb
+          name: ${{ inputs.application }}_v${{ inputs.version }}_arm64.deb
           path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_arm64.deb
           retention-days: 5
           compression-level: 0
@@ -132,7 +132,7 @@ jobs:
       - name: Upload artifact arm64.deb.checksum
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
         with:
-          name: ${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
+          name: ${{ inputs.application }}_v${{ inputs.version }}_arm64.deb.checksum
           path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
           retention-days: 5
           compression-level: 0
