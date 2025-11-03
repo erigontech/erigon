@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/dataflow"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
+	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/stages/headerdownload"
 )
 
 const requestLoopCutOff int = 1

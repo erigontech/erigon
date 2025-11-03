@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
-	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
