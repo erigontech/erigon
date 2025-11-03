@@ -629,13 +629,6 @@ type remoteInfo struct {
 	ModTime time.Time
 }
 
-type SnapInfo interface {
-	Version() snaptype.Version
-	From() uint64
-	To() uint64
-	Type() snaptype.Type
-}
-
 type fileInfo struct {
 	*rcloneInfo
 }
