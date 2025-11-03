@@ -152,7 +152,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					vi++
 				}
 				values[string(keyBuf)] = updates[vi:]
-				require.True(t,  slices.IsSorted(seenKeys))
+				require.True(t, slices.IsSorted(seenKeys))
 			}
 			h.integrateDirtyFiles(sf, i, i+h.stepSize)
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
