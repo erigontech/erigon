@@ -327,6 +327,7 @@ func NewMultiClient(
 		}
 	} else {
 		hd = &headerdownload.HeaderDownload{}
+		hd.InitDefaults()
 	}
 
 	// body downloader
