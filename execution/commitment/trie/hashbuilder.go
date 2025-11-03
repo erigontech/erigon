@@ -252,9 +252,10 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		popped++
 	}
 	var accountCode CodeNode
-	var codeHashValue common.Hash
+	var codeHash = accounts.EmptyCodeHash
 
 	if fieldSet&uint32(8) != 0 {
+		var codeHashValue common.Hash
 		copy(codeHashValue[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		var ok bool
 		if codeHashValue != accounts.EmptyCodeHash.Value() {
@@ -266,6 +267,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 					return fmt.Errorf("unexpected node type on the node stack, wanted codeNode, got %T:%s", stackTop, stackTop)
 				}
 			}
+			codeHash = accounts.InternCodeHash(codeHashValue)
 		}
 		popped++
 	}
@@ -279,7 +281,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		hb.proofElement.storageRoot = hb.acc.Root
 	}
 	var accCopy accounts.Account
-	hb.acc.CodeHash = accounts.InternCodeHash(codeHashValue)
+	hb.acc.CodeHash = codeHash
 	accCopy.Copy(&hb.acc)
 
 	if accCopy.CodeHash != accounts.EmptyCodeHash && accountCode != nil {
