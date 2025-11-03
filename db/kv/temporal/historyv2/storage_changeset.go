@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common/length"
 )
 
 func DecodeStorage(dbKey, dbValue []byte) (uint64, []byte, []byte, error) {

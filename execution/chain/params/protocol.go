@@ -22,7 +22,7 @@ package params
 import (
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 const (
@@ -251,12 +251,6 @@ var DefaultCancunBlobConfig = BlobConfig{
 }
 
 var DefaultPragueBlobConfig = BlobConfig{
-	Target:                6,
-	Max:                   9,
-	BaseFeeUpdateFraction: 5007716,
-}
-
-var DefaultOsakaBlobConfig = BlobConfig{
 	Target:                6,
 	Max:                   9,
 	BaseFeeUpdateFraction: 5007716,

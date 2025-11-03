@@ -31,7 +31,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/holiman/uint256"
 )
@@ -385,10 +385,7 @@ func decodeSliceElems(s *Stream, val reflect.Value, elemdec decoder) error {
 	for ; ; i++ {
 		// grow slice if necessary
 		if i >= val.Cap() {
-			newcap := val.Cap() + val.Cap()/2
-			if newcap < 4 {
-				newcap = 4
-			}
+			newcap := max(val.Cap()+val.Cap()/2, 4)
 			newv := reflect.MakeSlice(val.Type(), val.Len(), newcap)
 			reflect.Copy(newv, val)
 			val.Set(newv)

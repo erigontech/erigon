@@ -28,7 +28,7 @@ import (
 
 	natpmp "github.com/jackpal/go-nat-pmp"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 // natPMPClient adapts the NAT-PMP protocol implementation so it conforms to

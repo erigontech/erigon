@@ -25,9 +25,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -200,13 +200,14 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 }
 
 func Test_BtreeIndex_Seek2(t *testing.T) {
-	t.Skip("issue #15028")
+	//t.Skip("issue #15028")
 
 	t.Parallel()
 
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 1_200_000, 1024
+	M := 1024
+	keyCount := 10 * M
 
 	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)

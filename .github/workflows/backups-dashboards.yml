@@ -37,7 +37,7 @@ jobs:
         curl -L -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" -H "Accept: application/vnd.github.v3.raw" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/erigontech/scripts/contents/dashboards/dashboard-backup.sh?ref=${TEMPLATE_BRANCH} -o /tmp/dashboard-backup
     
     - name: Upload dashboard-backup
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: dashboard-backup
         path: /tmp/dashboard-backup
@@ -72,7 +72,7 @@ jobs:
         echo ${{ secrets.DASHBOARDS_GIT_CONFIG }} | base64 -d > $HOME/.gitconfig
               
     - name: Download dashboard-backup
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: dashboard-backup
         path: /tmp

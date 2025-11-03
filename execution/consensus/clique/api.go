@@ -22,14 +22,15 @@ package clique
 import (
 	"context"
 	"fmt"
+	"maps"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 // API is a user facing RPC API to allow controlling the signer and voting
@@ -147,9 +148,7 @@ func (api *API) Proposals() map[common.Address]bool {
 	defer api.clique.lock.RUnlock()
 
 	proposals := make(map[common.Address]bool)
-	for address, auth := range api.clique.proposals {
-		proposals[address] = auth
-	}
+	maps.Copy(proposals, api.clique.proposals)
 	return proposals
 }
 

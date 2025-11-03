@@ -24,7 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -50,17 +50,18 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
-		nonce:      stx.Nonce,
-		gasLimit:   stx.GasLimit,
-		gasPrice:   *stx.FeeCap,
-		tipCap:     *stx.TipCap,
-		feeCap:     *stx.FeeCap,
-		to:         stx.To,
-		amount:     *stx.Value,
-		data:       stx.Data,
-		accessList: stx.AccessList,
-		checkNonce: true,
-		checkGas:   true,
+		nonce:            stx.Nonce,
+		gasLimit:         stx.GasLimit,
+		gasPrice:         *stx.FeeCap,
+		tipCap:           *stx.TipCap,
+		feeCap:           *stx.FeeCap,
+		to:               stx.To,
+		amount:           *stx.Value,
+		data:             stx.Data,
+		accessList:       stx.AccessList,
+		checkNonce:       true,
+		checkTransaction: true,
+		checkGas:         true,
 	}
 	if !rules.IsCancun {
 		return nil, errors.New("BlobTx transactions require Cancun")

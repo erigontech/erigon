@@ -27,7 +27,14 @@ jobs:
           go-version: '>=1.24'
           go-version-file: 'hive/go.mod'
 
-      - name: Login to Docker Hub
+      - name: Conditional Docker Login
+        # Only login if we can. Workflow works without it but we want to avoid
+        # rate limiting by Docker Hub when possible. External repos don't
+        # have access to our Docker secrets.
+        if: |
+          github.repository == 'erigontech/erigon' && 
+          github.actor != 'dependabot[bot]' &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
@@ -98,12 +105,12 @@ jobs:
           run_suite engine api 0
           # 3 failures out of 8 tests at time of writing
           run_suite engine auth 3
-          # 100 failures out of 190 tests at time of writing
-          run_suite rpc compat 100
+          # 8 failures out of 194 tests, see https://github.com/ethereum/hive/pull/1355
+          run_suite rpc compat 8
         continue-on-error: true
 
       - name: Upload output log
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: hive-workspace-log
           path: hive/workspace/logs

@@ -30,7 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // TestUnpack tests the general pack/unpack tests in packing_test.go
@@ -380,7 +380,6 @@ func TestMethodMultiReturn(t *testing.T) {
 		"Can not unpack into a slice with wrong types",
 	}}
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			require := require.New(t)
 			err := abi.UnpackIntoInterface(tc.dest, "multi", data)

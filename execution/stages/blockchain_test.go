@@ -22,8 +22,8 @@ package stages_test
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
 	"testing"
@@ -32,16 +32,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -50,9 +46,13 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
@@ -421,28 +421,6 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	require.NoError(err)
 	if have.Cmp(want) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
-	}
-}
-
-// Tests that the insertion functions detect banned hashes.
-func TestBadBlockHashes(t *testing.T) { testBadHashes(t) }
-
-func testBadHashes(t *testing.T) {
-	t.Parallel()
-	t.Skip("to support this error in Erigon")
-	// Create a pristine chain and database
-	m := newCanonical(t, 0)
-	var err error
-
-	// Create a chain, ban a hash and try to import
-	chain := makeBlockChain(current(m, nil), 3, m, 10)
-
-	core.BadHashes[chain.Headers[2].Hash()] = true
-	defer func() { delete(core.BadHashes, chain.Headers[2].Hash()) }()
-
-	err = m.InsertChain(chain)
-	if !errors.Is(err, core.ErrBlacklistedHash) {
-		t.Errorf("error mismatch: have: %v, want: %v", err, core.ErrBlacklistedHash)
 	}
 }
 
@@ -1869,9 +1847,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		var exp = new(expectation)
 		exp.blocknum = i + 1
 		exp.values = make(map[int]int)
-		for k, v := range current.values {
-			exp.values[k] = v
-		}
+		maps.Copy(exp.values, current.values)
 		exp.exist = current.exist
 
 		b.SetCoinbase(common.Address{1})
