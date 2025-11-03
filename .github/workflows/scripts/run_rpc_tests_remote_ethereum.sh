@@ -12,7 +12,7 @@ DISABLED_TEST_LIST=(
   trace_rawTransaction
   engine_
   #eth_getProof
-  eth_simulateV1
+  #eth_simulateV1
 )
 
 # Transform the array into a comma-separated string
