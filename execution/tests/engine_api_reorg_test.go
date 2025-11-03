@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/state/contracts"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -56,7 +55,7 @@ func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t 
 		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b3Canon.ExecutionPayload, txn.Hash())
 		require.NoError(t, err)
 		// create an invalid fork at b3
-		b3Faulty := mock.TamperMockClPayloadStateRoot(b3Canon, common.HexToHash("0xb3f"))
+		b3Faulty := TamperMockClPayloadStateRoot(b3Canon, common.HexToHash("0xb3f"))
 		status, err := eat.MockCl.InsertNewPayload(ctx, b3Faulty)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
@@ -90,7 +89,7 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 	receiver1 := common.HexToAddress("0x111")
 	receiver2 := common.HexToAddress("0x222")
 	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
-	canonicalChain := make([]*mock.MockClPayload, n)
+	canonicalChain := make([]*MockClPayload, n)
 	eatCanonical := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, logLvl),
 		DataDir:     t.TempDir(),
@@ -112,7 +111,7 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 		}
 	})
 	// Generate a side chain which goes up to N and executes the same txns until N-1 but at N executes different txns
-	sideChain := make([]*mock.MockClPayload, n)
+	sideChain := make([]*MockClPayload, n)
 	eatSide := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, logLvl),
 		DataDir:     t.TempDir(),
