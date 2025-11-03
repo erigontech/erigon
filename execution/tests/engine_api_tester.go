@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
@@ -222,11 +223,11 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		),
 	)
 	require.NoError(t, err)
-	var mockCl *MockCl
+	var mockCl *mock.MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, WithMockClState(args.MockClState))
+		mockCl = mock.NewMockCl(logger, engineApiClient, genesisBlock, mock.WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(logger, engineApiClient, genesisBlock)
+		mockCl = mock.NewMockCl(logger, engineApiClient, genesisBlock)
 	}
 	_, err = mockCl.BuildCanonicalBlock(ctx) // build 1 empty block before proceeding to properly initialise everything
 	require.NoError(t, err)
@@ -251,7 +252,7 @@ type EngineApiTesterInitArgs struct {
 	Genesis          *types.Genesis
 	CoinbaseKey      *ecdsa.PrivateKey
 	EthConfigTweaker func(*ethconfig.Config)
-	MockClState      *MockClState
+	MockClState      *mock.MockClState
 }
 
 type EngineApiTester struct {
@@ -261,7 +262,7 @@ type EngineApiTester struct {
 	EngineApiClient      *engineapi.JsonRpcClient
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
-	MockCl               *MockCl
+	MockCl               *mock.MockCl
 	Transactor           Transactor
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
