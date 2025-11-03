@@ -11,8 +11,8 @@ DISABLED_TEST_LIST=(
   # Erigon2 and Erigon3 never supported this api methods
   trace_rawTransaction
   engine_
-  #eth_getProof
-  #eth_simulateV1
+  eth_getProof
+  eth_simulateV1
 )
 
 # Transform the array into a comma-separated string
