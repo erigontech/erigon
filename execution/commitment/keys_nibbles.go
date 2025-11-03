@@ -81,6 +81,28 @@ func hexNibblesToCompactBytes(key []byte) []byte {
 	return buf
 }
 
+// uncompactNibbles converts a slice of bytes representing nibbles in regular form into 1-nibble-per-byte form.
+func uncompactNibbles(key []byte) []byte {
+	if len(key) == 0 {
+		return nil
+	}
+	terminating := key[0]&0x20 == 0x20
+	odd := key[0]&0x10 == 0x10
+	buf := make([]byte, 0, len(key)*2)
+	if odd {
+		buf = append(buf, key[0]&0x0f)
+	}
+	key = key[1:]
+	for _, b := range key {
+		buf = append(buf, b>>4)
+		buf = append(buf, b&0x0f)
+	}
+	if terminating {
+		buf = append(buf, terminatorHexByte)
+	}
+	return buf
+}
+
 // hasTerm returns whether a hex nibble key has the terminator flag.
 func hasTerm(s []byte) bool {
 	return len(s) > 0 && s[len(s)-1] == terminatorHexByte

@@ -257,14 +257,16 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			}
 			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			logger.Warn(err.Error())
+			continue
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
 			logger.Info("skipping state key", "valueLen", len(branchValue), "file", fileName)
 			continue
 		}
+		counts.branchKeyCount++
 		branchData := commitment.BranchData(branchValue)
-		_, err = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) (newKey []byte, err error) {
+		newBranchData, err := branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 			if logger.Enabled(ctx, log.LvlTrace) {
 				logger.Trace(
 					"checking commitment deref for branch",
@@ -286,8 +288,9 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 						)
 					}
 					counts.storageNonDerefCount++
-					return nil, nil // not a referenced key, nothing to check
+					return key, nil // not a referenced key, nothing to check
 				}
+				counts.storageDerefCount++
 				offset, err := checkOffsetDeref(key, uint64(storageReader.Size()))
 				if err != nil {
 					err = fmt.Errorf("storage reference key %x issue for branch %x in %s: %w", key, branchKey, fileName, err)
@@ -295,7 +298,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 						return nil, err
 					}
 					logger.Warn(err.Error())
-					return nil, nil
+					return key, nil
 				}
 				storageReader.Reset(offset)
 				plainKey, _ := storageReader.Next(plainKeyBuf[:0])
@@ -306,9 +309,8 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					}
 					logger.Warn(err.Error())
 					integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
-					return nil, nil
+					return key, nil
 				}
-				counts.storageDerefCount++
 				if logger.Enabled(ctx, log.LvlTrace) {
 					logger.Trace(
 						"dereferenced storage key",
@@ -332,8 +334,9 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					)
 				}
 				counts.accNonDerefCount++
-				return nil, nil // not a referenced key, nothing to check
+				return key, nil // not a referenced key, nothing to check
 			}
+			counts.accDerefCount++
 			offset, err := checkOffsetDeref(key, uint64(accReader.Size()))
 			if err != nil {
 				err = fmt.Errorf("account reference key %x issue for branch %x in %s: %w", key, branchKey, fileName, err)
@@ -341,7 +344,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					return nil, err
 				}
 				logger.Warn(err.Error())
-				return nil, nil
+				return key, nil
 			}
 			accReader.Reset(offset)
 			plainKey, _ := accReader.Next(plainKeyBuf[:0])
@@ -352,9 +355,8 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				}
 				logger.Warn(err.Error())
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
-				return nil, nil
+				return key, nil
 			}
-			counts.accDerefCount++
 			if logger.Enabled(ctx, log.LvlTrace) {
 				logger.Trace(
 					"dereferenced account key",
@@ -370,7 +372,15 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		if err != nil {
 			return derefCounts{}, err
 		}
-		counts.branchKeyCount++
+		err = newBranchData.Validate(branchKey)
+		if err != nil {
+			err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", branchKey, fileName, err)
+			if failFast {
+				return derefCounts{}, err
+			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+		}
 	}
 	logger.Info(
 		"checked commitment kv dereference in",
