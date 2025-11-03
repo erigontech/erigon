@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -791,7 +792,7 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 	for pc := range entries {
 		entriesList = append(entriesList, pc)
 	}
-	sort.Ints(entriesList)
+	slices.Sort(entriesList)
 	for _, pc0 := range entriesList {
 		pc1 := pc0
 		for !exits[pc1] {
