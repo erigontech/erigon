@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/mock"
 )
 
 func TestCreateBodyDownload(t *testing.T) {
