@@ -94,7 +94,7 @@ import (
 
 const MockInsertAsInitialCycle = false
 
-// MockSentry is a Netwrork Inverface mock. So, unit-tests can test many Erigon's components - but without net-interaction
+// MockSentry is a Network Interface mock. So, unit-tests can test many Erigon's components - but without net-interaction
 type MockSentry struct {
 	sentryproto.UnimplementedSentryServer
 	Ctx                  context.Context
