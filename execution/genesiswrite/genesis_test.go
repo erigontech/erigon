@@ -23,13 +23,13 @@ import (
 	"os"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -165,11 +165,11 @@ func TestAllocConstructor(t *testing.T) {
 	key0 := accounts.InternKey(common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"))
 	storage0, err := state.GetState(address, key0)
 	require.NoError(err)
-	assert.Equal(uint256.NewInt(0x2a), storage0)
+	assert.Equal(u256.U64(0x2a), storage0)
 	key1 := accounts.InternKey(common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001"))
 	storage1, err := state.GetState(address, key1)
 	require.NoError(err)
-	assert.Equal(uint256.NewInt(0x01c9), storage1)
+	assert.Equal(u256.U64(0x01c9), storage1)
 }
 
 // See https://github.com/erigontech/erigon/pull/11264

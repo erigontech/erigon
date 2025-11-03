@@ -29,8 +29,8 @@ import (
 
 func TestGetBurntContract(t *testing.T) {
 	// Ethereum
-	assert.Nil(t, chainspec.Mainnet.Config.GetBurntContract(0))
-	assert.Nil(t, chainspec.Mainnet.Config.GetBurntContract(10_000_000))
+	assert.Equal(t, accounts.NilAddress, chainspec.Mainnet.Config.GetBurntContract(0))
+	assert.Equal(t, accounts.NilAddress, chainspec.Mainnet.Config.GetBurntContract(10_000_000))
 
 	// Gnosis Chain
 	addr := chainspec.Gnosis.Config.GetBurntContract(19_040_000)

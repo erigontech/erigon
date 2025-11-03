@@ -247,7 +247,10 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 		return
 	}
 	t.ctx["gasPrice"] = gasPriceBig
-	coinbaseValue := env.Coinbase.Value()
+	var coinbaseValue common.Address
+	if !env.Coinbase.IsNil() {
+		coinbaseValue = env.Coinbase.Value()
+	}
 	coinbase, err := t.toBuf(t.vm, coinbaseValue[:])
 	if err != nil {
 		t.err = err

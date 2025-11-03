@@ -102,7 +102,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	called := 0
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		require.Equal(t, contract.Value(), contractAddr)
+		require.Equal(t, contract, contractAddr)
 		called++
 
 		return nil, nil
