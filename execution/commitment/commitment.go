@@ -724,7 +724,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 		}
 		if !bytes.Equal(plainKeyNibbles, branchKeyAndExtNibbles) {
 			//fmt.Printf("--- debug --- branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
-			return fmt.Errorf("branch and hashed extension nibbles dont match account addr nibbles: %x vs %x", plainKeyNibbles, branchKeyAndExtNibbles)
+			return fmt.Errorf("branch and hashed extension nibbles dont match plainKey nibbles: %x vs %x", plainKeyNibbles, branchKeyAndExtNibbles)
 		}
 	}
 	return nil
