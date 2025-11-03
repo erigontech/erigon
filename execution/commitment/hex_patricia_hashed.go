@@ -1374,18 +1374,18 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 					break
 				}
 			}
-			keyPos += extKeyLength + 1 // jump ahead
+			keyPos += extKeyLength // jump ahead
 
-			if keyPos == int16(len(hashedKey)) || keyPos == 64 {
+			if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
 				extKeyLength++ //  +1 for the terminator 0x10 ([16])  byte when on a terminal extension node
 			}
 			extensionKey := make([]byte, extKeyLength)
 			copy(extensionKey, hashedExtKey)
-			if keyPos == int16(len(hashedKey)) || keyPos == 64 {
+			if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
 				extensionKey[len(extensionKey)-1] = terminatorHexByte // append terminator byte
 			}
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
-			if keyPos == int16(len(hashedKey)) {
+			if keyPos+1 == int16(len(hashedKey)) {
 				if cellToExpand.storageAddrLen > 0 && !depthAdjusted {
 					storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 					if err != nil {
@@ -1409,6 +1409,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 					//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 					//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 				}
+				keyPos++
 			}
 		} else if cellToExpand.storageAddrLen > 0 { // storage cell
 			storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
