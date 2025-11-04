@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/stages"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -111,7 +111,7 @@ type EthereumExecutionModule struct {
 	builders       map[uint64]*builder.BlockBuilder
 
 	// Changes accumulator
-	hook                *stages.Hook
+	hook                *stageloop.Hook
 	accumulator         *shards.Accumulator
 	recentLogs          *shards.RecentLogs
 	stateChangeConsumer shards.StateChangeConsumer
@@ -133,7 +133,7 @@ type EthereumExecutionModule struct {
 func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.TemporalRwDB,
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
-	hook *stages.Hook, accumulator *shards.Accumulator,
+	hook *stageloop.Hook, accumulator *shards.Accumulator,
 	recentLogs *shards.RecentLogs,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine consensus.Engine,
@@ -370,7 +370,7 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 	return nil
 }
 
-func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stages.Hook) {
+func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
@@ -379,7 +379,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stages.Hook) 
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.logger); err != nil {
+	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.logger); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
