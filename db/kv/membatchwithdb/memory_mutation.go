@@ -717,56 +717,56 @@ func (m *MemoryMutation) AggTx() any {
 
 func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).GetLatest(name, k)
+	return m.db.GetLatest(name, k)
 }
 
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
+	return m.db.GetAsOf(name, k, ts)
 }
 
 func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
+	return m.db.HasPrefix(name, prefix)
 }
 
 func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
-	return m.db.(kv.TemporalTx).StepsInFiles(entitySet...)
+	return m.db.StepsInFiles(entitySet...)
 }
 
 func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).RangeAsOf(name, fromKey, toKey, ts, asc, limit)
+	return m.db.RangeAsOf(name, fromKey, toKey, ts, asc, limit)
 }
 
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	panic("not supported")
-	// return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
+	// return m.db.HistorySeek(name, k, ts)
 }
 
 func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
+	return m.db.IndexRange(name, k, fromTs, toTs, asc, limit)
 }
 
 func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
 	panic("not supported")
-	// return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
+	// return m.db.HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
 func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
-	return m.db.(kv.TemporalTx).Debug().HistoryStartFrom(name)
+	return m.db.Debug().HistoryStartFrom(name)
 }
 func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
-func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.(kv.TemporalTx).Debug() }
+func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.Debug() }
 
 func (m *MemoryMutation) AggForkablesTx(id kv.ForkableId) any {
-	return m.db.(kv.TemporalTx).AggForkablesTx(id)
+	return m.db.AggForkablesTx(id)
 }
 
 func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return m.db.(kv.TemporalTx).Unmarked(id)
+	return m.db.Unmarked(id)
 }
 
 func (m *MemoryMutation) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {

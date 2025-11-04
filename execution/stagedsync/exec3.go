@@ -338,7 +338,7 @@ func ExecV3(ctx context.Context,
 					}
 
 					if !useExternalTx {
-						se.LogCommitted(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(

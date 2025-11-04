@@ -190,7 +190,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				break
 			}
 
-			se.LogExecuted()
+			se.LogExecution()
 
 			//TODO: https://github.com/erigontech/erigon/issues/10724
 			//if executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).CanPrune(executor.tx(), doms.TxNum()) {
@@ -270,7 +270,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 
 			if !useExternalTx {
-				se.LogCommitted(commitStart, 0, 0, uncommitedGas, stepsInDb, commitment.CommitProgress{})
+				se.LogCommitments(commitStart, 0, 0, uncommitedGas, stepsInDb, commitment.CommitProgress{})
 			}
 
 			se.logger.Info("Committed", "time", time.Since(commitStart),
@@ -300,15 +300,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	return b.HeaderNoCopy(), rwTx, nil
 }
 
-func (se *serialExecutor) LogExecuted() {
-	se.progress.LogExecuted(se.rs.StateV3, se)
+func (se *serialExecutor) LogExecution() {
+	se.progress.LogExecution(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	se.committedGas += int64(committedGas)
 	se.txExecutor.lastCommittedBlockNum += committedBlocks
 	se.txExecutor.lastCommittedTxNum += committedTransactions
-	se.progress.LogCommitted(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
+	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {

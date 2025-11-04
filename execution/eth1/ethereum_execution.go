@@ -281,19 +281,33 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if err != nil {
 		return nil, err
 	}
-	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
-	defer doms.Close()
 	defer tx.Rollback()
-
-	err = e.unwindToCommonCanonical(doms, tx, header)
+	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
 		return nil, err
 	}
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, tx, header, body.RawBody(), e.logger)
+	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
+		doms.Close()
+		return nil, err
+	}
+	if err := doms.Flush(ctx, tx); err != nil {
+		doms.Close()
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		doms.Close()
+		return nil, err
+	}
+	if tx, err = e.db.BeginTemporalRwNosync(ctx); err != nil {
+		doms.Close()
+		return nil, err
+	}
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
+
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
 	tx.Rollback()
 	tx, err = e.db.BeginTemporalRwNosync(ctx)

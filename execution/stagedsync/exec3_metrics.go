@@ -493,12 +493,12 @@ type Progress struct {
 }
 
 type executor interface {
-	LogExecuted()
-	LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
+	LogExecution()
+	LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
 	LogComplete(stepsInDb float64)
 }
 
-func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
+func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevExecTime)
 	seconds := interval.Seconds()
@@ -719,7 +719,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	}
 }
 
-func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64, lastProgress commitment.CommitProgress) {
+func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	var te *txExecutor
 	var suffix string
 

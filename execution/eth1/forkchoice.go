@@ -351,7 +351,19 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
-
+		if err := sd.Flush(ctx, tx); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+		tx, err = e.db.BeginTemporalRw(ctx)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
@@ -462,8 +474,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	}
 
-	for {
-		hasMore, err := e.executionPipeline.Run(e.db, sd, tx, initialCycle, firstCycle)
+	for hasMore := true; hasMore; {
+		hasMore, err = e.executionPipeline.Run(e.db, sd, tx, initialCycle, firstCycle)
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
@@ -478,15 +490,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
-		if !hasMore {
-			break
-		}
 		err = e.executionPipeline.RunPrune(e.db, tx, initialCycle)
 		if err != nil {
 			sendError("updateForkChoice: RunPrune after hasMore", err)
 			return
 		}
-
+		fmt.Println("sd flush (1)", sd.BlockNum())
 		if err := sd.Flush(ctx, tx); err != nil {
 			sendError("updateForkChoice:flush sd after hasMore", err)
 			return
@@ -497,13 +506,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 		tx, err = e.db.BeginTemporalRw(ctx)
+		// note we already have defer tx.Rollback() on stack from earlier
 		if err != nil {
 			sendError("updateForkChoice: begin tx after has more", err)
 			return
 		}
-		// note we already have defer tx.Rollback() on stack from earlier
-		// we update the same tx var so defer should see the latest tx
-		//(prev tx-es have commit called on them)
 	}
 
 	// if head hash was set then success otherwise no

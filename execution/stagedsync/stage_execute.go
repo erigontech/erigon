@@ -227,7 +227,7 @@ func unwindExec3State(ctx context.Context,
 				var address common.Address
 				copy(address[:], k)
 
-				if dbg.TraceUnwinds {
+				if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 				}
 
@@ -241,7 +241,7 @@ func unwindExec3State(ctx context.Context,
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
 				}
-				if dbg.TraceUnwinds {
+				if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x\n", blockUnwindTo, txUnwindTo, address)
 				}
 			}
@@ -255,7 +255,7 @@ func unwindExec3State(ctx context.Context,
 		if accumulator != nil {
 			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
 		}
-		if dbg.TraceUnwinds {
+		if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.StorageDomain)) {
 			if v == nil {
 				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [empty]\n", blockUnwindTo, txUnwindTo, address, location)
 			} else {
@@ -364,7 +364,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return fmt.Errorf("can't unwind: need external domains & tx")
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
 
 	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 	if err != nil {

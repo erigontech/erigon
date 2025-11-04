@@ -135,6 +135,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	var uncommittedTransactions uint64
 	var uncommittedGas int64
 	var flushPending bool
+	var hasLoggedExecution bool
+	var hasLoggedCommittments bool
+	var commitStart time.Time
+
+	var stepsInDb = rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
+	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
 		defer func() {
@@ -155,7 +161,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 		blockUpdateCount := 0
 		blockApplyCount := 0
-		hasLoggedExecution := false
 
 		for {
 			select {
@@ -240,23 +245,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
 							commitProgress := make(chan *commitment.CommitProgress, 100)
-							stepsInDb := rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
-							logCommittedDone := make(chan struct{})
+							LogCommitmentsDone := make(chan struct{})
+							commitStart = time.Now()
+
 							go func() {
-								defer close(logCommittedDone)
+								defer close(LogCommitmentsDone)
 								logEvery := time.NewTicker(20 * time.Second)
-								commitStart := time.Now()
 
 								defer logEvery.Stop()
-								var lastProgress commitment.CommitProgress
-
 								var prevCommitedBlocks uint64
 								var prevCommittedTransactions uint64
 								var prevCommitedGas uint64
 
-								hasLoggedCommittments := false
-
-								logCommitted := func(commitProgress commitment.CommitProgress) {
+								LogCommitments := func(commitProgress commitment.CommitProgress) {
 									// this is an approximation of blcok prgress - it assumnes an
 									// even distribution of keys to blocks
 									if commitProgress.KeyIndex > 0 && commitProgress.KeyIndex < commitProgress.UpdateCount {
@@ -267,7 +268,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 										if commitedBlocks > prevCommitedBlocks {
 											hasLoggedCommittments = true
-											pe.LogCommitted(commitStart,
+											pe.LogCommitments(commitStart,
 												commitedBlocks-prevCommitedBlocks,
 												committedTransactions-prevCommittedTransactions,
 												committedGas-prevCommitedGas, stepsInDb, commitProgress)
@@ -291,7 +292,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									case progress, ok := <-commitProgress:
 										if !ok {
 											if !hasLoggedCommittments || time.Since(lastCommitedLog) > logInterval/20 {
-												pe.LogCommitted(commitStart,
+												hasLoggedCommittments = true
+												pe.LogCommitments(commitStart,
 													uint64(uncommittedBlocks), uncommittedTransactions,
 													uint64(uncommittedGas), stepsInDb, lastProgress)
 											}
@@ -300,14 +302,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										lastProgress = *progress
 									case <-logEvery.C:
 										if time.Since(lastCommitedLog) > logInterval-(logInterval/90) {
-											logCommitted(lastProgress)
+											LogCommitments(lastProgress)
 										}
 									}
 								}
 							}()
 
-							if !hasLoggedExecution || time.Since(lastExecutedLog) > logInterval/50 {
-								pe.LogExecuted()
+							if time.Since(lastExecutedLog) > logInterval/50 {
+								hasLoggedExecution = true
+								pe.LogExecution()
 								lastExecutedLog = time.Now()
 							}
 
@@ -337,7 +340,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									rwTx, pe.cfg, execStage, pe.logger, u)
 							}
 
-							<-logCommittedDone // make sure no async mutations by LogCommitted can happen at this point
+							<-LogCommitmentsDone // make sure no async mutations by LogCommitments can happen at this point
 							// fix these here - they will contain estimates after commit logging
 							pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
 							pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
@@ -379,7 +382,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
 					hasLoggedExecution = true
 					lastExecutedLog = time.Now()
-					pe.LogExecuted()
+					pe.LogExecution()
 					if pe.agg.HasBackgroundFilesBuild() {
 						pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
@@ -389,6 +392,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}()
 
 	executorCancel()
+
+	if !hasLoggedExecution {
+		pe.LogExecution()
+	}
+
+	if !hasLoggedCommittments && !commitStart.IsZero() {
+		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum, uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
+	}
 
 	if execErr != nil {
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
@@ -411,8 +422,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	return lastHeader, rwTx, execErr
 }
 
-func (pe *parallelExecutor) LogExecuted() {
-	pe.progress.LogExecuted(pe.rs.StateV3, pe)
+func (pe *parallelExecutor) LogExecution() {
+	pe.progress.LogExecution(pe.rs.StateV3, pe)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -421,11 +432,11 @@ func (pe *parallelExecutor) LogExecuted() {
 	}
 }
 
-func (pe *parallelExecutor) LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	pe.committedGas += int64(committedGas)
 	pe.txExecutor.lastCommittedBlockNum += committedBlocks
 	pe.txExecutor.lastCommittedTxNum += committedTransactions
-	pe.progress.LogCommitted(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
+	pe.progress.LogCommitments(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -441,71 +452,6 @@ func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	}
 	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
 		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
-	}
-}
-
-func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *StageState, applyTx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, error) {
-	flushStart := time.Now()
-	var flushTime time.Duration
-
-	if !pe.inMemExec {
-		if err := pe.doms.Flush(ctx, applyTx); err != nil {
-			return applyTx, err
-		}
-		flushTime = time.Since(flushStart)
-	}
-
-	commitStart := time.Now()
-	var t2 time.Duration
-	var err error
-	if applyTx, t2, err = pe.commit(ctx, execStage, applyTx, asyncTxChan, useExternalTx); err != nil {
-		return applyTx, err
-	}
-
-	pe.logger.Info("["+pe.logPrefix+"] flushed", "block", pe.doms.BlockNum(), "time", time.Since(flushStart), "flush", flushTime, "commit", time.Since(commitStart), "db", t2, "externaltx", useExternalTx)
-	return applyTx, nil
-}
-
-func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, time.Duration, error) {
-	pe.pause()
-	defer pe.resume()
-
-	for {
-		waiter, paused := pe.paused()
-		if paused {
-			break
-		}
-		select {
-		case request := <-asyncTxChan:
-			request.Apply()
-		case <-ctx.Done():
-			return nil, 0, ctx.Err()
-		case <-waiter:
-		}
-	}
-
-	return pe.txExecutor.commit(ctx, execStage, tx, useExternalTx, pe.resetWorkers)
-}
-
-func (pe *parallelExecutor) pause() {
-	for _, worker := range pe.execWorkers {
-		worker.Pause()
-	}
-}
-
-func (pe *parallelExecutor) paused() (chan any, bool) {
-	for _, worker := range pe.execWorkers {
-		if waiter, paused := worker.Paused(); !paused {
-			return waiter, false
-		}
-	}
-
-	return nil, true
-}
-
-func (pe *parallelExecutor) resume() {
-	for _, worker := range pe.execWorkers {
-		worker.Resume()
 	}
 }
 
