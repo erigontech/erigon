@@ -220,10 +220,10 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	totalKeys := uint64(commDecomp.Count()) / 2
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
-	branchKeyBuf := make([]byte, 0, datasize.MB.Bytes())
+	branchKeyBuf := make([]byte, 0, 128)
 	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
 	newBranchValueBuf := make([]byte, 0, datasize.MB.Bytes())
-	plainKeyBuf := make([]byte, 0, datasize.MB.Bytes())
+	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 	var counts derefCounts
 	var integrityErr error
 	for commReader.HasNext() {
