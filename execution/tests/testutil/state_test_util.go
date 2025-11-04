@@ -398,7 +398,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 	var to accounts.Address
 	if tx.To != "" {
 		var txto common.Address
-		if err := to.UnmarshalText([]byte(tx.To)); err != nil {
+		if err := txto.UnmarshalText([]byte(tx.To)); err != nil {
 			return nil, fmt.Errorf("invalid to address: %v", err)
 		}
 		to = accounts.InternAddress(txto)
