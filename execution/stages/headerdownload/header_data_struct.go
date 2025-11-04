@@ -354,6 +354,13 @@ func NewHeaderDownload(
 	return hd
 }
 
+func (hd *HeaderDownload) InitDefaults() {
+	hd.badHeaders = make(map[common.Hash]struct{})
+	hd.anchors = make(map[common.Hash]*Anchor)
+	hd.links = make(map[common.Hash]*Link)
+	hd.badPoSHeaders = make(map[common.Hash]common.Hash)
+}
+
 func (p Penalty) String() string {
 	switch p {
 	case NoPenalty:

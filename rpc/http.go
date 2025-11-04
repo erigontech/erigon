@@ -57,7 +57,7 @@ type httpConn struct {
 	client    *http.Client
 	url       string
 	closeOnce sync.Once
-	closeCh   chan interface{}
+	closeCh   chan any
 	mu        sync.Mutex // protects headers
 	headers   http.Header
 	limiter   *rate.Limiter
@@ -73,7 +73,7 @@ func (hc *httpConn) SetLimit(r rate.Limit, b int) {
 // and some methods don't work. The panic() stubs here exist to ensure
 // this special treatment is correct.
 
-func (hc *httpConn) WriteJSON(context.Context, interface{}) error {
+func (hc *httpConn) WriteJSON(context.Context, any) error {
 	panic("writeJSON called on httpConn")
 }
 
@@ -94,7 +94,7 @@ func (hc *httpConn) Close() {
 	hc.closeOnce.Do(func() { close(hc.closeCh) })
 }
 
-func (hc *httpConn) closed() <-chan interface{} {
+func (hc *httpConn) closed() <-chan any {
 	return hc.closeCh
 }
 
@@ -128,7 +128,7 @@ func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
 	return DialHTTPWithClient(endpoint, new(http.Client), logger)
 }
 
-func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg interface{}) error {
+func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
 	hc := c.writeConn.(*httpConn)
 	respBody, err := hc.doRequest(ctx, msg)
 	if err != nil {
@@ -165,7 +165,7 @@ func (c *Client) SetRequestLimit(r rate.Limit, b int) {
 	hc.SetLimit(r, b)
 }
 
-func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, error) {
+func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return nil, err
@@ -346,7 +346,7 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 		return false
 	}
 
-	keyFunc := func(token *jwt.Token) (interface{}, error) {
+	keyFunc := func(token *jwt.Token) (any, error) {
 		return jwtSecret, nil
 	}
 	claims := jwt.RegisteredClaims{}
