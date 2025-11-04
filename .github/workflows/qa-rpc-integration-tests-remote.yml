@@ -2,19 +2,19 @@ name: QA - RPC Integration Tests Remote
 
 on:
   workflow_dispatch:     # Run manually
-#  push:
-#    branches:
-#      - main
-#      - 'release/3.*'
-#  pull_request:
-#    branches:
-#      - main
-#      - 'release/3.*'
-#    types:
-#      - opened
-#      - reopened
-#      - synchronize
-#      - ready_for_review
+  push:
+    branches:
+      - main
+      - 'release/3.*'
+  pull_request:
+    branches:
+      - main
+      - 'release/3.*'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 
 jobs:
@@ -93,7 +93,7 @@ jobs:
         run: |
           echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws  > rpcdaemon.log 2>&1 &
+          ./rpcdaemon --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > rpcdaemon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
