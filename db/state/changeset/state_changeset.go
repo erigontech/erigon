@@ -216,7 +216,7 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 	return ret
 }
 
-func DeserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
+func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 	var ret [kv.DomainLen][]kv.DomainEntryDiff
 	for i := range ret {
 		diffSetLen := binary.BigEndian.Uint32(in)
@@ -312,7 +312,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 		val = append(val, chunk...)
 	}
 
-	return DeserializeKeys(val), true, nil
+	return deserializeKeys(val), true, nil
 }
 func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 	//TODO: move this function somewhere from `commitment`/`state` pkg
