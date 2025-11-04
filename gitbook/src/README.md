@@ -1,7 +1,12 @@
 ---
 description: 'Your Erigon Guide: Core Features, Setup Instructions, and Essential Links'
+cover: .gitbook/assets/Untitled drawing (3).jpg
+coverY: 0
 layout:
   width: default
+  cover:
+    visible: true
+    size: full
   title:
     visible: true
   description:
@@ -23,6 +28,8 @@ Erigon is an efficient Ethereum implementation noted for its performance, modula
 See here [why you should be using Erigon](introduction/why-using-erigon.md).
 
 ## Topics
+
+el
 
 * Review the hardware and software requirements to [get started](getting-started/getting-started.md).
 * Follow the [installation guide](getting-started/installation.md) to set up Erigon.

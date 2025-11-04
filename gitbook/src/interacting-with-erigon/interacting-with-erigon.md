@@ -145,6 +145,7 @@ erigon --http --http.api "admin,debug,eth,erigon,net,trace,txpool,web3"
 
 This allows you to then call:
 
+{% code overflow="wrap" %}
 ```bash
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' localhost:8545
 
@@ -154,4 +155,5 @@ cast rpc admin_nodeInfo
 cast rpc debug_traceTransaction <tx_hash>
 cast rpc erigon_forks
 ```
+{% endcode %}
 
