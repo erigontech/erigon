@@ -1,6 +1,6 @@
 ---
 description: 'Your Erigon Guide: Core Features, Setup Instructions, and Essential Links'
-cover: .gitbook/assets/cover.svg
+cover: .gitbook/assets/cover (1).svg
 coverY: 36.99424874191229
 layout:
   width: default
