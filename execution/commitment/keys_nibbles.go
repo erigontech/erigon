@@ -94,8 +94,7 @@ func uncompactNibbles(key []byte) []byte {
 	}
 	key = key[1:]
 	for _, b := range key {
-		buf = append(buf, b>>4)
-		buf = append(buf, b&0x0f)
+		buf = append(buf, b>>4, b&0x0f)
 	}
 	if terminating {
 		buf = append(buf, terminatorHexByte)
