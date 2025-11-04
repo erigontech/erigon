@@ -21,10 +21,10 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
@@ -59,7 +59,7 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 }
 
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
-	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
+	// Due to the changed semantics of `latest` block in RPC request, it is now distinct
 	// from the block number corresponding to the plain state
 	var plainStateBlockNumber uint64
 	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
@@ -166,7 +166,7 @@ func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
 	return state.NewReaderV3(getter)
 }
 
-func NewLatestStateWriter(tx kv.Tx, domains *dbstate.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+func NewLatestStateWriter(tx kv.TemporalTx, domains *dbstate.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
 	minTxNum, err := blockReader.TxnumReader(context.Background()).Min(tx, blockNum)
 	if err != nil {
 		panic(err)

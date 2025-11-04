@@ -19,27 +19,26 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	snaptype2 "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type Sqeeze string
@@ -87,7 +86,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 }
 
 func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 
@@ -116,7 +115,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 }
 
 func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
@@ -141,7 +140,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	aggOld, err := state.NewAggregator(ctx, dirsOld, config3.DefaultStepSize, db, logger)
+	aggOld, err := state.New(dirsOld).Logger(logger).Open(ctx, db)
 	if err != nil {
 		panic(err)
 	}
@@ -175,17 +174,14 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	aggOld.Close()
 
 	log.Info("[sqeeze] removing", "dir", dirsOld.SnapDomain)
-	_ = os.RemoveAll(dirsOld.SnapDomain)
+	_ = dir.RemoveAll(dirsOld.SnapDomain)
 	log.Info("[sqeeze] success", "please_remove", dirs.SnapDomain+"_backup")
 	return nil
 }
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
-	if err != nil {
-		return err
-	}
+	agg := state.New(dirs).Logger(logger).MustOpen(ctx, db)
 	defer agg.Close()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
@@ -193,7 +189,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	if err := agg.Sqeeze(ctx, kv.CodeDomain); err != nil {
 		return err
 	}
-	if err = agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(); err != nil {
 		return err
 	}
 	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
@@ -221,12 +217,12 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 		if err := freezeblocks.Sqeeze(ctx, dirs, f, f, logger); err != nil {
 			return err
 		}
-		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".seg.torrent"))
-		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".idx"))
-		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".idx.torrent"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".seg.torrent"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".idx"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".idx.torrent"))
 	}
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)

@@ -29,21 +29,19 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -96,24 +94,10 @@ var eip2200Tests = []struct {
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
 }
 
-func testTemporalDB(t *testing.T) *temporal.DB {
-	db := memdb.NewStateDB(t.TempDir())
+func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *dbstate.SharedDomains) {
+	dirs := datadir.New(t.TempDir())
 
-	t.Cleanup(db.Close)
-
-	dirs, logger := datadir.New(t.TempDir()), log.New()
-	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(t, err)
-	agg, err := dbstate.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	return _db
-}
-
-func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *dbstate.SharedDomains) {
+	db := temporaltest.NewTestDB(t, dirs)
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
@@ -133,8 +117,7 @@ func TestEIP2200(t *testing.T) {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
 
-			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
-			defer tx.Rollback()
+			tx, sd := testTemporalTxSD(t)
 
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 			s := state.New(r)
@@ -144,13 +127,13 @@ func TestEIP2200(t *testing.T) {
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0, 0), w)
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 					return nil
 				},
 			}
+			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
 			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
@@ -202,7 +185,6 @@ func TestCreateGas(t *testing.T) {
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
@@ -210,6 +192,7 @@ func TestCreateGas(t *testing.T) {
 				return nil
 			},
 		}
+		_ = s.CommitBlock(vmctx.Rules(chain.TestChainConfig), stateWriter)
 		config := vm.Config{}
 		if tt.eip3860 {
 			config.ExtraEips = []int{3860}

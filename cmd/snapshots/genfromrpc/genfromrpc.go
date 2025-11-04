@@ -15,12 +15,12 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -777,7 +777,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 		case <-logEvery.C:
 			blkSec := float64(prev-startBlockNum) / logInterval.Seconds()
 			log.Info("Progress", "block", prev-1,
-				"blocks ahead", common.PrettyCounter(endBlockNum-prev), "done%", fmt.Sprintf("%.2f", (float64(endBlockNum-prev)/float64(totalBlocks))*100),
+				"blocks ahead", common.PrettyCounter(endBlockNum-prev), "done%", fmt.Sprintf("%.2f", 100-((float64(endBlockNum-prev)/float64(totalBlocks))*100)),
 				"hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
 			startBlockNum = prev
 

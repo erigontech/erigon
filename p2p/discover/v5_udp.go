@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/discover/v5wire"
@@ -500,7 +500,7 @@ func (t *UDPv5) callDone(c *callV5) {
 // When that happens the call is simply re-sent to complete the handshake. We allow one
 // handshake attempt per call.
 func (t *UDPv5) dispatch() {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	defer t.wg.Done()
 
 	// Arm first read.
@@ -631,7 +631,7 @@ func (t *UDPv5) send(toID enode.ID, toAddr *net.UDPAddr, packet v5wire.Packet, c
 
 // readLoop runs in its own goroutine and reads packets from the network.
 func (t *UDPv5) readLoop() {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	defer t.wg.Done()
 
 	buf := make([]byte, maxPacketSize)

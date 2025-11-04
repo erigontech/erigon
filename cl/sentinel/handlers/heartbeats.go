@@ -122,12 +122,14 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 
 // TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
-	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
+	status := c.hs.Status()
+	status.EarliestAvailableSlot = nil
+	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
 	status := c.hs.Status()
 	log.Debug("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
-		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]))
+		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]), "earliestAvailableSlot", c.peerdasStateReader.GetEarliestAvailableSlot())
 	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }

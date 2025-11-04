@@ -25,10 +25,11 @@ import (
 	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/rawdb"
 )
 
@@ -48,15 +49,12 @@ import (
 //   - if you need migrate multiple buckets - create separate migration for each bucket
 //   - write test - and check that it's safe to apply same migration twice
 var migrations = map[kv.Label][]Migration{
-	kv.ChainDB: {
+	dbcfg.ChainDB: {
 		dbSchemaVersion5,
-		ProhibitNewDownloadsLock,
-		ProhibitNewDownloadsLock2,
-		ClearBorTables,
 		ResetStageTxnLookup,
 	},
-	kv.TxPoolDB: {},
-	kv.SentryDB: {},
+	dbcfg.TxPoolDB: {},
+	dbcfg.SentryDB: {},
 }
 
 type Callback func(tx kv.RwTx, progress []byte, isDone bool) error

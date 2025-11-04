@@ -29,20 +29,20 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
@@ -285,9 +285,11 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 		SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true, // isFree
-		nil,  // maxFeePerBlobGas
+		data, nil,
+		false, // checkNonce
+		false, // checkGas
+		true,  // isFree
+		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
 	vmConfig.NoReceipts = true
@@ -329,9 +331,11 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 		SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true, // isFree
-		nil,  // maxFeePerBlobGas
+		data, nil,
+		false, // checkNonce
+		false, // checkGas
+		true,  // isFree
+		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
@@ -374,12 +378,8 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	var arbosVersion int
-	if cc.IsArbitrum() {
-		arbosVersion = int(types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion)
-	}
-
-	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time, uint64(arbosVersion)), stateWriter); err != nil {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
@@ -396,12 +396,8 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
-
-	var arbosVersion uint64
-	if cc.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time, arbosVersion), stateWriter)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 	return nil
 }
 

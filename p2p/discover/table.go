@@ -37,7 +37,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/netutil"
@@ -252,7 +252,7 @@ func (tab *Table) loop() {
 		revalidateDone  chan struct{}                   // where doRevalidate reports completion
 		waiting         = []chan struct{}{tab.initDone} // holds waiting callers while doRefresh runs
 	)
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	defer refresh.Stop()
 	defer revalidate.Stop()
 	defer tableMainenance.Stop()
@@ -353,7 +353,7 @@ loop:
 // doRefresh performs a lookup for a random target to keep buckets full. seed nodes are
 // inserted if the table is empty (initial bootstrap or discarded faulty peers).
 func (tab *Table) doRefresh(done chan struct{}) {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	defer close(done)
 
 	// Load nodes from the database and insert
@@ -393,7 +393,7 @@ func (tab *Table) loadSeedNodes() {
 // doRevalidate checks that the last node in a random bucket is still live and replaces or
 // deletes the node if it isn't.
 func (tab *Table) doRevalidate(done chan<- struct{}) {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	defer func() { done <- struct{}{} }()
 
 	tab.revalidates.Add(1)
@@ -460,7 +460,7 @@ func (tab *Table) nodeToRevalidate() (n *node, bi int) {
 // longer than seedMinTableTime.
 func (tab *Table) copyLiveNodes() {
 	tab.mutex.Lock()
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	defer tab.mutex.Unlock()
 
 	now := time.Now()

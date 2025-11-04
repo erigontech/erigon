@@ -10,17 +10,18 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/urfave/cli/v2"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 var (
@@ -40,33 +41,47 @@ var (
 	}
 )
 
-func resetCliAction(cliCtx *cli.Context) (err error) {
-	// Set logging verbosity. Oof that function signature.
-	logger, _, _, _, err := debug.Setup(cliCtx, true)
-	if err != nil {
-		err = fmt.Errorf("setting up logging: %w", err)
-		return
+// Checks if a value was explicitly set in the given CLI command context or any of its parents. In
+// urfave/cli@v2, you must check the lineage to see if a flag was set in any context. It may be
+// different in v3.
+func isSetLineage(cliCtx *cli.Context, flagName string) bool {
+	for _, ctx := range cliCtx.Lineage() {
+		if ctx.IsSet(flagName) {
+			return true
+		}
 	}
+	return false
+}
+
+func resetCliAction(cliCtx *cli.Context) (err error) {
+	// This is set up in snapshots cli.Command.Before.
+	logger := log.Root()
 	removeLocal := removeLocalFlag.Get(cliCtx)
 	dryRun := dryRunFlag.Get(cliCtx)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
+	logger.Info("resetting datadir", "path", dataDirPath)
 
 	dirs := datadir.Open(dataDirPath)
 
 	configChainName, chainNameErr := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
 
 	chainName := utils.ChainFlag.Get(cliCtx)
-	if cliCtx.IsSet(utils.ChainFlag.Name) {
+	// Check the lineage, we don't want to use the mainnet default, but due to how urfave/cli@v2
+	// works we shouldn't randomly re-add the chain flag in the current command context.
+	if isSetLineage(cliCtx, utils.ChainFlag.Name) {
 		if configChainName.Ok && configChainName.Value != chainName {
 			// Pedantic but interesting.
 			logger.Warn("chain name flag and chain config do not match", "flag", chainName, "config", configChainName.Value)
 		}
 		logger.Info("using chain name from flag", "chain", chainName)
-	} else if chainNameErr != nil {
-		return fmt.Errorf("getting chain name from chaindata: %w", chainNameErr)
-	} else if !configChainName.Ok {
-		return errors.New("chain flag not set and chain name not found in chaindata (reset already occurred or invalid data dir?)")
 	} else {
+		if chainNameErr != nil {
+			logger.Warn("error getting chain name from chaindata", "err", chainNameErr)
+		}
+		if !configChainName.Ok {
+			return errors.New(
+				"chain flag not set and chain name not found in chaindata. datadir is ready for sync, invalid, or requires chain flag to reset")
+		}
 		chainName = configChainName.Unwrap()
 		logger.Info("read chain name from config", "chain", chainName)
 	}
@@ -95,7 +110,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	)
 	removeFunc := func(path string) error {
 		logger.Debug("Removing snapshot dir file", "path", path)
-		return os.Remove(filepath.Join(dirs.Snap, path))
+		return dir.RemoveFile(filepath.Join(dirs.Snap, path))
 	}
 	if dryRun {
 		removeFunc = dryRunRemove
@@ -119,18 +134,18 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	// Remove chaindata last, so that the config is available if there's an error.
 	if removeLocal {
 		for _, extraDir := range []string{
-			kv.HeimdallDB,
-			kv.PolygonBridgeDB,
+			dbcfg.HeimdallDB,
+			dbcfg.PolygonBridgeDB,
 		} {
 			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
-			err = os.RemoveAll(extraFullPath)
+			err = dir.RemoveAll(extraFullPath)
 			if err != nil {
 				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
 			}
 		}
 		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
-			err = os.RemoveAll(dirs.Chaindata)
+			err = dir.RemoveAll(dirs.Chaindata)
 		}
 		if err != nil {
 			err = fmt.Errorf("removing chaindata dir: %w", err)
@@ -151,9 +166,13 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 }
 
 func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
+	_, err = os.Stat(chainDataDir)
+	if err != nil {
+		return
+	}
 	ctx := cliCtx.Context
 	var db kv.RoDB
-	db, err = mdbx.New(kv.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
+	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
 	if err != nil {
 		err = fmt.Errorf("opening chaindata database: %w", err)
 		return
@@ -168,7 +187,7 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 			return
 		}
 		// Do we need genesis block hash here?
-		chainCfg, err = core.ReadChainConfig(tx, genesis)
+		chainCfg, err = rawdb.ReadChainConfig(tx, genesis)
 		if err != nil {
 			err = fmt.Errorf("reading chain config: %w", err)
 			return
