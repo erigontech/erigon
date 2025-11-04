@@ -1,7 +1,7 @@
 package monitor
 
 import (
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -89,7 +89,7 @@ func (a *aggregateQualityMetric) observe(participationCount int, totalCount int)
 	if len(a.qualities) <= 40 {
 		return
 	}
-	sort.Float64s(a.qualities)
+	slices.Sort(a.qualities)
 	aggregateQuality50Per.Set(a.qualities[len(a.qualities)/2])
 	aggregateQuality25Per.Set(a.qualities[len(a.qualities)/4])
 	aggregateQuality75Per.Set(a.qualities[(len(a.qualities)*3)/4])

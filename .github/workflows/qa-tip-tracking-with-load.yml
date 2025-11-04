@@ -205,7 +205,7 @@ jobs:
 
     - name: Upload profiling data
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: profiling-data
         path: ${{ github.workspace }}/profiling-data*
