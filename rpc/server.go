@@ -89,7 +89,7 @@ func (s *Server) SetBatchLimit(limit int) {
 // methods on the given receiver match the criteria to be either a RPC method or a
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this server provides to clients.
-func (s *Server) RegisterName(name string, receiver interface{}) error {
+func (s *Server) RegisterName(name string, receiver any) error {
 	return s.services.registerName(name, receiver)
 }
 
@@ -153,7 +153,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 func (s *Server) Stop() {
 	if atomic.CompareAndSwapInt32(&s.run, 1, 0) {
 		s.logger.Info("RPC server shutting down")
-		s.codecs.Each(func(c interface{}) bool {
+		s.codecs.Each(func(c any) bool {
 			c.(ServerCodec).Close()
 			return true
 		})
