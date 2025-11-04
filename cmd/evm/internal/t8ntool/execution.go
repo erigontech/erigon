@@ -20,19 +20,18 @@
 package t8ntool
 
 import (
-	"encoding/binary"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -98,9 +97,6 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *dbstate.Share
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
-			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			tx.Put(kv.IncarnationMap, addr[:], b[:])
 		}
 	}
 	// Commit and re-open to start with a clean state.

@@ -27,10 +27,10 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -352,6 +352,13 @@ func NewHeaderDownload(
 	heap.Init(&hd.linkQueue)
 	heap.Init(&hd.insertQueue)
 	return hd
+}
+
+func (hd *HeaderDownload) InitDefaults() {
+	hd.badHeaders = make(map[common.Hash]struct{})
+	hd.anchors = make(map[common.Hash]*Anchor)
+	hd.links = make(map[common.Hash]*Link)
+	hd.badPoSHeaders = make(map[common.Hash]common.Hash)
 }
 
 func (p Penalty) String() string {

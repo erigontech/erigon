@@ -1,12 +1,12 @@
 [submodule "tests"]
-	path = tests/testdata
+	path = execution/tests/legacy-tests
 	url = https://github.com/ethereum/tests
 [submodule "eest-fixtures"]
-	path = tests/execution-spec-tests
+	path = execution/tests/execution-spec-tests
 	url = https://github.com/erigontech/eest-fixtures
 [submodule "erigon-lib/interfaces"]
 	path = erigon-lib/interfaces
 	url = https://github.com/erigontech/interfaces
-[submodule "arb-execution-spec-tests"]
-	path = tests/arb-execution-spec-tests
+[submodule "execution/tests/arb-execution-spec-tests"]
+	path = execution/tests/arb-execution-spec-tests
 	url = https://github.com/erigontech/arbitrum-eest-fixtures

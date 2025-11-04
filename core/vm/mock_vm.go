@@ -71,7 +71,6 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 			common.Address{},
 			new(uint256.Int),
 			0,
-			false,
 			evm.env.config.JumpDestCache,
 		), nil, evm.readOnlySliceTest[*evm.currentIdx])
 		return res, err

@@ -11,19 +11,19 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -91,8 +91,11 @@ type txExecutor struct {
 	u              Unwinder
 	isMining       bool
 	inMemExec      bool
+	initialCycle   bool
 	applyTx        kv.RwTx
 	applyWorker    *exec3.Worker
+	inputBlockNum  *atomic.Uint64
+	maxBlockNum    uint64
 	outputTxNum    *atomic.Uint64
 	outputBlockNum metrics.Gauge
 	logger         log.Logger
@@ -128,24 +131,27 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 	return h, err
 }
 
+func (te *txExecutor) shouldGenerateChangeSets() bool {
+	return shouldGenerateChangeSets(te.cfg, te.inputBlockNum.Load(), te.maxBlockNum, te.initialCycle)
+}
+
 type parallelExecutor struct {
 	txExecutor
-	rwLoopErrCh              chan error
-	rwLoopG                  *errgroup.Group
-	applyLoopWg              sync.WaitGroup
-	execWorkers              []*exec3.Worker
-	stopWorkers              func()
-	waitWorkers              func()
-	lastBlockNum             atomic.Uint64
-	in                       *state.QueueWithRetry
-	rws                      *state.ResultsQueue
-	rwsConsumed              chan struct{}
-	shouldGenerateChangesets bool
-	workerCount              int
-	pruneEvery               *time.Ticker
-	logEvery                 *time.Ticker
-	slowDownLimit            *time.Ticker
-	progress                 *Progress
+	rwLoopErrCh   chan error
+	rwLoopG       *errgroup.Group
+	applyLoopWg   sync.WaitGroup
+	execWorkers   []*exec3.Worker
+	stopWorkers   func()
+	waitWorkers   func()
+	lastBlockNum  atomic.Uint64
+	in            *state.QueueWithRetry
+	rws           *state.ResultsQueue
+	rwsConsumed   chan struct{}
+	workerCount   int
+	pruneEvery    *time.Ticker
+	logEvery      *time.Ticker
+	slowDownLimit *time.Ticker
+	progress      *Progress
 }
 
 func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, blockComplete *atomic.Bool, errCh chan error) {
@@ -233,7 +239,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 
 		case <-pe.logEvery.C:
 			stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-			pe.progress.Log("", pe.rs, pe.in, pe.rws, pe.rs.DoneCount(), 0 /* TODO logGas*/, pe.lastBlockNum.Load(), pe.outputBlockNum.GetValueUint64(), pe.outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs, pe.inMemExec)
+			pe.progress.Log("", pe.rs, pe.in, pe.rws, pe.rs.DoneCount(), 0 /* TODO logGas*/, pe.inputBlockNum.Load(), pe.outputBlockNum.GetValueUint64(), pe.outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangeSets() || pe.cfg.syncCfg.KeepExecutionProofs, pe.inMemExec)
 			if pe.agg.HasBackgroundFilesBuild() {
 				logger.Info(fmt.Sprintf("[%s] Background files build", pe.execStage.LogPrefix()), "progress", pe.agg.BackgroundProgress())
 			}

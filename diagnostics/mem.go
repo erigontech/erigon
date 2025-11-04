@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon/diagnostics/mem"
 )
 
 func SetupMemAccess(metricsMux *http.ServeMux) {

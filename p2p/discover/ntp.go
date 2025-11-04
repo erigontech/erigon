@@ -28,7 +28,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -48,7 +48,7 @@ func (s durationSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // checkClockDrift queries an NTP server for clock drifts and warns the user if
 // one large enough is detected.
 func checkClockDrift() {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	drift, err := sntpDrift(ntpChecks)
 	if err != nil {
 		return

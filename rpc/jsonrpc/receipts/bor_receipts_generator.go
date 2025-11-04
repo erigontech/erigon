@@ -5,15 +5,15 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -110,7 +110,14 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state
 	if receiptWithFirstLogIdx {
 		logIndex = logIdxAfterTx
 	} else {
-		logIndex = logIdxAfterTx - uint(len(receiptLogs))
+		// this check is a hack put in place because for cases where a block had only one tx, which was system
+		// e.g. 50075104 on bor.
+		// the receipt calculation stored 0 for logIdxAfterTx, which leads to underflow
+		// this check allows to adjust for that error (first logIndex is 0 for such cases)
+		// can be removed when receipt files fixed and all users are sure to have it (v2.2)
+		if logIdxAfterTx >= uint(len(receiptLogs)) {
+			logIndex = logIdxAfterTx - uint(len(receiptLogs))
+		}
 	}
 	for i, l := range receiptLogs {
 		l.TxIndex = txIndex

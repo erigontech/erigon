@@ -20,9 +20,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // CachedReader3 is a wrapper for an instance of type StateReader
@@ -90,10 +90,13 @@ func (r *CachedReader3) HasStorage(address common.Address) (bool, error) {
 
 func (r *CachedReader3) ReadAccountCode(address common.Address) ([]byte, error) {
 	code, err := r.cache.GetCode(address[:])
+	if err != nil {
+		return nil, err
+	}
 	if len(code) == 0 {
 		return nil, nil
 	}
-	return code, err
+	return code, nil
 }
 
 func (r *CachedReader3) ReadAccountCodeSize(address common.Address) (int, error) {

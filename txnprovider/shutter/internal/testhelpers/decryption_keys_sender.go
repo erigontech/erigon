@@ -71,6 +71,10 @@ func DialDecryptionKeysSender(ctx context.Context, logger log.Logger, port int, 
 	return DecryptionKeysSender{logger: logger, host: p2pHost, topic: topic}, nil
 }
 
+func (dks DecryptionKeysSender) InterfaceListenAddresses() ([]multiaddr.Multiaddr, error) {
+	return dks.host.Network().InterfaceListenAddresses()
+}
+
 func (dks DecryptionKeysSender) WaitExternalPeerConnection(ctx context.Context, peerId peer.ID) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -99,6 +103,25 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 	ips shutter.IdentityPreimages,
 	instanceId uint64,
 ) error {
+	dks.logger.Debug("publishing decryption keys", "slot", slot, "eon", ekg.EonIndex, "txnPointer", txnPointer, "ips", len(ips))
+	keysEnvelope, err := DecryptionKeysPublishMsgEnveloped(ekg, slot, txnPointer, ips, instanceId)
+	if err != nil {
+		return err
+	}
+	return dks.topic.Publish(ctx, keysEnvelope)
+}
+
+func (dks DecryptionKeysSender) Close() error {
+	return dks.host.Close()
+}
+
+func DecryptionKeysPublishMsgEnveloped(
+	ekg EonKeyGeneration,
+	slot uint64,
+	txnPointer uint64,
+	ips shutter.IdentityPreimages,
+	instanceId uint64,
+) ([]byte, error) {
 	signers := ekg.Keypers[:ekg.Threshold]
 	signerIndices := make([]uint64, len(signers))
 	for i, signer := range signers {
@@ -107,14 +130,14 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 
 	slotIp, err := MakeSlotIdentityPreimage(slot)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	ipsWithSlot := shutter.IdentityPreimages{slotIp}
 	ipsWithSlot = append(ipsWithSlot, ips...)
 	keys, err := ekg.DecryptionKeys(signers, ipsWithSlot)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	signatureData := shutter.DecryptionKeysSignatureData{
@@ -127,10 +150,10 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 
 	sigs, err := Signatures(signers, signatureData)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	keysEnvelope, err := MockDecryptionKeysEnvelopeData(MockDecryptionKeysEnvelopeDataOptions{
+	return MockDecryptionKeysEnvelopeData(MockDecryptionKeysEnvelopeDataOptions{
 		EonIndex:      ekg.EonIndex,
 		Keys:          keys,
 		Slot:          slot,
@@ -140,14 +163,4 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 		Signatures:    sigs,
 		Version:       shutterproto.EnvelopeVersion,
 	})
-	if err != nil {
-		return err
-	}
-
-	dks.logger.Debug("publishing decryption keys", "slot", slot, "eon", ekg.EonIndex, "txnPointer", txnPointer, "keys", len(keys))
-	return dks.topic.Publish(ctx, keysEnvelope)
-}
-
-func (dks DecryptionKeysSender) Close() error {
-	return dks.host.Close()
 }

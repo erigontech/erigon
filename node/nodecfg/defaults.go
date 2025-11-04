@@ -20,7 +20,7 @@
 package nodecfg
 
 import (
-	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -48,7 +48,7 @@ var DefaultConfig = Config{
 	WSModules:        []string{"net", "web3"},
 	P2P: p2p.Config{
 		ListenAddr:      ":30303",
-		ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
+		ProtocolVersion: []uint{direct.ETH68, direct.ETH69}, // Keep eth/68 in first index for Hive tests
 		MaxPeers:        32,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),
