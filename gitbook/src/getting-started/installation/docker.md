@@ -71,7 +71,7 @@ For example:
 
 {% code overflow="wrap" %}
 ```sh
-docker run -v /erigon-data/n:/erigon-data -it erigontech/erigon:v3.2.1 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
+docker run -v /erigon-data/n:/erigon-data -it erigontech/erigon:v3.2.2 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
 ```
 {% endcode %}
 
@@ -126,10 +126,6 @@ docker run \
 ```
 
 In this example, the Erigon process inside the container will run as user `1205` and the contents of the host directory `/erigon-data` will be written and owned by user `1205` on your host OS.
-
-{% hint style="warning" %}
-Support for `docker-compose` in Windows is not available.
-{% endhint %}
 
 ### Environment Variables <a href="#environment-variables" id="environment-variables"></a>
 

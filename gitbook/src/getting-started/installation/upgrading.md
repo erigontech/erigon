@@ -71,13 +71,13 @@ Follow the below instructions depending on your installation method:
 
 ### Pre-built Binaries (only Linux and MacOS)
 
-Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](pre-built-binaries.md#checksums) and reinstall it, no other operation needed.
+Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](pre-built-binaries.md#generate-the-checksum-of-your-downloaded-file) and reinstall it, no other operation needed.
 
 ### Docker
 
 If you're using Docker to run Erigon, the process to upgrade to a newer version of the software is straightforward and revolves around pulling the latest Docker image and then running it.&#x20;
 
-SImply follow the [Docker](docker.md#download-and-start-erigon-in-docker) instructions and install and launch the new version.
+Simply follow the [Docker](upgrading.md#docker) instructions and install and launch the new version.
 
 ### Compiled from source
 
@@ -115,9 +115,7 @@ git checkout <new_version_tag>
 
 And switch to it by using:
 
-```bash
-git checkout {{space.vars.version}}
-```
+{% include "../../.gitbook/includes/git-checkout-version.md" %}
 {% endstep %}
 
 {% step %}

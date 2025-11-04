@@ -3,5 +3,5 @@ title: git checkout version
 ---
 
 ```bash
-git checkout v3.2.1
+git checkout v3.2.2
 ```

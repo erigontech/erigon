@@ -32,7 +32,7 @@ docker run \
 ```
 {% endcode %}
 
-Docker will automatically download Erigon version 3.2.2 and start syncing Erigon.
+Docker will automatically download Erigon v3.2.2 and start syncing Erigon.
 
 {% include "../.gitbook/includes/press-ctrl+c-in-the-termina....md" %}
 
