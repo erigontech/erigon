@@ -29,8 +29,6 @@ See here [why you should be using Erigon](introduction/why-using-erigon.md).
 
 ## Topics
 
-el
-
 * Review the hardware and software requirements to [get started](getting-started/getting-started.md).
 * Follow the [installation guide](getting-started/installation.md) to set up Erigon.
 * Learn the [basic usage](fundamentals/basic-usage.md) of Erigon.
