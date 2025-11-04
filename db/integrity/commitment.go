@@ -137,7 +137,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		eg.SetLimit(1)
 	}
 	var integrityErr error
-	var keyCount, accDerefs, accNonDerefs, storageDerefs, storageNonDerefs atomic.Uint64
+	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -145,11 +145,11 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		eg.Go(func() error {
 			counts, err := checkCommitmentKvDeref(ctx, file, aggTx.StepSize(), failFast, logger)
 			if err == nil {
-				keyCount.Add(counts.branchKeyCount)
-				accDerefs.Add(counts.accDerefCount)
-				accNonDerefs.Add(counts.accNonDerefCount)
-				storageDerefs.Add(counts.storageDerefCount)
-				storageNonDerefs.Add(counts.storageNonDerefCount)
+				branchKeys.Add(counts.branchKeys)
+				referencedAccounts.Add(counts.referencedAccounts)
+				plainAccounts.Add(counts.plainAccounts)
+				referencedStorages.Add(counts.referencedStorages)
+				plainStorages.Add(counts.plainStorages)
 				return nil
 			}
 			if !failFast {
@@ -166,21 +166,21 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		"checked commitment kvs dereference in",
 		"dur", time.Since(start),
 		"files", len(files),
-		"keys", keyCount.Load(),
-		"accDerefs", accDerefs.Load(),
-		"accNonDerefs", accNonDerefs.Load(),
-		"storageDerefs", storageDerefs.Load(),
-		"storageNonDerefs", storageNonDerefs.Load(),
+		"keys", branchKeys.Load(),
+		"referencedAccounts", referencedAccounts.Load(),
+		"plainAccounts", plainAccounts.Load(),
+		"referencedStorages", referencedStorages.Load(),
+		"plainStorages", plainStorages.Load(),
 	)
 	return integrityErr
 }
 
 type derefCounts struct {
-	branchKeyCount       uint64
-	accDerefCount        uint64
-	accNonDerefCount     uint64
-	storageDerefCount    uint64
-	storageNonDerefCount uint64
+	branchKeys         uint64
+	referencedAccounts uint64
+	plainAccounts      uint64
+	referencedStorages uint64
+	plainStorages      uint64
 }
 
 func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
@@ -231,20 +231,20 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		case <-ctx.Done():
 			return derefCounts{}, ctx.Err()
 		case <-logTicker.C:
-			at := fmt.Sprintf("%d/%d", counts.branchKeyCount, totalKeys)
-			percent := fmt.Sprintf("%.1f%%", float64(counts.branchKeyCount)/float64(totalKeys)*100)
-			rate := float64(counts.branchKeyCount) / time.Since(start).Seconds()
-			eta := time.Duration(float64(totalKeys-counts.branchKeyCount)/rate) * time.Second
+			at := fmt.Sprintf("%d/%d", counts.branchKeys, totalKeys)
+			percent := fmt.Sprintf("%.1f%%", float64(counts.branchKeys)/float64(totalKeys)*100)
+			rate := float64(counts.branchKeys) / time.Since(start).Seconds()
+			eta := time.Duration(float64(totalKeys-counts.branchKeys)/rate) * time.Second
 			logger.Info(
 				"checking commitment deref progress",
 				"at", at,
 				"p", percent,
 				"k/s", rate,
 				"eta", eta,
-				"accDerefs", counts.accDerefCount,
-				"accNonDerefs", counts.accNonDerefCount,
-				"storageDerefs", counts.storageDerefCount,
-				"storageNonDerefs", counts.storageNonDerefCount,
+				"referencedAccounts", counts.referencedAccounts,
+				"plainAccounts", counts.plainAccounts,
+				"referencedStorages", counts.referencedStorages,
+				"plainStorages", counts.plainStorages,
 				"kv", fileName,
 			)
 		default: // proceed
@@ -264,7 +264,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			logger.Info("skipping state key", "valueLen", len(branchValue), "file", fileName)
 			continue
 		}
-		counts.branchKeyCount++
+		counts.branchKeys++
 		branchData := commitment.BranchData(branchValue)
 		newBranchData, err := branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 			if logger.Enabled(ctx, log.LvlTrace) {
@@ -287,10 +287,10 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 							"kv", fileName,
 						)
 					}
-					counts.storageNonDerefCount++
+					counts.plainStorages++
 					return key, nil // not a referenced key, nothing to check
 				}
-				counts.storageDerefCount++
+				counts.referencedStorages++
 				offset, err := checkOffsetDeref(key, uint64(storageReader.Size()))
 				if err != nil {
 					err = fmt.Errorf("storage reference key %x issue for branch %x in %s: %w", key, branchKey, fileName, err)
@@ -333,10 +333,10 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 						"kv", fileName,
 					)
 				}
-				counts.accNonDerefCount++
+				counts.plainAccounts++
 				return key, nil // not a referenced key, nothing to check
 			}
-			counts.accDerefCount++
+			counts.referencedAccounts++
 			offset, err := checkOffsetDeref(key, uint64(accReader.Size()))
 			if err != nil {
 				err = fmt.Errorf("account reference key %x issue for branch %x in %s: %w", key, branchKey, fileName, err)
@@ -385,11 +385,11 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	logger.Info(
 		"checked commitment kv dereference in",
 		"dur", time.Since(start),
-		"keys", counts.branchKeyCount,
-		"accDerefs", counts.accDerefCount,
-		"accNonDerefs", counts.accNonDerefCount,
-		"storageDerefs", counts.storageDerefCount,
-		"storageNonDerefs", counts.storageNonDerefCount,
+		"keys", counts.branchKeys,
+		"referencedAccounts", counts.referencedAccounts,
+		"plainAccounts", counts.plainAccounts,
+		"referencedStorages", counts.referencedStorages,
+		"plainStorages", counts.plainStorages,
 		"kv", fileName,
 	)
 	return counts, integrityErr
