@@ -777,7 +777,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 		case <-logEvery.C:
 			blkSec := float64(prev-startBlockNum) / logInterval.Seconds()
 			log.Info("Progress", "block", prev-1,
-				"blocks ahead", common.PrettyCounter(endBlockNum-prev), "done%", fmt.Sprintf("%.2f", float64(endBlockNum-prev)/float64(totalBlocks)*100),
+				"blocks ahead", common.PrettyCounter(endBlockNum-prev), "done%", fmt.Sprintf("%.2f", (1-(float64(endBlockNum-prev)/float64(totalBlocks)))*100),
 				"hash", lastBlockHash, "blk/s", fmt.Sprintf("%.2f", blkSec))
 			startBlockNum = prev
 
