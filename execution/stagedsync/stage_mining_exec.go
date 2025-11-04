@@ -128,8 +128,6 @@ func SpawnMiningExecStage(s *StageState, sd *execctx.SharedDomains, tx kv.Tempor
 
 	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}
 
-	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}
-
 	txNum := sd.TxNum()
 
 	core.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
