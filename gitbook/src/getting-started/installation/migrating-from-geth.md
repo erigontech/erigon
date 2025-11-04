@@ -43,7 +43,7 @@ This path offers the simplest validator configuration by using Erigon's embedded
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
    * Restart Erigon.
-   * Crucially, reconfigure your validator keys (your withdrawal key setup) to point directly to the Erigon node's standard execution port (or the appropriate RPC port for staking actions), as Erigon/Caplin now handles both layers internally. See also [here](../../staking/caplin.md).
+   * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally). See also [here](../../staking/caplin.md).
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
 {% endtab %}
 
@@ -53,14 +53,13 @@ This path allows you to retain your existing external Consensus Layer (CL) clien
 #### Steps for Minimal Downtime
 
 1. **Preparation** (Installation): Install and configure Erigon.
-2. **Configuration Check** (Ports): Ensure the network [ports](../../fundamentals/default-ports.md) for the Erigon instance are different from Geth's to avoid conflicts. This includes JSON-RPC (`--http.port`), Engine API (`--authrpc.port`), and P2P (`--p2p.listen-addr`).
-3. **Configuration Check** (CL Client): Ensure your external CL client is temporarily configured to use Erigon's temporary Engine API port (e.g., 8552, if Geth was 8551) for the duration of the parallel sync.
-4. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-RPC method or a health check.
-5. **Validator Swap**: Once Erigon is fully synced, shut down both Geth and Erigon. Keep the external CL client running.
+2. **Configuration Check** **(Ports)**: Ensure the network [ports](../../fundamentals/default-ports.md) for Engine API (`--authrpc.port`), JSON-RPC (`--http.port`), and P2P (`--p2p.listen-addr`) are different from the old EL client's ports to avoid conflicts.
+3. **Configuration Check (CL Client)**: Temporarily configure your external CL client to connect to Erigon's temporary Engine API port for the duration of the parallel sync.
+4. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../../interacting-with-erigon/interacting-with-erigon.md) or a health check.
+5. **Validator Swap**: Once Erigon is fully synced, shut down both Geth and Erigon. **Keep the external CL client running.**
 6. **Reconfiguration and Restart**:
-   * Restart Erigon, ensuring it uses the same Engine API port (e.g., 8551) and JWT secret that Geth previously used.
-   * Immediately shut down Geth.
-   * Restart your external CL client to re-establish a connection with Erigon using the original, expected Engine API port.
+   * Restart Erigon, ensuring it uses the **original Engine API port and JWT secret** that your old EL client used.
+   * Immediately shut down the old EL client. Your external CL client will re-establish communication with Erigon on the expected port
 7. **Decommission Old Setup**: Verify Erigon and your external CL client are proposing and attesting blocks correctly. If confirmed, safely remove Geth and its data.
 {% endtab %}
 {% endtabs %}
@@ -71,11 +70,11 @@ This is the simplest option as it requires no configuration adjustments. However
 
 {% tabs %}
 {% tab title="Erigon + Caplin (Fastest Sync)" %}
-This path is the fastest way to get Erigon running. It utilizes Erigon's embedded consensus client, Caplin, requiring no external CL client or JWT secret. This is ideal for home users with limited disk space and no critical uptime requirements.
+This path is the fastest way to get Erigon running. It utilizes **Erigon's embedded consensus client, Caplin**, requiring no external CL client or JWT secret. This is ideal for home users with limited disk space and no critical uptime requirements.
 
 #### Steps for Quickest Start
 
-1. **Decommission Old Setup**: Shut down and remove your old EL client (Geth, etc.) and its data. If you were using an external CL client, you can shut it down as well.
+1. **Decommission Old Setup**: Shut down and **remove your old EL** client (Geth, etc.) and its data. If you were using an external CL client, you can shut it down as well.
 2. **Installation**: Install and configure Erigon.
 3. **Configuration Ports (optional)**: Ensure Erigon uses the same standard network [ports](../../fundamentals/default-ports.md) (JSON-RPC, P2P) that your old EL client used.
 4. **Synchronization**: Start syncing Erigon with the default Caplin configuration (Caplin does not use the Engine API). See [Basic Usage](../../fundamentals/basic-usage.md).
@@ -84,7 +83,7 @@ This path is the fastest way to get Erigon running. It utilizes Erigon's embedde
 {% endtab %}
 
 {% tab title="Erigon + External CL (Reuse Existing CL)" %}
-This path retains your existing external Consensus Layer (CL) client (e.g., Prysm, Lighthouse) but swaps the old EL client for Erigon. Since downtime is accepted, this process requires simpler port management.
+This path retains your existing **external Consensus Layer (CL)** client (e.g., Prysm, Lighthouse) but swaps the old EL client for Erigon. Since downtime is accepted, this process requires simpler port management.
 
 #### Steps for Quickest Start
 

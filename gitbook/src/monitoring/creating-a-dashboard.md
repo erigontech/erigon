@@ -1,3 +1,7 @@
+---
+description: Enhancing Erigon Node Monitoring with Prometheus and Grafana
+---
+
 # Creating a dashboard
 
 Erigon provides robust, built-in support for monitoring using the Prometheus and Grafana stack. This setup offers comprehensive visibility into node performance, storage usage, and network activity, including relevant metrics for the integrated Consensus Layer (Caplin).

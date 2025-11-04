@@ -24,7 +24,7 @@ To interact with the **RPC Service** visit the dedicated page [Interacting with 
 
 ## Command Line Options
 
-When running RPC daemon in Local or Remote deployment mode, use this command to display available options for RPCdaemon digit:
+When running RPC daemon in Local or Remote deployment mode, use this command to display available options:
 
 ```bash
 ./build/bin/rpcdaemon --help
