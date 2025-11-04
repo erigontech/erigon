@@ -2272,20 +2272,20 @@ func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	return cpy
 }
 
-func (tx *ArbitrumInternalTx) Type() byte                         { return ArbitrumInternalTxType }
-func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int           { return tx.ChainId }
-func (tx *ArbitrumInternalTx) GetNonce() uint64                   { return 0 }
-func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int             { return uintZero }
-func (tx *ArbitrumInternalTx) GetTipCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumInternalTx) GetFeeCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumInternalTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
-func (tx *ArbitrumInternalTx) GetGasLimit() uint64                { return 0 }
-func (tx *ArbitrumInternalTx) GetBlobGas() uint64                 { return 0 } // todo
-func (tx *ArbitrumInternalTx) GetData() []byte                    { return tx.Data }
-func (tx *ArbitrumInternalTx) GetValue() *uint256.Int             { return uintZero }
-func (tx *ArbitrumInternalTx) GetTo() *common.Address             { return &ArbosAddress }
-func (tx *ArbitrumInternalTx) GetAccessList() AccessList          { return nil }
-func (tx *ArbitrumInternalTx) GetAuthorizations() []Authorization { return nil }
+func (tx *ArbitrumInternalTx) Type() byte                                   { return ArbitrumInternalTxType }
+func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int                     { return tx.ChainId }
+func (tx *ArbitrumInternalTx) GetNonce() uint64                             { return 0 }
+func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int                       { return uintZero }
+func (tx *ArbitrumInternalTx) GetTipCap() *uint256.Int                      { return uintZero }
+func (tx *ArbitrumInternalTx) GetFeeCap() *uint256.Int                      { return uintZero }
+func (tx *ArbitrumInternalTx) GetBlobHashes() []common.Hash                 { return []common.Hash{} }
+func (tx *ArbitrumInternalTx) GetGasLimit() uint64                          { return 0 }
+func (tx *ArbitrumInternalTx) GetBlobGas() uint64                           { return 0 } // todo
+func (tx *ArbitrumInternalTx) GetData() []byte                              { return tx.Data }
+func (tx *ArbitrumInternalTx) GetValue() *uint256.Int                       { return uintZero }
+func (tx *ArbitrumInternalTx) GetTo() *common.Address                       { return &ArbosAddress }
+func (tx *ArbitrumInternalTx) GetAccessList() AccessList                    { return nil }
+func (tx *ArbitrumInternalTx) GetAuthorizations() []Authorization           { return nil }
 func (tx *ArbitrumInternalTx) cachedSender() (common.Address, bool)         { return ArbosAddress, true }
 func (tx *ArbitrumInternalTx) GetSender() (common.Address, bool)            { return ArbosAddress, true }
 func (tx *ArbitrumInternalTx) IsContractDeploy() bool                       { return false }
