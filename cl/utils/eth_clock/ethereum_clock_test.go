@@ -19,8 +19,8 @@ package eth_clock
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 

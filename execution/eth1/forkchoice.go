@@ -24,24 +24,23 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
 const startPruneFrom = 1024
@@ -74,7 +73,7 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 }
 
 func isDomainAheadOfBlocks(tx kv.TemporalRwTx, logger log.Logger) bool {
-	doms, err := state.NewSharedDomains(tx, logger)
+	doms, err := execctx.NewSharedDomains(tx, logger)
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err)
 		return errors.Is(err, commitmentdb.ErrBehindCommitment)
@@ -261,7 +260,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
 	}
-	if fcuHeader.Number.Uint64() > 0 {
+	if fcuHeader.Number.Sign() > 0 {
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
@@ -315,7 +314,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 			currentParentHash = currentHeader.ParentHash
-			if currentHeader.Number.Uint64() == 0 {
+			if currentHeader.Number.Sign() == 0 {
 				panic("assert:uint64 underflow") //uint-underflow
 			}
 			currentParentNumber = currentHeader.Number.Uint64() - 1
@@ -347,7 +346,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, wrap.NewTxContainer(tx, nil)); err != nil {
+		if err := e.executionPipeline.RunUnwind(e.db, nil, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -449,7 +448,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	initialCycle := limitedBigJump
 	firstCycle := false
 	for {
-		hasMore, err := e.executionPipeline.Run(e.db, wrap.NewTxContainer(tx, nil), initialCycle, firstCycle)
+		hasMore, err := e.executionPipeline.Run(e.db, nil, tx, initialCycle, firstCycle)
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
@@ -474,6 +473,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
+
 		err = tx.Commit()
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
@@ -557,7 +557,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
-				return e.hook.AfterRun(tx, finishProgressBefore)
+				return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
 			}); err != nil {
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 				return

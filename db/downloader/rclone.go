@@ -44,9 +44,9 @@ import (
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -525,12 +525,12 @@ func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 	var fileRequests []*rcloneRequest
 
 	if strings.HasPrefix(c.remoteFs, "http") {
-		var headers string
+		var headers strings.Builder
 		var comma string
 
 		for header, values := range c.headers {
 			for _, value := range values {
-				headers += fmt.Sprintf("%s%s=%s", comma, header, value)
+				headers.WriteString(fmt.Sprintf("%s%s=%s", comma, header, value))
 				comma = ","
 			}
 		}
@@ -545,7 +545,7 @@ func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 					SrcFs: rcloneFs{
 						Type:    "http",
 						Url:     c.remoteFs,
-						Headers: headers,
+						Headers: headers.String(),
 					},
 					SrcRemote: file,
 					DstFs:     c.localFs,

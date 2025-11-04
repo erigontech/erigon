@@ -32,12 +32,12 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/bitutil"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/bitutil"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -377,10 +377,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 			// Calculate the data segment this thread should generate
 			batch := (size + hashBytes*uint64(threads) - 1) / (hashBytes * uint64(threads))
 			first := uint64(id) * batch
-			limit := first + batch
-			if limit > size/hashBytes {
-				limit = size / hashBytes
-			}
+			limit := min(first+batch, size/hashBytes)
 			// Calculate the dataset segment
 			percent := size / hashBytes / 100
 			for index := first; index < limit; index++ {

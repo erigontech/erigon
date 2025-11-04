@@ -23,11 +23,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
@@ -76,6 +76,10 @@ func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
 
 	if header.RequestsHash != nil {
 		h.RequestsHash = gointerfaces.ConvertHashToH256(*header.RequestsHash)
+	}
+
+	if header.BlockAccessListHash != nil {
+		h.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
 	}
 
 	if len(header.AuRaSeal) > 0 {
@@ -155,6 +159,10 @@ func HeaderRpcToHeader(header *executionproto.Header) (*types.Header, error) {
 	if header.RequestsHash != nil {
 		h.RequestsHash = new(common.Hash)
 		*h.RequestsHash = gointerfaces.ConvertH256ToHash(header.RequestsHash)
+	}
+	if header.BlockAccessListHash != nil {
+		h.BlockAccessListHash = new(common.Hash)
+		*h.BlockAccessListHash = gointerfaces.ConvertH256ToHash(header.BlockAccessListHash)
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {

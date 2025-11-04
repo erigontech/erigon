@@ -16,7 +16,7 @@
 
 package utils
 
-import "github.com/erigontech/erigon-lib/common"
+import "github.com/erigontech/erigon/common"
 
 // Check if leaf at index verifies against the Merkle root and branch
 func IsValidMerkleBranch(leaf common.Hash, branch []common.Hash, depth uint64, index uint64, root [32]byte) bool {

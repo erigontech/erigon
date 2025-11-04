@@ -33,30 +33,30 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/eth/consensuschain"
-	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/tracing"
+	trace_logger "github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
@@ -305,7 +305,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
+	sd, err := execctx.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return err
 	}
@@ -658,7 +658,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 	defer c.Close()
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}
@@ -696,7 +696,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 		}
 	}
 	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
+	root, err := domains.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
 		return nil, err
 	}

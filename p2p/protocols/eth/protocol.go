@@ -24,16 +24,15 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/forkid"
 )
 
 var ProtocolToString = map[uint]string{
-	direct.ETH67: "eth67",
 	direct.ETH68: "eth68",
 	direct.ETH69: "eth69",
 }
@@ -46,7 +45,7 @@ const ProtocolName = "eth"
 const maxMessageSize = 10 * 1024 * 1024
 const ProtocolMaxMsgSize = maxMessageSize
 
-var ProtocolLengths = map[uint]uint64{direct.ETH67: 17, direct.ETH68: 17, direct.ETH69: 18}
+var ProtocolLengths = map[uint]uint64{direct.ETH68: 17, direct.ETH69: 18}
 
 const (
 	// Protocol messages in eth/64
@@ -69,20 +68,6 @@ const (
 )
 
 var ToProto = map[uint]map[uint64]sentryproto.MessageId{
-	direct.ETH67: {
-		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
-		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
-		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
-		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
-		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_66,
-		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_66,
-		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
-		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
-		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
-		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
-		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
-	},
 	direct.ETH68: {
 		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
 		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
@@ -116,20 +101,6 @@ var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 }
 
 var FromProto = map[uint]map[sentryproto.MessageId]uint64{
-	direct.ETH67: {
-		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
-		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
-		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
-		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
-		sentryproto.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
-		sentryproto.MessageId_RECEIPTS_66:                      ReceiptsMsg,
-		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
-		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
-		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
-		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
-		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
-		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
-	},
 	direct.ETH68: {
 		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
 		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
@@ -410,6 +381,16 @@ type ReceiptsRLPPacket66 struct {
 type BlockRangeUpdatePacket struct {
 	Earliest, Latest uint64
 	LatestHash       common.Hash
+}
+
+func (packet *BlockRangeUpdatePacket) Validate() error {
+	if packet.Earliest > packet.Latest {
+		return fmt.Errorf("invalid block range: earliest (%d) > latest (%d)", packet.Earliest, packet.Latest)
+	}
+	if packet.LatestHash == (common.Hash{}) {
+		return fmt.Errorf("invalid block range: latest block hash is zero")
+	}
+	return nil
 }
 
 func (*StatusPacket) Name() string { return "Status" }

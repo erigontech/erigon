@@ -20,10 +20,10 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth2shuffle"
+	"github.com/erigontech/erigon/common"
 )
 
 func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint64, seed [32]byte, preInputs [][32]byte, hashFunc utils.HashFunc) (uint64, error) {
@@ -43,10 +43,7 @@ func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint6
 		flip := (pivot + ind_count - ind) % ind_count
 
 		// No uint64 max function in go standard library.
-		position := ind
-		if flip > ind {
-			position = flip
-		}
+		position := max(flip, ind)
 		// Construct the second hash input.
 		copy(input2, seed[:])
 		input2[32] = byte(i)

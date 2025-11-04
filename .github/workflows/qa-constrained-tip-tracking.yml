@@ -7,26 +7,26 @@ on:
 
 jobs:
   constrained-tip-tracking-test:
-    timeout-minutes: 600
     strategy:
       fail-fast: false
       matrix:
         include:
           - chain: mainnet
-            backend: Erigon3
+            backend: Ethereum
             cgroup_name: constrained_res_32G
             prune_mode: archive_node
-          - chain: bor-mainnet
-            backend: Polygon
-            cgroup_name: constrained_res_64G
-            prune_mode: full_node
+          #- chain: gnosis
+          #  backend: Gnosis
+          #  cgroup_name: constrained_res_64G
+          #  prune_mode: archive_node
     runs-on: [ self-hosted, qa, "${{ matrix.backend }}", tip-tracking ]
+    timeout-minutes: 780 # 13 hours
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
-      ERIGON_TESTBED_AREA: /opt/erigon-testbed
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-main/datadir
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 14400 # 4 hours
-      TOTAL_TIME_SECONDS: 28800 # 8 hours
+      TRACKING_TIME_SECONDS: 7200 # 2 hours
+      TOTAL_TIME_SECONDS: 36000 # 10 hours
       CHAIN: ${{ matrix.chain }}
       CGROUP_NAME: ${{ matrix.cgroup_name }}
       PRUNE_MODE: ${{ matrix.prune_mode }}
@@ -48,19 +48,54 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Save Erigon Chaindata Directory
+    - name: Run previous Erigon version and wait for sync (stabilization step)
+      id: pre_test_step
+      run: |
+        set +e # Disable exit on error
+        
+        # Launch the testbed Erigon instance & test its ability to maintain sync for 2 minutes
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/../ $ERIGON_REFERENCE_DATA_DIR 120 $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+        
+        # Capture monitoring script exit status
+        test_exit_status=$?
+        
+        # Save the subsection reached status
+        echo "test_executed=true" >> $GITHUB_OUTPUT
+        
+        # Clean up Erigon process if it's still running
+        if kill -0 $ERIGON_PID 2> /dev/null; then
+          echo "Terminating Erigon"
+          kill $ERIGON_PID
+          wait $ERIGON_PID
+        fi
+
+        # Check test runner script exit status
+        if [ $test_exit_status -eq 0 ]; then
+          echo "Pre-sync step completed successfully"
+          echo "::notice::Pre-sync step completed successfully"
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "Pre-sync step encountered an error"
+          echo "::error::Pre-sync step encountered an error"
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+    - name: Restore Erigon Testbed Data Directory & Erigon binary
       id: save_chaindata_step
       run: |
-        mv $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+        cp $ERIGON_REFERENCE_DATA_DIR/../erigon $ERIGON_TESTBED_DATA_DIR/../
 
-    - name: Run Erigon, wait sync and check ability to maintain sync
+    - name: Run Erigon under constraints, wait sync and check ability to maintain sync
       id: test_step
       run: |
         set +e # Disable exit on error
         
         # Run Erigon under memory constraints, wait sync and check ability to maintain sync
         cgexec -g memory:$CGROUP_NAME python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $PRUNE_MODE statistics
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $PRUNE_MODE statistics
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -78,15 +113,22 @@ jobs:
         # Check test runner script exit status
         if [ $test_exit_status -eq 0 ]; then
           echo "Tests completed successfully"
+          echo "::notice::Tip-tracking test completed successfully"
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
         else
-          echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          if reason=$(python3 print_reason.py ${{ github.workspace }}/result-$CHAIN.json); then
+            echo "Error detected during tests: $reason"
+            echo "::error::Tip-tracking test encountered an error: $reason"
+          else
+            echo "Error detected during tests"
+            echo "::error::Tip-tracking test encountered an error"
+          fi
         fi
 
     - name: Upload Downloader Torrent Client Status
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: torrent-client-status-${{ env.CHAIN }}
         path: torrent-client-status.txt
@@ -114,26 +156,32 @@ jobs:
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: test-results-${{ env.CHAIN }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
-    - name: Upload Erigon full log
+    - name: Upload erigon logs
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: erigon-logs-${{ env.CHAIN }}
         path: |
-          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
-          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/proc_stat.log
+          ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
+          ${{ env.ERIGON_TESTBED_DATA_DIR }}/proc_stat.log
 
-    - name: Restore Erigon Chaindata Directory
+    - name: Upload metric plots
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v5
+      with:
+        name: metric-plots-${{ env.CHAIN }}
+        path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
+
+    - name: Delete Erigon Testbed Data Directory
       if: ${{ always() }}
       run: |
-        if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ]; then
-          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
-          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+        if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
+          rm -rf $ERIGON_TESTBED_DATA_DIR
         fi
 
     - name: Resume the Erigon instance dedicated to db maintenance
@@ -141,12 +189,10 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
-    - name: Action for Success
-      if: steps.test_step.outputs.TEST_RESULT == 'success'
-      run: echo "::notice::Tests completed successfully"
-
     - name: Action for Not Success
-      if: steps.test_step.outputs.TEST_RESULT != 'success'
+      if: ${{ always() }}
       run: |
-        echo "::error::Error detected during tests"
-        exit 1
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during tests, please see the summary section for details"
+          exit 1
+        fi 

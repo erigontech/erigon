@@ -30,9 +30,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -312,7 +312,7 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 				break
 			}
 
-			if blockBatch[0].Number().Uint64() == 0 {
+			if blockBatch[0].Number().Sign() == 0 {
 				// we do not want to insert block 0 (genesis)
 				blockBatch = blockBatch[1:]
 			}

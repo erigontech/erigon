@@ -27,13 +27,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
@@ -496,7 +496,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxns.Txns[i], minedTxns.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 					return err
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}
@@ -516,7 +516,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					}
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}

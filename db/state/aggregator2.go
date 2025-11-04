@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -20,12 +20,13 @@ import (
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
 type AggOpts struct { //nolint:gocritic
-	schema   statecfg.SchemaGen // biz-logic
-	dirs     datadir.Dirs
-	logger   log.Logger
-	stepSize uint64
+	schema            statecfg.SchemaGen // biz-logic
+	dirs              datadir.Dirs
+	logger            log.Logger
+	stepSize          uint64
+	stepsInFrozenFile uint64
+	reorgBlockDepth   uint64
 
-	reorgBlockDepth uint64
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
 	disableFsync    bool // for tests speed
@@ -33,14 +34,15 @@ type AggOpts struct { //nolint:gocritic
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return AggOpts{ //Defaults
-		logger:          log.Root(),
-		schema:          statecfg.Schema,
-		dirs:            dirs,
-		stepSize:        config3.DefaultStepSize,
-		reorgBlockDepth: dbg.MaxReorgDepth,
-		genSaltIfNeed:   false,
-		sanityOldNaming: false,
-		disableFsync:    false,
+		logger:            log.Root(),
+		schema:            statecfg.Schema,
+		dirs:              dirs,
+		stepSize:          config3.DefaultStepSize,
+		stepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		reorgBlockDepth:   dbg.MaxReorgDepth,
+		genSaltIfNeed:     false,
+		sanityOldNaming:   false,
+		disableFsync:      false,
 	}
 }
 
@@ -61,7 +63,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, opts.reorgBlockDepth, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, opts.stepsInFrozenFile, opts.reorgBlockDepth, db, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +104,10 @@ func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //no
 // Setters
 
 func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
+func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
+	opts.stepsInFrozenFile = steps
+	return opts
+}
 func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
 	opts.reorgBlockDepth = d
 	return opts

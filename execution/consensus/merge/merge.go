@@ -24,18 +24,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -364,16 +364,19 @@ func (s *Merge) IsServiceTransaction(sender common.Address, syscall consensus.Sy
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
+	auraEngine, isAura := s.eth1Engine.(*aura.AuRa)
 	if !misc.IsPoSHeader(header) {
 		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
+	} else if isAura {
+		auraEngine.RewriteBytecode(header, state)
 	}
-	if chain.Config().IsCancun(header.Time) {
+	if chain.Config().IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr common.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
 	if chain.Config().IsPrague(header.Time) {
-		misc.StoreBlockHashesEip2935(header, state, config, chain)
+		_ = misc.StoreBlockHashesEip2935(header, state)
 	}
 }
 

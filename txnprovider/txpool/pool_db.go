@@ -25,8 +25,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -136,7 +136,7 @@ func SaveChainConfigIfNeed(
 	}
 
 	if cc != nil && !force {
-		if cc.ChainID.Uint64() == 0 {
+		if cc.ChainID.Sign() == 0 {
 			return nil, 0, errors.New("wrong chain config")
 		}
 		return initBor(cc), blockNum, nil
@@ -179,7 +179,7 @@ func SaveChainConfigIfNeed(
 	}); err != nil {
 		return nil, 0, err
 	}
-	if cc.ChainID.Uint64() == 0 {
+	if cc.ChainID.Sign() == 0 {
 		return nil, 0, errors.New("wrong chain config")
 	}
 	return initBor(cc), blockNum, nil

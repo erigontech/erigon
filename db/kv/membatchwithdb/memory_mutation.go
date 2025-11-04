@@ -19,12 +19,13 @@ package membatchwithdb
 import (
 	"bytes"
 	"context"
+	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -261,6 +262,7 @@ func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte,
 func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
+
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: true, limit: int64(limit)}
 	var err error
@@ -778,4 +780,32 @@ func (m *MemoryMutation) AggForkablesTx(id kv.ForkableId) any {
 
 func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	return m.db.(kv.TemporalTx).Unmarked(id)
+}
+
+func (m *MemoryMutation) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	panic("implement me pls. or use SharedDomains")
+}
+
+func (m *MemoryMutation) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	panic("implement me pls. or use SharedDomains")
+}
+
+func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	panic("implement me pls. or use SharedDomains")
+}
+
+func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
+	return m.db.(kv.TemporalRwTx).UnmarkedRw(id)
+}
+
+func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
+	return m.db.(kv.TemporalRwTx).PruneSmallBatches(ctx, timeout)
+}
+
+func (m *MemoryMutation) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
+	return m.db.(kv.TemporalRwTx).GreedyPruneHistory(ctx, domain)
+}
+
+func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	return m.db.(kv.TemporalRwTx).Unwind(ctx, txNumUnwindTo, changeset)
 }
