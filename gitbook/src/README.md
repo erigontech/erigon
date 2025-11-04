@@ -1,7 +1,9 @@
 ---
 description: 'Your Erigon Guide: Core Features, Setup Instructions, and Essential Links'
-cover: .gitbook/assets/Untitled drawing (3).jpg
-coverY: 0
+cover: >-
+  .gitbook/assets/ERIGON Presentation 2025 - Corporate PowerPoint
+  Template(1).svg
+coverY: 36.99424874191229
 layout:
   width: default
   cover:
