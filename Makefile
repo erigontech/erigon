@@ -153,7 +153,7 @@ dbg:
 %.cmd:
 	@echo Building '$(OUTPUT)'
 	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
-	@echo "Run \"$(GOBIN)/$*\" to launch $*."
+	@echo "Run \"$(OUTPUT)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
 geth: erigon
