@@ -71,4 +71,3 @@
   * [Disclaimer](about/disclaimer.md)
   * [Donate](about/donate.md)
   * [How to reach us](about/how-to-reach-us.md)
-* [Support](summary/support.md)
