@@ -165,7 +165,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		"checked commitment kvs dereference in",
 		"dur", time.Since(start),
 		"files", len(files),
-		"keys", branchKeys.Load(),
+		"branchKeys", branchKeys.Load(),
 		"referencedAccounts", referencedAccounts.Load(),
 		"plainAccounts", plainAccounts.Load(),
 		"referencedStorages", referencedStorages.Load(),
@@ -384,7 +384,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	logger.Info(
 		"checked commitment kv dereference in",
 		"dur", time.Since(start),
-		"keys", counts.branchKeys,
+		"branchKeys", counts.branchKeys,
 		"referencedAccounts", counts.referencedAccounts,
 		"plainAccounts", counts.plainAccounts,
 		"referencedStorages", counts.referencedStorages,
