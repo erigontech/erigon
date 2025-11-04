@@ -110,11 +110,11 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
+	valWithStep := dataWithStep{data: val, step: kv.Step(txNum / sd.stepSize)}
 	putKeySize := 0
 	putValueSize := 0
 	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
+		if old, ok := sd.storage.Set(key, valWithStep); ok {
 			putValueSize += len(val) - len(old.data)
 		} else {
 			putKeySize += len(key)
