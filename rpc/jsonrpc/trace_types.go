@@ -21,7 +21,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 // TODO:(tjayrush)
