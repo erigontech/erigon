@@ -8,10 +8,6 @@ description: 'Erigon Hardware Requirements: Disk Type and Size, RAM, and CPU for
 
 A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory Express) disk is essential for optimal performance. Avoid Hard Disk Drives (HDD), as they can cause Erigon to lag behind the blockchain tip, albeit not fall behind.
 
-Hardware requirements vary depending on whether you're running a Minimal, Full, or Archive node.
-
-#### General Recommendations for All Node Types
-
 | **Component**      | **Recommendation**                                                | **Notes**                                                                                                   |
 | ------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Disk Type          | Use high-end NVMe SSDs.                                           | SSD performance may degrade when nearing full capacity.                                                     |
@@ -30,11 +26,7 @@ The values in the table below refer to the --datadir directory as of September 2
 
 {% tabs %}
 {% tab title="Ethereum mainnet" %}
-| **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | 1.77 TB                | 4 TB                        | 32 GB              | 64 GB                 |
-| Full (Default) | 920 GB                 | 2 TB                        | 16 GB              | 32 GB                 |
-| Minimal        | 350 GB                 | 1 TB                        | 16 GB              | 64 GB                 |
+<table data-header-hidden><thead><tr><th width="109"></th><th width="126"></th><th></th><th width="116"></th><th></th></tr></thead><tbody><tr><td><strong>Sync Mode</strong></td><td><strong>Current Disk Usage</strong></td><td><strong>Disk Size (Recommended)</strong></td><td><strong>RAM (Required)</strong></td><td><strong>RAM (Recommended)</strong></td></tr><tr><td>Archive </td><td>1.77 TB</td><td>4 TB</td><td>32 GB</td><td>64 GB</td></tr><tr><td>Full (Default)</td><td>920 GB</td><td>2 TB</td><td>16 GB</td><td>32 GB</td></tr><tr><td>Minimal</td><td>350 GB</td><td>1 TB</td><td>16 GB</td><td>64 GB</td></tr></tbody></table>
 {% endtab %}
 
 {% tab title="Gnosis Chain" %}

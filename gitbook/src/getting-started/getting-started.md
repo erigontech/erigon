@@ -8,4 +8,8 @@ To use Erigon, you must first install the software. The current stable and produ
 
 There are several ways to install Erigon, depending on your operating system and preferred method (e.g., using a Docker container, pre-built packages, or building from source).
 
-**Before proceeding with any installation, please carefully verify the** [**Hardware Requirements**](hardware-requirements.md)**.**
+Before proceeding with any installation, please carefully check the hardware requirements.
+
+{% content-ref url="hardware-requirements.md" %}
+[hardware-requirements.md](hardware-requirements.md)
+{% endcontent-ref %}
