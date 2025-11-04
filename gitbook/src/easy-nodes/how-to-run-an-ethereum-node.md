@@ -1,5 +1,5 @@
 ---
-description: Quick start a Erigon full node on Ethereum mainnet
+description: 'Quick Start: Running a Ethereum Node with Erigon'
 ---
 
 # How to run an Ethereum node

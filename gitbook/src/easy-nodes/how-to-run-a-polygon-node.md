@@ -1,5 +1,5 @@
 ---
-description: Quick start a Erigon minimal node on Polygon network
+description: 'Quick Start: Running a Polygon Node with Erigon'
 ---
 
 # How to run a Polygon node
@@ -15,11 +15,11 @@ description: Quick start a Erigon minimal node on Polygon network
 
 ## Download and start Erigon​
 
-To download Erigon and start syncing a **Polygon minimal node** paste the following command in your terminal:
+To download Erigon and start syncing a **Polygon full node** paste the following command in your terminal:
 
 {% code overflow="wrap" %}
 ```bash
-docker run -it erigontech/erigon:v3.2.2 --chain=bor-mainnet --bor.heimdall=https://heimdall-api.polygon.technology --prune.mode=minimal --http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool --torrent.download.rate=512mb
+docker run -it erigontech/erigon:v3.2.2 --chain=bor-mainnet --bor.heimdall=https://heimdall-api.polygon.technology --http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool --torrent.download.rate=512mb
 ```
 {% endcode %}
 
@@ -30,7 +30,7 @@ Now you can relax and watch your Erigon node sync!
 * `-it` lets you see what's happening and interact with Erigon.
 * `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
   * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
-* `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](https://erigon.gitbook.io/docs/summary/fundamentals/sync-modes); this will allow Erigon to sync in few hours. Use `--prune.mode=archive` to run an archive node or `--prune.mode=full` to run a full node
+* Add `--prune.mode=minimal` to run minimal [Sync Mode](https://erigon.gitbook.io/docs/summary/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../fundamentals/web3-wallet.md);
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
 

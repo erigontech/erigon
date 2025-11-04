@@ -1,5 +1,5 @@
 ---
-description: Quick start a Gnosis Chain full node on Ethereum mainnet
+description: 'Quick Start: Running a Gnosis Chain Node with Erigon'
 ---
 
 # How to run a Gnosis Chain node
@@ -15,7 +15,7 @@ To download Erigon and start syncing a **Gnosis Chain full node** paste the foll
 
 {% code overflow="wrap" %}
 ```bash
-docker run -it erigontech/erigon:v3.2.2 --chain=gnosis --prune.mode=minimal --http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool --torrent.download.rate=512mb
+docker run -it erigontech/erigon:v3.2.2 --chain=gnosis --http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool --torrent.download.rate=512mb
 ```
 {% endcode %}
 
