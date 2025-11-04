@@ -15,7 +15,7 @@
       * [Windows Subsystem for Linux (WSL)](getting-started/installation/windows-wsl.md)
     * [Docker](getting-started/installation/docker.md)
     * [Upgrading from a previous version](getting-started/installation/upgrading.md)
-    * [Migrating from Geth](getting-started/installation/migrating-from-geth.md)
+  * [Migrating from Geth](summary/getting-started/migrating-from-geth.md)
 * [Easy Nodes](easy-nodes/easy-nodes.md)
   * [How to run an Ethereum node](easy-nodes/how-to-run-an-ethereum-node.md)
     * [Ethereum with an external CL](easy-nodes/ethereum-with-an-external-cl.md)

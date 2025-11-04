@@ -78,7 +78,7 @@ This path is the fastest way to get Erigon running. It utilizes **Erigon's embed
 2. **Installation**: Install and configure Erigon.
 3. **Configuration Ports (optional)**: Ensure Erigon uses the same standard network [ports](../../fundamentals/default-ports.md) (JSON-RPC, P2P) that your old EL client used.
 4. **Synchronization**: Start syncing Erigon with the default Caplin configuration (Caplin does not use the Engine API). See [Basic Usage](../../fundamentals/basic-usage.md).
-5. **Final Setup**: Once Erigon is fully synced, your node is online. If you are a validator, configure your validator keys to point directly to the Erigon node's standard execution port.
+5. **Final Setup**: Once Erigon is fully synced, your node is online.&#x20;
 6. **Monitoring**: Monitor the sync progress using `eth_syncing` or the health check, and ensure no errors appear in Erigon's logs.
 {% endtab %}
 
@@ -91,6 +91,6 @@ This path retains your existing **external Consensus Layer (CL)** client (e.g., 
 2. **Installation**: Install and [configure](../../fundamentals/configuring-erigon.md) Erigon using `--externalcl` flag.
 3. **Configuration** (JWT and Ports): Ensure Erigon uses the same Engine API [port](../../fundamentals/default-ports.md) (e.g., 8551) and [JWT secret](../../fundamentals/jwt.md) that the old EL client previously used. Otherwise, you must reconfigure your external CL client to match Erigon's new settings.
 4. **Synchronization**: Start syncing Erigon. Your external CL client will automatically connect to Erigon once Erigon is running and reachable on the Engine API port.
-5. **Monitoring and Verification**: Once Erigon is fully synced, check the logs of both Erigon and the external CL client to verify correct chain following and block production/attestation (if you are a validator).
+5. **Monitoring and Verification**: Once Erigon is fully synced, check the logs of both Erigon and the external CL client to verify correct chain following.
 {% endtab %}
 {% endtabs %}

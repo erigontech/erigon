@@ -1,8 +1,6 @@
 ---
 description: 'Your Erigon Guide: Core Features, Setup Instructions, and Essential Links'
-cover: >-
-  .gitbook/assets/ERIGON Presentation 2025 - Corporate PowerPoint
-  Template(1).svg
+cover: .gitbook/assets/cover.svg
 coverY: 36.99424874191229
 layout:
   width: default
