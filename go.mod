@@ -23,9 +23,9 @@ require (
 	github.com/anacrolix/envpprof v1.4.0
 	github.com/anacrolix/generics v0.1.0
 	github.com/anacrolix/go-libutp v1.3.2
-	github.com/anacrolix/log v0.17.0
+	github.com/anacrolix/log v0.17.1-0.20251104052530-3641ce2cfef7
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.59.2-0.20250903105451-d922d78d2e61
+	github.com/anacrolix/torrent v1.59.2-0.20251108111226-a4e8b82d070e
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -313,3 +313,5 @@ require (
 	modernc.org/sqlite v1.21.1 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
+
+replace github.com/ajwerner/btree => github.com/anacrolix/btree v0.0.0-20251103085645-fd1051eb0009
