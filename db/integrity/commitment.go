@@ -19,7 +19,6 @@ package integrity
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -291,9 +290,9 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					return key, nil // not a referenced key, nothing to check
 				}
 				counts.referencedStorages++
-				offset, err := checkOffsetDeref(key, uint64(storageReader.Size()))
-				if err != nil {
-					err = fmt.Errorf("storage reference key %x issue for branch %x in %s: %w", key, branchKey, fileName, err)
+				offset := state.DecodeReferenceKey(key)
+				if offset >= uint64(storageReader.Size()) {
+					err = fmt.Errorf("storage reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, storageReader.Size())
 					if failFast {
 						return nil, err
 					}
@@ -337,9 +336,9 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return key, nil // not a referenced key, nothing to check
 			}
 			counts.referencedAccounts++
-			offset, err := checkOffsetDeref(key, uint64(accReader.Size()))
-			if err != nil {
-				err = fmt.Errorf("account reference key %x issue for branch %x in %s: %w", key, branchKey, fileName, err)
+			offset := state.DecodeReferenceKey(key)
+			if offset >= uint64(accReader.Size()) {
+				err = fmt.Errorf("account reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, accReader.Size())
 				if failFast {
 					return nil, err
 				}
@@ -414,15 +413,4 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 	}
 	compression := statecfg.Schema.GetDomainCfg(newDomain).Compression
 	return seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
-}
-
-func checkOffsetDeref(key []byte, end uint64) (uint64, error) {
-	offset, n := binary.Uvarint(key)
-	if n <= 0 {
-		return 0, errors.New("invalid offset")
-	}
-	if offset >= end {
-		return 0, errors.New("offset out of bounds")
-	}
-	return offset, nil
 }
