@@ -2,19 +2,19 @@ name: QA - RPC Integration Tests Remote
 
 on:
   workflow_dispatch:     # Run manually
-#  push:
-#    branches:
-#      - main
-#      - 'release/3.*'
-#  pull_request:
-#    branches:
-#      - main
-#      - 'release/3.*'
-#    types:
-#      - opened
-#      - reopened
-#      - synchronize
-#      - ready_for_review
+  push:
+    branches:
+      - main
+      - 'release/3.*'
+  pull_request:
+    branches:
+      - main
+      - 'release/3.*'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 
 jobs:
@@ -71,14 +71,14 @@ jobs:
         run: |
           echo "Starting Erigon..."
           
-          ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR  --ethash.dagdir $ERIGON_REFERENCE_DATA_DIR --nodiscover --maxpeers 0 --no-downloader --ws --ws.compression  --http.compression  --prune.mode=archive --http=false > erigon.log 2>&1 &
+          ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR  --ethash.dagdir $ERIGON_REFERENCE_DATA_DIR --nodiscover --maxpeers 0 --no-downloader --prune.mode=archive --http=false > erigon.log 2>&1 &
 
           ERIGON_PID=$!          
           ERIGON_EXIT_STATUS=$?
-          echo "ERIGON_PID=$RPC_PID" >> $GITHUB_ENV
+          echo "ERIGON_PID=$ERIGON_PID" >> $GITHUB_ENV
           echo "erigon_started=true" >> $GITHUB_OUTPUT
           
-          sleep 10
+          sleep 15
           tail erigon.log
           
           if [ $ERIGON_EXIT_STATUS -ne 0 ]; then            
