@@ -12,7 +12,7 @@ description: Quick start your Gnosis Chain node on Ethereum mainnet
 
 ## Start Erigon​
 
-To execute a Ethereum full node paste the following command in your terminal:
+To download Erigon and execute a Gnosis minimal node paste the following command in your terminal:
 
 {% code overflow="wrap" %}
 ```bash
@@ -27,9 +27,7 @@ docker run \
 ```
 {% endcode %}
 
-Docker will automatically download Erigon v3.2.2 and start syncing Gnosis Chain.
-
-{% include "../.gitbook/includes/press-ctrl+c-in-the-termina....md" %}
+Docker will automatically download Erigon v3.2.2 and start syncing.
 
 ### Flag explanation
 

@@ -10,9 +10,9 @@ description: Quick start your Erigon node on Ethereum mainnet
 2. Check which [sync mode](../fundamentals/sync-modes.md) you want to run and the recommended [disk space](../getting-started/hardware-requirements.md#minimal-node-requirements).
 3. Install [Docker Desktop](https://app.gitbook.com/u/VThVXbGNqDg7P3yyr4K7KxnddwM2)
 
-## Start Erigon​
+## Download and start Erigon​
 
-To execute a Ethereum full node paste the following command in your terminal:
+To download Erigon and execute a Ethereum minimal node paste the following command in your terminal:
 
 {% code overflow="wrap" %}
 ```bash
@@ -27,7 +27,7 @@ docker run \
 ```
 {% endcode %}
 
-Docker will automatically download Erigon  v3.2.2 and start syncing Erigon.
+Docker will automatically download Erigon v3.2.2 and start syncing.
 
 {% include "../.gitbook/includes/press-ctrl+c-in-the-termina....md" %}
 

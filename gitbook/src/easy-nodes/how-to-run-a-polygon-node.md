@@ -16,7 +16,7 @@ The final release series of Erigon that officially supports Polygon is 3.1.\*. F
 
 ## Start Erigon​
 
-To execute a Ethereum full node paste the following command in your terminal:
+To download Erigon and execute a Polygon minimal node paste the following command in your terminal:
 
 {% code overflow="wrap" %}
 ```bash
