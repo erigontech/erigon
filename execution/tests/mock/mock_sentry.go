@@ -59,14 +59,14 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
+	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	stages2 "github.com/erigontech/erigon/execution/stages"
-	"github.com/erigontech/erigon/execution/stages/bodydownload"
-	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
@@ -94,7 +94,7 @@ import (
 
 const MockInsertAsInitialCycle = false
 
-// MockSentry is a Netwrork Inverface mock. So, unit-tests can test many Erigon's components - but without net-interaction
+// MockSentry is a Network Interface mock. So, unit-tests can test many Erigon's components - but without net-interaction
 type MockSentry struct {
 	sentryproto.UnimplementedSentryServer
 	Ctx                  context.Context
@@ -398,11 +398,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		terseLogger := log.New()
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync := stages2.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
+		stateSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain, true); err != nil {
+		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain, true); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -502,7 +502,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 			logger, stages.ModeBlockProduction)
 		// We start the mining step
-		if err := stages2.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
+		if err := stageloop.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultCh
@@ -548,7 +548,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stages2.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, tracer)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, tracer)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.RecentLogs, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
@@ -799,9 +799,9 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		ms.ReceiveWg.Add(1)
 	}
 	initialCycle, firstCycle := MockInsertAsInitialCycle, false
-	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil, nil, nil)
+	hook := stageloop.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil, nil, nil)
 
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, nil, nil, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
+	if err = stageloop.StageLoopIteration(ms.Ctx, ms.DB, nil, nil, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
 	// Wait to know if a new background retirement has started
