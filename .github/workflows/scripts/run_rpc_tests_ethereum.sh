@@ -13,6 +13,8 @@ DISABLED_TEST_LIST=(
   net_listening/test_1.json
   # Erigon2 and Erigon3 never supported this api methods
   trace_rawTransaction
+  # temporary disable waiting sync block 23000000 
+  debug_traceTransaction/test_141.json
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json
