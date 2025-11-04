@@ -700,7 +700,6 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 		hashedExtLen := c.hashedExtLen
 		hashedExt := c.hashedExtension[:hashedExtLen]
 		if c.extLen > 0 && hashedExtLen >= c.extLen {
-			//fmt.Printf("--- debug --- cell with plainKey and extLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), c)
 			hashedExtLen -= c.extLen
 			hashedExt = hashedExt[:hashedExtLen]
 		}
@@ -712,16 +711,19 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 			plainKeyNibbles = KeyToHexNibbleHash(c.accountAddr[:])
 		}
 		if c.storageAddrLen > 0 {
+			plainKeyNibbles = KeyToHexNibbleHash(c.storageAddr[:])
 			if c.accountAddrLen > 0 {
-				//fmt.Printf("--- debug --- cell with accountAddrLen>0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), c)
+				//fmt.Printf("--- debug --- cell with accountAddrLen>0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
 				if !bytes.Equal(c.accountAddr[:], c.storageAddr[:length.Addr]) {
 					return fmt.Errorf("accountAddr mismatch with storageAddr: %s != %x", common.BytesToAddress(c.accountAddr[:]), common.BytesToHash(c.storageAddr[:length.Addr]))
 				}
 			} else {
-				//fmt.Printf("--- debug --- cell with accountAddrLen=0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), c)
+				//fmt.Printf("--- debug --- cell with accountAddrLen=0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
 			}
-			plainKeyNibbles = KeyToHexNibbleHash(c.storageAddr[:])
 		}
+		//if c.extLen > 0 {
+		//	fmt.Printf("--- debug --- cell with plainKey and extLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+		//}
 		if !bytes.Equal(plainKeyNibbles, branchKeyAndExtNibbles) {
 			//fmt.Printf("--- debug --- branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
 			return fmt.Errorf("branch and hashed extension nibbles dont match plainKey nibbles: %x vs %x", plainKeyNibbles, branchKeyAndExtNibbles)
