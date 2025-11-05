@@ -25,6 +25,7 @@ var (
 	GitCommit string
 	GitBranch string
 	GitTag    string
+	BuildTime = "unknown"
 )
 
 // see https://calver.org

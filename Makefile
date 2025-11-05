@@ -6,11 +6,23 @@ GOARCH ?= $(shell go env GOHOSTARCH)
 UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
 DOCKER_BINARIES ?= "erigon"
+REPRODUCIBLE_BUILD ?= no	# to allow reproducible builds
 
+BUILD_TIMESTAMP := $(shell date -u)
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=*.*.*' --abbrev=7 --dirty)
+
+# Use git tag value for "release/" branches only. Otherwise it make no sense.
+ifeq (,$(findstring release/,$(GIT_BRANCH)))
+  GIT_TAG	:= .
+endif
+
+ifeq ($(REPRODUCIBLE_BUILD),yes)
+  BUILD_TIMESTAMP := unknown
+endif
+
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
@@ -68,7 +80,10 @@ PACKAGE = github.com/erigontech/erigon
 # Add to user provided GO_FLAGS. Insert it after a bunch of other stuff to allow overrides, and before tags to maintain BUILD_TAGS (set that instead if you want to modify it).
 
 GO_RELEASE_FLAGS := -trimpath -buildvcs=false \
-	-ldflags "-X ${PACKAGE}/db/version.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/db/version.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/db/version.GitTag=${GIT_TAG}"
+	-ldflags='-X ${PACKAGE}/db/version.GitCommit=${GIT_COMMIT} \
+			  -X ${PACKAGE}/db/version.GitBranch=${GIT_BRANCH} \
+			  -X ${PACKAGE}/db/version.GitTag=${GIT_TAG} \
+			  -X "${PACKAGE}/db/version.BuildTime=$(BUILD_TIMESTAMP)"'
 GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)"
 
 # Basic release build. Pass EXTRA_BUILD_TAGS if you want to modify the tags set.

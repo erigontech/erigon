@@ -67,7 +67,7 @@ func runErigon(cliCtx *cli.Context) (err error) {
 
 	// initializing the node and providing the current git commit there
 
-	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
+	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit, "build_time", version.BuildTime)
 	if version.Major == 3 {
 		logger.Info(`
 	########b          oo                               d####b. 
