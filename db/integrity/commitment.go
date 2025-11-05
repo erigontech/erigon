@@ -52,7 +52,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, failFast bool,
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(kv.CommitmentDomain)
 	// atm our older files are missing the root due to purification, so this flag can be used to only check the last file
-	onlyCheckLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE", false)
+	onlyCheckLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE", true)
 	if onlyCheckLastFile && len(files) > 0 {
 		files = files[len(files)-1:]
 	}
