@@ -801,9 +801,17 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	initialCycle, firstCycle := MockInsertAsInitialCycle, false
 	hook := stageloop.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil, nil, nil)
 
-	if err = stageloop.StageLoopIteration(ms.Ctx, ms.DB, nil, nil, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
+	if err := ms.DB.UpdateTemporal(ms.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		return stageloop.StageLoopIteration(ms.Ctx, ms.DB, sd, tx, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook)
+	}); err != nil {
 		return err
 	}
+
 	// Wait to know if a new background retirement has started
 	if retirementStarted := <-ms.retirementStart; retirementStarted {
 		// If so, increment the background retirement counter and start a task to watch for its completion
