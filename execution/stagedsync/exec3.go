@@ -372,10 +372,6 @@ func ExecV3(ctx context.Context,
 		lastCommittedTxNum = se.lastCommittedTxNum
 	}
 
-	if false && !inMemExec {
-		dumpPlainStateDebug(applyTx, doms)
-	}
-
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
 	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
 
@@ -906,10 +902,7 @@ func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64,
 	if cfg.syncCfg.AlwaysGenerateChangesets {
 		return true
 	}
-	if blockNum < cfg.blockReader.FrozenBlocks() {
-		return false
-	}
-	if initialCycle {
+	if blockNum < cfg.blockReader.FrozenBlocks() || initialCycle {
 		return false
 	}
 	// once past the initial cycle, make sure to generate changesets for the last blocks that fall in the reorg window
