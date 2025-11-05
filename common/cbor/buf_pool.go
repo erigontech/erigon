@@ -33,19 +33,27 @@ func Decoder(r io.Reader) *codec.Decoder {
 	var d *codec.Decoder
 	select {
 	case d = <-decoderPool:
-		d.Reset(r)
-	default:
-		{
-			var handle codec.CborHandle
-			handle.ReaderBufferSize = 64 * 1024
-			handle.ZeroCopy = true // if you need access to object outside of db transaction - please copy bytes before deserialization
-			d = codec.NewDecoder(r, &handle)
+		if d != nil {
+			d.Reset(r)
+		} else {
+			// Fall through to create a new decoder if nil was retrieved from pool
+			d = nil
 		}
+	default:
+	}
+	if d == nil {
+		var handle codec.CborHandle
+		handle.ReaderBufferSize = 64 * 1024
+		handle.ZeroCopy = true // if you need access to object outside of db transaction - please copy bytes before deserialization
+		d = codec.NewDecoder(r, &handle)
 	}
 	return d
 }
 
 func returnDecoderToPool(d *codec.Decoder) {
+	if d == nil {
+		return
+	}
 	select {
 	case decoderPool <- d:
 	default:
@@ -60,22 +68,30 @@ func Encoder(w io.Writer) *codec.Encoder {
 	var e *codec.Encoder
 	select {
 	case e = <-encoderPool:
-		e.Reset(w)
-	default:
-		{
-			var handle codec.CborHandle
-			handle.WriterBufferSize = 64 * 1024
-			handle.StructToArray = true
-			handle.OptimumSize = true
-			handle.StringToRaw = true
-
-			e = codec.NewEncoder(w, &handle)
+		if e != nil {
+			e.Reset(w)
+		} else {
+			// Fall through to create a new encoder if nil was retrieved from pool
+			e = nil
 		}
+	default:
+	}
+	if e == nil {
+		var handle codec.CborHandle
+		handle.WriterBufferSize = 64 * 1024
+		handle.StructToArray = true
+		handle.OptimumSize = true
+		handle.StringToRaw = true
+
+		e = codec.NewEncoder(w, &handle)
 	}
 	return e
 }
 
 func returnEncoderToPool(e *codec.Encoder) {
+	if e == nil {
+		return
+	}
 	select {
 	case encoderPool <- e:
 	default:
