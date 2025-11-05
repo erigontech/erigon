@@ -25,17 +25,11 @@ layout:
 
 Erigon is an efficient Ethereum implementation noted for its performance, modularity, and small disk footprint. Key features include modularity (for scalable RPC clusters), a BitTorrent solution for historical data, and OtterSync for quicker node synchronization. This makes it ideal for professionals needing performance, solo stakers on consumer hardware, and developers requiring a flexible, fast-syncing environment.
 
-See here [why you should be using Erigon](introduction/why-using-erigon.md).
+{% content-ref url="introduction/why-using-erigon.md" %}
+[why-using-erigon.md](introduction/why-using-erigon.md)
+{% endcontent-ref %}
 
-## Topics
-
-* Review the hardware and software requirements to [get started](getting-started/getting-started.md).
-* Follow the [installation guide](getting-started/installation.md) to set up Erigon.
-* Learn the [basic usage](fundamentals/basic-usage.md) of Erigon.
-* Find how to [configure Erigon](fundamentals/configuring-erigon.md).
-* Interact with Erigon's advanced [RPC](interacting-with-erigon/interacting-with-erigon.md).
-
-Explore also our help, wiki and dedicated developer guide.
+<table data-view="cards"><thead><tr><th></th><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><h4><i class="fa-play">:play:</i></h4></td><td><strong>Get Started</strong></td><td>Verification and Preparation Checklist to install Erigon</td><td><a href="broken-reference">Broken link</a></td></tr><tr><td><h4><i class="fa-gear">:gear:</i></h4></td><td><strong>Basic Usage</strong></td><td>The basic options for using Erigon</td><td><a href="broken-reference">Broken link</a></td></tr><tr><td><h4><i class="fa-bolt">:bolt:</i></h4></td><td><strong>Start your Ethereum node</strong></td><td>Quick Start: Running a Ethereum Node with Erigon</td><td><a href="broken-reference">Broken link</a></td></tr></tbody></table>
 
 ## Additional Resources and Information
 
