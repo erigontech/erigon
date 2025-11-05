@@ -1,18 +1,18 @@
 ---
-description: Downloading and Verifying Erigon Pre-built Binaries
+description: Downloading and Verifying Erigon Pre-built Binaries on Linux
 ---
 
-# Pre-built binaries
+# Pre-built binaries (Linux)
 
-## 1. Select Your Platform and Download
+## 1. Select Your Processor Architecture and Download
 
 Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., <code class="expression">space.vars.version</code>) or whichever version you prefer.
 
 <figure><img src="../../.gitbook/assets/image (12).png" alt=""><figcaption></figcaption></figure>
 
-Download the appropriate binary file for your operating system and processor architecture:
+Download the appropriate binary file for your processor architecture:
 
-<table data-header-hidden><thead><tr><th width="132"></th><th width="112"></th><th width="185"></th><th></th></tr></thead><tbody><tr><td><strong>Operating System</strong></td><td><strong>Processor Type</strong></td><td><strong>Binary File Type</strong></td><td><strong>Example File Name</strong></td></tr><tr><td>Linux</td><td>64-bit Intel/AMD</td><td>Debian Package (<code>.deb</code>)</td><td>erigon_<code class="expression">space.vars.version</code>_amd64.deb</td></tr><tr><td>Linux</td><td>64-bit ARM</td><td>Debian Package (<code>.deb</code>)</td><td>erigon_<code class="expression">space.vars.version</code>_arm64.deb</td></tr><tr><td>Linux</td><td>64-bit Intel/AMD</td><td>Compressed Archive (<code>.tar.gz</code>)</td><td>erigon_v<code class="expression">space.vars.version</code>_linux_amd64.tar.gz</td></tr><tr><td>Linux</td><td>64-bit ARM</td><td>Compressed Archive (<code>.tar.gz</code>)</td><td>erigon_v<code class="expression">space.vars.version</code>_linux_arm64.tar.gz</td></tr><tr><td>macOS</td><td>64-bit Intel/AMD</td><td>Compressed Archive (<code>.tar.gz</code>)</td><td>erigon_v<code class="expression">space.vars.version</code>_amd64v2.tar.gz</td></tr><tr><td>macOS</td><td>64-bit ARM</td><td>Compressed Archive (<code>.tar.gz</code>)</td><td>erigon_v<code class="expression">space.vars.version</code>_linux_arm64.tar.gz</td></tr></tbody></table>
+<table data-header-hidden><thead><tr><th width="210.88885498046875"></th><th width="185"></th><th></th></tr></thead><tbody><tr><td><strong>Processor Type</strong></td><td><strong>Binary File Type</strong></td><td><strong>Example File Name</strong></td></tr><tr><td>64-bit Intel/AMD</td><td>Debian Package (<code>.deb</code>)</td><td>erigon_<code class="expression">space.vars.version</code>_amd64.deb</td></tr><tr><td>64-bit ARM</td><td>Debian Package (<code>.deb</code>)</td><td>erigon_<code class="expression">space.vars.version</code>_arm64.deb</td></tr><tr><td>64-bit Intel/AMD</td><td>Compressed Archive (<code>.tar.gz</code>)</td><td>erigon_v<code class="expression">space.vars.version</code>_linux_amd64.tar.gz</td></tr><tr><td>64-bit Intel/AMDv2</td><td>Compressed Archive (<code>.tar.gz</code>)</td><td>erigon_v<code class="expression">space.vars.version</code>_amd64v2.tar.gz</td></tr><tr><td>64-bit ARM</td><td>Compressed Archive (<code>.tar.gz</code>)</td><td>erigon_v<code class="expression">space.vars.version</code>_linux_arm64.tar.gz</td></tr></tbody></table>
 
 Note that the Release Page Assets table contains also the **checksum** for each file and a checksum file.
 
@@ -26,12 +26,11 @@ To verify the integrity and ensure your downloaded Erigon file hasn't been corru
 
 Next, use the appropriate command for your operating system and the name of your downloaded binary (e.g., `erigon_v3.x.x_linux_amd64.tar.gz`).
 
-| **Operating System** | **Command to Generate Checksum**       |
-| -------------------- | -------------------------------------- |
-| Linux                | `sha256sum <DOWNLOADED_FILE_NAME>`     |
-| macOS                | `shasum -a 256 <DOWNLOADED_FILE_NAME>` |
+```
+sha256sum <DOWNLOADED_FILE_NAME>
+```
 
-Example (Linux with a `tar.gz` file):
+Example with a `tar.gz` file:
 
 ```bash
 sha256sum erigon_v3.x.x_linux_amd64.tar.gz
@@ -53,9 +52,7 @@ The two checksum strings must match exactly. If they do not match, the file is c
 
 After downloading and verifying the checksum, follow the instructions below based on the file type you chose.
 
-{% tabs %}
-{% tab title="Installation on Linux" %}
-**A. Using Debian Package (`.deb`)**
+#### **A. Using Debian Package (`.deb`)**
 
 This method uses your distribution's package manager (like <kbd>dpkg</kbd>) to install Erigon system-wide.
 
@@ -72,7 +69,7 @@ This method uses your distribution's package manager (like <kbd>dpkg</kbd>) to i
 
     (Replace the filename with your downloaded version)
 
-**B. Using Compressed Archive (`.tar.gz`)**
+#### **B. Using Compressed Archive (`.tar.gz`)**
 
 This method gives you a standalone executable that can be run from any directory.
 
@@ -88,29 +85,6 @@ This method gives you a standalone executable that can be run from any directory
     ```bash
     sudo mv erigon /usr/local/bin/
     ```
-{% endtab %}
-
-{% tab title="Installation on macOS" %}
-The macOS binaries are provided as **compressed archives** (`.tar.gz`).
-
-1.  Extract the archive replacing the filename with your downloaded version:
-
-    ```bash
-    tar -xzf erigon_3.x.x_amd64.tar.gz
-    ```
-2.  Move the resulting <kbd>erigon</kbd> executable to a convenient location, such as <kbd>/usr/local/bin/</kbd>, to allow running it directly from the terminal:
-
-    ```bash
-    sudo mv erigon /usr/local/bin/
-    ```
-
-    You may need to grant execution permissions:
-
-    ```bash
-    sudo chmod +x /usr/local/bin/erigon
-    ```
-{% endtab %}
-{% endtabs %}
 
 ## 4. Running Erigon
 

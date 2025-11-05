@@ -18,4 +18,5 @@ You can find detailed instructions for the following methods:
 * [Windows](installation/windows.md)
 * [Docker](installation/docker.md)
 * [Upgrading from a previous version](installation/upgrading.md)
-* [Migrating from another client](../summary/getting-started/migrating-from-geth.md) like Geth, Netherming, Besu or Reth.
+* [Migrating from another client](../summary/getting-started/migrating-from-geth.md) like Geth, Nethermind, Besu or Reth.
+

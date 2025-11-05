@@ -8,7 +8,7 @@
   * [Hardware Requirements](getting-started/hardware-requirements.md)
   * [Installation](getting-started/installation.md)
     * [Linux and macOS](getting-started/installation/linux-and-macos.md)
-      * [Pre-built binaries](getting-started/installation/pre-built-binaries.md)
+      * [Pre-built binaries (Linux)](getting-started/installation/pre-built-binaries.md)
       * [Build from source](getting-started/installation/build-Erigon-from-source.md)
     * [Windows](getting-started/installation/windows.md)
       * [Native compilation](getting-started/installation/windows-build-executables.md)
