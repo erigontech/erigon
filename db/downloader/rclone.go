@@ -227,14 +227,6 @@ func (c *RCloneClient) Stats(ctx context.Context) (*RCloneStats, error) {
 	return &stats, nil
 }
 
-func (c *RCloneClient) GetBwLimit() rate.Limit {
-	if c.bwLimit != nil {
-		return *c.bwLimit
-	}
-
-	return 0
-}
-
 func (c *RCloneClient) SetBwLimit(ctx context.Context, limit rate.Limit) {
 	if c.bwLimit == nil || limit != *c.bwLimit {
 		c.bwLimit = &limit
