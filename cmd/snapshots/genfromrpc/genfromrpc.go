@@ -103,7 +103,7 @@ type BlockJson struct {
 type ReceiptJson struct {
 	TransactionHash common.Hash  `json:"transactionHash"`
 	Timeboosted     bool         `json:"timeboosted"`
-	GasUsed         *hexutil.Big `json:"gasUsed"`
+	GasUsed         *hexutil.Big `json:"gasUsed,omitempty"`
 }
 
 // receiptData holds parsed receipt information for a transaction
@@ -988,9 +988,9 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 
 				tx.SetTimeboosted(&receipts[idx].timeboosted)
 				if tx.Type() == types.ArbitrumSubmitRetryableTxType {
-					if egu := receipt.GasUsed.Uint64(); egu > 0 {
+					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
 						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
-							srtx.EffectiveGasUsed = egu
+							srtx.EffectiveGasUsed = egu.Uint64()
 						}
 					}
 				}
