@@ -261,12 +261,12 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		return consensus.ErrUnexpectedRequests
 	}
 
-	glamsterdam := chain.Config().IsGlamsterdam(header.Time)
-	if glamsterdam && header.BlockAccessListHash == nil {
+	amsterdam := chain.Config().IsAmsterdam(header.Time)
+	if amsterdam && header.BlockAccessListHash == nil {
 		return errors.New("missing blockAccessListHash")
 	}
-	if !glamsterdam && header.BlockAccessListHash != nil {
-		return fmt.Errorf("unexpected blockAccessListHash before Glamsterdam: %x", *header.BlockAccessListHash)
+	if !amsterdam && header.BlockAccessListHash != nil {
+		return fmt.Errorf("unexpected blockAccessListHash before Amsterdam: %x", *header.BlockAccessListHash)
 	}
 
 	// If all checks passed, validate any special fields for hard forks

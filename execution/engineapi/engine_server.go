@@ -231,9 +231,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
 	}
-	isGlamsterdam := s.config.IsGlamsterdam(header.Time)
+	isAmsterdam := s.config.IsAmsterdam(header.Time)
 	var blockAccessList types.BlockAccessList
-	if isGlamsterdam {
+	if isAmsterdam {
 		if req.BlockAccessListHash == nil {
 			return nil, &rpc.InvalidParamsError{Message: "missing block access list hash"}
 		}
@@ -255,7 +255,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.BlockAccessListHash = req.BlockAccessListHash
 	} else {
 		if req.BlockAccessListHash != nil || (req.BlockAccessList != nil && len(req.BlockAccessList) > 0) {
-			return nil, &rpc.InvalidParamsError{Message: "block access list before Glamsterdam"}
+			return nil, &rpc.InvalidParamsError{Message: "block access list before Amsterdam"}
 		}
 	}
 

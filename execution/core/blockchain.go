@@ -400,7 +400,7 @@ func FinalizeBlockExecution(
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
 	rules := blockContext.Rules(cc)
 	collectBAL := rules != nil && rules.CollectBlockAccessList
-	enforceBAL := rules != nil && rules.IsGlamsterdam
+	enforceBAL := rules != nil && rules.IsAmsterdam
 	log.Info("FinalizeBlockExecution", "collectBAL", collectBAL, "enforceBAL", enforceBAL)
 
 	if collectBAL {
@@ -518,7 +518,7 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 		fmt.Println(h.Number.Uint64(), "receipts", result)
 	}
 
-	if chainConfig.IsGlamsterdam(h.Time) {
+	if chainConfig.IsAmsterdam(h.Time) {
 		computed := empty.BlockAccessListHash
 		if len(blockAccessList) > 0 {
 			computed = blockAccessList.Hash()
@@ -538,11 +538,11 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 		}
 	} else {
 		if h.BlockAccessListHash != nil {
-			return fmt.Errorf("unexpected block access list hash before Glamsterdam")
+			return fmt.Errorf("unexpected block access list hash before Amsterdam")
 		}
 		if len(blockAccessList) != 0 {
 			if !chainConfig.ExperimentalBAL {
-				return fmt.Errorf("unexpected block access list payload before Glamsterdam")
+				return fmt.Errorf("unexpected block access list payload before Amsterdam")
 			}
 			log.Info("bal", "hash", blockAccessList.Hash(), "count", len(blockAccessList))
 		}

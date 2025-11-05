@@ -418,8 +418,8 @@ type ExecutionPayload struct {
 	Withdrawals         []*Withdrawal             `protobuf:"bytes,16,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`
 	BlobGasUsed         *uint64                   `protobuf:"varint,17,opt,name=blob_gas_used,json=blobGasUsed,proto3,oneof" json:"blob_gas_used,omitempty"`
 	ExcessBlobGas       *uint64                   `protobuf:"varint,18,opt,name=excess_blob_gas,json=excessBlobGas,proto3,oneof" json:"excess_blob_gas,omitempty"`
-	BlockAccessListHash *H256                     `protobuf:"bytes,19,opt,name=block_access_list_hash,json=blockAccessListHash,proto3,oneof" json:"block_access_list_hash,omitempty"` // added in Glamsterdam (EIP-7928)
-	BlockAccessList     []*BlockAccessListAccount `protobuf:"bytes,20,rep,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"`                     // added in Glamsterdam (EIP-7928)
+	BlockAccessListHash *H256                     `protobuf:"bytes,19,opt,name=block_access_list_hash,json=blockAccessListHash,proto3,oneof" json:"block_access_list_hash,omitempty"` // added in Amsterdam (EIP-7928)
+	BlockAccessList     []*BlockAccessListAccount `protobuf:"bytes,20,rep,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"`                     // added in Amsterdam (EIP-7928)
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }

@@ -29,7 +29,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		chainID = new(big.Int)
 	}
 
-	collectBAL := c.IsGlamsterdam(bc.Time)
+	collectBAL := c.IsAmsterdam(bc.Time)
 	if c.ExperimentalBAL {
 		collectBAL = true
 	}
@@ -51,7 +51,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsBhilai:               c.IsBhilai(bc.BlockNumber),
 		IsPrague:               c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
 		IsOsaka:                c.IsOsaka(bc.Time),
-		IsGlamsterdam:          c.IsGlamsterdam(bc.Time),
+		IsAmsterdam:            c.IsAmsterdam(bc.Time),
 		IsAura:                 c.Aura != nil,
 		CollectBlockAccessList: collectBAL,
 	}

@@ -271,7 +271,7 @@ type Header struct {
 	ExcessBlobGas         *uint64                `protobuf:"varint,20,opt,name=excess_blob_gas,json=excessBlobGas,proto3,oneof" json:"excess_blob_gas,omitempty"`                          // added in Dencun (EIP-4844)
 	ParentBeaconBlockRoot *typesproto.H256       `protobuf:"bytes,21,opt,name=parent_beacon_block_root,json=parentBeaconBlockRoot,proto3,oneof" json:"parent_beacon_block_root,omitempty"` // added in Dencun (EIP-4788)
 	RequestsHash          *typesproto.H256       `protobuf:"bytes,22,opt,name=requests_hash,json=requestsHash,proto3,oneof" json:"requests_hash,omitempty"`                                // added in Pectra (EIP-7685)
-	BlockAccessListHash   *typesproto.H256       `protobuf:"bytes,25,opt,name=block_access_list_hash,json=blockAccessListHash,proto3,oneof" json:"block_access_list_hash,omitempty"`       // added in Glamsterdam (EIP-7928)
+	BlockAccessListHash   *typesproto.H256       `protobuf:"bytes,25,opt,name=block_access_list_hash,json=blockAccessListHash,proto3,oneof" json:"block_access_list_hash,omitempty"`       // added in Amsterdam (EIP-7928)
 	// AuRa
 	AuraStep      *uint64 `protobuf:"varint,23,opt,name=aura_step,json=auraStep,proto3,oneof" json:"aura_step,omitempty"`
 	AuraSeal      []byte  `protobuf:"bytes,24,opt,name=aura_seal,json=auraSeal,proto3,oneof" json:"aura_seal,omitempty"`
@@ -838,7 +838,7 @@ type BlockBody struct {
 	Transactions    [][]byte                  `protobuf:"bytes,3,rep,name=transactions,proto3" json:"transactions,omitempty"`
 	Uncles          []*Header                 `protobuf:"bytes,4,rep,name=uncles,proto3" json:"uncles,omitempty"`
 	Withdrawals     []*typesproto.Withdrawal  `protobuf:"bytes,5,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`                                  // added in Shapella (EIP-4895)
-	BlockAccessList []*BlockAccessListAccount `protobuf:"bytes,6,rep,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"` // added in Glamsterdam (EIP-7928)
+	BlockAccessList []*BlockAccessListAccount `protobuf:"bytes,6,rep,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"` // added in Amsterdam (EIP-7928)
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }

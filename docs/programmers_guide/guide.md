@@ -550,7 +550,7 @@ demand. It looks up the state at the point just before the transaction in questi
 re-executes transaction, and re-generates the receipt. This can only work if the history of the state is available for
 the period of time including the transaction.
 
-Starting with the Glamsterdam hardfork, block headers also include a `blockAccessListHash` and block bodies encode the
+Starting with the Amsterdam hardfork, block headers also include a `blockAccessListHash` and block bodies encode the
 corresponding `blockAccessList`. This payload captures every account balance, storage, nonce, and code mutation that
 occurred while executing the block. Erigon derives the list while executing each block, persists it alongside the body,
 and validates any provided hash before importing the block. The new field is exposed over all RPC surfaces together with

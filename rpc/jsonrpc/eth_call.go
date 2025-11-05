@@ -593,7 +593,7 @@ func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) 
 			return fmt.Errorf("mismatch in block access list hash actual(%x) != expected(%x)", *actualBalHash, *expectedBalHash)
 		}
 	} else if actualBalHash != nil {
-		return fmt.Errorf("unexpected block access list hash in execution result for pre-Glamsterdam block")
+		return fmt.Errorf("unexpected block access list hash in execution result for pre-Amsterdam block")
 	}
 	return nil
 }

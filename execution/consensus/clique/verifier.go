@@ -102,12 +102,12 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return consensus.ErrUnexpectedRequests
 	}
 
-	glamsterdam := c.ChainConfig.IsGlamsterdam(header.Time)
-	if glamsterdam && header.BlockAccessListHash == nil {
+	amsterdam := c.ChainConfig.IsAmsterdam(header.Time)
+	if amsterdam && header.BlockAccessListHash == nil {
 		return errors.New("missing blockAccessListHash")
 	}
-	if !glamsterdam && header.BlockAccessListHash != nil {
-		return fmt.Errorf("unexpected blockAccessListHash before Glamsterdam: %x", *header.BlockAccessListHash)
+	if !amsterdam && header.BlockAccessListHash != nil {
+		return fmt.Errorf("unexpected blockAccessListHash before Amsterdam: %x", *header.BlockAccessListHash)
 	}
 
 	// All basic checks passed, verify cascading fields
