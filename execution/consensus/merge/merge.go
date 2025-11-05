@@ -364,8 +364,11 @@ func (s *Merge) IsServiceTransaction(sender common.Address, syscall consensus.Sy
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
+	auraEngine, isAura := s.eth1Engine.(*aura.AuRa)
 	if !misc.IsPoSHeader(header) {
 		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
+	} else if isAura {
+		auraEngine.RewriteBytecode(header, state)
 	}
 	if chain.Config().IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr common.Address, data []byte) ([]byte, error) {
