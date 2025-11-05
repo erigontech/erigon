@@ -802,7 +802,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	hook := stageloop.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil, nil, nil)
 
 	if err := ms.DB.UpdateTemporal(ms.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.Root())
+		sd, err := execctx.NewSharedDomains(ms.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}
