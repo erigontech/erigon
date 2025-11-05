@@ -372,10 +372,6 @@ func ExecV3(ctx context.Context,
 		lastCommittedTxNum = se.lastCommittedTxNum
 	}
 
-	if false && !inMemExec {
-		dumpPlainStateDebug(applyTx, doms)
-	}
-
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
 	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
 
