@@ -172,7 +172,7 @@ jobs:
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: metric-plots-${{ env.CHAIN }}
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*

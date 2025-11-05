@@ -28,7 +28,6 @@ import (
 	"io"
 	"math/big"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,8 +43,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/dataflow"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/dataflow"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -307,7 +306,7 @@ func (hd *HeaderDownload) logAnchorState() {
 		sb.WriteString(fmt.Sprintf(", next retry in %v", anchor.nextRetryTime.Sub(currentTime)))
 		ss = append(ss, sb.String())
 	}
-	sort.Strings(ss)
+	slices.Sort(ss)
 	hd.logger.Debug("[downloader] Queue sizes", "anchors", hd.anchorTree.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
 	for _, s := range ss {
 		hd.logger.Debug(s)
