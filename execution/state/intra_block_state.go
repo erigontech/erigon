@@ -63,6 +63,9 @@ func (r *revisions) snapshot(journal *journal) int {
 }
 
 func (r *revisions) returnSnapshot(id int) {
+	if r == nil {
+		return
+	}
 	if lv := len(r.valid); lv > 0 && r.valid[lv-1].id == id {
 		r.valid = r.valid[0 : lv-1]
 		if r.nextId == id+1 {

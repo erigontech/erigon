@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -140,11 +141,11 @@ func TestAllocConstructor(t *testing.T) {
 	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
 
 	funds := big.NewInt(1000000000)
-	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	address := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000001"))
 	genSpec := &types.Genesis{
 		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
-			address: {Constructor: deploymentCode, Balance: funds},
+			address.Value(): {Constructor: deploymentCode, Balance: funds},
 		},
 	}
 
@@ -166,13 +167,13 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	assert.Equal(common.FromHex("5f355f55"), code)
 
-	key0 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
-	storage0 := &uint256.Int{}
-	state.GetState(address, key0, storage0)
+	key0 := accounts.InternKey(common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"))
+	storage0, err := state.GetState(address, key0)
+	require.NoError(err)
 	assert.Equal(uint256.NewInt(0x2a), storage0)
-	key1 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
-	storage1 := &uint256.Int{}
-	state.GetState(address, key1, storage1)
+	key1 := accounts.InternKey(common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001"))
+	storage1, err := state.GetState(address, key1)
+	require.NoError(err)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)
 }
 
