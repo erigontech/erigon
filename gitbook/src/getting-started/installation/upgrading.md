@@ -81,4 +81,4 @@ Simply follow the [Docker](upgrading.md#docker) instructions and install and lau
 
 ### Compiled from source
 
-To upgrade Erigon to a newer version when you've originally installed it via Git and manual compilation, simply follow the [installation](build-Erigon-from-source.md#id-2.-building-erigon-from-source) instructions.
+To upgrade Erigon to a newer version when you've originally installed it via Git and manual compilation,  follow the installation instructions from step 2 "[Check Out the Desired Stable Version (Tag)](build-Erigon-from-source.md#check-out-the-desired-stable-version-tag)".

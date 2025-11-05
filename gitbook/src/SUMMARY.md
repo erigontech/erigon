@@ -17,7 +17,7 @@
     * [Upgrading from a previous version](getting-started/installation/upgrading.md)
   * [Migrating from Geth](summary/getting-started/migrating-from-geth.md)
 * [Easy Nodes](easy-nodes/easy-nodes.md)
-  * [How to run an Ethereum node](easy-nodes/how-to-run-an-ethereum-node.md)
+  * [How to run a Ethereum node](easy-nodes/how-to-run-an-ethereum-node.md)
     * [Ethereum with an external CL](easy-nodes/ethereum-with-an-external-cl.md)
   * [How to run a Gnosis Chain node](easy-nodes/how-to-run-a-gnosis-chain-node.md)
     * [Gnosis Chain with an external CL](easy-nodes/gnosis-with-an-external-cl.md)
