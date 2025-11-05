@@ -495,7 +495,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendError("updateForkChoice: RunPrune after hasMore", err)
 			return
 		}
-		fmt.Println("sd flush (1)", sd.BlockNum())
 		if err := sd.Flush(ctx, tx); err != nil {
 			sendError("updateForkChoice:flush sd after hasMore", err)
 			return
