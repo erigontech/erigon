@@ -18,9 +18,11 @@ Returns transaction number information for development and debugging purposes. T
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"internal_getTxNumInfo","params":["0x1"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 

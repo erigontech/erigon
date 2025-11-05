@@ -40,9 +40,11 @@ Returns the validator snapshot at a given block number, containing information a
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getSnapshot","params":["latest"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -64,9 +66,11 @@ Returns the author (block proposer) of a block at the given block number or hash
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getAuthor","params":["0x1b4"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -88,9 +92,11 @@ Returns the validator snapshot at a specific block hash.
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getSnapshotAtHash","params":["0x1d59ff54b1eb26b013ce3cb5fc9dab3705b415a67127a003c3e61eb445bb8df2"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -112,9 +118,11 @@ Returns the list of authorized signers (validators) at a given block number.
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getSigners","params":["latest"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -136,9 +144,11 @@ Returns the list of authorized signers (validators) at a specific block hash.
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getSignersAtHash","params":["0x1d59ff54b1eb26b013ce3cb5fc9dab3705b415a67127a003c3e61eb445bb8df2"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -158,9 +168,11 @@ None
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getCurrentProposer","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -180,9 +192,11 @@ None
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getCurrentValidators","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -204,9 +218,11 @@ Returns the proposer sequence for a given block, showing the order in which vali
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getSnapshotProposerSequence","params":["latest"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -229,9 +245,11 @@ Returns the root hash for a range of blocks, used for checkpoint verification an
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":["0x1", "0x100"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 
@@ -253,9 +271,11 @@ Returns voting information for a specific block hash, used in the Bor consensus 
 
 **Example**
 
+{% code overflow="wrap" %}
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":["0x1d59ff54b1eb26b013ce3cb5fc9dab3705b415a67127a003c3e61eb445bb8df2"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 **Returns**
 

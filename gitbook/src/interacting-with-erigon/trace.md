@@ -257,9 +257,11 @@ params: [
 
 Request
 
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_rawTransaction","params":["0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
 
@@ -311,9 +313,11 @@ params: [
 
 Request
 
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_replayBlockTransactions","params":["0x2ed119",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
 
@@ -369,9 +373,11 @@ params: [
 
 Request
 
+{% code overflow="wrap" %}
 ```bash
 curl --data '{"method":"trace_replayTransaction","params":["0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
+{% endcode %}
 
 Response
 

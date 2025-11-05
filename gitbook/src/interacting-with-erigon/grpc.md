@@ -175,9 +175,11 @@ The Bridge and Heimdall services are created with their respective RPC servers.
 
 Erigon supports TLS encryption for gRPC connections using certificate files:
 
+{% code overflow="wrap" %}
 ```bash
 ./build/bin/rpcdaemon --grpc --tls.cert=/path/to/cert.pem --tls.key=/path/to/key.pem --tls.cacert=/path/to/ca.pem
 ```
+{% endcode %}
 
 ### Health Checks
 
