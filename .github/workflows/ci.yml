@@ -54,16 +54,16 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: Build
-        run: make all
+        run: make all REPRODUCIBLE_BUILD=yes
 
       - name: Reproducible build test
         run: |
-          make erigon
+          make erigon REPRODUCIBLE_BUILD=yes
           shasum -a256 ./build/bin/erigon > erigon1.sha256
-          make erigon
+          make erigon REPRODUCIBLE_BUILD=yes
           shasum -a256 ./build/bin/erigon > erigon2.sha256
           if ! cmp -s erigon1.sha256 erigon2.sha256; then
-            echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
+            echo >&2 "Reproducible build broken"; grep . erigon1.sha256 erigon2.sha256; exit 1
           fi
 
       - name: Test
