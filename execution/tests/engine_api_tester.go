@@ -44,7 +44,7 @@ import (
 	chainparams "github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/engineapi"
-	"github.com/erigontech/erigon/execution/genesiswrite"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"

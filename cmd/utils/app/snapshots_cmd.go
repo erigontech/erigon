@@ -556,7 +556,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
-		if doesRmCommitment && strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+		if doesRmCommitment && strings.Contains(filepath.Base(res.Path), "commitment") && strings.HasSuffix(res.Path, ".kv") {
 			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err

@@ -314,20 +314,25 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	// }
 	var m uint64
 	var cmp int
+
 	for l < r {
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
 			// m = l
 			if cur.d == 0 {
-				cur.Reset(l, g)
+				cur.resetNoRead(l, g)
 			} else {
-				cur.Next()
+				cur.nextNoRead()
 			}
+
+			cur.key, _ = g.Next(cur.key[:0])
 
 			if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
 				l++
 				continue
 			}
+
+			cur.value, _ = g.Next(cur.value[:0])
 			return cur, err
 		}
 
@@ -403,7 +408,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			return v, true, offset, nil
 		}
 
-		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
+		cmp, v, err = b.keyCmpFunc(key, m, g, v[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}

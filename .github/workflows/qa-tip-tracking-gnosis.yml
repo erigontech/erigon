@@ -1,9 +1,11 @@
 name: QA - Tip tracking & migration (Gnosis)
 
 on:
+  schedule:
+    - cron: '0 1 * * 0'  # Run on Sunday at 01:00 AM UTC
   push:
     branches:
-      - 'release/3.1'
+      - 'release/3.*'
   workflow_dispatch: # Run manually
     inputs:
       explicit_upgrade:
@@ -21,7 +23,7 @@ jobs:
     runs-on: [self-hosted, qa, Gnosis, tip-tracking]
     timeout-minutes: 1200
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version-3.0/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version-3.2/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
@@ -140,7 +142,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: torrent-client-status-${{ env.CHAIN }}
         path: torrent-client-status.txt
@@ -168,21 +170,21 @@ jobs:
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: erigon-logs
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
@@ -239,14 +241,14 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status of the downgrade test
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: torrent-client-status-downgrade-test
         path: torrent-client-status.txt
 
     - name: Upload erigon log of the downgrade test
       if: steps.downgrade_test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: erigon-log-downgrade-test
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log

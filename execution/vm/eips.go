@@ -21,7 +21,7 @@ package vm
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/holiman/uint256"
@@ -69,7 +69,7 @@ func ActivateableEips() []string {
 	for k := range activators {
 		nums = append(nums, strconv.Itoa(k))
 	}
-	sort.Strings(nums)
+	slices.Sort(nums)
 	return nums
 }
 

@@ -21,7 +21,7 @@ package trie
 import (
 	"encoding/binary"
 	"fmt"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -62,7 +62,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 		key := crypto.Keccak256(preimage[:])
 		keys = append(keys, string(key))
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for i, key := range keys {
 		if i > 0 && keys[i-1] == key {
 			fmt.Printf("Duplicate!\n")
@@ -120,7 +120,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 		key := crypto.Keccak256(preimage[:])
 		keys = append(keys, string(key))
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for i, key := range keys {
 		if i > 0 && keys[i-1] == key {
 			fmt.Printf("Duplicate!\n")

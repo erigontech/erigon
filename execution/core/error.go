@@ -29,9 +29,6 @@ var (
 	// ErrKnownBlock is returned when a block to import is already known locally.
 	ErrKnownBlock = errors.New("block already known")
 
-	// ErrBlacklistedHash is returned if a block to import is on the blacklist.
-	ErrBlacklistedHash = errors.New("blacklisted hash")
-
 	// ErrNoGenesis is returned when there is no Genesis Block.
 	ErrNoGenesis = errors.New("genesis not found in chain")
 

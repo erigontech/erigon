@@ -1,9 +1,8 @@
 name: QA - Tip tracking with load
 
 on:
-  #push: # Run on push to release branches
-  #  branches:
-  #    - 'release/*'
+  schedule:
+    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
   workflow_dispatch:
     # Run manually with parameters for load generation
     inputs:
@@ -18,7 +17,7 @@ on:
       load_sequence:
         description: "Stress test load sequence (qps:duration_secs) e.g. 100:300,500:300,750:300 "
         required: false
-        default: "100:300,500:300,750:300,1000:300,1:300,1500:300,1:300"
+        default: "100:300,500:300,1000:300,2000:300,1:300,3000:300,1:300"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,10 +25,10 @@ concurrency:
 
 jobs:
   mainnet-tip-tracking-test:
-    runs-on: [self-hosted, qa, tip-tracking-ext]
+    runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     timeout-minutes: 300 # 5 hours
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.3/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-main/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 1800 # 0.5 hours
@@ -157,7 +156,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: torrent-client-status
         path: torrent-client-status.txt
@@ -185,24 +184,31 @@ jobs:
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: erigon-logs
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
+
+    - name: Upload profiling data
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v5
+      with:
+        name: profiling-data
+        path: ${{ github.workspace }}/profiling-data*
 
     - name: Delete Erigon Testbed Data Directory
       if: ${{ always() }}

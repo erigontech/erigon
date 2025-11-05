@@ -22,11 +22,11 @@ package bitutil
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/rand"
 	"testing"
 
 	"github.com/erigontech/erigon/common/hexutil"
-
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -54,17 +54,21 @@ func TestEncodingCycle(t *testing.T) {
 		"0xdf7070533534333636313639343638373532313536346c1bc333393438373130707063363430353639343638373532313536346c1bc333393438336336346c65fe",
 	}
 	for i, tt := range tests {
-		data := hexutil.MustDecode(tt)
-
-		proc, err := bitsetDecodeBytes(bitsetEncodeBytes(data), len(data))
-		if err != nil {
-			t.Errorf("test %d: failed to decompress compressed data: %v", i, err)
-			continue
-		}
-		if !bytes.Equal(data, proc) {
-			t.Errorf("test %d: compress/decompress mismatch: have %x, want %x", i, proc, data)
+		if err := testEncodingCycle(hexutil.MustDecode(tt)); err != nil {
+			t.Errorf("test %d: %v", i, err)
 		}
 	}
+}
+
+func testEncodingCycle(data []byte) error {
+	proc, err := bitsetDecodeBytes(bitsetEncodeBytes(data), len(data))
+	if err != nil {
+		return fmt.Errorf("failed to decompress compressed data: %v", err)
+	}
+	if !bytes.Equal(data, proc) {
+		return fmt.Errorf("compress/decompress mismatch: have %x, want %x", proc, data)
+	}
+	return nil
 }
 
 // Tests that data bitset decoding and rencoding works and is bijective.
@@ -187,5 +191,42 @@ func benchmarkEncoding(b *testing.B, bytes int, fill float64) {
 		if decodeErr != nil {
 			log.Warn("Failed to decode bitset bytes", "err", decodeErr)
 		}
+	}
+}
+
+func FuzzEncoder(f *testing.F) {
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if err := testEncodingCycle(data); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+func FuzzDecoder(f *testing.F) {
+	f.Fuzz(func(t *testing.T, data []byte) {
+		fuzzDecode(data)
+	})
+}
+
+// fuzzDecode implements a go-fuzz fuzzer method to test the bit decoding and
+// reencoding algorithm.
+func fuzzDecode(data []byte) {
+	blob, err := DecompressBytes(data, 1024)
+	if err != nil {
+		return
+	}
+	// re-compress it (it's OK if the re-compressed differs from the
+	// original - the first input may not have been compressed at all)
+	comp := CompressBytes(blob)
+	if len(comp) > len(blob) {
+		// After compression, it must be smaller or equal
+		panic("bad compression")
+	}
+	// But decompressing it once again should work
+	decomp, err := DecompressBytes(data, 1024)
+	if err != nil {
+		panic(err)
+	}
+	if !bytes.Equal(decomp, blob) {
+		panic("content mismatch")
 	}
 }
