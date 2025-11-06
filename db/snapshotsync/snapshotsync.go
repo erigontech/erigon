@@ -406,7 +406,7 @@ func SyncSnapshots(
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
 		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
 		if !headerchain && toBlock > 0 {
-			toTxNum, err := txNumsReader.Min(tx, syncCfg.SnapshotDownloadToBlock)
+			toTxNum, err := blockReader.TxnumReader(ctx).Min(tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
 				return err
 			}
@@ -414,17 +414,20 @@ func SyncSnapshots(
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
-			var toDelete []string
+			var toDeleteSeg, toDeleteDownloader []string
 			for _, f := range blockReader.FrozenFiles() {
-				log.Debug(fmt.Sprintf("[%s] --- DEBUG --- checking", logPrefix), "file", f)
 				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
 				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
 					continue
 				}
-				toDelete = append(toDelete, f)
+				toDeleteSeg = append(toDeleteSeg, f)
+				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
 			}
-			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "files", toDelete)
-			if _, err := snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDelete}); err != nil {
+			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
+			if _, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader}); err != nil {
+				return err
+			}
+			if err = blockReader.Snapshots().Delete(toDeleteSeg...); err != nil {
 				return err
 			}
 		}
