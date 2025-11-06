@@ -114,65 +114,67 @@ type commitmentRootInfo struct {
 }
 
 func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile) (commitmentRootInfo, error) {
+	var info commitmentRootInfo
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
 	maxTxNum := endTxNum - 1
 	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
 	if err != nil {
-		return commitmentRootInfo{}, err
+		return info, err
 	}
 	if !ok {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root not found", ErrIntegrity)
+		return info, fmt.Errorf("%w: commitment root not found", ErrIntegrity)
 	}
 	if start != startTxNum {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root not found with same startTxNum: %d != %d", ErrIntegrity, start, startTxNum)
+		return info, fmt.Errorf("%w: commitment root not found with same startTxNum: %d != %d", ErrIntegrity, start, startTxNum)
 	}
 	if end != endTxNum {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root not found with same endTxNum: %d != %d", ErrIntegrity, end, endTxNum)
+		return info, fmt.Errorf("%w: commitment root not found with same endTxNum: %d != %d", ErrIntegrity, end, endTxNum)
 	}
 	rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 	if err != nil {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root could not be extracted: %w", ErrIntegrity, err)
+		return info, fmt.Errorf("%w: commitment root could not be extracted: %w", ErrIntegrity, err)
 	}
 	if txNum >= endTxNum {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root txNum is gte endTxNum: %d >= %d", ErrIntegrity, txNum, endTxNum)
+		return info, fmt.Errorf("%w: commitment root txNum is gte endTxNum: %d >= %d", ErrIntegrity, txNum, endTxNum)
 	}
 	if txNum < startTxNum {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root txNum is lt startTxNum: %d < %d", ErrIntegrity, txNum, startTxNum)
+		return info, fmt.Errorf("%w: commitment root txNum is lt startTxNum: %d < %d", ErrIntegrity, txNum, startTxNum)
 	}
 	txNumReader := br.TxnumReader(ctx)
 	blockMinTxNum, err := txNumReader.Min(tx, blockNum)
 	if err != nil {
-		return commitmentRootInfo{}, err
+		return info, err
 	}
 	blockMaxTxNum, err := txNumReader.Max(tx, blockNum)
 	if err != nil {
-		return commitmentRootInfo{}, err
+		return info, err
 	}
 	if txNum > blockMaxTxNum {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root txNum gt blockMaxTxNum for block %d: %d > %d", ErrIntegrity, blockNum, txNum, blockMaxTxNum)
+		return info, fmt.Errorf("%w: commitment root txNum gt blockMaxTxNum for block %d: %d > %d", ErrIntegrity, blockNum, txNum, blockMaxTxNum)
 	}
 	if txNum < blockMinTxNum {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root txNum is lt blockMinTxNum for block %d: %d < %d", ErrIntegrity, blockNum, txNum, blockMinTxNum)
+		return info, fmt.Errorf("%w: commitment root txNum is lt blockMinTxNum for block %d: %d < %d", ErrIntegrity, blockNum, txNum, blockMinTxNum)
 	}
 	if txNum == 0 {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root txNum should not be zero", ErrIntegrity)
+		return info, fmt.Errorf("%w: commitment root txNum should not be zero", ErrIntegrity)
 	}
 	rootHash := common.Hash(rootHashBytes)
 	if rootHash == (common.Hash{}) {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root is empty", ErrIntegrity)
+		return info, fmt.Errorf("%w: commitment root is empty", ErrIntegrity)
 	}
 	h, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
-		return commitmentRootInfo{}, err
+		return info, err
 	}
 	if h == nil {
-		return commitmentRootInfo{}, fmt.Errorf("%w: missing canonical header for block %d", ErrIntegrity, blockNum)
+		return info, fmt.Errorf("%w: missing canonical header for block %d", ErrIntegrity, blockNum)
 	}
+	info.rootHash, info.blockNum, info.txNum, info.blockMinTxNum, info.blockMaxTxNum = rootHash, blockNum, txNum, blockMinTxNum, blockMaxTxNum
 	if h.Root != rootHash {
-		return commitmentRootInfo{}, fmt.Errorf("%w: commitment root does not match header root for block %d: %s != %s", ErrIntegrity, blockNum, h.Root, rootHash)
+		return info, fmt.Errorf("%w: commitment root does not match header root for block %d: %s != %s", ErrIntegrity, blockNum, h.Root, rootHash)
 	}
-	return commitmentRootInfo{rootHash: rootHash, blockNum: blockNum, txNum: txNum, blockMaxTxNum: blockMaxTxNum, blockMinTxNum: blockMinTxNum}, nil
+	return info, nil
 }
 
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
