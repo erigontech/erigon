@@ -183,12 +183,6 @@ func (api *BaseAPI) engine() consensus.EngineReader {
 	return api._engine
 }
 
-// nolint:unused
-func (api *BaseAPI) genesis(ctx context.Context, tx kv.Tx) (*types.Block, error) {
-	_, genesis, err := api.chainConfigWithGenesis(ctx, tx)
-	return genesis, err
-}
-
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
 	return api._txnReader.TxnLookup(ctx, tx, txnHash)
 }

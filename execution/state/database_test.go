@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/contracts"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 )

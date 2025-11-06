@@ -49,7 +49,7 @@ type CursorItem struct {
 	cDup    kv.CursorDupSort
 	cNonDup kv.Cursor
 
-	iter         btree2.MapIter[string, dataWithPrevStep]
+	iter         btree2.MapIter[string, dataWithStep]
 	idx          *seg.Reader
 	hist         *seg.PagedReader
 	btCursor     *Cursor
@@ -313,7 +313,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, dataWithPrevStep], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
+func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, dataWithStep], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
