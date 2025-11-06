@@ -245,7 +245,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		// collect latest root from each available file
 		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
-		rootInFiles, err = commitment.HexTrieExtractStateRoot(stateVal)
+		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
 
 		for _, f := range ac.Files(kv.CommitmentDomain) {
