@@ -1197,7 +1197,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	return accountNode, nil
 }
 
-func readBranchData(hph *HexPatriciaHashed, key []byte, depth int16) ([16]*cell, error) {
+func readBranchData(hph *HexPatriciaHashed, key []byte) ([16]*cell, error) {
 	var rowData [16]*cell
 	compactKey := hexNibblesToCompactBytes(key)
 	branchData, _, err := hph.ctx.Branch(compactKey)
@@ -1274,8 +1274,7 @@ func terminalRowToNode(hph *HexPatriciaHashed, rowData [16]*cell, depth int16) (
 		if err != nil {
 			return nil, err
 		}
-	}
-	if nrCells == 1 {
+	} else if nrCells == 1 {
 		idx := firstNonEmptyIdx(rowData)
 		c := rowData[idx]
 		if c.hashLen > 0 { // HashNode
@@ -1343,6 +1342,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			// the corresponding path in the hashed key
 			hashedKeySubstring := hashedKey[keyPos+1 : keyPos+extKeyLength+1]
 			fullPathLength := int(keyPos+1) + len(hashedExtKey)
+			// the diverging extension node points to a branch node in this case
 			if !bytes.Equal(hashedExtKey, hashedKeySubstring) && fullPathLength != 64 && fullPathLength != 128 {
 				// path has diverged due to the hashedKey not leading to any account or storage
 				// the traversal can be stopped at this level
@@ -1356,21 +1356,20 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 					for i := 0; i < len(hashedExtKey); i++ {
 						fullDivergingPath[int(keyPos)+1+i] = hashedExtKey[i]
 					}
-					rowData, err := readBranchData(hph, fullDivergingPath, hph.depths[row])
-					if err != nil {
-						return nil, fmt.Errorf("failed to read branchdata: %w", err)
-					}
-					terminalNode, err := terminalRowToNode(hph, rowData, hph.depths[row])
-					if err != nil {
-						return nil, fmt.Errorf("failed to parse terminal node: %w", err)
-					}
-					nextNode = terminalNode
-					// WIP: flatten terminalNode to HashNode
-					// terminalNodeHash, err := trie.CalcNodeHash(terminalNode)
+					// // Code left commented out in case it might be needed in the future
+					// rowData, err := readBranchData(hph, fullDivergingPath)
 					// if err != nil {
-					// 	return nil, err
+					// 	return nil, fmt.Errorf("failed to read branchdata: %w", err)
 					// }
-					// nextNode = trie.NewHashNode(terminalNodeHash)
+					// terminalNode, err := terminalRowToNode(hph, rowData, hph.depths[row])
+					// if err != nil {
+					// 	return nil, fmt.Errorf("failed to parse terminal node: %w", err)
+					// }
+					// nextNode = &trie.ShortNode{Key: hashedExtKey, Val: terminalNode}
+
+					// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
+					// Currently necessary, because the commented out code above which reads branch data and converts it
+					nextNode = &trie.ShortNode{Key: hashedExtKey}
 				}
 			} else {
 				keyPos += extKeyLength // jump ahead
@@ -1462,6 +1461,13 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				if hph.trace {
 					fmt.Printf("[witness, pos %d] FullNodeChild Hash (%d, %0x, depth=%d) %s proof %+v\n", keyPos, row, col, hph.depths[row], currentCell.FullString(), fullNode.Children[col])
 				}
+			}
+
+			// this deals with the edge case where the extension key in nextNode diverges from hashedKey
+			// and points to a branch node. In this case we just need to provide the hash of this branch node
+			if pathDivergenceFound {
+				terminalCell := &hph.grid[row][currentNibble]
+				nextNode.(*trie.ShortNode).Val = trie.NewHashNode(terminalCell.hash[:])
 			}
 			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
@@ -2259,14 +2265,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		if err != nil {
 			return err
 		}
-		//computedRootHash := tr.Root()
-		//// fmt.Printf("computedRootHash = %x\n", computedRootHash)
-		//
-		//if !bytes.Equal(computedRootHash, expectedRootHash) {
-		//	err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
-		//	return err
-		//}
-
 		tries = append(tries, tr)
 		ki++
 		return nil
