@@ -45,7 +45,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	if sem != nil {
 		defer sem.Release(1)
 	}
-	if info.ID == s.host.ID() {
+	if info.ID == s.p2p.Host().ID() {
 		return nil
 	}
 	if s.peers.BanStatus(info.ID) {
@@ -53,7 +53,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
-	err = s.host.Connect(ctxWithTimeout, info)
+	err = s.p2p.Host().Connect(ctxWithTimeout, info)
 	if err != nil {
 		return err
 	}
@@ -213,8 +213,8 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		peerId := conn.RemotePeer()
 		if s.HasTooManyPeers() {
 			log.Trace("[Sentinel] Not looking for peers, at peer limit")
-			s.host.Peerstore().RemovePeer(peerId)
-			s.host.Network().ClosePeer(peerId)
+			s.p2p.Host().Peerstore().RemovePeer(peerId)
+			s.p2p.Host().Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
 			return
 		}
@@ -225,8 +225,8 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		if !valid {
 			log.Trace("Handshake was unsuccessful")
 			// on handshake fail, we disconnect with said peer, and remove them from our pool
-			s.host.Peerstore().RemovePeer(peerId)
-			s.host.Network().ClosePeer(peerId)
+			s.p2p.Host().Peerstore().RemovePeer(peerId)
+			s.p2p.Host().Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
