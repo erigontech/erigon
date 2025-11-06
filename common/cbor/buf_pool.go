@@ -33,12 +33,7 @@ func Decoder(r io.Reader) *codec.Decoder {
 	var d *codec.Decoder
 	select {
 	case d = <-decoderPool:
-		if d != nil {
-			d.Reset(r)
-		} else {
-			// Fall through to create a new decoder if nil was retrieved from pool
-			d = nil
-		}
+		d.Reset(r)
 	default:
 	}
 	if d == nil {
@@ -68,12 +63,7 @@ func Encoder(w io.Writer) *codec.Encoder {
 	var e *codec.Encoder
 	select {
 	case e = <-encoderPool:
-		if e != nil {
-			e.Reset(w)
-		} else {
-			// Fall through to create a new encoder if nil was retrieved from pool
-			e = nil
-		}
+		e.Reset(w)
 	default:
 	}
 	if e == nil {
