@@ -185,7 +185,7 @@ func checkRecomputeCommitmentRoot(
 		if len(k) != length.Addr {
 			return fmt.Errorf("%w: invalid account key length %d for root block %d account touches", ErrIntegrity, len(k), sd.BlockNum())
 		}
-		logger.Trace("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum())
+		logger.Info("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum())
 		sd.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(k), nil)
 		touches++
 	}
