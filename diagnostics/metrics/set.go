@@ -19,6 +19,7 @@ package metrics
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -631,6 +632,6 @@ func (s *Set) ListMetricNames() []string {
 		}
 		metricNames = append(metricNames, nm.name)
 	}
-	sort.Strings(metricNames)
+	slices.Sort(metricNames)
 	return metricNames
 }

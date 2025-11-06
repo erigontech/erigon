@@ -26,7 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -591,7 +591,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		files = append(files, "idx/"+fName)
 	}
 
-	sort.Strings(files)
+	slices.Sort(files)
 	for _, f := range files {
 		fmt.Printf("%s\n", f)
 	}
