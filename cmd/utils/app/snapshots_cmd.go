@@ -934,7 +934,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.CommitmentRoot:
-			if err := integrity.CheckCommitmentRoot(ctx, db, failFast, logger); err != nil {
+			if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
 				return err
 			}
 		case integrity.CommitmentKvi:
