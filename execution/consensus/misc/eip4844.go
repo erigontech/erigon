@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var (
@@ -39,7 +40,7 @@ var (
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
 // Updated for EIP-7691: currentHeaderTime is used to determine the fork, and hence params
 // Also updated for EIP-7918: Blob base fee bounded by execution cost
-func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeaderTime uint64) uint64 {
+func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeaderTime uint64, log log.Logger) uint64 {
 	var parentExcessBlobGas, parentBlobGasUsed uint64
 	if parent.ExcessBlobGas != nil {
 		parentExcessBlobGas = *parent.ExcessBlobGas
@@ -50,13 +51,24 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	target := config.GetTargetBlobsPerBlock(currentHeaderTime)
 	targetBlobGas := target * params.GasPerBlob
 
+	if (log != nil) {
+
+  	   log.Warn("CalcExcessBlobGas: target/targetBlobGas/parentExcessBlobGas/parentBlobGasUsed: ", target, targetBlobGas, parentExcessBlobGas, parentBlobGasUsed)
+	}
+
 	if parentExcessBlobGas+parentBlobGasUsed < targetBlobGas {
+		if (log != nil) {
+
+		   log.Warn("CalcExcessBlobGas: parentExcessBlobGas+parentBlobGasUsed less target: ", parentExcessBlobGas, parentBlobGasUsed)
+		}
+
 		return 0
 	}
+
 	if config.IsOsaka(currentHeaderTime) {
 		// EIP-7918: Blob base fee bounded by execution cost
 		max := config.GetMaxBlobsPerBlock(currentHeaderTime)
-		refBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, currentHeaderTime)
+		refBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, currentHeaderTime, log)
 		if err != nil {
 			panic(err) // should never happen assuming the parent is valid
 		}
@@ -64,6 +76,11 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 			return parentExcessBlobGas + parentBlobGasUsed*(max-target)/max
 		}
 	}
+	if (log != nil) {
+
+		log.Warn("CalcExcessBlobGas: return excess: ", parentExcessBlobGas, parentBlobGasUsed, targetBlobGas, parentExcessBlobGas + parentBlobGasUsed - targetBlobGas)
+	}
+
 	return parentExcessBlobGas + parentBlobGasUsed - targetBlobGas
 }
 
@@ -123,8 +140,16 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
-func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas)
+func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64, log log.Logger) (uint256.Int, error) {
+	if (log != nil) {
+		log.Warn("GetBlobGasPrice: ", excessBlobGas, headerTime)
+	}
+	a, err := FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas)
+	if (log != nil) {
+
+	   log.Warn("GetBlobGasPrice: returns: ", config.GetMinBlobGasPrice(), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas, a)
+	}
+	return a, err
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {

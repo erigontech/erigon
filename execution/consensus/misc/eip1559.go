@@ -87,8 +87,8 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 
 		if currentHeader.ExcessBlobGas != nil {
 			nextBlockTime := currentHeader.Time + chainConfig.SecondsPerSlot()
-			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader, nextBlockTime)
-			b, err := GetBlobGasPrice(chainConfig, excessBlobGas, nextBlockTime)
+			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader, nextBlockTime, nil)
+			b, err := GetBlobGasPrice(chainConfig, excessBlobGas, nextBlockTime, nil)
 			if err != nil {
 				return 0, 0, 0, 0, err
 			}
