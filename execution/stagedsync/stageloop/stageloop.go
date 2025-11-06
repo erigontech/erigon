@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package stages
+package stageloop
 
 import (
 	"context"
@@ -43,8 +43,8 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
