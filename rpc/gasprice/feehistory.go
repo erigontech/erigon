@@ -97,13 +97,13 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 
 	// Fill in blob base fee and next blob base fee.
 	if excessBlobGas := bf.header.ExcessBlobGas; excessBlobGas != nil {
-		blobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, *excessBlobGas, bf.header.Time)
+		blobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, *excessBlobGas, bf.header.Time, nil)
 		if err != nil {
 			bf.err = err
 			return
 		}
 		nextBlockTime := bf.header.Time + chainconfig.SecondsPerSlot()
-		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header, nextBlockTime), nextBlockTime)
+		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header, nextBlockTime, nil), nextBlockTime, nil)
 		if err != nil {
 			bf.err = err
 			return

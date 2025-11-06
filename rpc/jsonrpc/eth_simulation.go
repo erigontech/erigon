@@ -397,7 +397,7 @@ func (s *simulator) simulateBlock(
 	if s.chainConfig.IsCancun(header.Time) {
 		var excess uint64
 		if s.chainConfig.IsCancun(parent.Time) {
-			excess = misc.CalcExcessBlobGas(s.chainConfig, parent, header.Time)
+			excess = misc.CalcExcessBlobGas(s.chainConfig, parent, header.Time, nil)
 		}
 		header.ExcessBlobGas = &excess
 	}

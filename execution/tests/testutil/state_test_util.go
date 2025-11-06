@@ -264,7 +264,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		context.Difficulty = big.NewInt(0)
 	}
 	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
-		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
+		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time, nil)
 		if err != nil {
 			return nil, common.Hash{}, 0, err
 		}

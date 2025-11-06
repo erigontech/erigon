@@ -222,10 +222,13 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	nextBlockTime := header.Time + config.SecondsPerSlot()
-	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header, nextBlockTime), nextBlockTime)
+	logger := api.logger.New("BlobGasFee", "BlobGasFee")
+	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header, nextBlockTime, logger), nextBlockTime, logger)
 	if err != nil {
 		return nil, err
 	}
+
+	logger.Warn("api BlobBaseFee returns: ",ret256)
 	return (*hexutil.Big)(ret256.ToBig()), nil
 }
 
