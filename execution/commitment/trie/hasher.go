@@ -62,7 +62,7 @@ var hashersPool = sync.Pool{
 
 // hash or if RLP < 32 bytes --> RLP
 func CalcNodeHash(n Node) ([]byte, error) {
-	h := newHasher(true)
+	h := newHasher(false)
 	var hn common.Hash
 	_, err := h.hash(n, false, hn[:])
 	if err != nil {

@@ -439,9 +439,12 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, _, err := sdCtx.Witness(ctx, nil, "eth_getProof")
+	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof")
 	if err != nil {
 		return nil, err
+	}
+	if !bytes.Equal(calculatedAccountProofRoot, header.Root[:]) {
+		return nil, fmt.Errorf("root hash mismatch in account proof trie calculatedAccountProofRoot(%x)!=expectedRoot(%x)", calculatedAccountProofRoot, header.Root[:])
 	}
 
 	// set initial response fields
@@ -486,10 +489,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
 		}
 
-		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-		proofTrie, _, err = sdCtx.Witness(ctx, nil, "eth_getProof")
+		// generate the trie for proofs, this works by loading the merkle paths to the touched key
+		var storageProofRoot []byte
+		proofTrie, storageProofRoot, err = sdCtx.Witness(ctx, nil, "eth_getProof")
 		if err != nil {
 			return nil, err
+		}
+		if !bytes.Equal(storageProofRoot, header.Root[:]) {
+			return nil, fmt.Errorf("root hash mismatch in storage proof trie storageProofRoot(%x)!=expectedRoot(%x)", calculatedAccountProofRoot, header.Root[:])
 		}
 	}
 
