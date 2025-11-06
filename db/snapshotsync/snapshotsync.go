@@ -483,7 +483,7 @@ func SyncSnapshots(
 				continue
 			}
 
-			if filterToBlock(p.Name, toBlock, toStep, headerchain, logPrefix) {
+			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
 				continue
 			}
 
@@ -533,8 +533,7 @@ func SyncSnapshots(
 	return nil
 }
 
-func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool, logPrefix string) bool {
-	log.Debug(fmt.Sprintf("[%s] --- DEBUG --- filterToBlock", logPrefix), "file", name)
+func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
 	}
