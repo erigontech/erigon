@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +28,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -118,7 +119,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	cfg := statecfg.Schema.AccountsDomain.Hist.IiCfg
 
 	dirs := datadir.New(os.TempDir())
-	ii, err := NewInvertedIndex(cfg, aggStep, dirs, log.New())
+	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
 	ii.Accessors = 0
 	ii.salt.Store(&salt)
 	if err != nil {
@@ -506,7 +507,7 @@ func Test_mergeEliasFano(t *testing.T) {
 	t.Skip()
 
 	firstList := []int{1, 298164, 298163, 13, 298160, 298159}
-	sort.Ints(firstList)
+	slices.Sort(firstList)
 	uniq := make(map[int]struct{})
 
 	first := eliasfano32.NewEliasFano(uint64(len(firstList)), uint64(firstList[len(firstList)-1]))
@@ -528,7 +529,7 @@ func Test_mergeEliasFano(t *testing.T) {
 		644988, 644987, 644946, 644994,
 		644942, 644945, 644941, 644940,
 		644939, 644938, 644792, 644787}
-	sort.Ints(secondList)
+	slices.Sort(secondList)
 	second := eliasfano32.NewEliasFano(uint64(len(secondList)), uint64(secondList[len(secondList)-1]))
 
 	for _, v := range secondList {
@@ -552,7 +553,7 @@ func Test_mergeEliasFano(t *testing.T) {
 	require.EqualValues(t, len(uniq), merged.Count())
 	require.Equal(t, merged.Count(), eliasfano32.Count(menc))
 	mergedLists := append(firstList, secondList...)
-	sort.Ints(mergedLists)
+	slices.Sort(mergedLists)
 	require.EqualValues(t, mergedLists[len(mergedLists)-1], merged.Max())
 	require.Equal(t, merged.Max(), eliasfano32.Max(menc))
 
@@ -621,9 +622,9 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		salt := uint32(1)
 		dirs := datadir.New(os.TempDir())
 		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
-		cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
+		cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
-		d, err := NewDomain(cfg, 1, dirs, log.New())
+		d, err := NewDomain(cfg, 1, config3.DefaultStepsInFrozenFile, dirs, log.New())
 		if err != nil {
 			panic(err)
 		}

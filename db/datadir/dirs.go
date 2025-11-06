@@ -19,7 +19,6 @@ package datadir
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 // Dirs is the file system folder the node should use for any data storage
@@ -49,6 +49,7 @@ type Dirs struct {
 	SnapDomain       string
 	SnapAccessors    string
 	SnapCaplin       string
+	SnapForkable     string
 	Downloader       string
 	TxPool           string
 	Nodes            string
@@ -70,6 +71,7 @@ func New(datadir string) Dirs {
 		dirs.SnapDomain,
 		dirs.SnapAccessors,
 		dirs.SnapCaplin,
+		//dirs.SnapForkable,
 		dirs.Downloader,
 		dirs.TxPool,
 		dirs.Nodes,
@@ -106,6 +108,7 @@ func Open(datadir string) Dirs {
 		SnapDomain:       filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:    filepath.Join(datadir, "snapshots", "accessor"),
 		SnapCaplin:       filepath.Join(datadir, "snapshots", "caplin"),
+		SnapForkable:     filepath.Join(datadir, "snapshots", "forkable"),
 		Downloader:       filepath.Join(datadir, "downloader"),
 		TxPool:           filepath.Join(datadir, "txpool"),
 		Nodes:            filepath.Join(datadir, "nodes"),

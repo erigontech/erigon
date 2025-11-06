@@ -19,15 +19,12 @@ package sentinelcli
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
-
-	"github.com/erigontech/erigon/common"
-
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/turbo/logging"
-
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 type SentinelCliCfg struct {

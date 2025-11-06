@@ -20,9 +20,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math/big"
+	"math/rand"
 	"testing"
 	"time"
+
+	"crypto/ecdsa"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -37,11 +41,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -91,7 +96,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	pruneTo := uint64(3)
 	ethCallBlockNumber := rpc.BlockNumber(2)
 
-	m, bankAddress, contractAddress := chainWithDeployedContract(t)
+	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
 	doPrune(t, m.DB, pruneTo)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 
@@ -111,9 +116,9 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 }
 
 func TestGetProof(t *testing.T) {
-	var maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
-
-	m, bankAddr, contractAddr := chainWithDeployedContract(t)
+	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
+	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
+	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
 
 	key := func(b byte) hexutil.Bytes {
@@ -121,6 +126,7 @@ func TestGetProof(t *testing.T) {
 		result[31] = b
 		return result.Bytes()
 	}
+	_ = bankAddr
 
 	tests := []struct {
 		name        string
@@ -133,29 +139,29 @@ func TestGetProof(t *testing.T) {
 		{
 			name:     "currentBlockNoState",
 			addr:     contractAddr,
-			blockNum: 3,
+			blockNum: 6,
 		},
 		{
 			name:     "currentBlockEOA",
 			addr:     bankAddr,
-			blockNum: 3,
+			blockNum: 6,
 		},
 		{
 			name:     "currentBlockNoAccount",
 			addr:     common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
-			blockNum: 3,
+			blockNum: 6,
 		},
 		{
 			name:        "currentBlockWithState",
 			addr:        contractAddr,
-			blockNum:    3,
+			blockNum:    6,
 			storageKeys: []hexutil.Bytes{key(0), key(4), key(8), key(10)},
 			stateVal:    2,
 		},
 		{
 			name:        "currentBlockWithStateAndShortKeys",
 			addr:        contractAddr,
-			blockNum:    3,
+			blockNum:    6,
 			storageKeys: []hexutil.Bytes{{0x0}, {0x4}, {0x8}, {0x0a}},
 			stateVal:    2,
 		},
@@ -163,36 +169,45 @@ func TestGetProof(t *testing.T) {
 			name:        "currentBlockWithMissingState",
 			addr:        contractAddr,
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    3,
+			blockNum:    6,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockEOAMissingState",
 			addr:        bankAddr,
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    3,
+			blockNum:    6,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockNoAccountMissingState",
 			addr:        common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    3,
+			blockNum:    6,
 			stateVal:    0,
 		},
-		// {
-		// 	name:        "olderBlockWithState",
-		// 	addr:        contractAddr,
-		// 	blockNum:    2,
-		// 	storageKeys: []common.Hash{key(1), key(5), key(9), key(13)},
-		// 	stateVal:    1,
-		// },
-		// {
-		// 	name:        "tooOldBlock",
-		// 	addr:        contractAddr,
-		// 	blockNum:    1,
-		// 	expectedErr: "requested block is too old, block must be within 1 blocks of the head block number (currently 3)",
-		// },
+		{
+			name:        "olderBlockWithState",
+			addr:        contractAddr,
+			blockNum:    2,
+			storageKeys: []hexutil.Bytes{key(1), key(5), key(9), key(13)},
+			stateVal:    1,
+		},
+		{
+			name:     "notCreatedYetAccount",
+			addr:     receiverAddress, // receiver address only starts existing at block 4
+			blockNum: 3,
+		},
+		{
+			name:     "createdAccountAtBlock", // account created at block 4, proof requested at block 4, latest=6
+			addr:     receiverAddress,         // receiver address only starts existing at block 4
+			blockNum: 4,
+		},
+		{
+			name:     "createdAccountBlockAfter", // account created at block 4, proof requested at block 5, latest=6
+			addr:     receiverAddress,            // receiver address only starts existing at block 4
+			blockNum: 5,
+		},
 	}
 
 	for _, tt := range tests {
@@ -512,25 +527,52 @@ func contractInvocationData(val byte) []byte {
 	return hexutil.MustDecode(fmt.Sprintf("0x%x00000000000000000000000000000000000000000000000000000000000000%02x", contractFuncSelector, val))
 }
 
-func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address) {
+func generatePseudoRandomECDSAKey(rand io.Reader) (*ecdsa.PrivateKey, error) {
+	return ecdsa.GenerateKey(crypto.S256(), rand)
+}
+
+func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateKey, []*ecdsa.PublicKey, error) {
+	privateKeys := make([]*ecdsa.PrivateKey, n)
+	publicKeys := make([]*ecdsa.PublicKey, n)
+	var err error
+	for i := 0; i < n; i++ {
+		privateKeys[i], err = generatePseudoRandomECDSAKey(rand)
+		if err != nil {
+			return nil, nil, err
+		}
+		publicKeys[i] = &privateKeys[i].PublicKey
+	}
+	return privateKeys, publicKeys, nil
+}
+
+func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address, common.Address) {
 	var (
-		signer      = types.LatestSignerForChainID(nil)
-		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		bankAddress = crypto.PubkeyToAddress(bankKey.PublicKey)
-		bankFunds   = big.NewInt(1e9)
-		contract    = hexutil.MustDecode(contractHexString)
-		gspec       = &types.Genesis{
+		seed            = int64(12345)
+		rng             = rand.New(rand.NewSource(seed)) // rng for filler accounts
+		nFillerAccounts = 400                            // nr. of accounts to fill up MPT
+		signer          = types.LatestSignerForChainID(nil)
+		bankKey, _      = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		bankAddress     = crypto.PubkeyToAddress(bankKey.PublicKey)
+		receiverKey, _  = crypto.HexToECDSA("a71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
+		receiverAddress = crypto.PubkeyToAddress(receiverKey.PublicKey)
+		bankFunds       = big.NewInt(1e9)
+		contract        = hexutil.MustDecode(contractHexString)
+		gspec           = &types.Genesis{
 			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 			//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
 		}
 	)
+	// accounts to fill up MPT
+	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
+	require.NoError(t, err)
+
 	m := mock.MockWithGenesis(t, gspec, bankKey, false)
 	db := m.DB
 
 	var contractAddr common.Address
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -542,10 +584,41 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(1)), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(txn)
+			// send txs to filler addresses, so that MPT may be populated ( populate only half in this block, to not exceed gas limit)
+			nonce++
+			for idx := 0; idx < nFillerAccounts/2; idx++ {
+				transferAmount := big.NewInt(1e1)
+				fillerAddress := crypto.PubkeyToAddress(*fillerPublicKeys[idx])
+				txn, err := types.SignTx(types.NewTransaction(nonce, fillerAddress, uint256.MustFromBig(transferAmount), 21000, new(uint256.Int), nil), *signer, bankKey)
+				require.NoError(t, err)
+				block.AddTx(txn)
+				nonce++
+			}
 		case 2:
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(2)), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(txn)
+			// send txs to filler addresses, so that MPT may be populated
+			// ( populate the second half in this block)
+			nonce++
+			for idx := nFillerAccounts / 2; idx < nFillerAccounts; idx++ {
+				transferAmount := big.NewInt(1e1)
+				fillerAddress := crypto.PubkeyToAddress(*fillerPublicKeys[idx])
+				txn, err := types.SignTx(types.NewTransaction(nonce, fillerAddress, uint256.MustFromBig(transferAmount), 21000, new(uint256.Int), nil), *signer, bankKey)
+				require.NoError(t, err)
+				block.AddTx(txn)
+				nonce++
+			}
+
+		case 3:
+			transferAmount := big.NewInt(1e2)
+			txn, err := types.SignTx(types.NewTransaction(nonce, receiverAddress, uint256.MustFromBig(transferAmount), 21000, new(uint256.Int), nil), *signer, bankKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		case 4:
+			// empty block
+		case 5:
+			// empty block
 		}
 	})
 	if err != nil {
@@ -577,7 +650,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 
-	return m, bankAddress, contractAddr
+	return m, bankAddress, contractAddr, receiverAddress
 }
 
 func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {

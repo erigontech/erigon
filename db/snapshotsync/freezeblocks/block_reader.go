@@ -21,7 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
+	"slices"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type RemoteBlockReader struct {
@@ -455,7 +455,6 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
 	}
 
-	var err error
 	dbMinBlock, err := r.findFirstCompleteBlock(tx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
@@ -464,18 +463,19 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 	return dbMinBlock, nil
 }
 
-// findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
+// findFirstCompleteBlock finds the first block (after genesis) where block body is available.
+// When no block bodies exist beyond genesis, it returns 0.
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
-	firstKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
+	secondKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
 	}
 
-	if len(firstKey) < 8 {
-		return math.MaxUint64, nil // no body data found
+	if len(secondKey) < 8 { // incomplete key, no block found
+		return 0, nil
 	}
 
-	result := binary.BigEndian.Uint64(firstKey[:8])
+	result := binary.BigEndian.Uint64(secondKey[:8])
 	return result, nil
 }
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
@@ -505,7 +505,7 @@ func (r *BlockReader) FrozenFiles() []string {
 	if r.borSn != nil {
 		files = append(files, r.borSn.Files()...)
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
@@ -940,7 +940,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
+	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, b.BlockAccessList)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))

@@ -39,7 +39,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
@@ -146,7 +146,8 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
 			if test.Context.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
 
@@ -251,7 +252,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	baseFee := uint256.MustFromBig((*big.Int)(test.Context.BaseFee))
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: tx.GetEffectiveGasTip(baseFee),
+		GasPrice: *tx.GetEffectiveGasTip(baseFee),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
@@ -311,7 +312,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	origin, _ := signer.Sender(tx)
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: uint256.NewInt(1),
+		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,

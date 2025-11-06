@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/db/services"
 )
 
 func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
@@ -174,10 +174,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 
 	// Process chunks in parallel
 	for start := fromBlock; start <= toBlock; start += chunkSize {
-		end := start + chunkSize - 1
-		if end > toBlock {
-			end = toBlock
-		}
+		end := min(start+chunkSize-1, toBlock)
 
 		chunkStart := start // Capture loop variable
 		chunkEnd := end     // Capture loop variable

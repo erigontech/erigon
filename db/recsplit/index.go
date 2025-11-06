@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/version"
 	"math"
 	"math/bits"
 	"os"
@@ -84,22 +85,22 @@ type Index struct {
 	mmapHandle1 []byte // mmap handle for unix (this is used to close mmap)
 	golombRice  []uint32
 
-	version            uint8
-	startSeed          []uint64
-	ef                 eliasfano16.DoubleEliasFano
-	bucketSize         int
-	size               int64
-	modTime            time.Time
-	baseDataID         uint64 // Index internally organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
-	bucketCount        uint64 // Number of buckets
-	keyCount           uint64
-	recMask            uint64
-	bytesPerRec        int
-	salt               uint32
-	leafSize           uint16 // Leaf size for recursive split algorithms
-	secondaryAggrBound uint16 // The lower bound for secondary key aggregation (computed from leadSize)
-	primaryAggrBound   uint16 // The lower bound for primary key aggregation (computed from leafSize)
-	enums              bool
+	dataStructureVersion version.DataStructureVersion
+	startSeed            []uint64
+	ef                   eliasfano16.DoubleEliasFano
+	bucketSize           int
+	size                 int64
+	modTime              time.Time
+	baseDataID           uint64 // Index internally organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
+	bucketCount          uint64 // Number of buckets
+	keyCount             uint64
+	recMask              uint64
+	bytesPerRec          int
+	salt                 uint32
+	leafSize             uint16 // Leaf size for recursive split algorithms
+	secondaryAggrBound   uint16 // The lower bound for secondary key aggregation (computed from leadSize)
+	primaryAggrBound     uint16 // The lower bound for primary key aggregation (computed from leafSize)
+	enums                bool
 
 	lessFalsePositives bool
 	existenceV0        []byte
@@ -144,7 +145,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	}
 
 	// dontt know how to madv part of file in golang yet
-	//if idx.version == 1 && idx.lessFalsePositives {
+	//if idx.dataStructureVersion == 1 && idx.lessFalsePositives {
 	//	if len(idx.existenceV1) > 0 {
 	//		if err := mmap.MadviseWillNeed(idx.existence); err != nil {
 	//			panic(err)
@@ -180,8 +181,8 @@ func (idx *Index) init() (err error) {
 
 	defer idx.MadvSequential().DisableReadAhead()
 
-	// 1 byte: version, 7 bytes: app-specific minimal dataID (of current shard)
-	idx.version = idx.data[0]
+	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
+	idx.dataStructureVersion = version.DataStructureVersion(idx.data[0])
 	baseDataBytes := bytes.Clone(idx.data[:8])
 	baseDataBytes[0] = 0
 	idx.baseDataID = binary.BigEndian.Uint64(baseDataBytes)
@@ -232,7 +233,7 @@ func (idx *Index) init() (err error) {
 		idx.offsetEf, size = eliasfano32.ReadEliasFano(idx.data[offset:])
 		offset += size
 	}
-	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
+	if idx.dataStructureVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
 		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 		if arrSz != idx.keyCount {
@@ -242,7 +243,7 @@ func (idx *Index) init() (err error) {
 		offset += int(arrSz)
 	}
 
-	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		var sz int
 		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
 		if err != nil {
@@ -282,7 +283,7 @@ func (idx *Index) init() (err error) {
 }
 
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
-	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		return idx.existenceV1.ForceInMem()
 	}
 	return 0
@@ -366,7 +367,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 1 {
 		return 0, true
 	}
-	if idx.version == 1 && idx.lessFalsePositives {
+	if idx.dataStructureVersion == 1 && idx.lessFalsePositives {
 		if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
 			return 0, false
 		}
@@ -397,11 +398,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		d := gr.ReadNext(idx.golombParam(m))
 		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
 		part := hmod / idx.primaryAggrBound
-		if idx.primaryAggrBound < m-part*idx.primaryAggrBound {
-			m = idx.primaryAggrBound
-		} else {
-			m = m - part*idx.primaryAggrBound
-		}
+		m = min(idx.primaryAggrBound, m-part*idx.primaryAggrBound)
 		cumKeys += uint64(idx.primaryAggrBound * part)
 		if part != 0 {
 			gr.SkipSubtree(idx.skipNodes(idx.primaryAggrBound)*int(part), idx.skipBits(idx.primaryAggrBound)*int(part))
@@ -413,11 +410,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		d := gr.ReadNext(idx.golombParam(m))
 		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
 		part := hmod / idx.leafSize
-		if idx.leafSize < m-part*idx.leafSize {
-			m = idx.leafSize
-		} else {
-			m = m - part*idx.leafSize
-		}
+		m = min(idx.leafSize, m-part*idx.leafSize)
 		cumKeys += uint64(idx.leafSize * part)
 		if part != 0 {
 			gr.SkipSubtree(int(part), idx.skipBits(idx.leafSize)*int(part))
@@ -430,7 +423,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
-	if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
+	if idx.dataStructureVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
 		if len(idx.existenceV0) == 0 {
 			msg := fmt.Sprintf("existence filter is empty, file %s, len data %d first byte %b, "+
 				"lessFalsePositives %v enums %v", idx.fileName, len(idx.data), idx.data[0], idx.lessFalsePositives, idx.enums)

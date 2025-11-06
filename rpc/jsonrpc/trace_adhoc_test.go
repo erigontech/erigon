@@ -37,7 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -401,7 +401,8 @@ func TestOeTracer(t *testing.T) {
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
 			if test.Context.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
 

@@ -647,6 +647,13 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 	//return nil
 }
 
+func (c *AuRa) RewriteBytecode(header *types.Header, state *state.IntraBlockState) {
+	blockNum := header.Number.Uint64()
+	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
+		state.SetCode(address, rewrittenCode)
+	}
+}
+
 func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
@@ -655,9 +662,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	//Check block gas limit from smart contract, if applicable
 	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 
-	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
-		state.SetCode(address, rewrittenCode)
-	}
+	c.RewriteBytecode(header, state)
 
 	syscall := func(addr common.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)
@@ -727,7 +732,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	if header.Number.Uint64() >= DEBUG_LOG_FROM {
 		fmt.Printf("finalize1: %d,%d\n", header.Number.Uint64(), len(receipts))
 	}
-	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, receipts)
+	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Sign() == 0, header, receipts)
 	if err != nil {
 		return nil, err
 	}
@@ -844,7 +849,7 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to c
 		if header == nil {
 			panic("not found header")
 		}
-		if header.Number.Uint64() == 0 {
+		if header.Number.Sign() == 0 {
 			break
 		}
 		if to == header.Hash() {

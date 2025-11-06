@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -72,7 +72,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	origin, _ := signer.Sender(txn)
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: uint256.NewInt(1),
+		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
@@ -82,8 +82,8 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
-		BaseFee:     uint256.NewInt(0),
-		BlobBaseFee: uint256.NewInt(50000),
+		BaseFee:     uint256.Int{},
+		BlobBaseFee: *uint256.NewInt(50000),
 	}
 	alloc := types.GenesisAlloc{}
 

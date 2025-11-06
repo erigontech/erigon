@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -58,7 +59,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 var (
@@ -758,11 +758,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		if workers > int(body.TxCount-2) {
-			if int(body.TxCount-2) > 1 {
-				workers = int(body.TxCount - 2)
-			} else {
-				workers = 1
-			}
+			workers = max(int(body.TxCount-2), 1)
 		}
 
 		parsers := errgroup.Group{}

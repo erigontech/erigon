@@ -22,12 +22,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -39,17 +38,13 @@ import (
 type WebSeeds struct {
 	lock sync.Mutex
 
-	byFileName          snaptype.WebSeedUrls // HTTP urls of data files
-	torrentUrls         snaptype.TorrentUrls // HTTP urls of .torrent files
-	downloadTorrentFile bool
-	seeds               []*url.URL
+	seeds []*url.URL
 
 	logger    log.Logger
 	verbosity log.Lvl
 
 	// This doesn't belong here, it belongs in Downloader.
-	torrentFiles *AtomicTorrentFS
-	client       *http.Client
+	client *http.Client
 }
 
 func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSeeds {
@@ -65,11 +60,6 @@ func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSee
 	rc.Logger = nil
 	ws.client = rc.StandardClient()
 	return ws
-}
-
-func (d *WebSeeds) SetTorrent(torrentFS *AtomicTorrentFS, downloadTorrentFile bool) {
-	d.downloadTorrentFile = downloadTorrentFile
-	d.torrentFiles = torrentFS
 }
 
 func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, report *WebSeedCheckReport) {
@@ -138,11 +128,12 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) e
 		fmt.Printf("%s\n", rep.ToString(false))
 	}
 	if failed {
-		merr := "error list:\n"
+		var merr strings.Builder
+		merr.WriteString("error list:\n")
 		for _, err := range supErr {
-			merr += fmt.Sprintf("%s\n", err)
+			merr.WriteString(fmt.Sprintf("%s\n", err))
 		}
-		return fmt.Errorf("webseed: some webseeds are not OK, details above| %s", merr)
+		return fmt.Errorf("webseed: some webseeds are not OK, details above| %s", merr.String())
 	}
 	return nil
 }
@@ -156,8 +147,8 @@ type WebSeedCheckReport struct {
 }
 
 func (w *WebSeedCheckReport) sort() {
-	sort.Strings(w.missingTorrents)
-	sort.Strings(w.danglingTorrents)
+	slices.Sort(w.missingTorrents)
+	slices.Sort(w.danglingTorrents)
 }
 
 func (w *WebSeedCheckReport) OK() bool {
@@ -226,25 +217,6 @@ func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderUR
 
 	d.checkHasTorrents(manifestResponse, report)
 	return report, nil
-}
-
-func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	return d.torrentUrls
-}
-
-func (d *WebSeeds) Len() int {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	return len(d.byFileName)
-}
-
-func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	v, ok := d.byFileName[name]
-	return v, ok
 }
 
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {

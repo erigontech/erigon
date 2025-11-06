@@ -172,27 +172,6 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	return opts
 }
 
-var pathDbMap = map[string]kv.RoDB{}
-var pathDbMapLock sync.Mutex
-
-func addToPathDbMap(path string, db kv.RoDB) {
-	pathDbMapLock.Lock()
-	defer pathDbMapLock.Unlock()
-	pathDbMap[path] = db
-}
-
-func removeFromPathDbMap(path string) {
-	pathDbMapLock.Lock()
-	defer pathDbMapLock.Unlock()
-	delete(pathDbMap, path)
-}
-
-func PathDbMap() map[string]kv.RoDB {
-	pathDbMapLock.Lock()
-	defer pathDbMapLock.Unlock()
-	return maps.Clone(pathDbMap)
-}
-
 var ErrDBDoesNotExists = errors.New("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
 
 func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
@@ -389,9 +368,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
-	for name, cfg := range customBuckets { // copy map to avoid changing global variable
-		db.buckets[name] = cfg
-	}
+	// copy map to avoid changing global variable
+	maps.Copy(db.buckets, customBuckets)
 
 	buckets := bucketSlice(db.buckets)
 	if err := db.openDBIs(buckets); err != nil {
@@ -433,7 +411,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 	db.path = opts.path
-	addToPathDbMap(opts.path, db)
 	if dbg.MdbxLockInRam() && opts.label == dbcfg.ChainDB {
 		log.Info("[dbg] locking db in mem", "label", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
@@ -582,7 +559,6 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
-	removeFromPathDbMap(db.path)
 }
 
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
@@ -1065,18 +1041,16 @@ func (tx *MdbxTx) Rollback() {
 	if tx.tx == nil {
 		return
 	}
-	defer func() {
-		tx.tx = nil
-		tx.db.trackTxEnd()
-		if tx.readOnly {
-			tx.db.roTxsLimiter.Release(1)
-		} else {
-			runtime.UnlockOSThread()
-		}
-		tx.db.leakDetector.Del(tx.traceID)
-	}()
 	tx.closeCursors()
 	tx.tx.Abort()
+	tx.tx = nil
+	tx.db.trackTxEnd()
+	if tx.readOnly {
+		tx.db.roTxsLimiter.Release(1)
+	} else {
+		runtime.UnlockOSThread()
+	}
+	tx.db.leakDetector.Del(tx.traceID)
 }
 
 func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {

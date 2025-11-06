@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -17,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 var (
@@ -59,6 +61,18 @@ func NewDataColumnSidecarService(
 		columnSidecarStorage: columnSidecarStorage,
 		emitters:             emitters,
 	}
+}
+
+func (s *dataColumnSidecarService) IsMyGossipMessage(name string) bool {
+	return gossip.IsTopicDataColumnSidecar(name)
+}
+
+func (s *dataColumnSidecarService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.DataColumnSidecar, error) {
+	obj := &cltypes.DataColumnSidecar{}
+	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 type seenSidecarKey struct {

@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -53,14 +53,12 @@ type Config struct {
 	BlockNumber *big.Int
 	Time        *big.Int
 	GasLimit    uint64
-	GasPrice    *uint256.Int
-	Value       *uint256.Int
+	GasPrice    uint256.Int
+	Value       uint256.Int
 	EVMConfig   vm.Config
-	BaseFee     *uint256.Int
+	BaseFee     uint256.Int
 
-	State *state.IntraBlockState
-
-	evm       *vm.EVM
+	State     *state.IntraBlockState
 	GetHashFn func(n uint64) (common.Hash, error)
 }
 
@@ -85,6 +83,7 @@ func setDefaults(cfg *Config) {
 			CancunTime:            new(big.Int),
 			PragueTime:            new(big.Int),
 			OsakaTime:             new(big.Int),
+			GlamsterdamTime:       new(big.Int),
 		}
 	}
 
@@ -96,12 +95,6 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.GasLimit == 0 {
 		cfg.GasLimit = math.MaxUint64
-	}
-	if cfg.GasPrice == nil {
-		cfg.GasPrice = new(uint256.Int)
-	}
-	if cfg.Value == nil {
-		cfg.Value = new(uint256.Int)
 	}
 	if cfg.BlockNumber == nil {
 		cfg.BlockNumber = new(big.Int)
@@ -135,7 +128,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := dbstate.NewSharedDomains(tx, log.New())
+		sd, err := execctx.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -146,7 +139,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	var (
 		address = common.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
-		sender  = vm.AccountRef(cfg.Origin)
+		sender  = cfg.Origin
 		rules   = vmenv.ChainRules()
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
@@ -192,7 +185,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := dbstate.NewSharedDomains(tx, log.New())
+		sd, err := execctx.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -202,7 +195,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	}
 	var (
 		vmenv  = NewEnv(cfg)
-		sender = vm.AccountRef(cfg.Origin)
+		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil, nil)
@@ -242,7 +235,7 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
-		sender,
+		sender.Address(),
 		address,
 		input,
 		cfg.GasLimit,

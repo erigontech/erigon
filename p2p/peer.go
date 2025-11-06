@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -171,15 +172,20 @@ func (p *Peer) Caps() []Cap {
 	return p.rw.caps
 }
 
+// RunningProtocol returns true if the peer is actively connected using the
+// specified protocol, regardless of version.
+func (p *Peer) RunningProtocol(protocol string) bool {
+	_, ok := p.running[protocol]
+	return ok
+}
+
 // RunningCap returns true if the peer is actively connected using any of the
 // enumerated versions of a specific protocol, meaning that at least one of the
 // versions is supported by both this node and the peer p.
 func (p *Peer) RunningCap(protocol string, versions []uint) bool {
 	if proto, ok := p.running[protocol]; ok {
-		for _, ver := range versions {
-			if proto.Version == ver {
-				return true
-			}
+		if slices.Contains(versions, proto.Version) {
+			return true
 		}
 	}
 	return false
@@ -252,15 +258,15 @@ func convertToCamelCase(input string) string {
 		return input
 	}
 
-	var result string
+	var result strings.Builder
 
 	for _, part := range parts {
 		if len(part) > 0 && part != parts[len(parts)-1] {
-			result += makeFirstCharCap(part)
+			result.WriteString(makeFirstCharCap(part))
 		}
 	}
 
-	return result
+	return result.String()
 }
 
 func (p *Peer) run() (peerErr *PeerError) {
@@ -430,7 +436,6 @@ outer:
 func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error) {
 	p.wg.Add(len(p.running))
 	for _, proto := range p.running {
-		proto := proto
 		proto.closed = p.closed
 		proto.wstart = writeStart
 		proto.werr = writeErr

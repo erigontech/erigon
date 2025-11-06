@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
-	"github.com/erigontech/erigon/execution/genesiswrite"
+	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -229,12 +229,6 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
-}
-
-type GenericTracer interface {
-	TracingHooks() *tracing.Hooks
-	SetTransaction(tx types.Transaction)
-	Found() bool
 }
 
 func (t *TxTask) compare(other Task) int {

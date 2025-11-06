@@ -7,8 +7,7 @@ env:
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.24-bookworm"
-  DOCKER_BASE_IMAGE: "debian:12-slim"
+  DOCKER_BASE_IMAGE: "debian:13-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   BINARIES: "erigon downloader evm caplin capcli integration rpcdaemon sentry txpool"
@@ -175,7 +174,7 @@ jobs:
           find . -type f -ls
 
       - name: Upload artifact -- linux/arm64
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
@@ -184,7 +183,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
@@ -193,7 +192,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
@@ -228,7 +227,7 @@ jobs:
           python-version: '3.12'
 
       - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
           path: .
@@ -288,7 +287,7 @@ jobs:
 
       - name: Upload Downloader Torrent Client Status
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: torrent-client-status-${{ matrix.artifact }}
           path: torrent-client-status.txt
@@ -324,17 +323,17 @@ jobs:
         ref: ${{ needs.build-release.outputs.commit-id }}
 
     - name: Download arm64 artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
 
     - name: Download amd64 artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
 
     - name: Download amd64v2 artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
 
@@ -370,31 +369,31 @@ jobs:
 
     steps:
     - name: Download linux/arm64 artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
         path: dist/
 
     - name: Download linux/amd64 artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
         path: dist/
 
     - name: Download linux/amd64v2 artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
         path: dist/
 
     - name: Download arm64 debian package
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
         path: dist/
 
     - name: Download amd64 debian package
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
         path: dist/

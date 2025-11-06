@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -399,8 +399,6 @@ func TestClique(t *testing.T) {
 	}
 	// Run through the scenarios and test them
 	for i, tt := range tests {
-		i := i
-		tt := tt
 
 		t.Run(tt.name, func(t *testing.T) {
 			logger := testlog.Logger(t, log.LvlInfo)

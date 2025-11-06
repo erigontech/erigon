@@ -21,8 +21,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/common/dir"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +30,8 @@ import (
 
 	"github.com/emicklei/dot"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common/dir"
 )
 
 // ////////////////////////////////////////////////
@@ -109,14 +111,8 @@ func toProgram(code []byte) *Program {
 
 		if op.IsPushWithImmediateArgs() {
 			pushByteSize := stmt.operation.opNum
-			startMin := pc + 1
-			if startMin >= codeLen {
-				startMin = codeLen
-			}
-			endMin := startMin + pushByteSize
-			if startMin+pushByteSize >= codeLen {
-				endMin = codeLen
-			}
+			startMin := min(pc+1, codeLen)
+			endMin := min(startMin+pushByteSize, codeLen)
 			integer := new(uint256.Int)
 			integer.SetBytes(code[startMin:endMin])
 			stmt.value = *integer
@@ -796,7 +792,7 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 	for pc := range entries {
 		entriesList = append(entriesList, pc)
 	}
-	sort.Ints(entriesList)
+	slices.Sort(entriesList)
 	for _, pc0 := range entriesList {
 		pc1 := pc0
 		for !exits[pc1] {
