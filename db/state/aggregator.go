@@ -1802,7 +1802,11 @@ func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to 
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	return at.d[name].GetAsOf(k, ts, tx)
+	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
+	if name == kv.CommitmentDomain && !ok {
+		v, _, ok, err = at.GetLatest(name, k, tx)
+	}
+	return v, ok, err
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {

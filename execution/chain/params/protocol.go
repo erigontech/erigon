@@ -255,9 +255,3 @@ var DefaultPragueBlobConfig = BlobConfig{
 	Max:                   9,
 	BaseFeeUpdateFraction: 5007716,
 }
-
-var DefaultOsakaBlobConfig = BlobConfig{
-	Target:                6,
-	Max:                   9,
-	BaseFeeUpdateFraction: 5007716,
-}
