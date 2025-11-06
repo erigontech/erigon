@@ -1458,7 +1458,6 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		// pointers to storage and account domains to do the reference. Aggregator tx must be called instead
 		return nil, false, nil
 	}
-
 	var ok bool
 	v, _, ok, err = dt.GetLatest(key, roTx)
 	if err != nil {

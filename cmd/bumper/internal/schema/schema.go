@@ -1,10 +1,11 @@
 package schema
 
 import (
+	"os"
+	"slices"
+
 	"github.com/erigontech/erigon/db/snaptype"
 	"gopkg.in/yaml.v3"
-	"os"
-	"sort"
 )
 
 type TwoVers struct {
@@ -63,6 +64,6 @@ func Cats(s Schema) []string {
 	for k := range s {
 		cs = append(cs, k)
 	}
-	sort.Strings(cs)
+	slices.Sort(cs)
 	return cs
 }
