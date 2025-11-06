@@ -243,7 +243,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	if dbg.TraceUnwinds {
 		diffStats := ""
 		if diffSet != nil {
-			for d, diff := range diffSet.Diffs {
+			for d, diff := range &diffSet.Diffs {
 				if diffStats == "" {
 					diffStats += " "
 				} else {

@@ -196,7 +196,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		hash   common.Hash
 		number uint64
 	}
-	tx, err := e.db.BeginTemporalRw(ctx)
+	tx, err := e.db.BeginTemporalRw(ctx) //nolint
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
@@ -359,7 +359,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
-		tx, err = e.db.BeginTemporalRw(ctx)
+		tx, err = e.db.BeginTemporalRw(ctx) //nolint
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return

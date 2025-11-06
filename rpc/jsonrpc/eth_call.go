@@ -403,7 +403,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx,tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +674,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx,txBatch2, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
 	if err != nil {
 		return nil, err
 	}

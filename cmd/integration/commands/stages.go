@@ -941,7 +941,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 	}
 
-	tx, err := db.BeginTemporalRw(ctx)
+	tx, err := db.BeginTemporalRw(ctx) //nolint
 	if err != nil {
 		return err
 	}
@@ -967,7 +967,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	var sendersProgress, execProgress uint64
-	
+
 	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}

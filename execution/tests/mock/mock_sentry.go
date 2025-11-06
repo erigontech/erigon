@@ -807,7 +807,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 			return err
 		}
 		defer sd.Close()
-		if err := stageloop.StageLoopIteration(ms.Ctx, ms.DB, sd, tx, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err!=nil {
+		if err := stageloop.StageLoopIteration(ms.Ctx, ms.DB, sd, tx, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 			return err
 		}
 
