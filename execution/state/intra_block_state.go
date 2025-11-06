@@ -669,7 +669,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr common.Address) (common
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr common.Address, key common.Hash, value *uint256.Int) error {
-	versionedValue, source, _, err := versionedRead(sdb, addr, StatePath, key, false, *u256.N0,
+	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -693,7 +693,7 @@ func (sdb *IntraBlockState) GetState(addr common.Address, key common.Hash, value
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key common.Hash, value *uint256.Int) error {
-	versionedValue, source, _, err := versionedRead(sdb, addr, StatePath, key, true, *u256.N0,
+	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, true, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -1074,7 +1074,7 @@ func (sdb *IntraBlockState) setState(addr common.Address, key common.Hash, value
 		return err
 	}
 	if stateObject.SetState(key, value, force) {
-		sdb.versionWritten(addr, StatePath, key, value)
+		sdb.versionWritten(addr, StoragePath, key, value)
 	}
 	return nil
 }
@@ -1957,7 +1957,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			switch path {
 			case AddressPath:
 				continue
-			case StatePath:
+			case StoragePath:
 				stateKey := writes[i].Key
 				state := val.(uint256.Int)
 				if err := sdb.setState(addr, stateKey, state, true); err != nil {

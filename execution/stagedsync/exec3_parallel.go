@@ -207,6 +207,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
+						// TODO --- BAL Implementation integration point ---
+						//  At this stage applyResult.TxIO contains the reads and writes for all of the completed
+						// transactions in the block.  The state.VersionedRead, and state.VersionedWrite objects contain
+						// version information contains details the data read & writes and the associated transactions
+						//
+						// It should be possible to iterate this list and construct the blocks BAL here
+						//
+						// For more details on how to iterate this list look at:
+						//
+						// dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
+						//
+						// which iterates the list and prints it contents
+						//
 						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
@@ -744,7 +757,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.applyResults, execRequest.profile)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.profile)
 			}
 		}
 
@@ -760,12 +773,15 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execTasks.pushPending(i)
 		executor.validateTasks.pushPending(i)
 
-		if len(t.Dependencies()) > 0 {
+		switch {
+		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
 				executor.execTasks.addDependency(depTxIndex+1, i)
 			}
 			executor.execTasks.clearPending(i)
-		} else {
+		case len(execRequest.accessList) != 0:
+			break
+		default:
 			sender, err := t.TxSender()
 			if err != nil {
 				return err
@@ -1150,6 +1166,7 @@ type execRequest struct {
 	blockNum     uint64
 	blockHash    common.Hash
 	gasPool      *core.GasPool
+	accessList   types.BlockAccessList
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
@@ -1218,7 +1235,7 @@ type blockExecutor struct {
 	applyCount  int
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
 		blockHash:    blockHash,
@@ -1228,7 +1245,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool,
 		estimateDeps: map[int][]int{},
 		preValidated: map[int]bool{},
 		blockIO:      &state.VersionedIO{},
-		versionMap:   state.NewVersionMap(),
+		versionMap:   state.NewVersionMap(accessList),
 		profile:      profile,
 		applyResults: applyResults,
 		gasPool:      gasPool,

@@ -428,7 +428,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
@@ -501,7 +501,7 @@ func TestVersionMapRevert(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -562,7 +562,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 	states := []*IntraBlockState{s}
 
@@ -631,7 +631,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -720,7 +720,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -806,8 +806,8 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 	// map deletes necessary here as they happen in scheduler not ibs
-	states[1].versionMap.Delete(addr, StatePath, key1, 1, true)
-	states[1].versionMap.Delete(addr, StatePath, key2, 1, true)
+	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
+	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
 	states[1].versionMap.Delete(addr, BalancePath, common.Hash{}, 1, true)
 
 	// Tx3 read
@@ -846,7 +846,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	sClean := s.Copy()

@@ -428,14 +428,14 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
+				if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StoragePath, Key: ch.key}]; ok {
 					val := v.Val.(uint256.Int)
 					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, *ch.account, ch.key, &val, &ch.prevalue)
 				}
 			}
-			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StatePath, Key: ch.key})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StoragePath, Key: ch.key})
 		} else {
-			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StoragePath, Key: ch.key}]; ok {
 				if trace {
 					val := v.Val.(uint256.Int)
 					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, *ch.account, ch.key, &val, &ch.prevalue)
