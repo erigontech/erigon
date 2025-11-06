@@ -230,13 +230,13 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts
 	sub = &GossipSubscription{
 		gossip_topic: topic,
 		ch:           s.subManager.ch,
-		host:         s.host.ID(),
+		host:         s.p2p.Host().ID(),
 		ctx:          s.ctx,
 		expiration:   exp,
 		s:            s,
 	}
 	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
-	sub.topic, err = s.pubsub.Join(path, opts...)
+	sub.topic, err = s.p2p.Pubsub().Join(path, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}

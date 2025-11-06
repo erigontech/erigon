@@ -35,7 +35,7 @@ type P2Pmanager struct {
 	cfg    *SentinelConfig
 	pubsub *pubsub.PubSub
 	bwc    *metrics.BandwidthCounter
-	host   *host.Host
+	host   host.Host
 }
 
 func NewP2Pmanager(ctx context.Context, cfg *SentinelConfig) (*P2Pmanager, error) {
@@ -60,10 +60,11 @@ func NewP2Pmanager(ctx context.Context, cfg *SentinelConfig) (*P2Pmanager, error
 
 	p := P2Pmanager{
 		cfg:  cfg,
-		host: &host,
+		host: host,
 		bwc:  bwc,
 	}
 
+	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	p.pubsub, err = pubsub.NewGossipSub(ctx, host, p.pubsubOptions(cfg.BeaconConfig)...)
 	if err != nil {
 		return nil, err
@@ -75,7 +76,7 @@ func (p *P2Pmanager) Pubsub() *pubsub.PubSub {
 	return p.pubsub
 }
 
-func (p *P2Pmanager) Host() *host.Host {
+func (p *P2Pmanager) Host() host.Host {
 	return p.host
 }
 
