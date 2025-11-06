@@ -1399,13 +1399,6 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		if !found {
 			if traceGetLatest == dt.name {
 				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
-				v, found, _, err = dt.getLatestFromFile(i, []byte{0})
-				if err != nil {
-					fmt.Printf("GetLatest(%s, []byte{0}) -> not found in file %s due to err\n", dt.name.String(), dt.files[i].src.decompressor.FileName())
-				}
-				if !found {
-					fmt.Printf("GetLatest(%s, []byte{0}) -> not found in file %s\n", dt.name.String(), dt.files[i].src.decompressor.FileName())
-				}
 			}
 			continue
 		}
