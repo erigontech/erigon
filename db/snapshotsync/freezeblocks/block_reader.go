@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -504,7 +505,7 @@ func (r *BlockReader) FrozenFiles() []string {
 	if r.borSn != nil {
 		files = append(files, r.borSn.Files()...)
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }

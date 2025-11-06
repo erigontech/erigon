@@ -66,11 +66,11 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	stages2 "github.com/erigontech/erigon/execution/stages"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -375,6 +375,47 @@ var cmdPrintTableSizes = &cobra.Command{
 	},
 }
 
+var cmdPrintBlockTxNumsInfo = &cobra.Command{
+	Use:   "print_block_tx_nums_info",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
+		err := doPrintBlockTxNumsInfo(ctx, logger)
+		if err != nil {
+			logger.Error("issue reading block tx nums info", "err", err)
+		}
+	},
+}
+
+func doPrintBlockTxNumsInfo(ctx context.Context, logger log.Logger) error {
+	db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	br, _ := blocksIO(db, logger)
+	txNumReader := br.TxnumReader(ctx)
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	minTxNum, err := txNumReader.Min(tx, block)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumReader.Max(tx, block)
+	if err != nil {
+		return err
+	}
+	aggTx := dbstate.AggTx(tx)
+	minStep := minTxNum / aggTx.StepSize()
+	maxStep := maxTxNum / aggTx.StepSize()
+	logger.Info("block tx nums", "minTxNum", minTxNum, "maxTxNum", maxTxNum, "minStep", minStep, "maxStep", maxStep)
+	return nil
+}
+
 var cmdPrintMigrations = &cobra.Command{
 	Use:   "print_migrations",
 	Short: "",
@@ -470,6 +511,10 @@ func init() {
 	withDataDir(cmdPrintTableSizes)
 	withOutputCsvFile(cmdPrintTableSizes)
 	rootCmd.AddCommand(cmdPrintTableSizes)
+
+	withDataDir2(cmdPrintBlockTxNumsInfo)
+	withBlock(cmdPrintBlockTxNumsInfo)
+	rootCmd.AddCommand(cmdPrintBlockTxNumsInfo)
 
 	withConfig(cmdStageSenders)
 	withIntegrityChecks(cmdStageSenders)
@@ -1409,7 +1454,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	}
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 
-	stageList := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
+	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
 		signatures, logger, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 

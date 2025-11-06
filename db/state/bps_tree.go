@@ -413,7 +413,7 @@ func (b *BpsTree) Get(g *seg.PagedReader, key []byte) (v []byte, ok bool, offset
 			return v, v != nil, offset, nil
 		}
 
-		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
+		cmp, v, err = b.keyCmpFunc(key, m, g, v[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}

@@ -4,8 +4,10 @@ import (
 	"errors"
 	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -13,7 +15,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/erigontech/erigon/cmd/bumper/internal/schema"
-	"github.com/erigontech/erigon/db/version"
 )
 
 type focus int
@@ -128,7 +129,7 @@ func (m *model) rebuildRight() {
 		for k := range g {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		for _, k := range keys {
 			list = append(list, it{part, k})
 		}

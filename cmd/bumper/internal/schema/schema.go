@@ -2,7 +2,7 @@ package schema
 
 import (
 	"os"
-	"sort"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 
@@ -65,6 +65,6 @@ func Cats(s Schema) []string {
 	for k := range s {
 		cs = append(cs, k)
 	}
-	sort.Strings(cs)
+	slices.Sort(cs)
 	return cs
 }
