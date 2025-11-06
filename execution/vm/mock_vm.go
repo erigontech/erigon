@@ -18,7 +18,6 @@ package vm
 
 import (
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -44,7 +43,7 @@ type testVM struct {
 	depth int
 }
 
-func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err error) {
+func (evm *testVM) Run(_ Contract, _ uint64, _ []byte, readOnly bool) (ret []byte, gas uint64, err error) {
 	currentReadOnly := new(readOnlyState)
 
 	currentReadOnly.outer = readOnly
@@ -66,14 +65,14 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	*evm.currentIdx++
 
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
-		res, err := evm.env.interpreter.Run(NewContract(
-			&dummyContractRef{},
+		res, _, err := evm.env.interpreter.Run(*NewContract(
 			common.Address{},
-			new(uint256.Int),
-			0,
+			common.Address{},
+			common.Address{},
+			uint256.Int{},
 			evm.env.config.JumpDestCache,
-		), nil, evm.readOnlySliceTest[*evm.currentIdx])
-		return res, err
+		), 0, nil, evm.readOnlySliceTest[*evm.currentIdx])
+		return res, 0, err
 	}
 
 	return
@@ -94,20 +93,3 @@ type readOnlyState struct {
 func (r *readOnlyState) String() string {
 	return fmt.Sprintf("READONLY Status: outer %t; before %t; in %t; after %t", r.outer, r.before, r.in, r.after)
 }
-
-type dummyContractRef struct {
-	calledForEach bool
-}
-
-func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return common.Address{} }
-func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
-func (dummyContractRef) SetCode(common.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
-	d.calledForEach = true
-}
-func (d *dummyContractRef) SubBalance(amount *big.Int) {}
-func (d *dummyContractRef) AddBalance(amount *big.Int) {}
-func (d *dummyContractRef) SetBalance(*big.Int)        {}
-func (d *dummyContractRef) SetNonce(uint64)            {}
-func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }

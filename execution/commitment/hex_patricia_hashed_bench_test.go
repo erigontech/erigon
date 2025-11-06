@@ -53,10 +53,8 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
 	defer upds.Close()
 
-	b.ResetTimer()
-
 	ctx := context.Background()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		if i+5 >= len(pk) {
 			i = 0
 		}

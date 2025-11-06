@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -68,7 +69,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.Hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
-	h, err := NewHistory(cfg.Hist, aggregationStep, dirs, logger)
+	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(h.Close)
 	h.salt.Store(&salt)
@@ -151,7 +152,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					vi++
 				}
 				values[string(keyBuf)] = updates[vi:]
-				require.True(t, sort.StringsAreSorted(seenKeys))
+				require.True(t, slices.IsSorted(seenKeys))
 			}
 			h.integrateDirtyFiles(sf, i, i+h.stepSize)
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
@@ -916,7 +917,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 	}
 
 	var r HistoryRanges
-	maxSpan := h.stepSize * config3.StepsInFrozenFile
+	maxSpan := h.stepSize * config3.DefaultStepsInFrozenFile
 
 	for {
 		if stop := func() bool {

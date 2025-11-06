@@ -308,8 +308,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.FileVersion.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -334,8 +334,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.FileVersion.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -360,8 +360,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.FileVersion.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -382,8 +382,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.FileVersion.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)

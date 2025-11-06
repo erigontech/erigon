@@ -19,9 +19,10 @@ package eth_clock
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSlotOperations(t *testing.T) {
@@ -37,7 +38,7 @@ func TestGetForkDigests(t *testing.T) {
 	clock := NewEthereumClock(0, common.Hash{}, &clparams.MainnetBeaconConfig)
 	currDigest, err := clock.CurrentForkDigest()
 	require.NoError(t, err)
-	require.Equal(t, common.Bytes4{0xc8, 0xb9, 0xe6, 0xac}, currDigest)
+	require.Equal(t, common.Bytes4{0x0b, 0x15, 0x44, 0xdc}, currDigest)
 	nextDigest, err := clock.NextForkDigest()
 	require.NoError(t, err)
 	lastFork, err := clock.LastFork()

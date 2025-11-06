@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"sync"
 	"time"
@@ -207,9 +208,7 @@ func (t *UDPv4) Errors() map[string]uint {
 	errors := map[string]uint{}
 
 	t.mutex.Lock()
-	for key, value := range t.errors {
-		errors[key] = value
-	}
+	maps.Copy(errors, t.errors)
 	t.mutex.Unlock()
 
 	return errors
@@ -711,7 +710,8 @@ func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 			// Ignore temporary read errors.
 			t.log.Trace("Temporary UDP read error", "err", err)
 			continue
-		} else if err != nil {
+		}
+		if err != nil {
 			// Shut down the loop for permament errors.
 			if err != io.EOF {
 				t.log.Trace("UDP read error", "err", err)
@@ -859,8 +859,9 @@ func (t *UDPv4) verifyPing(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 
 	senderKey, err := v4wire.DecodePubkey(crypto.S256(), fromKey)
 	if err != nil {
+		errStr := err.Error()
 		t.mutex.Lock()
-		t.errors[err.Error()] = t.errors[err.Error()] + 1
+		t.errors[errStr] = t.errors[errStr] + 1
 		t.mutex.Unlock()
 		return err
 	}
@@ -1022,8 +1023,9 @@ func (t *UDPv4) handleENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID e
 	})
 
 	if err != nil {
+		errStr := err.Error()
 		t.mutex.Lock()
-		t.errors[err.Error()] = t.errors[err.Error()] + 1
+		t.errors[errStr] = t.errors[errStr] + 1
 		t.mutex.Unlock()
 	}
 }

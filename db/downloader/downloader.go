@@ -21,9 +21,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/puzpuzpuz/xsync/v4"
 	"io/fs"
 	"iter"
+	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -37,6 +37,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/puzpuzpuz/xsync/v4"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/quic-go/quic-go/http3"
@@ -175,9 +177,7 @@ var cloudflareHeaders = http.Header{
 
 func insertCloudflareHeaders(req *http.Request) {
 	// Note this is clobbering the headers.
-	for key, value := range cloudflareHeaders {
-		req.Header[key] = value
-	}
+	maps.Copy(req.Header, cloudflareHeaders)
 }
 
 type roundTripperFunc func(req *http.Request) (*http.Response, error)

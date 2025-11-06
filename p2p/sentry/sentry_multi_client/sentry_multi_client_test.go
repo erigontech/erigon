@@ -10,13 +10,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type receiptRLP69 struct {
@@ -128,78 +127,6 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	}
 }
 
-func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	testMinimumBlockHeight := uint64(100)
-	testLatestBlockHeight := uint64(200)
-	testBestHash := common.HexToHash("0xabc")
-
-	var sentMessage *proto_sentry.OutboundMessageData
-	mockSentry := &mockSentryClient{
-		sendMessageToAllFunc: func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-			sentMessage = req
-			return &proto_sentry.SentPeers{}, nil
-		},
-		handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
-			return &proto_sentry.HandShakeReply{
-				Protocol: proto_sentry.Protocol_ETH69,
-			}, nil
-		},
-	}
-
-	mockStatus := &mockStatusDataProvider{
-		getStatusDataFunc: func(ctx context.Context) (*proto_sentry.StatusData, error) {
-			return &proto_sentry.StatusData{
-				MinimumBlockHeight: testMinimumBlockHeight,
-				MaxBlockHeight:     testLatestBlockHeight,
-				BestHash:           gointerfaces.ConvertHashToH256(testBestHash),
-			}, nil
-		},
-	}
-
-	mockBlockReader := &mockFullBlockReader{
-		readyFunc: func(ctx context.Context) <-chan error {
-			ch := make(chan error, 1)
-			ch <- nil // Signal that the block reader is ready
-			return ch
-		},
-	}
-
-	cs := &MultiClient{
-		sentries:           []proto_sentry.SentryClient{mockSentry},
-		statusDataProvider: mockStatus,
-		blockReader:        mockBlockReader,
-		logger:             log.New(),
-	}
-
-	cs.doAnnounceBlockRange(ctx)
-
-	if sentMessage == nil {
-		t.Fatal("No message was sent")
-	}
-	if sentMessage.Id != proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69 {
-		t.Errorf("Expected message ID %v, got %v", proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69, sentMessage.Id)
-	}
-
-	var response eth.BlockRangeUpdatePacket
-	if err := rlp.DecodeBytes(sentMessage.Data, &response); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
-
-	if response.Earliest != testMinimumBlockHeight {
-		t.Errorf("Expected earliest block height %d, got %d", testMinimumBlockHeight, response.Earliest)
-	}
-	if response.Latest != testLatestBlockHeight {
-		t.Errorf("Expected latest block height %d, got %d", testLatestBlockHeight, response.Latest)
-	}
-	if response.LatestHash != testBestHash {
-		t.Errorf("Expected latest hash %s, got %s", testBestHash.Hex(), response.LatestHash.Hex())
-	}
-}
-
-// Mock implementations
 type mockSentryClient struct {
 	proto_sentry.SentryClient
 	sendMessageByIdFunc  func(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)

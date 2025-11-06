@@ -77,9 +77,9 @@ func TestCreation(t *testing.T) {
 				{17034870, 1681338479, ID{Hash: ChecksumToBytes(0xdce96c2d), Activation: 1681338455, Next: 1710338135}}, // First Shanghai block
 				{19426586, 1710338123, ID{Hash: ChecksumToBytes(0xdce96c2d), Activation: 1681338455, Next: 1710338135}}, // Last Shanghai block
 				{19426587, 1710338135, ID{Hash: ChecksumToBytes(0x9f3d2254), Activation: 1710338135, Next: 1746612311}}, // First Cancun block
-				{22432453, 1746612299, ID{Hash: ChecksumToBytes(0x9f3d2254), Activation: 1710338135, Next: 1746612311}}, // Last Cancun block (approx.)
-				{22432454, 1746612311, ID{Hash: ChecksumToBytes(0xc376cf8b), Activation: 1746612311, Next: 0}},          // First Prague block (approx.)
-				{30000000, 1900000000, ID{Hash: ChecksumToBytes(0xc376cf8b), Activation: 1746612311, Next: 0}},          // Future Prague block (mock)
+				{22431083, 1746612299, ID{Hash: ChecksumToBytes(0x9f3d2254), Activation: 1710338135, Next: 1746612311}}, // Last Cancun block
+				{22431084, 1746612311, ID{Hash: ChecksumToBytes(0xc376cf8b), Activation: 1746612311, Next: 1764798551}}, // First Prague block
+				{30000000, 1900000000, ID{Hash: ChecksumToBytes(0x07c9462e), Activation: 1767747671, Next: 0}},          // Future block (mock)
 			},
 		},
 		{
@@ -97,19 +97,6 @@ func TestCreation(t *testing.T) {
 				{9412738, 1760427360, ID{Hash: ChecksumToBytes(0xe2ae4999), Activation: 1760427360, Next: 1761017184}}, // First Osaka block (approx)
 				{9461890, 1761017184, ID{Hash: ChecksumToBytes(0x56078a1e), Activation: 1761017184, Next: 1761607008}}, // First BPO1 block (approx)
 				{12000000, 1800000000, ID{Hash: ChecksumToBytes(0x268956b6), Activation: 1761607008, Next: 0}},         // Future BPO2 block (mock)
-			},
-		},
-		{
-			chainspec.Holesky,
-			[]testcase{
-				{0, 1696000704, ID{Hash: ChecksumToBytes(0xfd4f016b), Activation: 1696000704, Next: 1707305664}},       // First Shanghai block
-				{0, 1707305652, ID{Hash: ChecksumToBytes(0xfd4f016b), Activation: 1696000704, Next: 1707305664}},       // Last Shanghai block
-				{894733, 1707305676, ID{Hash: ChecksumToBytes(0x9b192ad0), Activation: 1707305664, Next: 1740434112}},  // First Cancun block
-				{3419703, 1740434100, ID{Hash: ChecksumToBytes(0x9b192ad0), Activation: 1707305664, Next: 1740434112}}, // Last Cancun block
-				{3419704, 1740434112, ID{Hash: ChecksumToBytes(0xdfbd9bed), Activation: 1740434112, Next: 1759308480}}, // First Prague block
-				{4619676, 1759308480, ID{Hash: ChecksumToBytes(0x783def52), Activation: 1759308480, Next: 1759800000}}, // First Osaka block (approx)
-				{4660636, 1759800000, ID{Hash: ChecksumToBytes(0xa280a45c), Activation: 1759800000, Next: 1760389824}}, // First BPO1 block (approx)
-				{8000000, 1800000000, ID{Hash: ChecksumToBytes(0x9bc6cb31), Activation: 1760389824, Next: 0}},          // Future BPO2 block (mock)
 			},
 		},
 		{

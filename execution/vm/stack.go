@@ -47,9 +47,9 @@ func New() *Stack {
 	}
 	return stack
 }
-func (st *Stack) push(d *uint256.Int) {
+func (st *Stack) push(d uint256.Int) {
 	// NOTE push limit (1024) is checked in baseCheck
-	st.data = append(st.data, *d)
+	st.data = append(st.data, d)
 }
 
 func (st *Stack) pop() (ret uint256.Int) {

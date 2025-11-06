@@ -52,7 +52,7 @@ type Server struct {
 	services        serviceRegistry
 	methodAllowList AllowList
 	idgen           func() ID
-	run             int32
+	run             atomic.Bool
 	codecs          mapset.Set // mapset.Set[ServerCodec] requires go 1.20
 
 	batchConcurrency    uint
@@ -66,8 +66,9 @@ type Server struct {
 
 // NewServer creates a new server instance with no registered handlers.
 func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
-	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
+	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
+	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
@@ -102,7 +103,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 	defer codec.Close()
 
 	// Don't serve if server is stopped.
-	if atomic.LoadInt32(&s.run) == 0 {
+	if !s.run.Load() {
 		return
 	}
 
@@ -120,7 +121,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 // this mode.
 func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream jsonstream.Stream) *jsonrpcMessage {
 	// Don't serve if server is stopped.
-	if atomic.LoadInt32(&s.run) == 0 {
+	if !s.run.Load() {
 		return nil
 	}
 
@@ -151,7 +152,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 // requests to finish, then closes all codecs which will cancel pending requests and
 // subscriptions.
 func (s *Server) Stop() {
-	if atomic.CompareAndSwapInt32(&s.run, 1, 0) {
+	if s.run.CompareAndSwap(true, false) {
 		s.logger.Info("RPC server shutting down")
 		s.codecs.Each(func(c any) bool {
 			c.(ServerCodec).Close()

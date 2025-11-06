@@ -20,12 +20,13 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
-	b.StopTimer()
+
 	row, bm := generateCellRow(b, 16)
 
 	be := NewBranchEncoder(1024)
@@ -49,10 +50,9 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 		copies[i] = common.Copy(enc1)
 	}
 
-	b.StartTimer()
 	bmg := NewHexBranchMerger(4096)
 	var ci int
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := bmg.Merge(enc, copies[ci])
 		if err != nil {
 			b.Fatal(err)
@@ -93,10 +93,8 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(b, err)
 
-	b.ResetTimer()
-
 	original := common.Copy(enc)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		target := make([]byte, 0, len(enc))
 		oldKeys := make([][]byte, 0)
 		replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {

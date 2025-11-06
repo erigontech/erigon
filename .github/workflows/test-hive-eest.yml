@@ -7,6 +7,9 @@ on:
         - main
   workflow_dispatch:
 
+env:
+  EEST_VERSION: 'v5.3.0'
+
 concurrency:
   # Dynamic group to fill all available runners
   group: hive-eest-tests-${{ github.run_id }}
@@ -39,7 +42,14 @@ jobs:
           ref: master
           path: hive
     
-      - name: Login to Docker Hub
+      - name: Conditional Docker Login
+        # Only login if we can. Workflow works without it but we want to avoid
+        # rate limiting by Docker Hub when possible. External repos don't
+        # have access to our Docker secrets.
+        if: |
+          github.repository == 'erigontech/erigon' && 
+          github.actor != 'dependabot[bot]' &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
@@ -75,7 +85,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eels/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -105,10 +115,10 @@ jobs:
               exit 1
             fi
           }
-          run_suite eest/consume-engine
+          run_suite eels/consume-engine
         continue-on-error: true
       - name: Upload output log
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: hive-workspace-log
           path: hive/workspace/logs
