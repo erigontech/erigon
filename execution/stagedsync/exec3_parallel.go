@@ -207,6 +207,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
+						// TODO --- BAL Implementation integration point ---
+						//  At this stage applyResult.TxIO contains the reads and writes for all of the completed
+						// transactions in the block.  The state.VersionedRead, and state.VersionedWrite objects contain
+						// version information contains details the data read & writes and the associated transactions
+						//
+						// It should be possible to iterate this list and construct the blocks BAL here
+						//
+						// For more details on how to iterate this list look at:
+						//
+						// dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
+						//
+						// which iterates the list and prints it contents
+						//
 						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
