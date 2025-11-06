@@ -496,7 +496,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, err
 		}
 		if !bytes.Equal(storageProofRoot, header.Root[:]) {
-			return nil, fmt.Errorf("root hash mismatch in storage proof trie storageProofRoot(%x)!=expectedRoot(%x)", calculatedAccountProofRoot, header.Root[:])
+			return nil, fmt.Errorf("root hash mismatch in storage proof trie storageProofRoot(%x)!=expectedRoot(%x)", storageProofRoot, header.Root[:])
 		}
 	}
 

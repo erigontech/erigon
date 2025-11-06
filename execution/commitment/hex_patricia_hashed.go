@@ -1383,7 +1383,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 					extensionKey[len(extensionKey)-1] = terminatorHexByte // append terminator byte
 				}
 				nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
-				if keyPos+1 == int16(len(hashedKey)) {
+				if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
 					if cellToExpand.storageAddrLen > 0 && !depthAdjusted {
 						storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 						if err != nil {
@@ -1407,7 +1407,9 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 						//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 					}
-					keyPos++
+					if keyPos+1 == int16(len(hashedKey)) {
+						keyPos++
+					}
 				}
 			}
 		} else if cellToExpand.storageAddrLen > 0 { // storage cell
@@ -1505,7 +1507,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		// in that case start a new tree for the storage
 		if nextAccNode, ok := nextNode.(*trie.AccountNode); ok && len(hashedKey) > 64 {
 			if cellToExpand.hashedExtLen > 0 {
-				extKey := cellToExpand.extension[:cellToExpand.hashedExtLen]
+				extKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
 				nextNode = &trie.ShortNode{Key: extKey}
 			} else {
 				nextNode = &trie.FullNode{}
@@ -1513,6 +1515,13 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			nextAccNode.Storage = nextNode
 			if hph.trace {
 				fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
+			}
+		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 {
+			if nextAccNode, ok := nextShortNode.Val.(*trie.AccountNode); ok {
+				nextNode = nextAccNode
+				if hph.trace {
+					fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
+				}
 			}
 		}
 		currentNode = nextNode
