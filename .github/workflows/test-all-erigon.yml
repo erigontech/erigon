@@ -63,6 +63,14 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - name: Cleanup space
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+
       - name: Declare runners
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
