@@ -64,7 +64,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	}
 	var integrityErr error
 	for i, file := range files {
-		recompute := onlyRecomputeLastFile && i == len(files)-1
+		recompute := !onlyRecomputeLastFile || i == len(files)-1
 		err = checkCommitmentRootInFile(ctx, tx, br, file, recompute, logger)
 		if err != nil {
 			if !errors.Is(err, ErrIntegrity) {
