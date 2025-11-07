@@ -94,6 +94,7 @@ func checkCommitmentRootInFile(ctx context.Context, tx kv.TemporalTx, br service
 	if err != nil {
 		return fmt.Errorf("%w: in %s with startTxNum=%d, endTxNum=%d", err, fileName, startTxNum, endTxNum)
 	}
+	defer sd.Close()
 	if !recompute {
 		logger.Info("skipping commitment root recompute in file", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 		return nil
