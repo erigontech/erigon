@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/merge"
-	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -55,7 +55,7 @@ type BlockGen struct {
 	uncles   []*types.Header
 
 	config *chain.Config
-	engine consensus.Engine
+	engine rules.Engine
 
 	beforeAddTx func()
 }
@@ -113,7 +113,7 @@ func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine consensus.Engine, txn types.Transaction) {
+func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine rules.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
@@ -129,7 +129,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	b.receipts = append(b.receipts, receipt)
 }
 
-func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine consensus.Engine, txn types.Transaction) {
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine rules.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
@@ -311,7 +311,7 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = chain.TestChainConfig
 	}
@@ -442,7 +442,7 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	return header
 }
 
-func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, engine consensus.Engine) *types.Header {
+func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
 	var time uint64
 	if parent.Time() == 0 {
 		time = 10

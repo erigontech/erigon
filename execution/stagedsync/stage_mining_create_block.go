@@ -34,10 +34,10 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -132,7 +132,7 @@ type MiningCreateBlockCfg struct {
 	db                     kv.RwDB
 	miner                  MiningState
 	chainConfig            *chain.Config
-	engine                 consensus.Engine
+	engine                 rules.Engine
 	tmpdir                 string
 	blockBuilderParameters *core.BlockBuilderParameters
 	blockReader            services.FullBlockReader
@@ -142,7 +142,7 @@ func StageMiningCreateBlockCfg(
 	db kv.RwDB,
 	miner MiningState,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
+	engine rules.Engine,
 	blockBuilderParameters *core.BlockBuilderParameters,
 	tmpdir string,
 	blockReader services.FullBlockReader,
@@ -358,7 +358,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 	return nil
 }
 
-func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
 	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {

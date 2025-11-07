@@ -35,8 +35,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
@@ -393,7 +393,7 @@ func TestOeTracer(t *testing.T) {
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 			context := evmtypes.BlockContext{
 				CanTransfer: core.CanTransfer,
-				Transfer:    consensus.Transfer,
+				Transfer:    rules.Transfer,
 				Coinbase:    test.Context.Miner,
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),

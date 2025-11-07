@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -54,7 +54,7 @@ type BodyDownload struct {
 	requestedMap     map[BodyHashes]uint64
 	DeliveryNotify   chan struct{}
 	deliveryCh       chan Delivery
-	Engine           consensus.Engine
+	Engine           rules.Engine
 	delivered        *roaring64.Bitmap
 	prefetchedBlocks *PrefetchedBlocks
 	deliveriesH      map[uint64]*types.Header
@@ -108,7 +108,7 @@ func (bd BodyRequest) ToBlockHash() common.Hash {
 }
 
 // NewBodyDownload create a new body download state object
-func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader, logger log.Logger) *BodyDownload {
+func NewBodyDownload(engine rules.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader, logger log.Logger) *BodyDownload {
 	bd := &BodyDownload{
 		requestedMap:     make(map[BodyHashes]uint64),
 		bodyCacheLimit:   bodyCacheLimit,

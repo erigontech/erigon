@@ -61,7 +61,7 @@ This table stores information about block headers. For each block there are thre
         * gas limit: 8-byte scalar value equal to the current limit of gas expenditure per block
         * gas used: 8-byte scalar value equal to the total gas used in transactions in this block
         * timestamp: 8-byte scalar value equal to the Unix epoch timestamp at the inception of this block
-        * extra data: up to 32-byte array of additional relevant data for this block (at least for Eth-hash consensus engine, for Clique could be more)
+        * extra data: up to 32-byte array of additional relevant data for this block (at least for Eth-hash rules engine, for Clique could be more)
         * mix_hash: 64-byte hash proving, combined with nonce, the computation amount spent in block mining
         * nonce: 8-byte value proving, combined with mix hash, the computation amount spent in block mining
 * __TOTAL DIFFICULTY HEADER__: contains the total mining difficulty (TD) of the chain ending in such specific block

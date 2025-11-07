@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconsensusconfig"
+	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -121,7 +121,7 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	if !ok {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
 
 	bt.br = m.BlockReader
@@ -162,7 +162,7 @@ func (bt *BlockTest) RunCLI() error {
 	if !ok {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine, false)
 	defer m.DB.Close()
 

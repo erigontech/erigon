@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -155,11 +155,11 @@ type spanner struct {
 	currentSpan      heimdall.Span
 }
 
-func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*heimdall.Span, error) {
+func (c spanner) GetCurrentSpan(_ rules.SystemCall) (*heimdall.Span, error) {
 	return &c.currentSpan, nil
 }
 
-func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
+func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall rules.SystemCall) error {
 	c.currentSpan = heimdallSpan
 	return nil
 }
