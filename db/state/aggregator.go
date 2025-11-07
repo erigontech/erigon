@@ -1823,6 +1823,10 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.getLatest(domain, k, tx, nil, time.Time{})
 }
 
+func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+	return at.getLatest(domain, k, tx, metrics, start)
+}
+
 func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, metrics, start)

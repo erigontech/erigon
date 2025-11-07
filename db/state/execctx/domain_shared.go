@@ -278,11 +278,16 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		sd.metrics.UpdateCacheReads(domain, start)
 		return v, _step, nil
 	}
-	//if aggTx, ok := tx.AggTx().(*state.AggregatorRoTx); ok {
-	//	v, step, _, err = aggTx.getLatest(domain, k, tx, &sd.metrics, start)
-	//} else {
-	v, step, err = tx.GetLatest(domain, k)
-	//}
+
+	type MeteredGetter interface {
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+	}
+
+	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
+		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, &sd.metrics, start)
+	} else {
+		v, step, err = tx.GetLatest(domain, k)
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
