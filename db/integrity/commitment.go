@@ -66,7 +66,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	var integrityErr error
 	for i, file := range files {
 		recompute := !onlyRecomputeLastFile || i == len(files)-1
-		err = checkCommitmentRootInFile(ctx, db, br, file, recompute, logger)
+		err = checkCommitmentRootInFile(ctx, tx, br, file, recompute, logger)
 		if err != nil {
 			if !errors.Is(err, ErrIntegrity) {
 				return err
@@ -82,12 +82,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	return integrityErr
 }
 
-func checkCommitmentRootInFile(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, f state.VisibleFile, recompute bool, logger log.Logger) error {
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func checkCommitmentRootInFile(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile, recompute bool, logger log.Logger) error {
 	fileName := filepath.Base(f.Fullpath())
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
@@ -198,6 +193,7 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	if err != nil {
 		return nil, err
 	}
+	sd.DiscardWrites(kv.CommitmentDomain)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
 	err = sd.SeekCommitment(ctx, tx)                                 // seek commitment again to use the new state reader instead
