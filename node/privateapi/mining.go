@@ -63,7 +63,7 @@ func (s *MiningServer) Version(context.Context, *emptypb.Empty) (*typesproto.Ver
 
 func (s *MiningServer) GetWork(context.Context, *txpoolproto.GetWorkRequest) (*txpoolproto.GetWorkReply, error) {
 	if s.ethash == nil {
-		return nil, errors.New("not supported, rules engine is not ethash")
+		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	res, err := s.ethash.GetWork()
 	if err != nil {
@@ -74,7 +74,7 @@ func (s *MiningServer) GetWork(context.Context, *txpoolproto.GetWorkRequest) (*t
 
 func (s *MiningServer) SubmitWork(_ context.Context, req *txpoolproto.SubmitWorkRequest) (*txpoolproto.SubmitWorkReply, error) {
 	if s.ethash == nil {
-		return nil, errors.New("not supported, rules engine is not ethash")
+		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	var nonce types.BlockNonce
 	copy(nonce[:], req.BlockNonce)
@@ -84,7 +84,7 @@ func (s *MiningServer) SubmitWork(_ context.Context, req *txpoolproto.SubmitWork
 
 func (s *MiningServer) SubmitHashRate(_ context.Context, req *txpoolproto.SubmitHashRateRequest) (*txpoolproto.SubmitHashRateReply, error) {
 	if s.ethash == nil {
-		return nil, errors.New("not supported, rules engine is not ethash")
+		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	ok := s.ethash.SubmitHashRate(hexutil.Uint64(req.Rate), common.BytesToHash(req.Id))
 	return &txpoolproto.SubmitHashRateReply{Ok: ok}, nil
@@ -92,14 +92,14 @@ func (s *MiningServer) SubmitHashRate(_ context.Context, req *txpoolproto.Submit
 
 func (s *MiningServer) GetHashRate(_ context.Context, req *txpoolproto.HashRateRequest) (*txpoolproto.HashRateReply, error) {
 	if s.ethash == nil {
-		return nil, errors.New("not supported, rules engine is not ethash")
+		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	return &txpoolproto.HashRateReply{HashRate: s.ethash.GetHashrate()}, nil
 }
 
 func (s *MiningServer) Mining(_ context.Context, req *txpoolproto.MiningRequest) (*txpoolproto.MiningReply, error) {
 	if s.ethash == nil {
-		return nil, errors.New("not supported, rules engine is not ethash")
+		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	return &txpoolproto.MiningReply{Enabled: s.isMining.IsMining(), Running: true}, nil
 }
