@@ -65,7 +65,7 @@ import (
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -78,9 +78,9 @@ import (
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethconfig/features"
-	"github.com/erigontech/erigon/node/ethconsensusconfig"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -1376,7 +1376,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 const blockBufferSize = 128
 
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.MiningConfig, logger log.Logger) (
-	services.BlockRetire, consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState,
+	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState,
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
@@ -1425,7 +1425,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	if borSn != nil {
 		borSn.DownloadComplete() // mark as ready
 	}
-	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
+	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1528,19 +1528,19 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 	return res
 }
 
-func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) consensus.Engine {
+func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) rules.Engine {
 	config := ethconfig.Defaults
 	var polygonBridge *bridge.Service
 	var heimdallService *heimdall.Service
 	var heimdallClient heimdall.Client
 	var bridgeClient bridge.Client
-	var consensusConfig interface{}
+	var rulesConfig interface{}
 	if cc.Clique != nil {
-		consensusConfig = chainspec.CliqueSnapshot
+		rulesConfig = chainspec.CliqueSnapshot
 	} else if cc.Aura != nil {
-		consensusConfig = &config.Aura
+		rulesConfig = &config.Aura
 	} else if cc.Bor != nil {
-		consensusConfig = cc.Bor
+		rulesConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
 			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
@@ -1549,7 +1549,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 			heimdallClient = heimdall.NewIdleClient(config.Miner)
 			bridgeClient = bridge.NewIdleClient()
 		}
-		borConfig := consensusConfig.(*borcfg.BorConfig)
+		borConfig := rulesConfig.(*borcfg.BorConfig)
 
 		polygonBridge = bridge.NewService(bridge.ServiceConfig{
 			Store:        bridgeStore,
@@ -1574,9 +1574,9 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 		})
 
 	} else {
-		consensusConfig = &config.Ethash
+		rulesConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
+	return rulesconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, rulesConfig, config.Miner.Notify, config.Miner.Noverify,
 		config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService)
 }
 

@@ -28,8 +28,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/execution/chain/params"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
 )

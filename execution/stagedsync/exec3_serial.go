@@ -19,9 +19,9 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
@@ -388,7 +388,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return result.Err
 			}
 			if result.Err != nil {
-				return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
+				return fmt.Errorf("%w, txnIdx=%d, %v", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
 			}
 
 			se.txCount++
@@ -426,7 +426,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				}
 
 				if err != nil {
-					return fmt.Errorf("%w, txnIdx=%d, %w", consensus.ErrInvalidBlock, txTask.TxIndex, err)
+					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
 				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
@@ -436,7 +436,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
-						return fmt.Errorf("%w, txnIdx=%d, %w", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
 
@@ -480,7 +480,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
-			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
+			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
 			if se.cfg.badBlockHalt {
@@ -489,7 +489,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 			if se.u != nil {
 				unwindReason := ExecUnwind
-				if errors.Is(err, consensus.ErrInvalidBlock) {
+				if errors.Is(err, rules.ErrInvalidBlock) {
 					unwindReason = BadBlock(txTask.Header.Hash(), err)
 				}
 				if err := se.u.UnwindTo(txTask.BlockNumber()-1, unwindReason, se.applyTx); err != nil {

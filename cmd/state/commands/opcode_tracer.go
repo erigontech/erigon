@@ -44,9 +44,9 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	chain2 "github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -727,7 +727,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	return nil
 }
 
-func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
+func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
 	chainConfig *chain2.Config, getHeader func(hash common.Hash, number uint64) (*types.Header, error), block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
@@ -752,7 +752,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	}
 
 	if !vmConfig.ReadOnly {
-		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		// Finalize the block, applying any rules engine specific extras (e.g. block rewards)
 		tx := block.Transactions()
 		if _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, tx, block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil, logger); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)

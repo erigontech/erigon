@@ -27,10 +27,10 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/exec/calltracer"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -210,7 +210,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
-							return fmt.Errorf("%w, block=%d, %v", consensus.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
+							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
 						if !pe.isMining && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
@@ -879,7 +879,7 @@ type execResult struct {
 	stateUpdates *state.StateUpdates
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
+func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -1009,12 +1009,12 @@ func (ev *taskVersion) Trace() bool {
 }
 
 func (ev *taskVersion) Execute(evm *vm.EVM,
-	engine consensus.Engine,
+	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
-	chainReader consensus.ChainReader,
+	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
 	calcFees bool) (result *exec.TxResult) {
 

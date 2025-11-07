@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/core"
+	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -172,7 +172,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 type simulator struct {
 	base              *types.Header
 	chainConfig       *chain.Config
-	engine            consensus.EngineReader
+	engine            protocolrules.EngineReader
 	blockReader       services.FullBlockReader
 	logger            log.Logger
 	gasPool           *core.GasPool
@@ -188,7 +188,7 @@ func newSimulator(
 	req *SimulationRequest,
 	header *types.Header,
 	chainConfig *chain.Config,
-	engine consensus.EngineReader,
+	engine protocolrules.EngineReader,
 	blockReader services.FullBlockReader,
 	logger log.Logger,
 	gasCap uint64,
@@ -463,9 +463,9 @@ func (s *simulator) simulateBlock(
 	}
 
 	// Apply pre-transaction state modifications before block execution.
-	engine, ok := s.engine.(consensus.Engine)
+	engine, ok := s.engine.(protocolrules.Engine)
 	if !ok {
-		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
+		return nil, nil, errors.New("rules engine reader does not support full rules.Engine")
 	}
 	systemCallCustom := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return core.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)

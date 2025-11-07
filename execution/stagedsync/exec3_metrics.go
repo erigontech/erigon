@@ -14,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 )
 
@@ -125,7 +125,7 @@ var (
 	mxCommitmentDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="commitment"}`)
 )
 
-var ErrWrongTrieRoot = fmt.Errorf("%w: wrong trie root", consensus.ErrInvalidBlock)
+var ErrWrongTrieRoot = fmt.Errorf("%w: wrong trie root", rules.ErrInvalidBlock)
 
 const (
 	maxUnwindJumpAllowance = 1000 // Maximum number of blocks we are allowed to unwind

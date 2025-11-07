@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"

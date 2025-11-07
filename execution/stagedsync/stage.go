@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -135,9 +135,9 @@ var ExecUnwind = UnwindReason{}
 var ForkChoice = UnwindReason{}
 
 func BadBlock(badBlock common.Hash, err error) UnwindReason {
-	if !errors.Is(err, consensus.ErrInvalidBlock) {
+	if !errors.Is(err, rules.ErrInvalidBlock) {
 		// make sure to always have ErrInvalidBlock in the error chain for bad block unwinding
-		err = fmt.Errorf("%w: %w", consensus.ErrInvalidBlock, err)
+		err = fmt.Errorf("%w: %w", rules.ErrInvalidBlock, err)
 	}
 	return UnwindReason{Block: &badBlock, ErrBadBlock: err}
 }

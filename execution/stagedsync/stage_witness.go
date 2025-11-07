@@ -16,8 +16,8 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -31,7 +31,7 @@ type WitnessCfg struct {
 	enableWitnessGeneration bool
 	maxWitnessLimit         uint64
 	chainConfig             *chain.Config
-	engine                  consensus.Engine
+	engine                  rules.Engine
 	blockReader             services.FullBlockReader
 	dirs                    datadir.Dirs
 }
@@ -44,7 +44,7 @@ type WitnessStore struct {
 	GetHashFn       func(n uint64) (common.Hash, error)
 }
 
-func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
+func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine rules.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
 	return WitnessCfg{
 		enableWitnessGeneration: enableWitnessGeneration,
 		maxWitnessLimit:         maxWitnessLimit,
@@ -120,7 +120,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	return nil
 }
 
-func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader consensus.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) (common.Hash, error), logger log.Logger) (common.Hash, error) {
+func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader rules.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) (common.Hash, error), logger log.Logger) (common.Hash, error) {
 	blockNr := block.NumberU64()
 	nw, err := trie.NewWitnessFromReader(bytes.NewReader(buf.Bytes()), false)
 	if err != nil {

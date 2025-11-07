@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
@@ -51,7 +51,7 @@ type BlockGetter interface {
 }
 
 // ComputeBlockContext returns the execution environment of a certain block.
-func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
+func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
 	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
@@ -76,7 +76,7 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 }
 
 // ComputeTxContext returns the execution environment of a certain transaction.
-func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (core.Message, evmtypes.TxContext, error) {
+func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (core.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
 	statedb.SetTxContext(block.NumberU64(), txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -89,7 +89,7 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineRea
 // be tracer dependent.
 func TraceTx(
 	ctx context.Context,
-	engine consensus.EngineReader,
+	engine rules.EngineReader,
 	tx types.Transaction,
 	message core.Message,
 	blockCtx evmtypes.BlockContext,
