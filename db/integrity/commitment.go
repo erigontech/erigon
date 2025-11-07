@@ -86,7 +86,7 @@ func checkCommitmentRootInFile(ctx context.Context, tx kv.TemporalTx, br service
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
 	logger.Info("checking commitment root in", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
-	info, err := checkCommitmentRootViaFileData(ctx, tx, br, f)
+	info, err := checkCommitmentRootViaFileData(ctx, tx, br, f, logger)
 	if err != nil {
 		return fmt.Errorf("%w: in %s with startTxNum=%d, endTxNum=%d", err, fileName, startTxNum, endTxNum)
 	}
@@ -95,10 +95,10 @@ func checkCommitmentRootInFile(ctx context.Context, tx kv.TemporalTx, br service
 		return fmt.Errorf("%w: in %s with startTxNum=%d, endTxNum=%d", err, fileName, startTxNum, endTxNum)
 	}
 	if !recompute {
-		logger.Info("skipping commitment root recompute in non last file", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
+		logger.Info("skipping commitment root recompute in file", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 		return nil
 	}
-	err = checkCommitmentRootViaRecompute(ctx, tx, sd, info, logger)
+	err = checkCommitmentRootViaRecompute(ctx, tx, sd, info, f, logger)
 	if err != nil {
 		return fmt.Errorf("%w: in %s with startTxNum=%d, endTxNum=%d", err, fileName, startTxNum, endTxNum)
 	}
@@ -113,7 +113,11 @@ type commitmentRootInfo struct {
 	blockMaxTxNum uint64
 }
 
-func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile) (commitmentRootInfo, error) {
+func (info commitmentRootInfo) PartialBlock() bool {
+	return info.txNum < info.blockMaxTxNum
+}
+
+func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile, logger log.Logger) (commitmentRootInfo, error) {
 	var info commitmentRootInfo
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
@@ -163,6 +167,11 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	if rootHash == (common.Hash{}) {
 		return info, fmt.Errorf("%w: commitment root is empty", ErrIntegrity)
 	}
+	info.rootHash, info.blockNum, info.txNum, info.blockMinTxNum, info.blockMaxTxNum = rootHash, blockNum, txNum, blockMinTxNum, blockMaxTxNum
+	if info.PartialBlock() {
+		logger.Info("skipping commitment root check with canonical header root as it is for partial block", "file", filepath.Base(f.Fullpath()), "blockNum", blockNum, "txNum", txNum, "blockMinTxNum", blockMinTxNum, "blockMaxTxNum", blockMaxTxNum)
+		return info, nil
+	}
 	h, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return info, err
@@ -170,7 +179,6 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	if h == nil {
 		return info, fmt.Errorf("%w: missing canonical header for block %d", ErrIntegrity, blockNum)
 	}
-	info.rootHash, info.blockNum, info.txNum, info.blockMinTxNum, info.blockMaxTxNum = rootHash, blockNum, txNum, blockMinTxNum, blockMaxTxNum
 	if h.Root != rootHash {
 		return info, fmt.Errorf("%w: commitment root does not match header root for block %d: %s != %s", ErrIntegrity, blockNum, h.Root, rootHash)
 	}
@@ -201,6 +209,10 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	if sd.TxNum() == 0 {
 		return nil, fmt.Errorf("%w: commitment root sd txNum should not be zero", ErrIntegrity)
 	}
+	if info.PartialBlock() {
+		logger.Info("skipping commitment root check with sd root as it is for partial block", "file", filepath.Base(f.Fullpath()), "blockNum", info.blockNum, "txNum", info.txNum, "blockMinTxNum", info.blockMinTxNum, "blockMaxTxNum", info.blockMaxTxNum)
+		return sd, nil
+	}
 	rootHashBytes, err := sd.GetCommitmentCtx().Trie().RootHash()
 	if err != nil {
 		return nil, err
@@ -212,8 +224,8 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	return sd, nil
 }
 
-func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, logger log.Logger) error {
-	it, err := tx.HistoryRange(kv.AccountsDomain, int(info.blockMinTxNum), int(info.blockMaxTxNum)+1, order.Asc, math.MaxInt)
+func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
+	it, err := tx.HistoryRange(kv.AccountsDomain, int(info.blockMinTxNum), int(info.txNum)+1, order.Asc, math.MaxInt)
 	if err != nil {
 		return err
 	}
@@ -227,13 +239,11 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 		if len(k) != length.Addr {
 			return fmt.Errorf("%w: invalid account key length %d for root block %d account touches", ErrIntegrity, len(k), sd.BlockNum())
 		}
-		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum())
+		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum(), "file", filepath.Base(f.Fullpath()))
 		sd.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(k), nil)
 		touches++
 	}
-	if touches == 0 {
-		return fmt.Errorf("%w: unexpected no touches for root block", ErrIntegrity) // the very least - system contracts
-	}
+	logger.Info("recomputing commitment root after", "touches", touches, "file", filepath.Base(f.Fullpath()))
 	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil)
 	if err != nil {
 		return err
