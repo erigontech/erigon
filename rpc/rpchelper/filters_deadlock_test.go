@@ -30,7 +30,9 @@ func TestFiltersDeadlock(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, logger)
+	filterCtx, filterCancel := context.WithCancel(context.Background())
+	t.Cleanup(filterCancel)
+	f := New(filterCtx, config, nil, nil, nil, func() {}, logger)
 	crit := filters.FilterCriteria{
 		Addresses: nil,
 		Topics:    [][]common.Hash{},
@@ -41,7 +43,8 @@ func TestFiltersDeadlock(t *testing.T) {
 		id LogsSubID
 		ch <-chan *types.Log
 	}
-	ctx, cancel := context.WithCancel(context.TODO())
+	subsCtx, subsCancel := context.WithCancel(context.Background())
+	t.Cleanup(subsCancel)
 	for i := 0; i < subCount; i++ {
 		n := &sub{}
 		n.ch, n.id = f.SubscribeLogs(128, crit)
@@ -52,14 +55,14 @@ func TestFiltersDeadlock(t *testing.T) {
 				select {
 				case l := <-n.ch:
 					_ = l
-				case <-ctx.Done():
+				case <-subsCtx.Done():
 					return
 				}
 			}
 		}()
 	}
 	// cancel the subs at the same time
-	cancel()
+	subsCancel()
 	// try to send logs
 	for i := 0; i < logCount; i++ {
 		log := createLog()
