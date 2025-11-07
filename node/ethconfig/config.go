@@ -101,11 +101,8 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID: 1,
-	Prune:     prune.DefaultMode,
-	Miner: buildercfg.MiningConfig{
-		Recommit: 3 * time.Second,
-	},
+	NetworkID:   1,
+	Prune:       prune.DefaultMode,
 	TxPool:      txpoolcfg.DefaultConfig,
 	RPCGasCap:   50000000,
 	GPO:         FullNodeGPO,

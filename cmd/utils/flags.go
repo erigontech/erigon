@@ -221,6 +221,7 @@ var (
 		Usage: "How often transactions should be committed to the storage",
 		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
+
 	// Miner settings
 	ProposingDisableFlag = cli.BoolFlag{
 		Name:  "proposer.disable",
@@ -239,11 +240,7 @@ var (
 		Name:  "miner.extradata",
 		Usage: "Block extra data set by the miner (default = client version)",
 	}
-	MinerRecommitIntervalFlag = cli.DurationFlag{
-		Name:  "miner.recommit",
-		Usage: "Time interval to recreate the block being mined",
-		Value: ethconfig.Defaults.Miner.Recommit,
-	}
+
 	VMEnableDebugFlag = cli.BoolFlag{
 		Name:  "vmdebug",
 		Usage: "Record information useful for VM and contract debugging",
@@ -1607,10 +1604,6 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.MiningConfig) {
 		}
 		cfg.GasLimit = &gasLimit
 	}
-	cfg.Recommit, err = flags.GetDuration(MinerRecommitIntervalFlag.Name)
-	if err != nil {
-		panic(err)
-	}
 
 	// Extract the current etherbase, new flag overriding legacy one
 	var etherbase string
@@ -1675,9 +1668,6 @@ func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
 		if gasLimit := ctx.Uint64(MinerGasLimitFlag.Name); gasLimit != 0 {
 			cfg.GasLimit = &gasLimit
 		}
-	}
-	if ctx.IsSet(MinerRecommitIntervalFlag.Name) {
-		cfg.Recommit = ctx.Duration(MinerRecommitIntervalFlag.Name)
 	}
 }
 

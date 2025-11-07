@@ -70,8 +70,6 @@ func withMining(cmd *cobra.Command) {
 	cmd.Flags().Uint64("miner.gaslimit", ethconfig.DefaultBlockGasLimit, "Target gas limit for mined blocks")
 	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
 	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")
-	cmd.Flags().Duration("miner.recommit", ethconfig.Defaults.Miner.Recommit, "Time interval to recreate the block being mined")
-	cmd.Flags().Bool("miner.noverify", false, "Disable remote sealing verification")
 }
 
 func withFile(cmd *cobra.Command) {

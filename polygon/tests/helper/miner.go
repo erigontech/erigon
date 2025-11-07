@@ -143,7 +143,6 @@ func InitMiner(
 		Miner: buildercfg.MiningConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
 			GasLimit:   &genesis.GasLimit,
-			Recommit:   ethconfig.Defaults.Miner.Recommit,
 			EnabledPOS: true,
 		},
 		Sync:                      ethconfig.Defaults.Sync,
