@@ -27,7 +27,6 @@ import (
 
 // MiningConfig is the configuration parameters of mining.
 type MiningConfig struct {
-	Enabled    bool
 	EnabledPOS bool
 	Noverify   bool              // Disable remote mining solution verification(only useful in ethash).
 	Etherbase  common.Address    `toml:",omitempty"` // Public address for block mining rewards

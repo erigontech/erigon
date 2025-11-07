@@ -223,10 +223,6 @@ var (
 		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
 	// Miner settings
-	MiningEnabledFlag = cli.BoolFlag{
-		Name:  "mine",
-		Usage: "Enable mining",
-	}
 	ProposingDisableFlag = cli.BoolFlag{
 		Name:  "proposer.disable",
 		Usage: "Disables PoS proposer",
@@ -1396,9 +1392,6 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 
 	chainsWithValidatorMode := map[string]bool{}
 	if _, ok := chainsWithValidatorMode[ctx.String(ChainFlag.Name)]; ok || ctx.IsSet(MinerSigningKeyFileFlag.Name) {
-		if ctx.IsSet(MiningEnabledFlag.Name) && !ctx.IsSet(MinerSigningKeyFileFlag.Name) {
-			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, ChainFlag.Name, MiningEnabledFlag.Name))
-		}
 		setSigKey(ctx, cfg)
 		if cfg.Miner.SigKey != nil {
 			cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
@@ -1644,13 +1637,6 @@ func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.MiningConfig) {
 	flags := cmd.Flags()
 	var err error
-	cfg.Enabled, err = flags.GetBool(MiningEnabledFlag.Name)
-	if err != nil {
-		panic(err)
-	}
-	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
-	}
 	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
 	if err != nil {
 		panic(err)
@@ -1726,12 +1712,8 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 }
 
 func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
-	cfg.Enabled = ctx.Bool(MiningEnabledFlag.Name)
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
-	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
-	}
 	if ctx.IsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = common.CliString2Array(ctx.String(MinerNotifyFlag.Name))
 	}

@@ -204,7 +204,6 @@ type Ethereum struct {
 	unsubscribeEthstat func()
 
 	waitForStageLoopStop chan struct{}
-	waitForMiningStop    chan struct{}
 
 	txPool                    *txpool.TxPool
 	txPoolGrpcServer          txpoolproto.TxpoolServer
@@ -350,7 +349,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		networkID:                 config.NetworkID,
 		etherbase:                 config.Miner.Etherbase,
 		waitForStageLoopStop:      make(chan struct{}),
-		waitForMiningStop:         make(chan struct{}),
 		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
 		miningSealingQuit:         make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
@@ -1223,7 +1221,7 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	return common.Address{}, errors.New("etherbase must be explicitly specified")
 }
 
-func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
+func (s *Ethereum) IsMining() bool { return false }
 
 func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) event.UnregisterFunc {
 	return s.minedBlockObservers.Register(callback)
@@ -1615,9 +1613,6 @@ func (s *Ethereum) Stop() error {
 	_ = s.engine.Close()
 	if s.waitForStageLoopStop != nil {
 		<-s.waitForStageLoopStop
-	}
-	if s.config.Miner.Enabled {
-		<-s.waitForMiningStop
 	}
 	for _, sentryServer := range s.sentryServers {
 		sentryServer.Close()

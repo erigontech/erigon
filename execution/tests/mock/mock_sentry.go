@@ -457,7 +457,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	snapDownloader := mockDownloader(ctrl)
 
 	miningConfig := cfg.Miner
-	miningConfig.Enabled = true
 	miningConfig.Noverify = false
 	miningConfig.Etherbase = mock.Address
 	miningConfig.SigKey = mock.Key
