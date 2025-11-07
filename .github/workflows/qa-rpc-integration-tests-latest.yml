@@ -110,10 +110,10 @@ jobs:
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
           DUMP_RESPONSE=""
-          if [[ "${{ github.event.inputs.force_dump_response }}" == "true" ]]; then
+          if [[ "${{ inputs.force_dump_response }}" == "true" ]]; then
             DUMP_RESPONSE="always-dump-response"
-            echo "Force response dump is enabled."
           fi
+          echo "Force response dump is $DUMP_RESPONSE"
 
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh
 
