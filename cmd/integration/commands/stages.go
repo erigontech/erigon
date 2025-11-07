@@ -1522,7 +1522,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	} else {
 		rulesConfig = &config.Ethash
 	}
-	return rulesconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, rulesConfig, config.Miner.Notify, config.Miner.Noverify,
+	return rulesconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, rulesConfig, config.Miner.Notify, false, /* noVerify */
 		config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService)
 }
 

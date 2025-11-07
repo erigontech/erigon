@@ -259,10 +259,6 @@ var (
 		Usage: "Time interval to recreate the block being mined",
 		Value: ethconfig.Defaults.Miner.Recommit,
 	}
-	MinerNoVerfiyFlag = cli.BoolFlag{
-		Name:  "miner.noverify",
-		Usage: "Disable remote sealing verification",
-	}
 	VMEnableDebugFlag = cli.BoolFlag{
 		Name:  "vmdebug",
 		Usage: "Record information useful for VM and contract debugging",
@@ -1662,10 +1658,6 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.MiningConfig) {
 	if err != nil {
 		panic(err)
 	}
-	cfg.Noverify, err = flags.GetBool(MinerNoVerfiyFlag.Name)
-	if err != nil {
-		panic(err)
-	}
 
 	// Extract the current etherbase, new flag overriding legacy one
 	var etherbase string
@@ -1739,9 +1731,6 @@ func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
 	}
 	if ctx.IsSet(MinerRecommitIntervalFlag.Name) {
 		cfg.Recommit = ctx.Duration(MinerRecommitIntervalFlag.Name)
-	}
-	if ctx.IsSet(MinerNoVerfiyFlag.Name) {
-		cfg.Noverify = ctx.Bool(MinerNoVerfiyFlag.Name)
 	}
 }
 
