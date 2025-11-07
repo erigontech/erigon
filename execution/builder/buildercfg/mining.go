@@ -17,7 +17,6 @@
 package buildercfg
 
 import (
-	"math/big"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -30,6 +29,5 @@ type MiningConfig struct {
 	Etherbase  common.Address `toml:",omitempty"` // Public address for block mining rewards
 	ExtraData  hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
 	GasLimit   *uint64        // Target gas limit for mined blocks.
-	GasPrice   *big.Int       // Minimum gas price for mining a transaction
 	Recommit   time.Duration  // The time interval for miner to re-create mining work.
 }

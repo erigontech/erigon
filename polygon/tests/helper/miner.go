@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"time"
 
@@ -144,7 +143,6 @@ func InitMiner(
 		Miner: buildercfg.MiningConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
 			GasLimit:   &genesis.GasLimit,
-			GasPrice:   big.NewInt(1),
 			Recommit:   ethconfig.Defaults.Miner.Recommit,
 			EnabledPOS: true,
 		},

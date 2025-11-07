@@ -104,7 +104,6 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: buildercfg.MiningConfig{
-		GasPrice: big.NewInt(common.GWei),
 		Recommit: 3 * time.Second,
 	},
 	TxPool:      txpoolcfg.DefaultConfig,

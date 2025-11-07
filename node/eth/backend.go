@@ -38,7 +38,6 @@ import (
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -154,7 +153,6 @@ type Ethereum struct {
 
 	engine rules.Engine
 
-	gasPrice  *uint256.Int
 	etherbase common.Address
 
 	networkID uint64
@@ -289,10 +287,6 @@ const blockBufferSize = 128
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
-	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Sign() <= 0 {
-		logger.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
-		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
-	}
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp
@@ -400,8 +394,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.genesisHash = genesis.Hash()
 
 	setDefaultMinerGasLimit(chainConfig, config, logger)
-
-	setBorDefaultMinerGasPrice(chainConfig, config, logger)
 	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
@@ -429,8 +421,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
-
-	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
 	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
 		logLevel, err := log.LvlFromString(config.SilkwormVerbosity)
@@ -1141,14 +1131,8 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}
 	}
 
-	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
-	gpoParams := config.GPO
-	if gpoParams.Default == nil {
-		gpoParams.Default = config.Miner.GasPrice
-	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
@@ -1739,14 +1723,6 @@ func (s *Ethereum) Sentinel() sentinelproto.SentinelClient {
 
 func (s *Ethereum) DataDir() string {
 	return s.config.Dirs.DataDir
-}
-
-// setBorDefaultMinerGasPrice enforces Miner.GasPrice to be equal to BorDefaultMinerGasPrice (25gwei by default)
-func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
-	if chainConfig.Bor != nil && (config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0) {
-		logger.Warn("Sanitizing invalid bor miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.BorDefaultMinerGasPrice)
-		config.Miner.GasPrice = ethconfig.BorDefaultMinerGasPrice
-	}
 }
 
 func setDefaultMinerGasLimit(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {

@@ -230,11 +230,6 @@ var (
 		Name:  "miner.gaslimit",
 		Usage: "Target gas limit for mined blocks",
 	}
-	MinerGasPriceFlag = flags.BigFlag{
-		Name:  "miner.gasprice",
-		Usage: "Minimum gas price for mining a transaction",
-		Value: ethconfig.Defaults.Miner.GasPrice,
-	}
 	MinerEtherbaseFlag = cli.StringFlag{
 		Name:  "miner.etherbase",
 		Usage: "Public address for block mining rewards",
@@ -1612,11 +1607,6 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.MiningConfig) {
 		}
 		cfg.GasLimit = &gasLimit
 	}
-	price, err := flags.GetInt64(MinerGasPriceFlag.Name)
-	if err != nil {
-		panic(err)
-	}
-	cfg.GasPrice = big.NewInt(price)
 	cfg.Recommit, err = flags.GetDuration(MinerRecommitIntervalFlag.Name)
 	if err != nil {
 		panic(err)
@@ -1685,9 +1675,6 @@ func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
 		if gasLimit := ctx.Uint64(MinerGasLimitFlag.Name); gasLimit != 0 {
 			cfg.GasLimit = &gasLimit
 		}
-	}
-	if ctx.IsSet(MinerGasPriceFlag.Name) {
-		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)
 	}
 	if ctx.IsSet(MinerRecommitIntervalFlag.Name) {
 		cfg.Recommit = ctx.Duration(MinerRecommitIntervalFlag.Name)
@@ -1974,9 +1961,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		// Create a new developer genesis block or reuse existing one
 		cfg.Genesis = chainspec.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
 		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
-		if !ctx.IsSet(MinerGasPriceFlag.Name) {
-			cfg.Miner.GasPrice = big.NewInt(1)
-		}
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
