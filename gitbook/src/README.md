@@ -25,11 +25,11 @@ layout:
 
 Erigon is an efficient Ethereum implementation noted for its performance, modularity, and small disk footprint. Key features include modularity (for scalable RPC clusters), a BitTorrent solution for historical data, and OtterSync for quicker node synchronization. This makes it ideal for professionals needing performance, solo stakers on consumer hardware, and developers requiring a flexible, fast-syncing environment.
 
-{% content-ref url="introduction/why-using-erigon.md" %}
-[why-using-erigon.md](introduction/why-using-erigon.md)
+{% content-ref url="get-started/readme/why-using-erigon.md" %}
+[why-using-erigon.md](get-started/readme/why-using-erigon.md)
 {% endcontent-ref %}
 
-<table data-view="cards"><thead><tr><th></th><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><h4><i class="fa-play">:play:</i></h4></td><td><strong>Get Started</strong></td><td>Verification and Preparation Checklist to install Erigon</td><td><a href="getting-started/getting-started.md">getting-started.md</a></td></tr><tr><td><h4><i class="fa-gear">:gear:</i></h4></td><td><strong>Basic Usage</strong></td><td>The basic options for using Erigon</td><td><a href="fundamentals/basic-usage.md">basic-usage.md</a></td></tr><tr><td><h4><i class="fa-bolt">:bolt:</i></h4></td><td><strong>Start your Ethereum node</strong></td><td>Quick Start: Running a Ethereum Node with Erigon</td><td><a href="easy-nodes/how-to-run-an-ethereum-node.md">how-to-run-an-ethereum-node.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><h4><i class="fa-list-check">:list-check:</i></h4></td><td><strong>Check Systen Requirements</strong></td><td>Verification and Preparation Checklist to install Erigon</td><td><a href="get-started/hardware-requirements.md">hardware-requirements.md</a></td></tr><tr><td><h4><i class="fa-gear">:gear:</i></h4></td><td><strong>Basic Usage</strong></td><td>The basic options for using Erigon</td><td><a href="get-started/fundamentals/basic-usage.md">basic-usage.md</a></td></tr><tr><td><h4><i class="fa-bolt">:bolt:</i></h4></td><td><strong>Start your Ethereum node</strong></td><td>Quick Start: Running a Ethereum Node with Erigon</td><td><a href="get-started/easy-nodes/how-to-run-an-ethereum-node/">how-to-run-an-ethereum-node</a></td></tr></tbody></table>
 
 ## Additional Resources and Information
 
