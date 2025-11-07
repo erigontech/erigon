@@ -54,6 +54,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	}
 	defer tx.Rollback()
 	aggTx := state.AggTx(tx)
+	defer aggTx.Close()
 	files := aggTx.Files(kv.CommitmentDomain)
 	// atm our older files are missing the root due to purification, so this flag can be used to only check the last file
 	onlyCheckLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE", true)
@@ -65,7 +66,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	var integrityErr error
 	for i, file := range files {
 		recompute := !onlyRecomputeLastFile || i == len(files)-1
-		err = checkCommitmentRootInFile(ctx, tx, br, file, recompute, logger)
+		err = checkCommitmentRootInFile(ctx, db, br, file, recompute, logger)
 		if err != nil {
 			if !errors.Is(err, ErrIntegrity) {
 				return err
@@ -81,7 +82,12 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	return integrityErr
 }
 
-func checkCommitmentRootInFile(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile, recompute bool, logger log.Logger) error {
+func checkCommitmentRootInFile(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, f state.VisibleFile, recompute bool, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	fileName := filepath.Base(f.Fullpath())
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
@@ -253,6 +259,7 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 	if recomputed != info.rootHash {
 		return fmt.Errorf("%w: recomputed root does not match verified root: %s != %s", ErrIntegrity, recomputed, info.rootHash)
 	}
+	logger.Info("recomputed commitment root matches", "root", recomputed, "touches", touches, "file", filepath.Base(f.Fullpath()))
 	return nil
 }
 
