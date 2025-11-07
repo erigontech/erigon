@@ -1,4 +1,4 @@
-package types
+package txn
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -143,7 +144,7 @@ func TestArbitrumSubmitRetryableTxGasUsed(t *testing.T) {
 
 		// Decode using your generic RLP transaction decoder
 		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		decoded, err := DecodeRLPTransaction(stream, false)
+		decoded, err := types.DecodeRLPTransaction(stream, false)
 		require.NoError(t, err)
 
 		tx2, ok := decoded.(*ArbitrumSubmitRetryableTx)

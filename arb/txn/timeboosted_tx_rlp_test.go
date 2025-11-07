@@ -1,4 +1,4 @@
-package types
+package txn
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -15,14 +16,14 @@ func Test_LegacyTx_Timeboosted(t *testing.T) {
 	timeboostedVals := []bool{true, false}
 	for i := 0; i < 2; i++ {
 		two := uint256.NewInt(2)
-		ltx := NewTransaction(4, common.HexToAddress("0x2"), two, 21000, two, []byte("data"))
+		ltx := types.NewTransaction(4, common.HexToAddress("0x2"), two, 21000, two, []byte("data"))
 		ltx.Timeboosted = timeboostedVals[i]
 
 		buf := bytes.NewBuffer(nil)
 		err := ltx.EncodeRLP(buf)
 		require.NoError(t, err)
 
-		var ltx2 LegacyTx
+		var ltx2 types.LegacyTx
 		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), uint64(buf.Len()))
 		err = ltx2.DecodeRLP(stream)
 		require.NoError(t, err)
@@ -44,12 +45,12 @@ func Test_DynamicFeeTx_Timeboosted(t *testing.T) {
 		two := uint256.NewInt(2)
 		three := uint256.NewInt(3)
 		chainID := uint256.NewInt(1)
-		accessList := AccessList{
+		accessList := types.AccessList{
 			{Address: common.HexToAddress("0x1"), StorageKeys: []common.Hash{common.HexToHash("0x01")}},
 		}
 
-		tx := &DynamicFeeTransaction{
-			CommonTx: CommonTx{
+		tx := &types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
 				Nonce:    4,
 				To:       &common.Address{0x2},
 				Value:    two,
@@ -69,10 +70,10 @@ func Test_DynamicFeeTx_Timeboosted(t *testing.T) {
 
 		// Decode using DecodeRLPTransaction pattern
 		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		decoded, err := DecodeRLPTransaction(stream, false)
+		decoded, err := types.DecodeRLPTransaction(stream, false)
 		require.NoError(t, err)
 
-		tx2, ok := decoded.(*DynamicFeeTransaction)
+		tx2, ok := decoded.(*types.DynamicFeeTransaction)
 		require.True(t, ok)
 
 		require.EqualValues(t, tx.Timeboosted, tx2.Timeboosted)
@@ -93,13 +94,13 @@ func Test_AccessListTx_Timeboosted(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		two := uint256.NewInt(2)
 		chainID := uint256.NewInt(1)
-		accessList := AccessList{
+		accessList := types.AccessList{
 			{Address: common.HexToAddress("0x1"), StorageKeys: []common.Hash{common.HexToHash("0x01")}},
 		}
 
-		tx := &AccessListTx{
-			LegacyTx: LegacyTx{
-				CommonTx: CommonTx{
+		tx := &types.AccessListTx{
+			LegacyTx: types.LegacyTx{
+				CommonTx: types.CommonTx{
 					Nonce:    4,
 					To:       &common.Address{0x2},
 					Value:    two,
@@ -119,10 +120,10 @@ func Test_AccessListTx_Timeboosted(t *testing.T) {
 
 		// Decode using DecodeRLPTransaction pattern
 		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		decoded, err := DecodeRLPTransaction(stream, false)
+		decoded, err := types.DecodeRLPTransaction(stream, false)
 		require.NoError(t, err)
 
-		tx2, ok := decoded.(*AccessListTx)
+		tx2, ok := decoded.(*types.AccessListTx)
 		require.True(t, ok)
 
 		require.EqualValues(t, tx.Timeboosted, tx2.Timeboosted)
@@ -144,14 +145,14 @@ func Test_BlobTx_Timeboosted(t *testing.T) {
 		three := uint256.NewInt(3)
 		chainID := uint256.NewInt(1)
 		maxFeePerBlobGas := uint256.NewInt(5)
-		accessList := AccessList{
+		accessList := types.AccessList{
 			{Address: common.HexToAddress("0x1"), StorageKeys: []common.Hash{common.HexToHash("0x01")}},
 		}
 		blobHashes := []common.Hash{common.HexToHash("0x01"), common.HexToHash("0x02")}
 
-		tx := &BlobTx{
-			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx: CommonTx{
+		tx := &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
 					Nonce:    4,
 					To:       &common.Address{0x2},
 					Value:    two,
@@ -174,10 +175,10 @@ func Test_BlobTx_Timeboosted(t *testing.T) {
 
 		// Decode using DecodeRLPTransaction pattern
 		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		decoded, err := DecodeRLPTransaction(stream, false)
+		decoded, err := types.DecodeRLPTransaction(stream, false)
 		require.NoError(t, err)
 
-		tx2, ok := decoded.(*BlobTx)
+		tx2, ok := decoded.(*types.BlobTx)
 		require.True(t, ok)
 
 		require.EqualValues(t, tx.Timeboosted, tx2.Timeboosted)
@@ -201,19 +202,19 @@ func Test_SetCodeTx_Timeboosted(t *testing.T) {
 		two := uint256.NewInt(2)
 		three := uint256.NewInt(3)
 		chainID := uint256.NewInt(1)
-		accessList := AccessList{
+		accessList := types.AccessList{
 			{Address: common.HexToAddress("0x1"), StorageKeys: []common.Hash{common.HexToHash("0x01")}},
 		}
 
-		auth := Authorization{
+		auth := types.Authorization{
 			ChainID: *chainID,
 			Address: common.HexToAddress("0x3"),
 			Nonce:   1,
 		}
 
-		tx := &SetCodeTransaction{
-			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx: CommonTx{
+		tx := &types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
 					Nonce:    4,
 					To:       &common.Address{0x2},
 					Value:    two,
@@ -226,7 +227,7 @@ func Test_SetCodeTx_Timeboosted(t *testing.T) {
 				AccessList:  accessList,
 				Timeboosted: timeboostedVals[i],
 			},
-			Authorizations: []Authorization{auth},
+			Authorizations: []types.Authorization{auth},
 		}
 
 		buf := bytes.NewBuffer(nil)
@@ -235,10 +236,10 @@ func Test_SetCodeTx_Timeboosted(t *testing.T) {
 
 		// Decode using DecodeRLPTransaction pattern
 		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		decoded, err := DecodeRLPTransaction(stream, false)
+		decoded, err := types.DecodeRLPTransaction(stream, false)
 		require.NoError(t, err)
 
-		tx2, ok := decoded.(*SetCodeTransaction)
+		tx2, ok := decoded.(*types.SetCodeTransaction)
 		require.True(t, ok)
 
 		require.EqualValues(t, tx.Timeboosted, tx2.Timeboosted)
@@ -285,7 +286,7 @@ func Test_ArbRetryTx_Timeboosted(t *testing.T) {
 
 		// Decode using DecodeRLPTransaction pattern
 		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		decoded, err := DecodeRLPTransaction(stream, false)
+		decoded, err := types.DecodeRLPTransaction(stream, false)
 		require.NoError(t, err)
 
 		tx2, ok := decoded.(*ArbitrumRetryTx)

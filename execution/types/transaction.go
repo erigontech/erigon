@@ -54,15 +54,6 @@ const (
 	BlobTxType
 	SetCodeTxType
 	AccountAbstractionTxType
-
-	// Arbitrum transaction types
-	ArbitrumDepositTxType         byte = 0x64
-	ArbitrumUnsignedTxType        byte = 0x65
-	ArbitrumContractTxType        byte = 0x66
-	ArbitrumRetryTxType           byte = 0x68
-	ArbitrumSubmitRetryableTxType byte = 0x69
-	ArbitrumInternalTxType        byte = 0x6A
-	ArbitrumLegacyTxType          byte = 0x78
 )
 
 // Transaction is an Ethereum transaction.
@@ -99,7 +90,7 @@ type Transaction interface {
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
 	Sender(Signer) (common.Address, error)
-	cachedSender() (common.Address, bool)
+	CachedSender() (common.Address, bool)
 	GetSender() (common.Address, bool)
 	SetSender(common.Address)
 	IsContractDeploy() bool
@@ -215,20 +206,20 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		t = &SetCodeTransaction{}
 	case AccountAbstractionTxType:
 		t = &AccountAbstractionTransaction{}
-	case ArbitrumDepositTxType:
-		t = &ArbitrumDepositTx{}
-	case ArbitrumUnsignedTxType:
-		t = &ArbitrumUnsignedTx{}
-	case ArbitrumContractTxType:
-		t = &ArbitrumContractTx{}
-	case ArbitrumRetryTxType:
-		t = &ArbitrumRetryTx{}
-	case ArbitrumSubmitRetryableTxType:
-		t = &ArbitrumSubmitRetryableTx{}
-	case ArbitrumInternalTxType:
-		t = &ArbitrumInternalTx{}
-	case ArbitrumLegacyTxType:
-		t = &ArbitrumLegacyTxData{}
+	//case ArbitrumDepositTxType:
+	//	t = &ArbitrumDepositTx{}
+	//case ArbitrumUnsignedTxType:
+	//	t = &ArbitrumUnsignedTx{}
+	//case ArbitrumContractTxType:
+	//	t = &ArbitrumContractTx{}
+	//case ArbitrumRetryTxType:
+	//	t = &ArbitrumRetryTx{}
+	//case ArbitrumSubmitRetryableTxType:
+	//	t = &ArbitrumSubmitRetryableTx{}
+	//case ArbitrumInternalTxType:
+	//	t = &ArbitrumInternalTx{}
+	//case ArbitrumLegacyTxType:
+	//	t = &ArbitrumLegacyTxData{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
@@ -307,13 +298,13 @@ func TypedTransactionMarshalledAsRlpString(data []byte) bool {
 	return len(data) > 0 && 0x80 <= data[0] && data[0] < 0xc0
 }
 
-func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
-	if isProtectedV(v) && !maybeProtected {
+func SanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
+	if IsProtectedV(v) && !maybeProtected {
 		return ErrUnexpectedProtection
 	}
 
 	var plainV byte
-	if isProtectedV(v) {
+	if IsProtectedV(v) {
 		chainID := DeriveChainId(v).Uint64()
 		plainV = byte(v.Uint64() - 35 - 2*chainID)
 	} else if maybeProtected {
@@ -333,7 +324,7 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	return nil
 }
 
-func isProtectedV(V *uint256.Int) bool {
+func IsProtectedV(V *uint256.Int) bool {
 	if V.BitLen() <= 8 {
 		v := V.Uint64()
 		return v != 27 && v != 28 && v != 1 && v != 0
@@ -415,10 +406,19 @@ type Message struct {
 	Tx                Transaction
 }
 
-// Arbitrum
 func (msg *Message) SetGasPrice(f *uint256.Int) { msg.gasPrice.Set(f) }
 func (msg *Message) SetFeeCap(f *uint256.Int)   { msg.feeCap.Set(f) }
 func (msg *Message) SetTip(f *uint256.Int)      { msg.tipCap.Set(f) }
+
+func (msg *Message) SetTo(addr *common.Address)             { msg.to = addr }
+func (msg *Message) SetFrom(addr *common.Address)           { msg.from = *addr }
+func (msg *Message) SetNonce(val uint64)                    { msg.nonce = val }
+func (msg *Message) SetAmount(f *uint256.Int)               { msg.amount.Set(f) }
+func (msg *Message) SetGasLimit(val uint64)                 { msg.gasLimit = val }
+func (msg *Message) SetData(data []byte)                    { msg.data = data }
+func (msg *Message) SetAccessList(accessList AccessList)    { msg.accessList = accessList }
+func (msg *Message) SetSkipAccountCheck(skipCheck bool)     { msg.SkipAccountChecks = skipCheck }
+func (msg *Message) SetBlobHashes(blobHashes []common.Hash) { msg.blobHashes = blobHashes }
 
 type MessageRunMode uint8
 

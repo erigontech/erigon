@@ -1,4 +1,4 @@
-package types
+package txn
 
 import (
 	"bytes"
@@ -9,23 +9,24 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 )
 
 type ArbitrumLegacyTxData struct {
-	*LegacyTx
+	*types.LegacyTx
 	HashOverride      common.Hash // Hash cannot be locally computed from other fields
 	EffectiveGasPrice uint64
 	L1BlockNumber     uint64
 	OverrideSender    *common.Address `rlp:"optional,nil"` // only used in unsigned Txs
 }
 
-func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effectiveGas uint64, l1Block uint64, senderOverride *common.Address) (Transaction, error) {
-	if origTx.Type() != LegacyTxType {
+func NewArbitrumLegacyTx(origTx types.Transaction, hashOverride common.Hash, effectiveGas uint64, l1Block uint64, senderOverride *common.Address) (types.Transaction, error) {
+	if origTx.Type() != types.LegacyTxType {
 		return nil, errors.New("attempt to arbitrum-wrap non-legacy transaction")
 	}
 	inner := ArbitrumLegacyTxData{
-		LegacyTx:          origTx.(*LegacyTx),
+		LegacyTx:          origTx.(*types.LegacyTx),
 		HashOverride:      hashOverride,
 		EffectiveGasPrice: effectiveGas,
 		L1BlockNumber:     l1Block,
@@ -52,7 +53,7 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
-func (tx *ArbitrumLegacyTxData) Unwrap() Transaction {
+func (tx *ArbitrumLegacyTxData) Unwrap() types.Transaction {
 	return tx
 }
 
@@ -139,7 +140,7 @@ func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	legacyTx := &LegacyTx{}
+	legacyTx := &types.LegacyTx{}
 	str := rlp.NewStream(bytes.NewReader(legacyBytes), uint64(len(legacyBytes)))
 	if err := legacyTx.DecodeRLP(str); err != nil {
 		return err
@@ -299,7 +300,7 @@ func (tx *ArbitrumLegacyTxData) UnmarshalJSON(input []byte) error {
 	// Validate signature if present
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
-		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, true); err != nil {
+		if err := types.SanityCheckSignature(&tx.V, &tx.R, &tx.S, true); err != nil {
 			return err
 		}
 	}

@@ -197,7 +197,7 @@ func ExecuteBlockEphemerally(
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
+		LogsHash:    RlpHash(blockLogs),
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
 		GasUsed:     math.HexOrDecimal64(*gasUsed),
@@ -257,7 +257,7 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 	logger.Info("marshalled receipts", "result", string(result))
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
+func RlpHash(x interface{}) (h common.Hash) {
 	hw := sha3.NewLegacyKeccak256()
 	rlp.Encode(hw, x) //nolint:errcheck
 	hw.Sum(h[:0])
