@@ -68,8 +68,8 @@ func TestArbitrumSubmitRetryableTx(t *testing.T) {
 
 	var b bytes.Buffer
 
-	// now encode and decode again
-	require.NoError(t, tx.MarshalBinary(&b))
+	// now encode and decode again, use ForHashing method since normal method encodes EffectiveGasUsed, which is not present in OG encoding
+	require.NoError(t, tx.MarshalBinaryForHashing(&b))
 
 	require.Equal(t, rawInitial, b.Bytes())
 }
@@ -166,6 +166,8 @@ func TestArbitrumSubmitRetryableTxGasUsed(t *testing.T) {
 		require.EqualValues(t, tx.EffectiveGasUsed, tx2.EffectiveGasUsed)
 
 		// With NoTimeBoosted embedded, this should be false.
-		require.False(t, tx2.IsTimeBoosted())
+		require.Nil(t, tx2.IsTimeBoosted())
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }

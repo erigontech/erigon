@@ -369,11 +369,11 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDepl
 
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
 
-func (txw *BlobTxWrapper) IsTimeBoosted() bool {
+func (txw *BlobTxWrapper) IsTimeBoosted() *bool {
 	return txw.Tx.IsTimeBoosted()
 }
 
-func (txw *BlobTxWrapper) SetTimeboosted(val bool) {
+func (txw *BlobTxWrapper) SetTimeboosted(val *bool) {
 	txw.Tx.Timeboosted = val
 }
 
@@ -418,7 +418,7 @@ func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
 }
 func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
-	l, _, _, _, _ := txw.Tx.payloadSize()
+	l, _, _, _, _ := txw.Tx.payloadSize(false)
 	payloadSize += l + rlp.ListPrefixLen(l)
 	if txw.WrapperVersion != 0 {
 		payloadSize += 1

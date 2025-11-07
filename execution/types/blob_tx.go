@@ -170,13 +170,13 @@ func (stx *BlobTx) copy() *BlobTx {
 }
 
 func (stx *BlobTx) EncodingSize() int {
-	payloadSize, _, _, _, _ := stx.payloadSize()
+	payloadSize, _, _, _, _ := stx.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (stx *BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
-	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
+func (stx *BlobTx) payloadSize(hashingOnly bool) (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
+	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize(hashingOnly)
 	// size of MaxFeePerBlobGas
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerBlobGas)
@@ -199,7 +199,7 @@ func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) erro
 	return nil
 }
 
-func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
+func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -273,12 +273,11 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	//encode Timeboosted
-	if stx.Timeboosted {
-		if err := rlp.EncodeBool(stx.Timeboosted, w, b); err != nil {
+	if stx.Timeboosted != nil && !hashingOnly {
+		if err := rlp.EncodeBool(*stx.Timeboosted, w, b); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -286,7 +285,7 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	if stx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
+	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
@@ -300,7 +299,7 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
+	if err := stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen, false); err != nil {
 		return err
 	}
 	return nil
@@ -310,7 +309,9 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	if stx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
+	hashingOnly := false
+
+	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize(hashingOnly)
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode TxType
@@ -318,10 +319,25 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
+	return stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen, hashingOnly)
+}
+
+// MarshalBinaryForHashing encodes the transaction for hashing (without timeboosted field).
+func (stx *BlobTx) MarshalBinaryForHashing(w io.Writer) error {
+	if stx.To == nil {
+		return ErrNilToFieldTx
+	}
+	hashingOnly := true
+
+	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize(hashingOnly)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = BlobTxType
+	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	return nil
+	return stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen, hashingOnly)
 }
 
 func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
@@ -411,20 +427,16 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		if err != nil {
 			return err
 		}
-		stx.Timeboosted = boolVal
-		// After reading the optional field, ensure list end.
-		return s.ListEnd()
+		stx.Timeboosted = &boolVal
 	}
-	// List already completed, set default.
-	stx.Timeboosted = false
 	return s.ListEnd()
 }
 
-func (tx *BlobTx) IsTimeBoosted() bool {
+func (tx *BlobTx) IsTimeBoosted() *bool {
 	return tx.Timeboosted
 }
 
-func (tx *BlobTx) SetTimeboosted(val bool) {
+func (tx *BlobTx) SetTimeboosted(val *bool) {
 	tx.Timeboosted = val
 }
 
