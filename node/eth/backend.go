@@ -667,7 +667,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.heimdallService = heimdallService
 	}
 
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
+	backend.engine = ethconsensusconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
 	inMemoryExecution := func(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {

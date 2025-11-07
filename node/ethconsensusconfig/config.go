@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
+func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) rules.Engine {
@@ -134,7 +134,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 	}
 }
 
-func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
+func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
 	var consensusConfig interface{}
 
 	if chainConfig.Clique != nil {
@@ -149,6 +149,6 @@ func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Conf
 		consensusConfig = &ethashCfg
 	}
 
-	return CreateConsensusEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
+	return CreateRulesEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
 		true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
 }

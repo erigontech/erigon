@@ -1413,7 +1413,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	if borSn != nil {
 		borSn.DownloadComplete() // mark as ready
 	}
-	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
+	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1516,7 +1516,7 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 	return res
 }
 
-func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) rules.Engine {
+func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) rules.Engine {
 	config := ethconfig.Defaults
 	var polygonBridge *bridge.Service
 	var heimdallService *heimdall.Service
@@ -1564,7 +1564,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
+	return ethconsensusconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
 		config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService)
 }
 
