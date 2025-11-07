@@ -106,7 +106,6 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/ethconsensusconfig"
 	"github.com/erigontech/erigon/node/ethstats"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -117,6 +116,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/nodecfg"
 	privateapi2 "github.com/erigontech/erigon/node/privateapi"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/node/silkworm"
 	"github.com/erigontech/erigon/p2p"
@@ -607,16 +607,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
-	var consensusConfig interface{}
+	var rulesConfig interface{}
 
 	if chainConfig.Clique != nil {
-		consensusConfig = &config.Clique
+		rulesConfig = &config.Clique
 	} else if chainConfig.Aura != nil {
-		consensusConfig = &config.Aura
+		rulesConfig = &config.Aura
 	} else if chainConfig.Bor != nil {
-		consensusConfig = chainConfig.Bor
+		rulesConfig = chainConfig.Bor
 	} else {
-		consensusConfig = &config.Ethash
+		rulesConfig = &config.Ethash
 	}
 
 	var heimdallClient heimdall.Client
@@ -634,7 +634,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			heimdallClient = heimdall.NewIdleClient(config.Miner)
 			bridgeClient = bridge.NewIdleClient()
 		}
-		borConfig := consensusConfig.(*borcfg.BorConfig)
+		borConfig := rulesConfig.(*borcfg.BorConfig)
 
 		polygonBridge = bridge.NewService(bridge.ServiceConfig{
 			Store:        bridgeStore,
@@ -667,7 +667,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.heimdallService = heimdallService
 	}
 
-	backend.engine = ethconsensusconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
+	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, config.Miner.Notify, config.Miner.Noverify, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
 	inMemoryExecution := func(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {

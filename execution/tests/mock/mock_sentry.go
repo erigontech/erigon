@@ -73,13 +73,13 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/ethconsensusconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -717,7 +717,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	engine := ethconsensusconfig.CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
 	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader)
 }
 
