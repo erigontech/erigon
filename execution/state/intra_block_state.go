@@ -347,6 +347,9 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 	for _, lgs := range sdb.logs {
 		logs = append(logs, lgs...)
 	}
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i].Index < logs[j].Index
+	})
 	return logs
 }
 
