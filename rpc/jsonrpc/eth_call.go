@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -643,9 +643,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		regenerateHash = true
 	}
 
-	engine, ok := api.engine().(consensus.Engine)
+	engine, ok := api.engine().(rules.Engine)
 	if !ok {
-		return nil, errors.New("engine is not consensus.Engine")
+		return nil, errors.New("engine is not rules.Engine")
 	}
 
 	roTx2, err := db.BeginRo(ctx)

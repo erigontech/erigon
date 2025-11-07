@@ -25,14 +25,14 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 type MiningFinishCfg struct {
 	db                    kv.RwDB
 	chainConfig           *chain.Config
-	engine                consensus.Engine
+	engine                rules.Engine
 	sealCancel            chan struct{}
 	miningState           MiningState
 	blockReader           services.FullBlockReader
@@ -42,7 +42,7 @@ type MiningFinishCfg struct {
 func StageMiningFinishCfg(
 	db kv.RwDB,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
+	engine rules.Engine,
 	miningState MiningState,
 	sealCancel chan struct{},
 	blockReader services.FullBlockReader,

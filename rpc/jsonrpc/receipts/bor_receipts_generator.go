@@ -11,8 +11,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -24,11 +24,11 @@ import (
 type BorGenerator struct {
 	receiptCache *lru.Cache[common.Hash, *types.Receipt]
 	blockReader  services.FullBlockReader
-	engine       consensus.EngineReader
+	engine       rules.EngineReader
 }
 
 func NewBorGenerator(blockReader services.FullBlockReader,
-	engine consensus.EngineReader) *BorGenerator {
+	engine rules.EngineReader) *BorGenerator {
 	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit)
 	if err != nil {
 		panic(err)

@@ -61,10 +61,10 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/aura"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/aura"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -339,7 +339,7 @@ func EmbeddedServices(ctx context.Context,
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
-	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
+	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine rules.EngineReader,
 	ff *rpchelper.Filters, bridgeReader BridgeReader, heimdallReader HeimdallReader, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("either remote db or local db must be specified")
@@ -597,12 +597,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 			}
 			if cc.TerminalTotalDifficulty != nil {
-				engine = merge.New(engine.(consensus.Engine)) // the Merge
+				engine = merge.New(engine.(rules.Engine)) // the Merge
 			}
 		} else {
 			engine = ethash.NewFaker()
 			if cc.TerminalTotalDifficulty != nil {
-				engine = merge.New(engine.(consensus.Engine)) // the Merge
+				engine = merge.New(engine.(rules.Engine)) // the Merge
 			}
 		}
 	} else {
@@ -641,7 +641,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		if remoteCE != nil {
 			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
-				logger.Error("Failed to initialize remote consensus engine", "err", err)
+				logger.Error("Failed to initialize remote rules engine", "err", err)
 				rootCancel()
 			}
 		}
@@ -976,19 +976,19 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	return engineListener, engineSrv, engineAddr.String(), nil
 }
 
-var remoteConsensusEngineNotReadyErr = errors.New("remote consensus engine not ready")
+var remoteConsensusEngineNotReadyErr = errors.New("remote rules engine not ready")
 
 type remoteConsensusEngine struct {
-	engine consensus.Engine
+	engine rules.Engine
 }
 
-var _ consensus.Engine = (*remoteConsensusEngine)(nil)
+var _ rules.Engine = (*remoteConsensusEngine)(nil)
 
 func (e *remoteConsensusEngine) HasEngine() bool {
 	return e.engine != nil
 }
 
-func (e *remoteConsensusEngine) Engine() consensus.EngineReader {
+func (e *remoteConsensusEngine) Engine() rules.EngineReader {
 	return e.engine
 }
 
@@ -1000,7 +1000,7 @@ func (e *remoteConsensusEngine) validateEngineReady() error {
 	return nil
 }
 
-// init - reasoning behind init is that we would like to initialise the remote consensus engine either post rpcdaemon
+// init - reasoning behind init is that we would like to initialise the remote rules engine either post rpcdaemon
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
@@ -1011,7 +1011,7 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 	}
 
 	// TODO(yperbasis): try to unify with CreateConsensusEngine
-	var eng consensus.Engine
+	var eng rules.Engine
 	if cc.Aura != nil {
 		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.AuRaTablesCfg).
@@ -1049,7 +1049,7 @@ func (e *remoteConsensusEngine) Author(header *types.Header) (common.Address, er
 	return e.engine.Author(header)
 }
 
-func (e *remoteConsensusEngine) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+func (e *remoteConsensusEngine) IsServiceTransaction(sender common.Address, syscall rules.SystemCall) bool {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}
@@ -1065,7 +1065,7 @@ func (e *remoteConsensusEngine) Type() chain.ConsensusName {
 	return e.engine.Type()
 }
 
-func (e *remoteConsensusEngine) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall) ([]consensus.Reward, error) {
+func (e *remoteConsensusEngine) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall rules.SystemCall) ([]rules.Reward, error) {
 	if err := e.validateEngineReady(); err != nil {
 		return nil, err
 	}
@@ -1081,7 +1081,7 @@ func (e *remoteConsensusEngine) Close() error {
 	return e.engine.Close()
 }
 
-func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}
@@ -1105,27 +1105,27 @@ func (e *remoteConsensusEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMess
 	return e.engine.GetPostApplyMessageFunc()
 }
 
-func (e *remoteConsensusEngine) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
+func (e *remoteConsensusEngine) VerifyHeader(_ rules.ChainHeaderReader, _ *types.Header, _ bool) error {
 	panic("remoteConsensusEngine.VerifyHeader not supported")
 }
 
-func (e *remoteConsensusEngine) VerifyUncles(_ consensus.ChainReader, _ *types.Header, _ []*types.Header) error {
+func (e *remoteConsensusEngine) VerifyUncles(_ rules.ChainReader, _ *types.Header, _ []*types.Header) error {
 	panic("remoteConsensusEngine.VerifyUncles not supported")
 }
 
-func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.Header, _ *state.IntraBlockState) error {
+func (e *remoteConsensusEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, _ *state.IntraBlockState) error {
 	panic("remoteConsensusEngine.Prepare not supported")
 }
 
-func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 
-func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ consensus.Call, _ log.Logger) (*types.Block, types.FlatRequests, error) {
+func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, _ rules.Call, _ log.Logger) (*types.Block, types.FlatRequests, error) {
 	panic("remoteConsensusEngine.FinalizeAndAssemble not supported")
 }
 
-func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.BlockWithReceipts, _ chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
+func (e *remoteConsensusEngine) Seal(_ rules.ChainHeaderReader, _ *types.BlockWithReceipts, _ chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
 	panic("remoteConsensusEngine.Seal not supported")
 }
 
@@ -1133,11 +1133,11 @@ func (e *remoteConsensusEngine) SealHash(_ *types.Header) common.Hash {
 	panic("remoteConsensusEngine.SealHash not supported")
 }
 
-func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ common.Hash, _ common.Hash, _ uint64) *big.Int {
+func (e *remoteConsensusEngine) CalcDifficulty(_ rules.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ common.Hash, _ common.Hash, _ uint64) *big.Int {
 	panic("remoteConsensusEngine.CalcDifficulty not supported")
 }
 
-func (e *remoteConsensusEngine) APIs(_ consensus.ChainHeaderReader) []rpc.API {
+func (e *remoteConsensusEngine) APIs(_ rules.ChainHeaderReader) []rpc.API {
 	panic("remoteConsensusEngine.APIs not supported")
 }
 

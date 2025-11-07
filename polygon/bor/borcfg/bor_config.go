@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-// BorConfig is the consensus engine configs for Matic bor based sealing.
+// BorConfig is the rules engine configs for Matic bor based sealing.
 type BorConfig struct {
 	Period                map[string]uint64 `json:"period"`                // Number of seconds between blocks to enforce
 	ProducerDelay         map[string]uint64 `json:"producerDelay"`         // Number of seconds delay between two producer interval
@@ -50,7 +50,7 @@ type BorConfig struct {
 	sprints                    sprints
 }
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *BorConfig) String() string {
 	return "bor"
 }

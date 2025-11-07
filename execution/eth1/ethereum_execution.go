@@ -36,10 +36,10 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/types"
@@ -118,8 +118,8 @@ type EthereumExecutionModule struct {
 	// configuration
 	config  *chain.Config
 	syncCfg ethconfig.Sync
-	// consensus
-	engine consensus.Engine
+	// rules engine
+	engine rules.Engine
 
 	doingPostForkchoice atomic.Bool
 
@@ -135,7 +135,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.Temp
 	hook *stageloop.Hook, accumulator *shards.Accumulator,
 	recentLogs *shards.RecentLogs,
 	stateChangeConsumer shards.StateChangeConsumer,
-	logger log.Logger, engine consensus.Engine,
+	logger log.Logger, engine rules.Engine,
 	syncCfg ethconfig.Sync,
 	ctx context.Context,
 ) *EthereumExecutionModule {

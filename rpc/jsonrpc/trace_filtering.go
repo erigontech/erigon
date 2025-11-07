@@ -33,9 +33,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	consensus "github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -153,15 +154,15 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	return nil, err
 }
 
-func rewardKindToString(kind consensus.RewardKind) string {
+func rewardKindToString(kind rules.RewardKind) string {
 	switch kind {
-	case consensus.RewardAuthor:
+	case rules.RewardAuthor:
 		return "block"
-	case consensus.RewardEmptyStep:
+	case rules.RewardEmptyStep:
 		return "emptyStep"
-	case consensus.RewardExternal:
+	case rules.RewardExternal:
 		return "external"
-	case consensus.RewardUncle:
+	case rules.RewardUncle:
 		return "uncle"
 	default:
 		return "unknown"
@@ -723,7 +724,7 @@ func (api *TraceAPIImpl) callBlock(
 	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
-) ([]*TraceCallResult, consensus.SystemCall, error) {
+) ([]*TraceCallResult, rules.SystemCall, error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
 	if pNo > 0 {
