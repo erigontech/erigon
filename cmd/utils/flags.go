@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/metrics"
@@ -244,11 +243,6 @@ var (
 		Name:  "miner.etherbase",
 		Usage: "Public address for block mining rewards",
 		Value: "0",
-	}
-	MinerSigningKeyFileFlag = cli.StringFlag{
-		Name:  "miner.sigfile",
-		Usage: "Private key to sign blocks with",
-		Value: "",
 	}
 	MinerExtraDataFlag = cli.StringFlag{
 		Name:  "miner.extradata",
@@ -1365,32 +1359,9 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	setSigKey := func(ctx *cli.Context, cfg *ethconfig.Config) {
-		if ctx.IsSet(MinerSigningKeyFileFlag.Name) {
-			signingKeyFileName := ctx.String(MinerSigningKeyFileFlag.Name)
-			key, err := crypto.LoadECDSA(signingKeyFileName)
-			if err != nil {
-				panic(err)
-			}
-			cfg.Miner.SigKey = key
-		}
-	}
-
 	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.Dev || chainName == networkname.BorDevnet {
 		if etherbase == "" {
 			cfg.Miner.Etherbase = core.DevnetEtherbase
-		}
-
-		cfg.Miner.SigKey = core.DevnetSignKey(cfg.Miner.Etherbase)
-
-		setSigKey(ctx, cfg)
-	}
-
-	chainsWithValidatorMode := map[string]bool{}
-	if _, ok := chainsWithValidatorMode[ctx.String(ChainFlag.Name)]; ok || ctx.IsSet(MinerSigningKeyFileFlag.Name) {
-		setSigKey(ctx, cfg)
-		if cfg.Miner.SigKey != nil {
-			cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
 		}
 	}
 }

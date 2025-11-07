@@ -146,7 +146,6 @@ func InitMiner(
 			GasLimit:   &genesis.GasLimit,
 			GasPrice:   big.NewInt(1),
 			Recommit:   ethconfig.Defaults.Miner.Recommit,
-			SigKey:     privKey,
 			EnabledPOS: true,
 		},
 		Sync:                      ethconfig.Defaults.Sync,

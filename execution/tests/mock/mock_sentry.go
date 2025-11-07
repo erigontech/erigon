@@ -458,7 +458,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	miningConfig := cfg.Miner
 	miningConfig.Etherbase = mock.Address
-	miningConfig.SigKey = mock.Key
 	miningCancel := make(chan struct{})
 	go func() {
 		<-mock.Ctx.Done()
