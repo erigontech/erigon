@@ -130,7 +130,7 @@ type EngineReader interface {
 	// Service transactions are free and don't pay baseFee after EIP-1559
 	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
 
-	Type() chain.ConsensusName
+	Type() chain.RulesName
 
 	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
 	) ([]Reward, error)

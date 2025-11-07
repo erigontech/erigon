@@ -247,8 +247,8 @@ func New(cfg *chain.Config, snapshotConfig *chainspec.ConsensusSnapshotConfig, c
 }
 
 // Type returns underlying rules engine
-func (c *Clique) Type() chain.ConsensusName {
-	return chain.CliqueConsensus
+func (c *Clique) Type() chain.RulesName {
+	return chain.CliqueRules
 }
 
 // Author implements rules.Engine, returning the Ethereum address recovered

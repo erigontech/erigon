@@ -40,7 +40,7 @@ type Config struct {
 	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Consensus ConsensusName `json:"consensus,omitempty"` // aura, ethash or clique
+	Rules RulesName `json:"consensus,omitempty"` // aura, ethash or clique
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -114,7 +114,7 @@ type Config struct {
 var (
 	TestChainConfig = &Config{
 		ChainID:               big.NewInt(1337),
-		Consensus:             EtHashConsensus,
+		Rules:                 EtHashRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -129,7 +129,7 @@ var (
 
 	TestChainAuraConfig = &Config{
 		ChainID:               big.NewInt(1),
-		Consensus:             AuRaConsensus,
+		Rules:                 AuRaRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -147,7 +147,7 @@ var (
 	// and accepted by the Ethereum core developers into the main net protocol.
 	AllProtocolChanges = &Config{
 		ChainID:                       big.NewInt(1337),
-		Consensus:                     EtHashConsensus,
+		Rules:                         EtHashRules,
 		HomesteadBlock:                big.NewInt(0),
 		TangerineWhistleBlock:         big.NewInt(0),
 		SpuriousDragonBlock:           big.NewInt(0),

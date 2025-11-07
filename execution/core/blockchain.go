@@ -210,7 +210,7 @@ func ExecuteBlockEphemerally(
 		}
 
 		stateSyncReceipt := &types.Receipt{}
-		if chainConfig.Consensus == chain.BorConsensus && len(blockLogs) > 0 {
+		if chainConfig.Rules == chain.BorRules && len(blockLogs) > 0 {
 			slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
 
 			if len(blockLogs) > len(logs) {

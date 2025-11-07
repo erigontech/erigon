@@ -16,11 +16,11 @@
 
 package chain
 
-type ConsensusName string
+type RulesName string
 
 const (
-	AuRaConsensus   ConsensusName = "aura"
-	EtHashConsensus ConsensusName = "ethash"
-	CliqueConsensus ConsensusName = "clique"
-	BorConsensus    ConsensusName = "bor"
+	AuRaRules   RulesName = "aura"
+	EtHashRules RulesName = "ethash"
+	CliqueRules RulesName = "clique"
+	BorRules    RulesName = "bor"
 )

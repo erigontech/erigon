@@ -401,8 +401,8 @@ func NewRo(chainConfig *chain.Config, blockReader services.FullBlockReader, logg
 }
 
 // Type returns underlying rules engine
-func (c *Bor) Type() chain.ConsensusName {
-	return chain.BorConsensus
+func (c *Bor) Type() chain.RulesName {
+	return chain.BorRules
 }
 
 func (c *Bor) Config() *borcfg.BorConfig {

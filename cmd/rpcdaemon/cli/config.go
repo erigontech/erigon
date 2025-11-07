@@ -1057,7 +1057,7 @@ func (e *remoteRulesEngine) IsServiceTransaction(sender common.Address, syscall 
 	return e.engine.IsServiceTransaction(sender, syscall)
 }
 
-func (e *remoteRulesEngine) Type() chain.ConsensusName {
+func (e *remoteRulesEngine) Type() chain.RulesName {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}

@@ -354,8 +354,8 @@ func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, b
 }
 
 // Type returns underlying rules engine
-func (c *AuRa) Type() chain.ConsensusName {
-	return chain.AuRaConsensus
+func (c *AuRa) Type() chain.RulesName {
+	return chain.AuRaRules
 }
 
 // Author implements rules.Engine, returning the Ethereum address recovered

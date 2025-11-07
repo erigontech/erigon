@@ -84,7 +84,7 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 	// Tests may set pre-calculated nonce
 	if block.NonceU64() != 0 {
 		// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
-		if cfg.engine.Type() != chain.CliqueConsensus {
+		if cfg.engine.Type() != chain.CliqueRules {
 			cfg.miningState.MiningResultCh <- blockWithReceipts
 			return nil
 		}

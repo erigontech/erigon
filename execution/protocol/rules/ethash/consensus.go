@@ -105,8 +105,8 @@ var (
 )
 
 // Type returns underlying rules engine
-func (ethash *Ethash) Type() chain.ConsensusName {
-	return chain.EtHashConsensus
+func (ethash *Ethash) Type() chain.RulesName {
+	return chain.EtHashRules
 }
 
 // Author implements rules.Engine, returning the header's coinbase as the

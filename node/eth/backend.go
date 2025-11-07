@@ -1308,7 +1308,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.TemporalRwDB, stateDif
 			borcfg.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 			})
-		} else if s.chainConfig.Consensus == chain.CliqueConsensus {
+		} else if s.chainConfig.Rules == chain.CliqueRules {
 			s.engine.(*clique.Clique).Authorize(eb, func(_ common.Address, _ string, msg []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(msg), miner.MiningConfig.SigKey)
 			})

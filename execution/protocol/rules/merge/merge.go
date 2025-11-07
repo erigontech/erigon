@@ -82,7 +82,7 @@ func (s *Merge) InnerEngine() rules.Engine {
 }
 
 // Type returns the type of the underlying rules engine.
-func (s *Merge) Type() chain.ConsensusName {
+func (s *Merge) Type() chain.RulesName {
 	return s.eth1Engine.Type()
 }
 
