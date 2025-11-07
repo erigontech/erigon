@@ -28,7 +28,6 @@ import (
 type MiningConfig struct {
 	EnabledPOS bool
 	Etherbase  common.Address `toml:",omitempty"` // Public address for block mining rewards
-	Notify     []string       `toml:",omitempty"` // HTTP URL list to be notified of new work packages(only useful in ethash).
 	ExtraData  hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
 	GasLimit   *uint64        // Target gas limit for mined blocks.
 	GasPrice   *big.Int       // Minimum gas price for mining a transaction

@@ -154,7 +154,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.CliqueSnapshotInmemorySignaturesFlag,
 	&utils.CliqueDataDirFlag,
 	&utils.ProposingDisableFlag,
-	&utils.MinerNotifyFlag,
 	&utils.MinerGasLimitFlag,
 	&utils.MinerEtherbaseFlag,
 	&utils.MinerGasPriceFlag,

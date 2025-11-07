@@ -75,7 +75,7 @@ func GetSharedEthash() *Ethash {
 			CachesInMem:   3,
 			DatasetsInMem: 1,
 		}
-		sharedEthash = New(sharedConfig, nil, false)
+		sharedEthash = New(sharedConfig, false)
 	})
 	return sharedEthash
 }
@@ -428,7 +428,7 @@ type Ethash struct {
 // New creates a full sized ethash PoW scheme and starts a background thread for
 // remote mining, also optionally notifying a batch of remote services of new work
 // packages.
-func New(config ethashcfg.Config, notify []string, noverify bool) *Ethash {
+func New(config ethashcfg.Config, noverify bool) *Ethash {
 	if config.Log == nil {
 		config.Log = log.Root()
 	}
@@ -448,14 +448,14 @@ func New(config ethashcfg.Config, notify []string, noverify bool) *Ethash {
 	if config.PowMode == ethashcfg.ModeShared {
 		ethash.shared = GetSharedEthash()
 	}
-	ethash.remote = startRemoteSealer(ethash, notify, noverify)
+	ethash.remote = startRemoteSealer(ethash, noverify)
 	return ethash
 }
 
 // NewTester creates a small sized ethash PoW scheme useful only for testing
 // purposes.
-func NewTester(notify []string, noverify bool) *Ethash {
-	return New(ethashcfg.Config{PowMode: ethashcfg.ModeTest}, notify, noverify)
+func NewTester(noverify bool) *Ethash {
+	return New(ethashcfg.Config{PowMode: ethashcfg.ModeTest}, noverify)
 }
 
 // NewShared creates a full sized ethash PoW shared between all requesters running

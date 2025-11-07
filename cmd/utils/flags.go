@@ -226,10 +226,6 @@ var (
 		Name:  "proposer.disable",
 		Usage: "Disables PoS proposer",
 	}
-	MinerNotifyFlag = cli.StringFlag{
-		Name:  "miner.notify",
-		Usage: "Comma separated HTTP URL list to notify of new work packages",
-	}
 	MinerGasLimitFlag = cli.Uint64Flag{
 		Name:  "miner.gaslimit",
 		Usage: "Target gas limit for mined blocks",
@@ -1604,10 +1600,6 @@ func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.MiningConfig) {
 	flags := cmd.Flags()
 	var err error
-	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
-	if err != nil {
-		panic(err)
-	}
 	extraDataStr, err := flags.GetString(MinerExtraDataFlag.Name)
 	if err != nil {
 		panic(err)
@@ -1677,9 +1669,6 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
-	if ctx.IsSet(MinerNotifyFlag.Name) {
-		cfg.Notify = common.CliString2Array(ctx.String(MinerNotifyFlag.Name))
-	}
 	if ctx.IsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
 	} else if len(version.GitCommit) > 0 {
