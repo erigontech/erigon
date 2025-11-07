@@ -250,7 +250,7 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 	}
 	recomputed := common.Hash(recomputedBytes)
 	if recomputed != info.rootHash {
-		return fmt.Errorf("%w: recomputed root does not match verified root: %s != %s", ErrIntegrity, recomputedBytes, info.rootHash)
+		return fmt.Errorf("%w: recomputed root does not match verified root: %s != %s", ErrIntegrity, recomputed, info.rootHash)
 	}
 	return nil
 }
