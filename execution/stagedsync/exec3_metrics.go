@@ -251,7 +251,8 @@ func resetDomainGauges(ctx context.Context) {
 	}
 }
 
-func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *changeset.DomainMetrics, interval time.Duration) *changeset.DomainMetrics {
+func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *changeset.DomainMetrics, interval time.Duration,
+	executing bool) *changeset.DomainMetrics {
 	metrics.RLock()
 	defer metrics.RUnlock()
 
@@ -311,10 +312,12 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		mxExecAccountDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxExecAccountDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxExecAccountDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-		mxExecAccountDomainPutRate.Set(float64(cachePutCount))
-		mxExecAccountDomainPutSize.Set(float64(cachePutSize))
-		mxExecAccountDomainPutKeySize.Set(float64(cachePutKeySize))
-		mxExecAccountDomainPutValueSize.Set(float64(cachePutValueSize))
+		if executing {
+			mxExecAccountDomainPutRate.Set(float64(cachePutCount))
+			mxExecAccountDomainPutSize.Set(float64(cachePutSize))
+			mxExecAccountDomainPutKeySize.Set(float64(cachePutKeySize))
+			mxExecAccountDomainPutValueSize.Set(float64(cachePutValueSize))
+		}
 		mxExecAccountDomainDbReads.Set(float64(dbReads) / seconds)
 		mxExecAccountDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 		mxExecAccountDomainFileReads.Set(float64(fileReads) / seconds)
@@ -346,10 +349,12 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		mxExecStorageDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxExexStorageDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxExecStorageDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-		mxExecStorageDomainPutRate.Set(float64(cachePutCount))
-		mxExecStorageDomainPutSize.Set(float64(cachePutSize))
-		mxExecStorageDomainPutKeySize.Set(float64(cachePutKeySize))
-		mxExecStorageDomainPutValueSize.Set(float64(cachePutValueSize))
+		if executing {
+			mxExecStorageDomainPutRate.Set(float64(cachePutCount))
+			mxExecStorageDomainPutSize.Set(float64(cachePutSize))
+			mxExecStorageDomainPutKeySize.Set(float64(cachePutKeySize))
+			mxExecStorageDomainPutValueSize.Set(float64(cachePutValueSize))
+		}
 		mxExecStorageDomainDbReads.Set(float64(dbReads) / seconds)
 		mxExecStorageDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 		mxExecStorageDomainFileReads.Set(float64(fileReads) / seconds)
@@ -359,7 +364,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		prevMetrics.Domains[kv.StorageDomain] = &prevStorageMetrics
 	}
 
-	if codeMetrics, ok := metrics.Domains[kv.CodeDomain]; ok {
+	if codeMetrics, ok := metrics.Domains[kv.CodeDomain]; ok && executing {
 		var prevCodeMetrics changeset.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.CodeDomain]; ok {
@@ -394,7 +399,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		prevMetrics.Domains[kv.CodeDomain] = &prevCodeMetrics
 	}
 
-	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; ok {
+	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; !executing && ok {
 		var prevCommitmentMetrics changeset.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.CommitmentDomain]; ok {
@@ -708,7 +713,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
 		executedDiffTxs, executedTxSec, executedGasSec, uncommitedGas, 0, execVals)
 
-	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval)
+	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, true)
 
 	p.prevExecTime = currentTime
 
@@ -799,7 +804,7 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
 		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
 
-	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval)
+	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, false)
 
 	p.prevCommitTime = currentTime
 
