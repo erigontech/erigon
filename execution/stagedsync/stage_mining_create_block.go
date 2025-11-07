@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/core"
@@ -134,7 +135,7 @@ type MiningCreateBlockCfg struct {
 	chainConfig            *chain.Config
 	engine                 rules.Engine
 	tmpdir                 string
-	blockBuilderParameters *core.BlockBuilderParameters
+	blockBuilderParameters *builder.Parameters
 	blockReader            services.FullBlockReader
 }
 
@@ -143,7 +144,7 @@ func StageMiningCreateBlockCfg(
 	miner MiningState,
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	blockBuilderParameters *core.BlockBuilderParameters,
+	blockBuilderParameters *builder.Parameters,
 	tmpdir string,
 	blockReader services.FullBlockReader,
 ) MiningCreateBlockCfg {

@@ -22,11 +22,10 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type BlockBuilderFunc func(param *core.BlockBuilderParameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
+type BlockBuilderFunc func(param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining")
 type BlockBuilder struct {
@@ -36,7 +35,7 @@ type BlockBuilder struct {
 	err       error
 }
 
-func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters, maxBuildTimeSecs uint64) *BlockBuilder {
+func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs uint64) *BlockBuilder {
 	builder := new(BlockBuilder)
 	builder.syncCond = sync.NewCond(new(sync.Mutex))
 	terminated := make(chan struct{})

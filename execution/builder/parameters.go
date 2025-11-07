@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package builder
 
 import (
 	"github.com/erigontech/erigon/common"
@@ -23,7 +23,7 @@ import (
 
 // Parameters for PoS block building
 // See also https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3
-type BlockBuilderParameters struct {
+type Parameters struct {
 	PayloadId             uint64
 	ParentHash            common.Hash
 	Timestamp             uint64
