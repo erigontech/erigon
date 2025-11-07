@@ -18,7 +18,7 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 //
 //nolint:errcheck,prealloc
-package core_test
+package rlp_test
 
 import (
 	"fmt"
