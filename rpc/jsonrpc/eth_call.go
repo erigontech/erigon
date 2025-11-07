@@ -471,6 +471,10 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 				Proof: []hexutil.Bytes{},
 			}
 		}
+		err = trie.VerifyAccountProof(header.Root, proof)
+		if err != nil {
+			return nil, err
+		}
 		return proof, nil
 	}
 
