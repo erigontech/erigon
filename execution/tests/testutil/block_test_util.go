@@ -162,7 +162,7 @@ func (bt *BlockTest) RunCLI() error {
 	if !ok {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
-	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
+	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine, false)
 	defer m.DB.Close()
 
