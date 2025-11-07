@@ -30,7 +30,7 @@ func TestFiltersDeadlock(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 	config := FiltersConfig{}
-	filterCtx, filterCancel := context.WithCancel(context.Background())
+	filterCtx, filterCancel := context.WithCancel(t.Context())
 	t.Cleanup(filterCancel)
 	f := New(filterCtx, config, nil, nil, nil, func() {}, logger)
 	crit := filters.FilterCriteria{
