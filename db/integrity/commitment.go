@@ -210,7 +210,7 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 		return nil, fmt.Errorf("%w: commitment root sd txNum should not be zero", ErrIntegrity)
 	}
 	if info.PartialBlock() {
-		logger.Info("skipping commitment root check with sd root as it is for partial block", "file", filepath.Base(f.Fullpath()), "blockNum", info.blockNum, "txNum", info.txNum, "blockMinTxNum", info.blockMinTxNum, "blockMaxTxNum", info.blockMaxTxNum)
+		logger.Info("skipping commitment root sd check with canonical header root as it is for partial block", "file", filepath.Base(f.Fullpath()), "blockNum", info.blockNum, "txNum", info.txNum, "blockMinTxNum", info.blockMinTxNum, "blockMaxTxNum", info.blockMaxTxNum)
 		return sd, nil
 	}
 	rootHashBytes, err := sd.GetCommitmentCtx().Trie().RootHash()
