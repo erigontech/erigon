@@ -22,7 +22,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -232,7 +231,7 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 }
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
-	it, err := tx.HistoryRange(kv.AccountsDomain, int(info.blockMinTxNum), int(info.txNum)+1, order.Asc, math.MaxInt)
+	it, err := tx.HistoryRange(kv.AccountsDomain, int(info.blockMinTxNum), int(info.txNum)+1, order.Asc, -1)
 	if err != nil {
 		return err
 	}
