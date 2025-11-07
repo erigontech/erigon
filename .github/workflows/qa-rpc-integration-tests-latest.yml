@@ -112,8 +112,8 @@ jobs:
           DUMP_RESPONSE=""
           if [[ "${{ inputs.force_dump_response }}" == "true" ]]; then
             DUMP_RESPONSE="always-dump-response"
+            echo "Force response dump is enabled"
           fi
-          echo "Force response dump is $DUMP_RESPONSE"
 
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh
 
