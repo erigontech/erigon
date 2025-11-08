@@ -32,15 +32,11 @@ type DBAPI interface {
 }
 
 // DBAPIImpl data structure to store things needed for db_ commands
-type DBAPIImpl struct {
-	unused uint64
-}
+type DBAPIImpl struct{}
 
 // NewDBAPIImpl returns NetAPIImplImpl instance
 func NewDBAPIImpl() *DBAPIImpl {
-	return &DBAPIImpl{
-		unused: uint64(0),
-	}
+	return &DBAPIImpl{}
 }
 
 // GetString implements db_getString. Returns string from the local database.
