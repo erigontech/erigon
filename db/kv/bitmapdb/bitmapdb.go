@@ -33,10 +33,6 @@ import (
 
 const MaxUint32 = 1<<32 - 1
 
-type ToBitamp interface {
-	ToBitmap() (*roaring64.Bitmap, error)
-}
-
 var roaringPool = sync.Pool{
 	New: func() any {
 		return roaring.New()
@@ -212,19 +208,6 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 	return roaring.FastOr(chunks...), nil
 }
 
-// SeekInBitmap - returns value in bitmap which is >= n
-//
-//nolint:deadcode
-func SeekInBitmap(m *roaring.Bitmap, n uint32) (found uint32, ok bool) {
-	i := m.Iterator()
-	i.AdvanceIfNeeded(n)
-	ok = i.HasNext()
-	if ok {
-		found = i.Next()
-	}
-	return found, ok
-}
-
 // CutLeft - cut from bitmap `targetSize` bytes from left
 // removing lft part from `bm`
 // returns nil on zero cardinality
@@ -370,22 +353,6 @@ func Get64(db kv.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bit
 	return roaring64.FastOr(chunks...), nil
 }
 
-// SeekInBitmap - returns value in bitmap which is >= n
-func SeekInBitmap64(m *roaring64.Bitmap, n uint64) (found uint64, ok bool) {
-	if m.IsEmpty() {
-		return 0, false
-	}
-	if n == 0 {
-		return m.Minimum(), true
-	}
-	searchRank := m.Rank(n - 1)
-	if searchRank >= m.GetCardinality() {
-		return 0, false
-	}
-	found, _ = m.Select(searchRank)
-	return found, true
-}
-
 func Walk(c kv.Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	k, v, err := c.Seek(startkey)
@@ -417,14 +384,3 @@ func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
 	}
 	return fixedbytes, mask
 }
-
-type ToBitmap interface {
-	ToBitmap() (*roaring64.Bitmap, error)
-}
-
-func ToIter(it roaring64.IntIterable64) *ToIterInterface { return &ToIterInterface{it: it} }
-
-type ToIterInterface struct{ it roaring64.IntIterable64 }
-
-func (i *ToIterInterface) HasNext() bool         { return i.it.HasNext() }
-func (i *ToIterInterface) Next() (uint64, error) { return i.it.Next(), nil }
