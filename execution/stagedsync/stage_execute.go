@@ -406,6 +406,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	if err = u.Done(rwTx); err != nil {
 		return err
 	}
+
+	doms.SeekCommitment(ctx, rwTx)
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }
