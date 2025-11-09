@@ -346,7 +346,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
 							uncommittedBlocks = 0
 							uncommittedGas = 0
-							uncommittedGas = 0
+							uncommittedTransactions = 0
 						}
 
 						if flushPending {
