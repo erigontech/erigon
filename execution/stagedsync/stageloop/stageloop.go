@@ -512,7 +512,8 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 		if err = stagedsync.NotifyNewHeaders(h.ctx, notifyFrom, notifyTo, h.notifications.Events, tx, h.logger); err != nil {
 			return nil
 		}
-		h.notifications.RecentLogs.Notify(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
+		h.notifications.RecentReceipts.NotifyReceipts(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
+		h.notifications.RecentReceipts.NotifyLogs(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
 	}
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)

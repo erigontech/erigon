@@ -2018,6 +2018,249 @@ func (x *SyncingReply_StageProgress) GetBlockNumber() uint64 {
 	return 0
 }
 
+type ReceiptsFilterRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	AllTransactions   bool                   `protobuf:"varint,1,opt,name=all_transactions,json=allTransactions,proto3" json:"all_transactions,omitempty"`
+	TransactionHashes []*typesproto.H256     `protobuf:"bytes,2,rep,name=transaction_hashes,json=transactionHashes,proto3" json:"transaction_hashes,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ReceiptsFilterRequest) Reset() {
+	*x = ReceiptsFilterRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReceiptsFilterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReceiptsFilterRequest) ProtoMessage() {}
+
+func (x *ReceiptsFilterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (*ReceiptsFilterRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ReceiptsFilterRequest) GetAllTransactions() bool {
+	if x != nil {
+		return x.AllTransactions
+	}
+	return false
+}
+
+func (x *ReceiptsFilterRequest) GetTransactionHashes() []*typesproto.H256 {
+	if x != nil {
+		return x.TransactionHashes
+	}
+	return nil
+}
+
+type SubscribeReceiptsReply struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Receipt metadata
+	BlockHash        *typesproto.H256 `protobuf:"bytes,1,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
+	BlockNumber      uint64           `protobuf:"varint,2,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	TransactionHash  *typesproto.H256 `protobuf:"bytes,3,opt,name=transaction_hash,json=transactionHash,proto3" json:"transaction_hash,omitempty"`
+	TransactionIndex uint64           `protobuf:"varint,4,opt,name=transaction_index,json=transactionIndex,proto3" json:"transaction_index,omitempty"`
+	// Receipt core fields
+	Type              uint32                `protobuf:"varint,5,opt,name=type,proto3" json:"type,omitempty"`
+	Status            uint64                `protobuf:"varint,6,opt,name=status,proto3" json:"status,omitempty"`
+	CumulativeGasUsed uint64                `protobuf:"varint,7,opt,name=cumulative_gas_used,json=cumulativeGasUsed,proto3" json:"cumulative_gas_used,omitempty"`
+	GasUsed           uint64                `protobuf:"varint,8,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`
+	ContractAddress   *typesproto.H160      `protobuf:"bytes,9,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
+	LogsBloom         []byte                `protobuf:"bytes,10,opt,name=logs_bloom,json=logsBloom,proto3" json:"logs_bloom,omitempty"`
+	Logs              []*SubscribeLogsReply `protobuf:"bytes,11,rep,name=logs,proto3" json:"logs,omitempty"`
+	// Transaction data (for from/to addresses)
+	From   *typesproto.H160 `protobuf:"bytes,12,opt,name=from,proto3" json:"from,omitempty"`
+	To     *typesproto.H160 `protobuf:"bytes,13,opt,name=to,proto3" json:"to,omitempty"`
+	TxType uint32           `protobuf:"varint,14,opt,name=tx_type,json=txType,proto3" json:"tx_type,omitempty"`
+	// Header data (for MarshalReceipt)
+	BaseFee       *typesproto.H256 `protobuf:"bytes,15,opt,name=base_fee,json=baseFee,proto3" json:"base_fee,omitempty"`
+	BlockTime     uint64           `protobuf:"varint,16,opt,name=block_time,json=blockTime,proto3" json:"block_time,omitempty"`
+	ExcessBlobGas uint64           `protobuf:"varint,17,opt,name=excess_blob_gas,json=excessBlobGas,proto3" json:"excess_blob_gas,omitempty"`
+	// EIP-4844 fields
+	BlobGasUsed   uint64           `protobuf:"varint,18,opt,name=blob_gas_used,json=blobGasUsed,proto3" json:"blob_gas_used,omitempty"`
+	BlobGasPrice  *typesproto.H256 `protobuf:"bytes,19,opt,name=blob_gas_price,json=blobGasPrice,proto3" json:"blob_gas_price,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeReceiptsReply) Reset() {
+	*x = SubscribeReceiptsReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeReceiptsReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeReceiptsReply) ProtoMessage() {}
+
+func (x *SubscribeReceiptsReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (*SubscribeReceiptsReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *SubscribeReceiptsReply) GetBlockHash() *typesproto.H256 {
+	if x != nil {
+		return x.BlockHash
+	}
+	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetBlockNumber() uint64 {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetTransactionHash() *typesproto.H256 {
+	if x != nil {
+		return x.TransactionHash
+	}
+	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetTransactionIndex() uint64 {
+	if x != nil {
+		return x.TransactionIndex
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetType() uint32 {
+	if x != nil {
+		return x.Type
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetStatus() uint64 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetCumulativeGasUsed() uint64 {
+	if x != nil {
+		return x.CumulativeGasUsed
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetGasUsed() uint64 {
+	if x != nil {
+		return x.GasUsed
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetContractAddress() *typesproto.H160 {
+	if x != nil {
+		return x.ContractAddress
+	}
+	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetLogsBloom() []byte {
+	if x != nil {
+		return x.LogsBloom
+	}
+	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetLogs() []*SubscribeLogsReply {
+	if x != nil {
+		return x.Logs
+	}
+	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetFrom() *typesproto.H160 {
+	if x != nil {
+		return x.From
+	}
+	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetTo() *typesproto.H160 {
+	if x != nil {
+		return x.To
+	}
+	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetTxType() uint32 {
+	if x != nil {
+		return x.TxType
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetBaseFee() *typesproto.H256 {
+	if x != nil {
+		return x.BaseFee
+	}
+	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetBlockTime() uint64 {
+	if x != nil {
+		return x.BlockTime
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetExcessBlobGas() uint64 {
+	if x != nil {
+		return x.ExcessBlobGas
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetBlobGasUsed() uint64 {
+	if x != nil {
+		return x.BlobGasUsed
+	}
+	return 0
+}
+
+func (x *SubscribeReceiptsReply) GetBlobGasPrice() *typesproto.H256 {
+	if x != nil {
+		return x.BlobGasPrice
+	}
+	return nil
+}
+
 var File_remote_ethbackend_proto protoreflect.FileDescriptor
 
 const file_remote_ethbackend_proto_rawDesc = "" +

@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 func MarshalReceipt(
@@ -127,4 +129,86 @@ func MarshalReceipt(
 	}
 
 	return fields
+}
+
+func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) map[string]interface{} {
+	receipt := make(map[string]interface{})
+
+	// Basic metadata - convert to proper hex strings
+	blockHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.BlockHash))
+	receipt["blockHash"] = blockHash
+	receipt["blockNumber"] = hexutil.Uint64(protoReceipt.BlockNumber)
+	txHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.TransactionHash))
+	receipt["transactionHash"] = txHash
+	receipt["transactionIndex"] = hexutil.Uint64(protoReceipt.TransactionIndex)
+
+	// From address as hex string
+	from := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.From))
+	receipt["from"] = from
+
+	// To can be null for contract creation
+	if protoReceipt.To != nil {
+		toAddr := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.To))
+		if toAddr != (common.Address{}) {
+			receipt["to"] = toAddr
+		} else {
+			receipt["to"] = nil
+		}
+	} else {
+		receipt["to"] = nil
+	}
+
+	receipt["type"] = hexutil.Uint64(protoReceipt.Type)
+	receipt["status"] = hexutil.Uint64(protoReceipt.Status)
+	receipt["cumulativeGasUsed"] = hexutil.Uint64(protoReceipt.CumulativeGasUsed)
+	receipt["gasUsed"] = hexutil.Uint64(protoReceipt.GasUsed)
+
+	if protoReceipt.ContractAddress != nil {
+		addr := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.ContractAddress))
+		if addr != (common.Address{}) {
+			receipt["contractAddress"] = addr
+		} else {
+			receipt["contractAddress"] = nil
+		}
+	} else {
+		receipt["contractAddress"] = nil
+	}
+
+	if len(protoReceipt.LogsBloom) > 0 {
+		receipt["logsBloom"] = hexutil.Bytes(protoReceipt.LogsBloom)
+	}
+
+	logs := make([]map[string]interface{}, 0, len(protoReceipt.Logs))
+	for _, protoLog := range protoReceipt.Logs {
+		logEntry := make(map[string]interface{})
+
+		if protoLog.Address != nil {
+			logEntry["address"] = common.Address(gointerfaces.ConvertH160toAddress(protoLog.Address))
+		}
+
+		topics := make([]common.Hash, len(protoLog.Topics))
+		for i, topic := range protoLog.Topics {
+			topics[i] = common.Hash(gointerfaces.ConvertH256ToHash(topic))
+		}
+		logEntry["topics"] = topics
+		logEntry["data"] = hexutil.Bytes(protoLog.Data)
+
+		logs = append(logs, logEntry)
+	}
+	receipt["logs"] = logs
+
+	if protoReceipt.BaseFee != nil {
+		baseFee := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee)
+		receipt["effectiveGasPrice"] = (*hexutil.Big)(baseFee.ToBig())
+	}
+
+	if protoReceipt.BlobGasUsed > 0 {
+		receipt["blobGasUsed"] = hexutil.Uint64(protoReceipt.BlobGasUsed)
+	}
+	if protoReceipt.BlobGasPrice != nil {
+		blobGasPrice := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BlobGasPrice)
+		receipt["blobGasPrice"] = (*hexutil.Big)(blobGasPrice.ToBig())
+	}
+
+	return receipt
 }
