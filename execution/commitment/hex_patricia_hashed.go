@@ -1937,7 +1937,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 
 	cell.setFromUpdate(u)
 	if hph.trace {
-	fmt.Printf("updateCell %x => %s\n", plainKey, u.String())
+		fmt.Printf("updateCell %x => %s\n", plainKey, u.String())
 	}
 	return cell
 }
