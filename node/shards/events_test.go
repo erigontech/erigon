@@ -24,10 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRecentLogs(t *testing.T) {
+func TestRecentReceipts(t *testing.T) {
 	t.Parallel()
 	t.Run("Evict", func(t *testing.T) {
-		e := NewRecentLogs(3)
+		e := NewRecentReceipts(3)
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}})
@@ -37,14 +37,14 @@ func TestRecentLogs(t *testing.T) {
 		require.Len(t, e.receipts, 1)
 	})
 	t.Run("Nil", func(t *testing.T) {
-		e := NewRecentLogs(3)
+		e := NewRecentReceipts(3)
 		e.Add(types.Receipts{nil, {BlockNumber: big.NewInt(1)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}, nil})
 		e.Add(types.Receipts{nil, nil, {BlockNumber: big.NewInt(31)}})
 		require.Len(t, e.receipts, 3)
 	})
 	t.Run("Order", func(t *testing.T) {
-		e := NewRecentLogs(3)
+		e := NewRecentReceipts(3)
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
 		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})

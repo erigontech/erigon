@@ -141,7 +141,7 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) FlushExtendingFork(tx kv.TemporalRwTx, accumulator *shards.Accumulator, recentLogs *shards.RecentLogs) error {
+func (fv *ForkValidator) FlushExtendingFork(tx kv.TemporalRwTx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
@@ -163,7 +163,7 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.TemporalRwTx, accumulator *sha
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
-	fv.extendingForkNotifications.RecentLogs.CopyAndReset(recentLogs)
+	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(recentReceipts)
 	// Clean extending fork data
 	fv.sharedDom = nil
 
