@@ -48,6 +48,13 @@ func DefaultLogFilterOptions() LogFilterOptions {
 	}
 }
 
+// TransactionReceiptsFilter defines criteria for transaction receipts subscription.
+// If TransactionHashes is nil or empty, receipts for all transactions included in new blocks will be delivered.
+// Otherwise, only receipts for the specified transactions will be delivered.
+type ReceiptsFilterCriteria struct {
+	TransactionHashes []common.Hash `json:"transactionHashes"`
+}
+
 /*
 // filter is a helper struct that holds meta information over the filter type
 // and associated subscription in the event system.
