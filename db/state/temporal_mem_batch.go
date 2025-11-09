@@ -110,18 +110,10 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
-	valWithStep := dataWithStep{data: val, step: kv.Step(txNum / sd.stepSize)}
-	putKeySize := 0
-	putValueSize := 0
-	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Set(key, valWithStep); ok {
-			putValueSize += len(val) - len(old.data)
-		} else {
-			putKeySize += len(key)
-			putValueSize += len(val)
-		}
 
+	var updateMetrics = func(domain kv.Domain, putKeySize int, putValueSize int) {
 		sd.metrics.Lock()
+		defer sd.metrics.Unlock()
 		sd.metrics.CachePutCount++
 		sd.metrics.CachePutSize += putKeySize + putValueSize
 		sd.metrics.CachePutKeySize += putKeySize
@@ -139,7 +131,20 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 				CachePutValueSize: putValueSize,
 			}
 		}
-		sd.metrics.Unlock()
+	}
+
+	valWithStep := dataWithStep{data: val, step: kv.Step(txNum / sd.stepSize)}
+	putKeySize := 0
+	putValueSize := 0
+	if domain == kv.StorageDomain {
+		if old, ok := sd.storage.Set(key, valWithStep); ok {
+			putValueSize += len(val) - len(old.data)
+		} else {
+			putKeySize += len(key)
+			putValueSize += len(val)
+		}
+
+		updateMetrics(domain, putKeySize, putValueSize)
 		return
 	}
 
@@ -151,25 +156,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 	sd.domains[domain][key] = valWithStep
 
-	sd.metrics.Lock()
-	sd.metrics.CachePutCount++
-	sd.metrics.CachePutSize += putValueSize + putKeySize
-	sd.metrics.CachePutKeySize += putKeySize
-	sd.metrics.CachePutValueSize += putValueSize
-	if dm, ok := sd.metrics.Domains[domain]; ok {
-		dm.CachePutCount++
-		dm.CachePutSize += putValueSize + putKeySize
-		dm.CachePutKeySize += putKeySize
-		dm.CachePutValueSize += putValueSize
-	} else {
-		sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
-			CachePutCount:     1,
-			CachePutSize:      putKeySize + putValueSize,
-			CachePutKeySize:   putKeySize,
-			CachePutValueSize: putValueSize,
-		}
-	}
-	sd.metrics.Unlock()
+	updateMetrics(domain, putKeySize, putValueSize)
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
