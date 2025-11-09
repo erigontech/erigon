@@ -8,7 +8,7 @@ To install Erigon, begin by choosing an installation method suited to your opera
 
 {% tabs %}
 {% tab title="Linux" %}
-<table data-view="cards"><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><h4><i class="fa-play">:play:</i></h4></td><td><ol><li><a href="./#prebuilt-binaries-linux-only"><strong>Pre-built Binaries</strong></a></li></ol></td></tr><tr><td><h4><i class="fa-docker">:docker:</i></h4></td><td><ol start="2"><li><a href="./#docker"><strong>Docker</strong></a></li></ol></td></tr><tr><td><h4><i class="fa-gear">:gear:</i></h4></td><td><ol start="3"><li><a href="./#build-from-source"><strong>Build from Source</strong></a></li></ol></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><h4><i class="fa-play">:play:</i></h4></td><td><ol><li><a href="./#pre-built-binaries-linux-only"><strong>Pre-built Binaries</strong></a></li></ol></td></tr><tr><td><h4><i class="fa-docker">:docker:</i></h4></td><td><ol start="2"><li><a href="./#docker"><strong>Docker</strong></a></li></ol></td></tr><tr><td><h4><i class="fa-gear">:gear:</i></h4></td><td><ol start="3"><li><a href="./#build-from-source"><strong>Build from Source</strong></a></li></ol></td></tr></tbody></table>
 {% endtab %}
 
 {% tab title="macOS" %}
@@ -32,7 +32,13 @@ To install Erigon, begin by choosing an installation method suited to your opera
 
 Docker is like a portable container for software. It packages Erigon and everything it needs to run, so you don't have to install complicated dependencies on your computer.
 
-The Docker image works on **Intel/AMD computers** (linux/amd64) and **Apple Silicon Macs** (linux/arm64).
+This Docker image is fully supported on **Linux**, **macOS**, and **Windows**.&#x20;
+
+_(Note: The container itself is built on multi-platform Linux architectures (linux/amd64 and linux/arm64), which is handled automatically by your Docker setup.)_
+
+## Prerequisites
+
+[Docker Engine](https://docs.docker.com/engine/install) if you run Linux or [Docker Desktop](https://docs.docker.com/desktop/) if you run macOS/Windows.
 
 ### General Info
 
@@ -42,10 +48,6 @@ The Docker image works on **Intel/AMD computers** (linux/amd64) and **Apple Sili
 * Docker images now contain the label `org.opencontainers.image.revision`, which refers to the commit ID from the Erigon project used to build the artifacts.
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
 * Images are stored at [https://hub.docker.com/r/erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
-
-## Prerequisites
-
-[Docker Engine](https://docs.docker.com/engine/install) if you run Linux or [Docker Desktop](https://docs.docker.com/desktop/) if you run macOS/Windows.
 
 ## Download and start Erigon in Docker
 
@@ -236,8 +238,6 @@ The basic Erigon configuration is suitable for most users who simply want to run
 
 First, clone the Erigon repository (you do not need to specify a branch):
 
-Copy
-
 ```
 git clone https://github.com/erigontech/erigon.git
 cd erigon
@@ -247,17 +247,13 @@ cd erigon
 
 Next, fetch all available release tags:
 
-Copy
-
-```
+```sh
 git fetch --tags
 ```
 
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
-Copy
-
-```
+```sh
 git checkout v3.2.2
 ```
 
@@ -267,17 +263,13 @@ Compile the Erigon binary using the `make` command.
 
 Standard Compilation:
 
-Copy
-
-```
+```sh
 make erigon
 ```
 
 Fast Compilation (Recommended): to significantly speed up the process, specify the number of processors you want to use with the `-j<n>` option, where `<n>` is the number of processor you want to use (we recommend using a number slightly less than your total core count):
 
-Copy
-
-```
+```sh
 make -j<n> erigon
 ```
 
@@ -287,7 +279,7 @@ The resulting executable binary will be created in the `./build/bin/erigon` path
 
 After installation, you can run Erigon from your terminal:
 
-```bash
+```sh
 ./build/bin/erigon [options]
 ```
 
@@ -381,10 +373,7 @@ This section outlines the two primary methods for compiling the Erigon client an
 
 You have two alternative options for compilation, both utilizing PowerShell: a quick, graphical method via File Explorer, and a more controlled, command-line method. All successfully compiled binaries will be placed in the `.\build\bin\` subfolder of your Erigon directory.
 
-| **Method**                     | **Pro**                                                                                                           | **Con**                                                                                                |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| a. File Explorer (`wmake.ps1`) | Fastest and simplest; requires minimal command-line interaction.                                                  | Less control over which specific component is built (builds all modules by default).                   |
-|  b. PowerShell CLI             | Provides granular control, allowing you to compile only specific components (e.g., just `erigon` or `rpcdaemon`). | Requires CLI familiarity and an additional step to modify the `ExecutionPolicy` for script permission. |
+<table data-header-hidden><thead><tr><th width="185.22216796875"></th><th></th><th></th></tr></thead><tbody><tr><td><strong>Method</strong></td><td><strong>Pro</strong></td><td><strong>Con</strong></td></tr><tr><td>a. File Explorer (<code>wmake.ps1</code>)</td><td>Fastest and simplest; requires minimal command-line interaction.</td><td>Less control over which specific component is built (builds all modules by default).</td></tr><tr><td> b. PowerShell CLI</td><td>Provides granular control, allowing you to compile only specific components (e.g., just <code>erigon</code> or <code>rpcdaemon</code>).</td><td>Requires CLI familiarity and an additional step to modify the <code>ExecutionPolicy</code> for script permission.</td></tr></tbody></table>
 
 ### a. File Explorer (`wmake.ps1`)
 

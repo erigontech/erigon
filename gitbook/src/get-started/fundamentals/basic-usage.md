@@ -18,8 +18,6 @@ for example:
 ./build/bin/erigon --http.addr="0.0.0.0"
 ```
 
-See [here](configuring-erigon.md) how to configure Erigon with the available options (aka flags).
-
 ## All-in-One Client
 
 The all-in-one client is the preferred option for most users:
@@ -34,11 +32,11 @@ The default Consensus Layer utilized is [Caplin](caplin.md), the Erigon flagship
 
 ## Example of configuration
 
-Run Erigon with RPCDaemon, TxPool, and more within a single process. This approach is the 'simplest' to start with Erigon. You might consider splitting components across different machines to optimize performance and manage load effectively.
+To run Erigon with RPCDaemon, TxPool, and other components in a single process is the simplest way to get started. For better performance and load management, you might consider distributing these components across multiple machines.
 
 ```sh
 ./build/bin/erigon --datadir=/desired/path/to/datadir \
- --chain=sepolia \
+ --chain=mainnet \
  --port=30304 \
  --http.port=8546 \
  --torrent.port=42068 \
@@ -47,7 +45,7 @@ Run Erigon with RPCDaemon, TxPool, and more within a single process. This approa
  --ws \
  --http.api=eth,debug,net,trace,web3,erigon \
  --log.dir.path=/desired/path/to/logs
- --log.dir.prefix=filename
+ --torrent.download.rate=512mb
 ```
 
 ### Flags of Interest
@@ -57,11 +55,11 @@ Run Erigon with RPCDaemon, TxPool, and more within a single process. This approa
     ```bash
     --datadir=/desired/path/to/datadir
     ```
-* `--chain=mainnet` is the default flag meaning Ethereum mainnet, see [Supported Networks](supported-networks.md) for other flags
-* `--log.dir.path` dictates where [logs](logs.md) will be output - useful for sending reports to the Erigon team when issues occur
-* Based on the [sync mode](sync-modes.md) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default) or `--prune.mode=minimal` for a minimal node. The default node is full node.
+* The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks.md) section. For quick testing, consider selecting a testnet.
+* `--log.dir.path` dictates where [logs](logs.md) will be output - useful for sending reports to the Erigon team when issues occur.
+* Based on the [sync mode](sync-modes.md) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet.md).
-* To increase download speed add `--torrent.download.rate=512mb` (default is 16mb).
+* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
 
 To stop the Erigon node you can use the `CTRL+C` command.
 
@@ -70,14 +68,6 @@ Additional flags can be added to configure the node with several options.
 {% content-ref url="configuring-erigon.md" %}
 [configuring-erigon.md](configuring-erigon.md)
 {% endcontent-ref %}
-
-## Testnets
-
-If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one of the public [testnets](supported-networks.md#testnets), Hoodi, adding the option `--chain=hoodi` and using the default Consensus Layer, Caplin. You can also had the flag `--prune.mode=minimal` to have a node that is syncing fast while taking not so much disk space:v
-
-```bash
-./build/bin/erigon --chain=hoodi --prune.mode=minimal
-```
 
 ## Help
 
