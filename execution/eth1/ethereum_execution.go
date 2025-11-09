@@ -291,18 +291,18 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		doms.Close()
 		return nil, err
 	}
-	if err := doms.Flush(ctx, tx); err != nil {
-		doms.Close()
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		doms.Close()
-		return nil, err
-	}
-	if tx, err = e.db.BeginTemporalRwNosync(ctx); err != nil {
-		doms.Close()
-		return nil, err
-	}
+	//if err := doms.Flush(ctx, tx); err != nil {
+	//	doms.Close()
+	//	return nil, err
+	//}
+	//if err := tx.Commit(); err != nil {
+	//	doms.Close()
+	//return nil, err
+	//}
+	//if tx, err = e.db.BeginTemporalRwNosync(ctx); err != nil {
+	//	doms.Close()
+	//	return nil, err
+	//}
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
