@@ -22,7 +22,7 @@ To verify the integrity and ensure your downloaded Erigon file hasn't been corru
 
 {% stepper %}
 {% step %}
-### Generate the Checksum of Your Downloaded File
+#### Generate the Checksum of Your Downloaded File
 
 Next, use the appropriate command and the name of your downloaded binary (e.g., `erigon_v3.x.x_linux_amd64.tar.gz`).
 
@@ -40,7 +40,7 @@ This command will output a long string (the computed checksum) followed by the f
 {% endstep %}
 
 {% step %}
-### Compare the Checksums
+#### Compare the Checksums
 
 Compare the checksum found in the previous step with those in the Assets table or the <kbd>erigon\_v3.x.x\_checksums.txt</kbd> file in the same table.
 
@@ -80,7 +80,7 @@ This method gives you a standalone executable that can be run from any directory
     ```
 
     (Replace the filename with your downloaded version)
-2.  Move the resulting `erigon` executable to a directory included in your system's <kbd>$PATH</kbd>(e.g.,  <kbd>$/usr/local/bin</kbd>) to run it from anywhere:
+2.  Move the resulting `erigon` executable to a directory included in your system's <kbd>$PATH</kbd>(e.g., <kbd>$/usr/local/bin</kbd>) to run it from anywhere:
 
     ```bash
     sudo mv erigon /usr/local/bin/

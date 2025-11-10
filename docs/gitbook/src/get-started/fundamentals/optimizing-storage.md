@@ -8,7 +8,7 @@ For optimal performance, it's recommended to store the datadir on a fast NVMe-RA
 
 {% stepper %}
 {% step %}
-### Store datadir on the slow disk
+#### Store datadir on the slow disk
 
 Place the `datadir` on the slower disk. Then, create symbolic links (using `ln -s`) to the **fast disk** for the following sub-folders:
 
@@ -29,7 +29,7 @@ On the **slow disk** place `datadir` folder with the following structure:
 {% endstep %}
 
 {% step %}
-### Speed Up History Access (Optional)
+#### Speed Up History Access (Optional)
 
 If you need to further improve performance try the following improvements step by step:
 

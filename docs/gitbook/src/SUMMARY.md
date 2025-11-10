@@ -14,7 +14,7 @@
   * [How to run a Gnosis Chain node](get-started/easy-nodes/how-to-run-a-gnosis-chain-node/README.md)
     * [Gnosis Chain with an external CL](get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl.md)
   * [How to run a Polygon node](get-started/easy-nodes/how-to-run-a-polygon-node.md)
-* FUNDAMENTALS
+* [FUNDAMENTALS](get-started/fundamentals/README.md)
   * [Basic Usage](get-started/fundamentals/basic-usage.md)
   * [Sync Modes](get-started/fundamentals/sync-modes.md)
   * [Configuring Erigon](get-started/fundamentals/configuring-erigon.md)
@@ -52,11 +52,11 @@
   * [Docker Compose](get-started/fundamentals/docker-compose.md)
   * [Otterscan](get-started/fundamentals/otterscan.md)
   * [web3 Wallet](get-started/fundamentals/web3-wallet.md)
-  * STAKING
+  * [STAKING](get-started/fundamentals/staking/README.md)
     * [Using Caplin as Validator](get-started/fundamentals/staking/caplin.md)
     * [Using an external consensus client as validator](get-started/fundamentals/staking/external-consensus-client-as-validator.md)
     * [Shutter Network](get-started/fundamentals/staking/shutter-network.md)
-* ABOUT
+* [ABOUT](get-started/about/README.md)
   * [Contributing](get-started/about/contributing.md)
   * [License](get-started/about/license.md)
   * [Disclaimer](get-started/about/disclaimer.md)
