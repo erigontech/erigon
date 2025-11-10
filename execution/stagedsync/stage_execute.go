@@ -216,6 +216,8 @@ func unwindExec3State(ctx context.Context,
 	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
 
+	unwindSet := [kv.DomainLen]map[string]kv.DomainEntryDiff{}
+
 	//TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
@@ -287,12 +289,18 @@ func unwindExec3State(ctx context.Context,
 			return err
 		}
 
-		// TODO this may need to be moved
-		if err := tx.Unwind(ctx, txUnwindTo, changeset); err != nil {
-			return err
+		for domain, changes := range *changeset {
+			if unwindSet[domain] == nil {
+				unwindSet[domain] = map[string]kv.DomainEntryDiff{}
+			}
+
+			for _, change := range changes {
+				unwindSet[domain][change.Key] = change
+			}
 		}
 	}
 
+	sd.Unwind(txUnwindTo, &unwindSet)
 	sd.SetTxNum(txUnwindTo)
 	sd.SetBlockNum(blockUnwindTo)
 	return nil

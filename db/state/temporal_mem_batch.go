@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sort"
 	"sync"
 	"unsafe"
 
@@ -60,7 +61,11 @@ type TemporalMemBatch struct {
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
-	metrics                   *changeset.DomainMetrics
+
+	unwindToTxNum   uint64
+	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+
+	metrics *changeset.DomainMetrics
 }
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
@@ -163,15 +168,33 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
+	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
+		if sd.unwindChangeset != nil {
+			if values := sd.unwindChangeset[domain]; values != nil {
+				if value, ok := values[key]; ok {
+					return value.Value, kv.Step(binary.BigEndian.Uint64(value.PrevStepBytes)), true
+				}
+			}
+		}
+
+		return nil, 0, false
+	}
+
 	keyS := toStringZeroCopy(key)
 	var dataWithStep dataWithStep
 	if domain == kv.StorageDomain {
 		dataWithStep, ok = sd.storage.Get(keyS)
+		if !ok {
+			return unwoundLatest(domain, keyS)
+		}
 		return dataWithStep.data, dataWithStep.step, ok
 
 	}
 
 	dataWithStep, ok = sd.domains[domain][keyS]
+	if !ok {
+		return unwoundLatest(domain, keyS)
+	}
 	return dataWithStep.data, dataWithStep.step, ok
 }
 
@@ -192,6 +215,9 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithStep](128)
+	sd.unwindToTxNum = 0
+	sd.unwindChangeset = nil
+
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
 	sd.metrics.CachePutCount = 0
@@ -252,6 +278,11 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
 
+func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen]map[string]kv.DomainEntryDiff) {
+	sd.unwindToTxNum = unwindToTxNum
+	sd.unwindChangeset = changeset
+}
+
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
@@ -279,8 +310,23 @@ func (sd *TemporalMemBatch) Close() {
 	for _, fWriter := range sd.forkableWriters {
 		fWriter.Close()
 	}
+	sd.ClearRam()
 }
+
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+	if sd.unwindChangeset != nil {
+		var changeSet [kv.DomainLen][]kv.DomainEntryDiff
+		for domain, diffEntries := range sd.unwindChangeset {
+			for _, entry := range diffEntries {
+				changeSet[domain] = append(changeSet[domain], entry)
+			}
+			sort.Slice(changeSet[domain], func(i, j int) bool {
+				return changeSet[domain][i].Key < changeSet[domain][j].Key
+			})
+		}
+		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, &changeSet)
+	}
+
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
