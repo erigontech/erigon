@@ -1487,11 +1487,6 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				fmt.Printf("[witness] AccountNode (+storage) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), accNode)
 			}
 		} else if extNode, ok := currentNode.(*trie.ShortNode); ok { // handle extension node case
-			// expect only one item in this row, so take the first one
-			// technically it should be at the last nibble of the key but we will adjust this later
-			if extNode.Val != nil { // early termination
-				break
-			}
 			extNode.Val = nextNode
 
 			if hph.trace {
@@ -1516,8 +1511,10 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			if hph.trace {
 				fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
 			}
-		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && cellToExpand.storageAddrLen == 0 {
-			// if cellToExpan.storageAddLen == 0 then there is more expansion to do in the storage trie
+			// we want to jump to the account's storage trie directly in this case
+		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 && cellToExpand.storageAddrLen > 0 {
+			// this is because there won't be an account cell stacked in the row below the current row in this case
+			// so the account cell will be skipped in the grid in this case
 			if nextAccNode, ok := nextShortNode.Val.(*trie.AccountNode); ok {
 				nextNode = nextAccNode
 				if hph.trace {
