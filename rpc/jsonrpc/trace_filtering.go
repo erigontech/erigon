@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/core"
+	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -153,15 +153,15 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	return nil, err
 }
 
-func rewardKindToString(kind consensus.RewardKind) string {
+func rewardKindToString(kind protocolrules.RewardKind) string {
 	switch kind {
-	case consensus.RewardAuthor:
+	case protocolrules.RewardAuthor:
 		return "block"
-	case consensus.RewardEmptyStep:
+	case protocolrules.RewardEmptyStep:
 		return "emptyStep"
-	case consensus.RewardExternal:
+	case protocolrules.RewardExternal:
 		return "external"
-	case consensus.RewardUncle:
+	case protocolrules.RewardUncle:
 		return "uncle"
 	default:
 		return "unknown"
@@ -723,7 +723,7 @@ func (api *TraceAPIImpl) callBlock(
 	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
-) ([]*TraceCallResult, consensus.SystemCall, error) {
+) ([]*TraceCallResult, protocolrules.SystemCall, error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
 	if pNo > 0 {
@@ -776,7 +776,7 @@ func (api *TraceAPIImpl) callBlock(
 
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
+	err = core.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -890,7 +890,7 @@ func (api *TraceAPIImpl) callTransaction(
 
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
+	err = core.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, err
 	}

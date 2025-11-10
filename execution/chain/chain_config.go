@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -40,7 +40,7 @@ type Config struct {
 	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Consensus ConsensusName `json:"consensus,omitempty"` // aura, ethash or clique
+	Rules RulesName `json:"consensus,omitempty"` // aura, ethash or clique
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -99,7 +99,7 @@ type Config struct {
 
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
-	// Various consensus engines
+	// Various rules engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
@@ -114,7 +114,7 @@ type Config struct {
 var (
 	TestChainConfig = &Config{
 		ChainID:               big.NewInt(1337),
-		Consensus:             EtHashConsensus,
+		Rules:                 EtHashRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -129,7 +129,7 @@ var (
 
 	TestChainAuraConfig = &Config{
 		ChainID:               big.NewInt(1),
-		Consensus:             AuRaConsensus,
+		Rules:                 AuRaRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -147,7 +147,7 @@ var (
 	// and accepted by the Ethereum core developers into the main net protocol.
 	AllProtocolChanges = &Config{
 		ChainID:                       big.NewInt(1337),
-		Consensus:                     EtHashConsensus,
+		Rules:                         EtHashRules,
 		HomesteadBlock:                big.NewInt(0),
 		TangerineWhistleBlock:         big.NewInt(0),
 		SpuriousDragonBlock:           big.NewInt(0),
@@ -649,21 +649,21 @@ func (err *ConfigCompatError) Error() string {
 	return fmt.Sprintf("mismatching %s in database (have %d, want %d, rewindto %d)", err.What, err.StoredConfig, err.NewConfig, err.RewindTo)
 }
 
-// EthashConfig is the consensus engine configs for proof-of-work based sealing.
+// EthashConfig is the rules engine configs for proof-of-work based sealing.
 type EthashConfig struct{}
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *EthashConfig) String() string {
 	return "ethash"
 }
 
-// CliqueConfig is the consensus engine configs for proof-of-authority based sealing.
+// CliqueConfig is the rules engine configs for proof-of-authority based sealing.
 type CliqueConfig struct {
 	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
 	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
 }
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *CliqueConfig) String() string {
 	return "clique"
 }

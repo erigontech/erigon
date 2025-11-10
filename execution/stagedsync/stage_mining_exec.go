@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -53,7 +53,7 @@ type MiningExecCfg struct {
 	miningState MiningState
 	notifier    ChainEventNotifier
 	chainConfig *chain.Config
-	engine      consensus.Engine
+	engine      rules.Engine
 	blockReader services.FullBlockReader
 	vmConfig    *vm.Config
 	tmpdir      string
@@ -67,7 +67,7 @@ func StageMiningExecCfg(
 	miningState MiningState,
 	notifier ChainEventNotifier,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
+	engine rules.Engine,
 	vmConfig *vm.Config,
 	tmpdir string,
 	interrupt *atomic.Bool,
@@ -433,7 +433,7 @@ func addTransactionsToMiningBlock(
 	chainConfig *chain.Config,
 	vmConfig *vm.Config,
 	getHeader func(hash common.Hash, number uint64) (*types.Header, error),
-	engine consensus.Engine,
+	engine rules.Engine,
 	txns types.Transactions,
 	coinbase common.Address,
 	ibs *state.IntraBlockState,

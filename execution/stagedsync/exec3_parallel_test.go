@@ -24,9 +24,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -96,12 +96,12 @@ func sleep(i time.Duration) {
 }
 
 func (t *testExecTask) Execute(evm *vm.EVM,
-	engine consensus.Engine,
+	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
-	chainReader consensus.ChainReader,
+	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
 	calcFees bool) *exec.TxResult {
 	// Sleep for 50 microsecond to simulate setup time
