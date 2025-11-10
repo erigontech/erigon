@@ -23,6 +23,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	blockstype "github.com/erigontech/erigon/arb/blocks"
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
@@ -271,7 +272,7 @@ func getNextTransactions(
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
-		arbOsVersion := types.GetArbOSVersion(header, cfg.chainConfig)
+		arbOsVersion := blockstype.GetArbOSVersion(header, cfg.chainConfig)
 		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time, arbOsVersion) - *header.BlobGasUsed
 	}
 
@@ -352,7 +353,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
-			arbOsVersion := types.GetArbOSVersion(header, config)
+			arbOsVersion := blockstype.GetArbOSVersion(header, config)
 			if config.IsPrague(header.Time, arbOsVersion) || config.IsBhilai(header.Number.Uint64()) {
 				code, err := simStateReader.ReadAccountCode(sender)
 				if err != nil {
@@ -445,7 +446,7 @@ func addTransactionsToMiningBlock(
 	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
-		arbOsVersion := types.GetArbOSVersion(header, chainConfig)
+		arbOsVersion := blockstype.GetArbOSVersion(header, chainConfig)
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time, arbOsVersion) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)

@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	arbtxn "github.com/erigontech/erigon/arb/txn"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -678,7 +679,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			sender = senders[j]
 		} else {
 			signerEth := types.LatestSignerForChainID(chainConfig.ChainID)
-			signerArb := types.NewArbitrumSigner(*signerEth)
+			signerArb := arbtxn.NewArbitrumSigner(*signerEth)
 
 			sender, err = signerArb.Sender(txn2)
 			if err != nil {

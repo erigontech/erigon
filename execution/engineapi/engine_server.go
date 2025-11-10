@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	blockstype "github.com/erigontech/erigon/arb/blocks"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -323,7 +324,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		arbOsVersion := types.GetArbOSVersion(&header, s.config)
+		arbOsVersion := blockstype.GetArbOSVersion(&header, s.config)
 		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time, arbOsVersion), s.config.GetMaxBlobsPerBlock(header.Time, arbOsVersion), expectedBlobHashes, &transactions)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}

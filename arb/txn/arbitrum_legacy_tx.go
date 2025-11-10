@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/arb/txn_types"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
@@ -51,7 +52,7 @@ func NewArbitrumLegacyTx(origTx types.Transaction, hashOverride common.Hash, eff
 // 	}
 // }
 
-func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
+func (tx *ArbitrumLegacyTxData) Type() byte { return txn_types.ArbitrumLegacyTxType }
 
 func (tx *ArbitrumLegacyTxData) Unwrap() types.Transaction {
 	return tx
@@ -65,7 +66,7 @@ func (tx *ArbitrumLegacyTxData) Hash() common.Hash {
 }
 
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
-	if _, err := w.Write([]byte{ArbitrumLegacyTxType}); err != nil {
+	if _, err := w.Write([]byte{txn_types.ArbitrumLegacyTxType}); err != nil {
 		return err
 	}
 

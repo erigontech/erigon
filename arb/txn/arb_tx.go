@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/arb/txn_types"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
@@ -176,19 +176,19 @@ func (tx *ArbTx) decodeTyped(b []byte, arbParsing bool) (types.Transaction, erro
 	var inner types.Transaction
 	if arbParsing {
 		switch b[0] {
-		case ArbitrumDepositTxType:
+		case txn_types.ArbitrumDepositTxType:
 			inner = new(ArbitrumDepositTx)
-		case ArbitrumInternalTxType:
+		case txn_types.ArbitrumInternalTxType:
 			inner = new(ArbitrumInternalTx)
-		case ArbitrumUnsignedTxType:
+		case txn_types.ArbitrumUnsignedTxType:
 			inner = new(ArbitrumUnsignedTx)
-		case ArbitrumContractTxType:
+		case txn_types.ArbitrumContractTxType:
 			inner = new(ArbitrumContractTx)
-		case ArbitrumRetryTxType:
+		case txn_types.ArbitrumRetryTxType:
 			inner = new(ArbitrumRetryTx)
-		case ArbitrumSubmitRetryableTxType:
+		case txn_types.ArbitrumSubmitRetryableTxType:
 			inner = new(ArbitrumSubmitRetryableTx)
-		case ArbitrumLegacyTxType:
+		case txn_types.ArbitrumLegacyTxType:
 			inner = new(ArbitrumLegacyTxData)
 		default:
 			arbParsing = false
@@ -490,8 +490,8 @@ func (tx *ArbTx) Hash() common.Hash {
 
 	var h common.Hash
 	if tx.Type() == types.LegacyTxType {
-		h = core.RlpHash(tx.inner)
-	} else if tx.Type() == ArbitrumLegacyTxType {
+		h = rlp.RlpHash(tx.inner)
+	} else if tx.Type() == txn_types.ArbitrumLegacyTxType {
 		h = tx.inner.(*ArbitrumLegacyTxData).HashOverride
 	} else {
 		h = types.PrefixedRlpHash(tx.Type(), tx.inner)
@@ -567,7 +567,7 @@ func (s ArbTxs) EncodeIndex(i int, w *bytes.Buffer) {
 	// case ArbitrumLegacyTxType:
 	// arbData := tx.inner.(*ArbitrumLegacyTxData) //
 	// arbData.EncodeOnlyLegacyInto(w)
-	case ArbitrumLegacyTxType, types.LegacyTxType:
+	case txn_types.ArbitrumLegacyTxType, types.LegacyTxType:
 		rlp.Encode(w, tx.inner)
 	default:
 		tx.encodeTyped(w)

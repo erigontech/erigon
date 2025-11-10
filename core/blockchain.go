@@ -27,14 +27,13 @@ import (
 	"slices"
 	"time"
 
-	"golang.org/x/crypto/sha3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/arb/blocks"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -99,7 +98,7 @@ func ExecuteBlockEphemerally(
 	gasUsed := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	arbOsVersion := types.GetArbOSVersion(header, chainConfig)
+	arbOsVersion := blockstype.GetArbOSVersion(header, chainConfig)
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time(), arbOsVersion))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
@@ -197,7 +196,7 @@ func ExecuteBlockEphemerally(
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
-		LogsHash:    RlpHash(blockLogs),
+		LogsHash:    rlp.RlpHash(blockLogs),
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
 		GasUsed:     math.HexOrDecimal64(*gasUsed),
@@ -255,13 +254,6 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 	}
 
 	logger.Info("marshalled receipts", "result", string(result))
-}
-
-func RlpHash(x interface{}) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
-	rlp.Encode(hw, x) //nolint:errcheck
-	hw.Sum(h[:0])
-	return h
 }
 
 func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {

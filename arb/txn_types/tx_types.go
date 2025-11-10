@@ -1,4 +1,4 @@
-package txn
+package txn_types
 
 // Transaction types.
 const (

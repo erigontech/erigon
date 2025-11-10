@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/txn"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -340,7 +341,7 @@ func (api *APIImpl) fillArbClassicL1BlockNumber(ctx context.Context, block *type
 	for {
 		transactions := block.Transactions()
 		if len(transactions) > 0 {
-			legacyTx, ok := transactions[0].(*types.ArbitrumLegacyTxData)
+			legacyTx, ok := transactions[0].(*txn.ArbitrumLegacyTxData)
 			if !ok {
 				return 0, fmt.Errorf("couldn't read legacy transaction from block %d", blockNum)
 			}
