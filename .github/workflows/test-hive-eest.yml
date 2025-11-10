@@ -131,6 +131,7 @@ jobs:
           fi
           echo "All tests passed successfully."
 
+      # TODO(yperbasis): add consume-rlp checks
 
 
       # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)

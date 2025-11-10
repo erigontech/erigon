@@ -67,7 +67,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testMatcher)
-	dir := filepath.Join(eestDir, "blockchain_tests")
+	dir := eestDir
 
 	// Slow tests
 	bt.slow(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)

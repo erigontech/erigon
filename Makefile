@@ -296,7 +296,8 @@ eest-hive:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-rlp,"id:tests/berlin/eip2930_access_list/test_tx_intrinsic_gas.py::test_tx_intrinsic_gas[fork_Paris-tx_type_2-blockchain_test_from_state_test-below_intrinsic_False-access_list_2_address_empty_keys-data_1_non_zero_byte]",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_stable.tar.gz)
+
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
