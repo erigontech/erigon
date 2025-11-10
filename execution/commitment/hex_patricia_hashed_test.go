@@ -2084,7 +2084,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		// 2 accounts with prefix 56
 		plainKeys56, hashedKeys56 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 2, 2)
 		// 1 account with prefix 52789, will result in extension key 789...
-		plainKeys52789, hashedKeys52789 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0x8, 0x9}, length.Addr, 2, 1)
+		plainKeys52789, hashedKeys52789 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0x8, 0x9}, length.Addr, 5, 1)
 
 		// 2 accounts with prefix 7
 		plainKeys7, hashedKeys7 := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 1, 2)
@@ -2111,6 +2111,49 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		}
 		// add a storage slot to spice up the test case
 		builder.Storage(common.Bytes2Hex(plainKeys52789[0]), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+		buildTrieAndWitness(t, builder, addrToProve)
+	})
+
+	t.Run("NonExistentAccountProofShortNodeToFullNode", func(t *testing.T) {
+		t.Logf("NonExistentAccountProofShortNodeToFullNode")
+		// 2 accounts with prefix 54
+		plainKeys54, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 2, 2)
+		// 2 accounts with prefix 56
+		plainKeys56, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 2, 2)
+		// 2 accounts with prefix 527a
+		plainKeys527a, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0xa}, length.Addr, 5, 2)
+		// 2 accounts with prefix 527b
+		plainKeys527b, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0xb}, length.Addr, 5, 2)
+		// 2 accounts with prefix 527c
+		plainKeys527c, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0xc}, length.Addr, 5, 2)
+		// this results in 7 extension key pointing to a branch node (with children at nibbles a,b,c)
+		// 2 accounts with prefix 7
+		plainKeys7, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 1, 2)
+
+		// 2 accounts with prefix 9
+		plainKeys9, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Addr, 1, 2)
+
+		plainKeysList := append([][]byte(nil), plainKeys527a...)
+		plainKeysList = append(plainKeysList, plainKeys527b...)
+		plainKeysList = append(plainKeysList, plainKeys527c...)
+		plainKeysList = append(plainKeysList, plainKeys54...)
+		plainKeysList = append(plainKeysList, plainKeys56...)
+		plainKeysList = append(plainKeysList, plainKeys7...)
+		plainKeysList = append(plainKeysList, plainKeys9...)
+
+		// generate non existent account key adjacent to the extension node leading to a branch node
+		// e.g. key with prefix 0x52f will diverge at nibble f
+		// but the ShortNode{Key:7..., Val: HashNode{branchNodeHash}} should still be in the proof
+		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0xf}, 20)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+		// add a storage slot to spice up the test case
+		builder.Storage(common.Bytes2Hex(plainKeys527a[0]), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
 
 		buildTrieAndWitness(t, builder, addrToProve)
 	})
