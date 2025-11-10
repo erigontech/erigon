@@ -1850,21 +1850,27 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
+func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
+	plainKey = make([]byte, keyLen)
+	for {
+		randMu.Lock()
+		randSrc.Read(plainKey[:keyLen]) // read random key
+		randMu.Unlock()
+		hashedKey := KeyToNibblizedHash(plainKey)
+		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
+			// found key with desired hashed prefix, return result
+			return plainKey, hashedKey
+		}
+	}
+}
+
 // longer prefixLen - harder to find required keys
-func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefix []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
+func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefixNibbles []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
 	tb.Helper()
 	plainKeys = make([][]byte, 0, keyCount)
 	hashedKeys = make([][]byte, 0, keyCount)
 	for {
-		key := make([]byte, keyLen)
-		if constPrefix != nil {
-			copy(key, constPrefix)
-		}
-		randMu.Lock()
-		randSrc.Read(key[len(constPrefix):])
-		randMu.Unlock()
-
-		hashed := KeyToNibblizedHash(key)
+		key, hashed := generateKeyWithHashedPrefix(constPrefixNibbles, keyLen)
 		if len(plainKeys) == 0 {
 			plainKeys = append(plainKeys, key)
 			hashedKeys = append(hashedKeys, hashed)
@@ -2035,5 +2041,39 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		}
 
 		buildTrieAndWitness(t, builder, addrWithSingleton)
+	})
+
+	t.Run("NonExistentAccountProofBranchNodesOnly", func(t *testing.T) {
+		t.Logf("NonExistentAccountProofBranchNodesOnly")
+		// 2 accounts with nibbles 54
+		plainKeys54, hashedKeys54 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 1, 2)
+		// 2 accounts with nibbles 56
+		plainKeys56, hashedKeys56 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 1, 2)
+		// 1 account with nibbles 52
+		plainKeys52, hashedKeys52 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2}, length.Addr, 1, 1)
+
+		// 2 accounts with nibble 7
+		plainKeys7, hashedKeys7 := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 1, 2)
+
+		// 2 accounts with nibble 9
+		plainKeys9, hashedKeys9 := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Addr, 1, 2)
+
+		_, _, _, _, _ = hashedKeys7, hashedKeys9, hashedKeys52, hashedKeys54, hashedKeys56
+
+		plainKeysList := append([][]byte(nil), plainKeys52...)
+		plainKeysList = append(plainKeysList, plainKeys54...)
+		plainKeysList = append(plainKeysList, plainKeys56...)
+		plainKeysList = append(plainKeysList, plainKeys7...)
+		plainKeysList = append(plainKeysList, plainKeys9...)
+
+		// generate non existent account key (e.g. with hashed prefix 53)
+		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x3}, 20)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+		buildTrieAndWitness(t, builder, addrToProve)
 	})
 }

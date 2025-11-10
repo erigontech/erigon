@@ -1197,106 +1197,106 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	return accountNode, nil
 }
 
-func readBranchData(hph *HexPatriciaHashed, key []byte) ([16]*cell, error) {
-	var rowData [16]*cell
-	compactKey := hexNibblesToCompactBytes(key)
-	branchData, _, err := hph.ctx.Branch(compactKey)
-	if err != nil {
-		return rowData, err
-	}
-	if branchData == nil {
-		return rowData, fmt.Errorf("empty branch data for key %x", compactKey)
-	}
-	bd := BranchData(branchData)
-	_, _, rowData, err = bd.decodeCells()
-	if err != nil {
-		return rowData, err
-	}
-	return rowData, nil
-}
+// func readBranchData(hph *HexPatriciaHashed, key []byte) ([16]*cell, error) {
+// 	var rowData [16]*cell
+// 	compactKey := hexNibblesToCompactBytes(key)
+// 	branchData, _, err := hph.ctx.Branch(compactKey)
+// 	if err != nil {
+// 		return rowData, err
+// 	}
+// 	if branchData == nil {
+// 		return rowData, fmt.Errorf("empty branch data for key %x", compactKey)
+// 	}
+// 	bd := BranchData(branchData)
+// 	_, _, rowData, err = bd.decodeCells()
+// 	if err != nil {
+// 		return rowData, err
+// 	}
+// 	return rowData, nil
+// }
 
-// number of non-empty cells in a row
-func nCells(rowData [16]*cell) int {
-	var count int = 0
-	for i := 0; i < 16; i++ {
-		if !rowData[i].IsEmpty() {
-			count++
-		}
-	}
-	return count
-}
+// // number of non-empty cells in a row
+// func nCells(rowData [16]*cell) int {
+// 	var count int = 0
+// 	for i := 0; i < 16; i++ {
+// 		if !rowData[i].IsEmpty() {
+// 			count++
+// 		}
+// 	}
+// 	return count
+// }
 
-// first index in row where the cell is not empty
-func firstNonEmptyIdx(rowData [16]*cell) int {
-	for i := 0; i < 16; i++ {
-		if !rowData[i].IsEmpty() {
-			return i
-		}
-	}
-	return -1
-}
+// // first index in row where the cell is not empty
+// func firstNonEmptyIdx(rowData [16]*cell) int {
+// 	for i := 0; i < 16; i++ {
+// 		if !rowData[i].IsEmpty() {
+// 			return i
+// 		}
+// 	}
+// 	return -1
+// }
 
-func terminalRowToFullNode(hph *HexPatriciaHashed, rowData [16]*cell, depth int16) (*trie.FullNode, error) {
-	var fullNode trie.FullNode
-	for i := 0; i < 16; i++ {
-		c := rowData[i]
-		if c.IsEmpty() {
-			fullNode.Children[i] = nil
-		} else if c.hashLen > 0 { // hash nod
-			fullNode.Children[i] = trie.NewHashNode(c.hash[:c.hashLen])
-		} else if c.accountAddrLen > 0 { // account node
-			addrHash := KeyToHexNibbleHash(c.accountAddr[:c.accountAddrLen])
-			accNode, err := hph.witnessCreateAccountNode(c, depth, addrHash, nil)
-			if err != nil {
-				return nil, err
-			}
-			fullNode.Children[i] = accNode
-		} else if c.storageAddrLen > 0 { // storage node
-			storageUpdate, err := hph.ctx.Storage(c.storageAddr[:c.storageAddrLen])
-			if err != nil {
-				return nil, err
-			}
-			storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
-			fullNode.Children[i] = storageValueNode
-		} else if c.hashedExtLen > 0 { // extension node, but we don't have the hash, we would need to traverse further. Throw error for now
-			return nil, fmt.Errorf("unexpected cell with hashedExtKey=%x", c.hashedExtension[:c.hashedExtLen])
-		}
-	}
-	return &fullNode, nil
-}
+// func terminalRowToFullNode(hph *HexPatriciaHashed, rowData [16]*cell, depth int16) (*trie.FullNode, error) {
+// 	var fullNode trie.FullNode
+// 	for i := 0; i < 16; i++ {
+// 		c := rowData[i]
+// 		if c.IsEmpty() {
+// 			fullNode.Children[i] = nil
+// 		} else if c.hashLen > 0 { // hash nod
+// 			fullNode.Children[i] = trie.NewHashNode(c.hash[:c.hashLen])
+// 		} else if c.accountAddrLen > 0 { // account node
+// 			addrHash := KeyToHexNibbleHash(c.accountAddr[:c.accountAddrLen])
+// 			accNode, err := hph.witnessCreateAccountNode(c, depth, addrHash, nil)
+// 			if err != nil {
+// 				return nil, err
+// 			}
+// 			fullNode.Children[i] = accNode
+// 		} else if c.storageAddrLen > 0 { // storage node
+// 			storageUpdate, err := hph.ctx.Storage(c.storageAddr[:c.storageAddrLen])
+// 			if err != nil {
+// 				return nil, err
+// 			}
+// 			storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
+// 			fullNode.Children[i] = storageValueNode
+// 		} else if c.hashedExtLen > 0 { // extension node, but we don't have the hash, we would need to traverse further. Throw error for now
+// 			return nil, fmt.Errorf("unexpected cell with hashedExtKey=%x", c.hashedExtension[:c.hashedExtLen])
+// 		}
+// 	}
+// 	return &fullNode, nil
+// }
 
-func terminalRowToNode(hph *HexPatriciaHashed, rowData [16]*cell, depth int16) (trie.Node, error) {
-	var terminalNode trie.Node
-	var err error
-	nrCells := nCells(rowData)
-	if nrCells > 1 { // branch node
-		terminalNode, err = terminalRowToFullNode(hph, rowData, depth)
-		if err != nil {
-			return nil, err
-		}
-	} else if nrCells == 1 {
-		idx := firstNonEmptyIdx(rowData)
-		c := rowData[idx]
-		if c.hashLen > 0 { // HashNode
-			terminalNode = trie.NewHashNode(c.hash[:c.hashLen])
-		} else if c.accountAddrLen > 0 { // AccountNode
-			addrHash := KeyToHexNibbleHash(c.accountAddr[:c.accountAddrLen])
-			terminalNode, err = hph.witnessCreateAccountNode(c, depth, addrHash, nil)
-			if err != nil {
-				return nil, err
-			}
-		} else if c.storageAddrLen > 0 { // Storage Value
-			storageUpdate, err := hph.ctx.Storage(c.storageAddr[:c.storageAddrLen])
-			if err != nil {
-				return nil, err
-			}
-			terminalNode = trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
-		} else {
-			return nil, fmt.Errorf("unexpected type of terminal cell %s", c)
-		}
-	}
-	return terminalNode, nil
-}
+// func terminalRowToNode(hph *HexPatriciaHashed, rowData [16]*cell, depth int16) (trie.Node, error) {
+// 	var terminalNode trie.Node
+// 	var err error
+// 	nrCells := nCells(rowData)
+// 	if nrCells > 1 { // branch node
+// 		terminalNode, err = terminalRowToFullNode(hph, rowData, depth)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	} else if nrCells == 1 {
+// 		idx := firstNonEmptyIdx(rowData)
+// 		c := rowData[idx]
+// 		if c.hashLen > 0 { // HashNode
+// 			terminalNode = trie.NewHashNode(c.hash[:c.hashLen])
+// 		} else if c.accountAddrLen > 0 { // AccountNode
+// 			addrHash := KeyToHexNibbleHash(c.accountAddr[:c.accountAddrLen])
+// 			terminalNode, err = hph.witnessCreateAccountNode(c, depth, addrHash, nil)
+// 			if err != nil {
+// 				return nil, err
+// 			}
+// 		} else if c.storageAddrLen > 0 { // Storage Value
+// 			storageUpdate, err := hph.ctx.Storage(c.storageAddr[:c.storageAddrLen])
+// 			if err != nil {
+// 				return nil, err
+// 			}
+// 			terminalNode = trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
+// 		} else {
+// 			return nil, fmt.Errorf("unexpected type of terminal cell %s", c)
+// 		}
+// 	}
+// 	return terminalNode, nil
+// }
 
 // Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key
 func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
