@@ -1919,7 +1919,7 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	// t.Parallel()
 
-	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, plainKeyToWitness []byte) {
+	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, plainKeyToWitness []byte, keyExists bool) {
 		t.Helper()
 
 		ctx := context.Background()
@@ -1952,19 +1952,31 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
 		require.NotNil(t, rootWitness, "root witness should not be nil")
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
+
+		if keyExists { // to be checked only if key should exist
+			hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
+			require.NoError(t, err)
+			var gotValue bool
+			if len(plainKeyToWitness) == length.Addr {
+				_, gotValue = witnessTrie.GetAccount(hashedKeyWitnessed)
+			} else {
+				_, gotValue = witnessTrie.Get(hashedKeyWitnessed)
+			}
+			require.True(t, gotValue, "value not found in witness trie")
+		}
 	}
 
-	//t.Run("JustRoot", func(t *testing.T) {
-	//	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
-	//
-	//	addrWithSingleton := common.Copy(plainKeysList[0])
-	//	builder := NewUpdateBuilder()
-	//	for i := 0; i < len(plainKeysList); i++ {
-	//		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
-	//	}
-	//
-	//	buildTrieAndWitness(t, builder, addrWithSingleton)
-	//})
+	t.Run("JustRoot", func(t *testing.T) {
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
+
+		addrWithSingleton := common.Copy(plainKeysList[0])
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+
+		buildTrieAndWitness(t, builder, addrWithSingleton, true)
+	})
 	t.Run("RandomAccountsOnly", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
 
@@ -1974,7 +1986,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 		}
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 	t.Run("RandomAccountsOnlyWithCPrefix", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 4, 5)
@@ -1985,7 +1997,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 		}
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 
 	t.Run("RandomAccountsOnly-Many", func(t *testing.T) {
@@ -1997,7 +2009,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 		}
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 	t.Run("StorageSingleton", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
@@ -2018,7 +2030,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		// fmt.Printf("addrWithSingleton %x\n", addrWithSingleton)
 		// builder.Storage(common.Bytes2Hex(addrWithSingleton), "01044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 
 	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
@@ -2044,7 +2056,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			fmt.Printf("storage %x -> %x\n", storageKeysList[sl], storageKeysList[sl])
 		}
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 
 	t.Run("NonExistentAccountProofBranchNodesOnly", func(t *testing.T) {
@@ -2078,7 +2090,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 			fmt.Printf("addr %x\n", plainKeysList[i])
 		}
-		buildTrieAndWitness(t, builder, addrToProve)
+		buildTrieAndWitness(t, builder, addrToProve, false /* keyExists */)
 	})
 
 	t.Run("NonExistentAccountProofShortNodeToAccount", func(t *testing.T) {
@@ -2116,7 +2128,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		// add a storage slot to spice up the test case
 		builder.Storage(common.Bytes2Hex(plainKeys52789[0]), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
 
-		buildTrieAndWitness(t, builder, addrToProve)
+		buildTrieAndWitness(t, builder, addrToProve, false /* keyExists */)
 	})
 
 	t.Run("NonExistentAccountProofShortNodeToFullNode", func(t *testing.T) {
@@ -2159,7 +2171,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		// add a storage slot to spice up the test case
 		builder.Storage(common.Bytes2Hex(plainKeys527a[0]), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
 
-		buildTrieAndWitness(t, builder, addrToProve)
+		buildTrieAndWitness(t, builder, addrToProve, false /* keyExists */)
 	})
 
 	t.Run("SingletonStorage", func(t *testing.T) {
@@ -2185,7 +2197,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
 			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
 		}
-		buildTrieAndWitness(t, builder, fullStorageKeyToProve)
+		buildTrieAndWitness(t, builder, fullStorageKeyToProve, true)
 	})
 
 	// t.Run("StorageRootIsShortNode", func(t *testing.T) {
@@ -2256,7 +2268,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
 			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
 		}
-		buildTrieAndWitness(t, builder, fullStorageKeyToProve)
+		buildTrieAndWitness(t, builder, fullStorageKeyToProve, false)
 	})
 
 }

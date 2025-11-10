@@ -97,9 +97,9 @@ func commonPrefixLen(b1, b2 []byte) int {
 	return i
 }
 
-// compactKey takes a slice of nibbles and compacts them into the original byte slice.
+// CompactKey takes a slice of nibbles and compacts them into the original byte slice.
 // It returns an error if the input contains invalid nibbles (values > 0xF).
-func compactKey(nibbles []byte) ([]byte, error) {
+func CompactKey(nibbles []byte) ([]byte, error) {
 	// If the number of nibbles is odd, you might decide to handle it differently.
 	// For this example, we'll return an error.
 	if len(nibbles)%2 != 0 {
