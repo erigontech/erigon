@@ -712,7 +712,10 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	}
 	_, id1 := f.SubscribeReceipts(1, criteria1)
 
-	// Request should have empty TransactionHashes (subscribe to all)
+	// Request should have AllTransactions=true and empty TransactionHashes
+	if !lastFilterRequest.AllTransactions {
+		t.Error("1: expected AllTransactions to be true for subscribe-all")
+	}
 	if len(lastFilterRequest.TransactionHashes) != 0 {
 		t.Error("1: expected transaction hashes to be empty for subscribe-all")
 	}
@@ -723,10 +726,16 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	}
 	_, id2 := f.SubscribeReceipts(1, criteria2)
 
-	// Request should have empty array (because criteria1 subscribes to all)
-	// and txHash1 should be in the aggregated filter
-	if len(lastFilterRequest.TransactionHashes) != 0 {
-		t.Error("2: expected transaction hashes to be empty because one sub subscribes to all")
+	// Request should have AllTransactions=true and include txHash1
+	// Backend uses OR logic: send if (AllTransactions OR hash matches)
+	if !lastFilterRequest.AllTransactions {
+		t.Error("2: expected AllTransactions to be true")
+	}
+	if len(lastFilterRequest.TransactionHashes) != 1 {
+		t.Errorf("2: expected 1 transaction hash, got %d", len(lastFilterRequest.TransactionHashes))
+	}
+	if gointerfaces.ConvertH256ToHash(lastFilterRequest.TransactionHashes[0]) != txHash1 {
+		t.Error("2: expected transaction hash to match txHash1")
 	}
 
 	// Unsubscribe the first filter (subscribe-all)
