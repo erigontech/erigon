@@ -84,15 +84,18 @@ func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filter *ReceiptsFilter, 
 	a.subtractReceiptsFilters(filter)
 	filter.txHashes = make(map[common.Hash]int)
 
-	// Set allTxHashes based on AllTransactions flag
-	if filterReq.GetAllTransactions() {
+	// Empty TransactionHashes slice (not nil) means subscribe to all
+	txHashes := filterReq.GetTransactionHashes()
+	if txHashes != nil && len(txHashes) == 0 {
+		filter.allTxHashes = 1
+	} else if filterReq.GetAllTransactions() {
 		filter.allTxHashes = 1
 	} else {
 		filter.allTxHashes = 0
 	}
 
-	// Always process specific transaction hashes (OR logic with AllTransactions)
-	for _, txHash := range filterReq.GetTransactionHashes() {
+	// Process specific transaction hashes
+	for _, txHash := range txHashes {
 		filter.txHashes[gointerfaces.ConvertH256ToHash(txHash)] = 1
 	}
 
