@@ -1919,7 +1919,7 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	// t.Parallel()
 
-	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, addrToWitness []byte) {
+	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, plainKeyToWitness []byte) {
 		t.Helper()
 
 		ctx := context.Background()
@@ -1940,7 +1940,11 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 		defer toWitness.Close()
-		toWitness.TouchPlainKey(string(addrToWitness), nil, toProcess.TouchAccount)
+		if len(plainKeyToWitness) == length.Addr { // touch account
+			toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toProcess.TouchAccount)
+		} else {
+			toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toProcess.TouchStorage)
+		}
 
 		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "")
 		require.NoError(t, err)
@@ -2046,7 +2050,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	t.Run("NonExistentAccountProofBranchNodesOnly", func(t *testing.T) {
 		t.Logf("NonExistentAccountProofBranchNodesOnly")
 		// 2 accounts with prefix 54
-		plainKeys54, hashedKeys54 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 1, 2)
+		plainKeys54, hashedKeys54 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 2, 2)
 		// 2 accounts with prefix 56
 		plainKeys56, hashedKeys56 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 2, 2)
 		// 1 account with prefix 52
@@ -2067,7 +2071,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		plainKeysList = append(plainKeysList, plainKeys9...)
 
 		// generate non existent account key (e.g. with hashed prefix 53)
-		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x3}, 20)
+		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x3}, length.Addr)
 
 		builder := NewUpdateBuilder()
 		for i := 0; i < len(plainKeysList); i++ {
@@ -2102,7 +2106,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 		// generate non existent account key adjacent to the extension node leading to the account (e.g. with hashed prefix 527f)
 		// this key will diverge at nibble f, but the ShortNode{Key:789..., Val: HashNode{accountRef}} should still be in the proof
-		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0x7, 0xf}, 20)
+		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0x7, 0xf}, length.Addr)
 
 		builder := NewUpdateBuilder()
 		for i := 0; i < len(plainKeysList); i++ {
@@ -2145,7 +2149,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		// generate non existent account key adjacent to the extension node leading to a branch node
 		// e.g. key with prefix 0x52f will diverge at nibble f
 		// but the ShortNode{Key:7..., Val: HashNode{branchNodeHash}} should still be in the proof
-		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0xf}, 20)
+		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0xf}, length.Addr)
 
 		builder := NewUpdateBuilder()
 		for i := 0; i < len(plainKeysList); i++ {
@@ -2157,4 +2161,49 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 		buildTrieAndWitness(t, builder, addrToProve)
 	})
+
+	t.Run("NonExistentStorageProofBranchNodesOnly", func(t *testing.T) {
+		t.Logf("NonExistentAccountProofBranchNodesOnly")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+		// generate storage slots to be implanted on this account
+		// 2 storage slots with prefix 54
+		storageKeys54, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Hash, 2, 2)
+		// 2 storage slots with prefix 56
+		storageKeys56, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Hash, 2, 2)
+		// 1 storage slot with prefix 52
+		storageKeys52, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2}, length.Hash, 2, 1)
+
+		// 2 storage slots with prefix 7
+		storageKeys7, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Hash, 1, 2)
+
+		// 2 storage slots with prefix 9
+		storageKeys9, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Hash, 1, 2)
+
+		storagePlainKeysList := append([][]byte(nil), storageKeys52...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys54...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys56...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys7...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys9...)
+
+		// generate non existent storage key (e.g. with hashed prefix 53)
+		storageSlotToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x3}, length.Hash)
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storagePlainKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
+		}
+		buildTrieAndWitness(t, builder, fullStorageKeyToProve)
+	})
+
 }
