@@ -1169,7 +1169,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	account.Root = accountUpdate.Storage
 	account.CodeHash = accountUpdate.CodeHash
 
-	addrHash, err := compactKey(hashedKey[:64])
+	addrHash, err := CompactKey(hashedKey[:64])
 	if err != nil {
 		return nil, err
 	}
@@ -1305,7 +1305,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 	keyPos := int16(0) // current position in hashedKey (usually same as row, but could be different due to extension nodes)
 
 	if hph.root.hashedExtLen > 0 {
-		currentNode = &trie.ShortNode{Key: common.Copy(hph.root.hashedExtension[:hph.root.hashedExtLen]), Val: &trie.FullNode{}}
+		extKey := common.Copy(hph.root.hashedExtension[:hph.root.hashedExtLen])
+		if len(extKey) == 64 {
+			extKey = append(extKey, 0x10) // append terminator byte
+		}
+		currentNode = &trie.ShortNode{Key: extKey, Val: &trie.FullNode{}}
 		// currentNode = &trie.ShortNode{Val: &trie.FullNode{}}
 		rootNode = currentNode             // use root node as the current node
 		keyPos = hph.root.hashedExtLen - 1 // start from the end of the root extension
@@ -1323,12 +1327,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		// need to check node type along the key path
 		cellToExpand := &hph.grid[row][currentNibble]
 		// determine the next node
-		if hph.root.hashedExtLen > 0 && currentNode == rootNode {
-			currentNode = currentNode.(*trie.ShortNode).Val
-			keyPos++
-			continue
-
-		} else if cellToExpand.hashedExtLen > 0 { // extension cell
+		if cellToExpand.hashedExtLen > 0 { // extension cell
 			depthAdjusted := false
 			extKeyLength := cellToExpand.hashedExtLen
 			if hph.depths[row] < 64 && extKeyLength+hph.depths[row] > 64 { //&& cellToExpand.accountAddrLen > 0 {
