@@ -213,6 +213,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						//
 						// which iterates the list and prints it contents
 						//
+						CreateBAL(applyResult.BlockNum, applyResult.TxIO)
+
 						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
