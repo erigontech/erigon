@@ -957,6 +957,9 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 			default:
 				return fmt.Errorf("unknown tx type: %s at index %d", typeTx, idx)
 			}
+			if txData["hash"] == "0xf468d0b9e699ddeb7635108b9d9a1d970913fc8272e576d71d7c320897001cf4" {
+				log.Info("debug tx", "index", idx, "type", typeTx, "data", txData)
+			}
 
 			if receiptsEnabled && timeboostedTxTypes[typeTx] {
 				var receipt ReceiptJson
