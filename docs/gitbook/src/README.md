@@ -1,12 +1,7 @@
 ---
 description: 'Your Erigon Guide: Core Features, Setup Instructions, and Essential Links'
-cover: .gitbook/assets/1990x480_cover-2.png
-coverY: 0
 layout:
   width: default
-  cover:
-    visible: true
-    size: full
   title:
     visible: true
   description:
