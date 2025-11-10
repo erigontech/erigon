@@ -1516,13 +1516,13 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			if hph.trace {
 				fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
 			}
-		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 {
+		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && cellToExpand.storageAddrLen == 0 {
+			// if cellToExpan.storageAddLen == 0 then there is more expansion to do in the storage trie
 			if nextAccNode, ok := nextShortNode.Val.(*trie.AccountNode); ok {
 				nextNode = nextAccNode
 				if hph.trace {
 					fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
 				}
-				keyPos++
 			}
 		}
 		currentNode = nextNode
