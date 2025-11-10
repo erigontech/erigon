@@ -64,7 +64,7 @@ type TemporalMemBatch struct {
 
 	unwindToTxNum   uint64
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
-	
+
 	metrics *changeset.DomainMetrics
 }
 
@@ -281,7 +281,7 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.unwindToTxNum = unwindToTxNum
 	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
-	
+
 	if changeset != nil {
 		unwindChangeset = &[kv.DomainLen]map[string]kv.DomainEntryDiff{}
 
