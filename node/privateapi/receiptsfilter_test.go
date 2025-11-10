@@ -31,8 +31,8 @@ import (
 )
 
 var (
-	txHash1    = common.HexToHash("0xffc4978dfe7ab496f0158ae8916adae6ffd0c1fca4f09f7a7134556011357424")
-	txHash2    = common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	txHash1     = common.HexToHash("0xffc4978dfe7ab496f0158ae8916adae6ffd0c1fca4f09f7a7134556011357424")
+	txHash2     = common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 	txHash1H256 *typesproto.H256
 	txHash2H256 *typesproto.H256
 )
