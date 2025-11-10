@@ -17,7 +17,6 @@
 package rpchelper
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -34,7 +33,7 @@ type ReceiptsFilterAggregator struct {
 
 // ReceiptsFilter filters receipts by transaction hashes
 type ReceiptsFilter struct {
-	allTxHashes       int                                    // Counter: subscribe to all receipts if > 0
+	allTxHashes       int                                   // Counter: subscribe to all receipts if > 0
 	transactionHashes *concurrent.SyncMap[common.Hash, int] // Transaction hashes to filter, with ref count
 	sender            Sub[*remoteproto.SubscribeReceiptsReply]
 }
