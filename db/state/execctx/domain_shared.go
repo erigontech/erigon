@@ -177,7 +177,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
 }
 
-func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen]map[string]kv.DomainEntryDiff) {
+func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
 }
 

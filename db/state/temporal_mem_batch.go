@@ -64,7 +64,7 @@ type TemporalMemBatch struct {
 
 	unwindToTxNum   uint64
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
-
+	
 	metrics *changeset.DomainMetrics
 }
 
@@ -278,9 +278,25 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
 
-func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen]map[string]kv.DomainEntryDiff) {
+func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.unwindToTxNum = unwindToTxNum
-	sd.unwindChangeset = changeset
+	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+	
+	if changeset != nil {
+		unwindChangeset = &[kv.DomainLen]map[string]kv.DomainEntryDiff{}
+
+		for domain, changes := range changeset {
+			if unwindChangeset[domain] == nil {
+				unwindChangeset[domain] = map[string]kv.DomainEntryDiff{}
+			}
+
+			for _, change := range changes {
+				unwindChangeset[domain][change.Key[:len(change.Key)-8]] = change
+			}
+		}
+	}
+
+	sd.unwindChangeset = unwindChangeset
 }
 
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
