@@ -172,7 +172,10 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 		if sd.unwindChangeset != nil {
 			if values := sd.unwindChangeset[domain]; values != nil {
 				if value, ok := values[key]; ok {
-					return value.Value, kv.Step(binary.BigEndian.Uint64(value.PrevStepBytes)), true
+					if len(value.Value) == 0 {
+						return nil, kv.Step(^binary.BigEndian.Uint64(value.PrevStepBytes)), true
+					}
+					return value.Value, kv.Step(^binary.BigEndian.Uint64(value.PrevStepBytes)), true
 				}
 			}
 		}

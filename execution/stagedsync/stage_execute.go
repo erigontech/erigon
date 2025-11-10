@@ -283,6 +283,21 @@ func unwindExec3State(ctx context.Context,
 			}
 		}
 
+		commitmentDiffs := changeset[kv.CommitmentDomain]
+
+		if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.CommitmentDomain)) {
+			for _, entry := range commitmentDiffs {
+				if entry.Value == nil {
+					fmt.Printf("unwind (Block:%d,Tx:%d): commitment [%x] => [empty]\n", blockUnwindTo, txUnwindTo, entry.Key[:len(entry.Key)-8])
+				} else {
+					if entry.Key[:len(entry.Key)-8] == "state" {
+						fmt.Printf("unwind (Block:%d,Tx:%d): commitment [%s] => [%x]\n", blockUnwindTo, txUnwindTo, entry.Key[:len(entry.Key)-8], entry.Value)
+					} else {
+						fmt.Printf("unwind (Block:%d,Tx:%d): commitment [%x] => [%x]\n", blockUnwindTo, txUnwindTo, entry.Key[:len(entry.Key)-8], entry.Value)
+					}
+				}
+			}
+		}
 		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
