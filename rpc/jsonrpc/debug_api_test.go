@@ -557,8 +557,8 @@ func TestGetBadBlocks(t *testing.T) {
 		signer1 := types.MakeSigner(chainspec.Mainnet.Config, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
-				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
-				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number, testAddr, &u256.Num1, 1, &u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, &u256.Num1, 2, &u256.Num1, nil), *signer1),
 			},
 			Uncles: []*types.Header{{Extra: []byte("test header")}},
 		}

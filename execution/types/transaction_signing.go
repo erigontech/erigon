@@ -251,7 +251,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 				return common.Address{}, ErrInvalidChainId
 			}
 			V.Sub(&t.V, &sg.chainIDMul)
-			V.Sub(&V, u256.Num8)
+			V.Sub(&V, &u256.Num8)
 		}
 		R, S = &t.R, &t.S
 	case *AccessListTx:
@@ -267,7 +267,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		}
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
 		// 27 to become equivalent to unprotected Homestead signatures.
-		V.Add(&t.V, u256.Num27)
+		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
 	case *DynamicFeeTransaction:
 		if !sg.dynamicFee {
@@ -282,7 +282,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		}
 		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
-		V.Add(&t.V, u256.Num27)
+		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
 	case *BlobTx:
 		if !sg.blob {
@@ -297,7 +297,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		}
 		// ACL, DynamicFee, and blob txs are defined to use 0 and 1 as their recovery
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
-		V.Add(&t.V, u256.Num27)
+		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
 	case *SetCodeTransaction:
 		if !sg.setCode {
@@ -312,7 +312,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		}
 		// ACL, DynamicFee, blob, and setCode txs are defined to use 0 and 1 as their recovery
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
-		V.Add(&t.V, u256.Num27)
+		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
 	case *AccountAbstractionTransaction:
 		return txn.Sender(Signer{})
@@ -329,9 +329,9 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 	case *LegacyTx:
 		R, S, V = decodeSignature(sig)
 		if sg.chainID.IsZero() {
-			V.Add(V, u256.Num27)
+			V.Add(V, &u256.Num27)
 		} else {
-			V.Add(V, u256.Num35)
+			V.Add(V, &u256.Num35)
 			V.Add(V, &sg.chainIDMul)
 		}
 	case *DynamicFeeTransaction, *AccessListTx, *BlobTx, *SetCodeTransaction:
@@ -410,6 +410,6 @@ func DeriveChainId(v *uint256.Int) *uint256.Int {
 		}
 		return new(uint256.Int).SetUint64((v - 35) / 2)
 	}
-	r := new(uint256.Int).Sub(v, u256.Num35)
+	r := new(uint256.Int).Sub(v, &u256.Num35)
 	return r.Rsh(r, 1) // ÷2
 }

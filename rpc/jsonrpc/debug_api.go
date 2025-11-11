@@ -375,7 +375,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	result := &AccountResult{}
 	result.Balance.ToInt().Set(a.Balance.ToBig())
 	result.Nonce = hexutil.Uint64(a.Nonce)
-	result.CodeHash = a.CodeHash
+	result.CodeHash = a.CodeHash.Value()
 
 	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], minTxNum+txIndex)
 	if err != nil {

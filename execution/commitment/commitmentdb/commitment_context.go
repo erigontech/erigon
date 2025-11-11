@@ -623,9 +623,9 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 	u.Flags |= commitment.BalanceUpdate
 	u.Balance = acc.Balance
 
-	if ch := acc.CodeHash.Bytes(); len(ch) > 0 {
+	if !acc.CodeHash.IsZero() {
 		u.Flags |= commitment.CodeUpdate
-		u.CodeHash = acc.CodeHash
+		u.CodeHash = acc.CodeHash.Value()
 	}
 
 	if assert.Enable { // verify code hash from account encoding matches stored code
@@ -637,8 +637,8 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 			copy(u.CodeHash[:], crypto.Keccak256(code))
 			u.Flags |= commitment.CodeUpdate
 		}
-		if acc.CodeHash != u.CodeHash {
-			return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash.Bytes(), u.CodeHash[:])
+		if acc.CodeHash.Value() != u.CodeHash {
+			return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash, u.CodeHash[:])
 		}
 	}
 	return u, nil

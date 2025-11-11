@@ -284,7 +284,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (sd *TemporalMemBatch) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
+func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 	for key, changeSet := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))

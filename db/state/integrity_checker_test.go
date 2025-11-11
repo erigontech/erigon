@@ -23,7 +23,7 @@ func TestDependency(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions[*FilesItem](filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfs := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	dfs.Set(df1)
@@ -63,7 +63,7 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions[*FilesItem](filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfs := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	df3 := getPopulatedCommitmentFilesItem(t, dirs, 0, 2, true, logger)

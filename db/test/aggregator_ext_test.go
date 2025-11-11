@@ -94,7 +94,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		acc := accounts.Account{
 			Nonce:       txNum,
 			Balance:     *uint256.NewInt(1000000000000),
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -247,7 +247,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     uint256.Int{},
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -331,7 +331,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     uint256.Int{},
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -683,7 +683,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     *uint256.NewInt(txNum * 1e6),
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -849,7 +849,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			acc := accounts.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(txNum * 100_000),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -900,7 +900,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 				acc := accounts.Account{
 					Nonce:       txNum,
 					Balance:     *uint256.NewInt(txNum * 100_000),
-					CodeHash:    common.Hash{},
+					CodeHash:    accounts.EmptyCodeHash,
 					Incarnation: 0,
 				}
 				buf := accounts.SerialiseV3(&acc)

@@ -233,7 +233,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("can't get the current state")
 		}
 
-		balance, err := state.GetBalance(*args.From) // from can't be nil
+		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
 			return 0, err
 		}
@@ -273,7 +273,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if state == nil {
 			return 0, errors.New("can't get the current state")
 		}
-		codeSize, err := state.GetCodeSize(*args.To)
+		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
@@ -480,7 +480,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
-	proof.CodeHash = acc.CodeHash
+	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie
@@ -523,7 +523,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		res, _, err := reader.ReadAccountStorage(address, storageKey.Hash)
+		res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(storageKey.Hash))
 		if err != nil {
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
@@ -835,7 +835,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if reply.Found {
 				nonce = reply.Nonce + 1
 			} else {
-				a, err := stateReader.ReadAccountData(*args.From)
+				a, err := stateReader.ReadAccountData(accounts.InternAddress(*args.From))
 				if err != nil {
 					return nil, err
 				}
@@ -862,7 +862,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	excl[*args.From] = struct{}{}
 	excl[to] = struct{}{}
 	for _, pc := range precompiles {
-		excl[pc] = struct{}{}
+		excl[pc.Value()] = struct{}{}
 	}
 
 	// Create an initial tracer

@@ -33,7 +33,7 @@ func TestEmptyAccount(t *testing.T) {
 		Nonce:       100,
 		Balance:     *new(uint256.Int),
 		Root:        empty.RootHash, // extAccount doesn't have Root value
-		CodeHash:    empty.CodeHash, // extAccount doesn't have CodeHash value
+		CodeHash:    EmptyCodeHash,  // extAccount doesn't have CodeHash value
 		Incarnation: 5,
 	}
 
@@ -84,7 +84,7 @@ func TestAccountEncodeWithCode(t *testing.T) {
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 		Incarnation: 4,
 	}
 
@@ -105,7 +105,7 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 		Incarnation: 5,
 	}
 
@@ -126,7 +126,7 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        empty.RootHash, // extAccount doesn't have Root value
-		CodeHash:    empty.CodeHash, // extAccount doesn't have CodeHash value
+		CodeHash:    EmptyCodeHash,  // extAccount doesn't have CodeHash value
 		Incarnation: 5,
 	}
 
@@ -147,7 +147,7 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 		Nonce:       0,
 		Balance:     uint256.Int{},
 		Root:        common.HexToHash("123"),
-		CodeHash:    common.HexToHash("123"),
+		CodeHash:    InternCodeHash(common.HexToHash("123")),
 		Incarnation: 1,
 	}
 	encodedAccount := SerialiseV3(&a)
@@ -214,7 +214,7 @@ func TestIncarnationForEmptyAccount(t *testing.T) {
 		Nonce:       100,
 		Balance:     *new(uint256.Int),
 		Root:        empty.RootHash,
-		CodeHash:    empty.CodeHash,
+		CodeHash:    EmptyCodeHash,
 		Incarnation: 4,
 	}
 
@@ -250,7 +250,7 @@ func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 		Incarnation: 4,
 	}
 
@@ -271,7 +271,7 @@ func TestIncarnationWithNoIncarnation(t *testing.T) {
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 		Incarnation: 0,
 	}
 

@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -732,7 +733,7 @@ func NewDefaultStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
-	signatures *lru.ARCCache[common.Hash, common.Address],
+	signatures *lru.ARCCache[common.Hash, accounts.Address],
 	logger log.Logger,
 	tracer *tracers.Tracer,
 ) []*stagedsync.Stage {

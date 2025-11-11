@@ -80,7 +80,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     uint256.Int{},
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -191,7 +191,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(txNum * 1e6),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)

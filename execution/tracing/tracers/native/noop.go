@@ -24,10 +24,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func init() {
@@ -69,26 +69,27 @@ func (t *noopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpC
 
 func (t *noopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
 
-func (t *noopTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *noopTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 }
 
 func (t *noopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 }
 
-func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 }
 
 func (*noopTracer) OnTxEnd(receipt *types.Receipt, err error) {}
 
-func (*noopTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
+func (*noopTracer) OnBalanceChange(a accounts.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 }
 
-func (*noopTracer) OnNonceChange(a common.Address, prev, new uint64) {}
+func (*noopTracer) OnNonceChange(a accounts.Address, prev, new uint64) {}
 
-func (*noopTracer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
+func (*noopTracer) OnCodeChange(a accounts.Address, prevCodeHash accounts.CodeHash, prev []byte, codeHash accounts.CodeHash, code []byte) {
 }
 
-func (*noopTracer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {}
+func (*noopTracer) OnStorageChange(a accounts.Address, k accounts.StorageKey, prev, new uint256.Int) {
+}
 
 func (*noopTracer) OnLog(log *types.Log) {}
 

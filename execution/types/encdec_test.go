@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const RUNS = 1000 // for local tests increase this number
@@ -199,7 +200,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
 			ChainID: *tr.RandUint256(),
-			Address: tr.RandAddress(),
+			Address: accounts.InternAddress(tr.RandAddress()),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
 			R:       *tr.RandUint256(),

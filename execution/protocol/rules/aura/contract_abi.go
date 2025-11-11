@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura/contracts"
 )
@@ -36,7 +37,7 @@ func callBlockRewardAbi(contractAddr common.Address, syscall rules.SystemCall, b
 	if err != nil {
 		panic(err)
 	}
-	out, err := syscall(contractAddr, packed)
+	out, err := syscall(accounts.InternAddress(contractAddr), packed)
 	if err != nil {
 		panic(err)
 	}
@@ -65,7 +66,7 @@ func callBlockGasLimitAbi(contractAddr common.Address, syscall rules.SystemCall)
 	if err != nil {
 		panic(err)
 	}
-	out, err := syscall(contractAddr, packed)
+	out, err := syscall(accounts.InternAddress(contractAddr), packed)
 	if err != nil {
 		panic(err)
 	}
@@ -97,7 +98,7 @@ func getCertifier(registrar common.Address, syscall rules.SystemCall) *common.Ad
 	if err != nil {
 		panic(err)
 	}
-	out, err := syscall(registrar, packed)
+	out, err := syscall(accounts.InternAddress(registrar), packed)
 	if err != nil {
 		panic(err)
 	}

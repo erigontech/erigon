@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type DynamicFeeTransaction struct {
@@ -333,13 +334,19 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 
 // AsMessage returns the transaction as a core.Message.
 func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.To)
+	}
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         *tx.FeeCap,
 		tipCap:           *tx.TipCap,
 		feeCap:           *tx.FeeCap,
-		to:               tx.To,
+		to:               to,
 		amount:           *tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,
@@ -361,9 +368,12 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		msg.gasPrice.Set(tx.FeeCap)
 	}
 
-	var err error
-	msg.from, err = tx.Sender(s)
-	return &msg, err
+	if msgFrom, err := tx.Sender(s); err != nil {
+		return nil, err
+	} else {
+		msg.from = accounts.InternAddress(msgFrom)
+	}
+	return &msg, nil
 }
 
 // Hash computes the hash (but not for signatures!)

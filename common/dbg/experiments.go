@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
@@ -275,7 +276,7 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 var tracedBlocks map[uint64]struct{}
 var traceAllBlocks bool
 var tracedTxIndexes map[int64]struct{}
-var tracedAccounts map[common.Address]struct{}
+var tracedAccounts map[unique.Handle[common.Address]]struct{}
 
 var traceInit sync.Once
 
@@ -291,10 +292,10 @@ func initTraceMaps() {
 	for _, index := range TraceTxIndexes {
 		tracedTxIndexes[index] = struct{}{}
 	}
-	tracedAccounts = map[common.Address]struct{}{}
+	tracedAccounts = map[unique.Handle[common.Address]]struct{}{}
 	for _, account := range TraceAccounts {
 		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
-		tracedAccounts[common.HexToAddress(account)] = struct{}{}
+		tracedAccounts[unique.Make(common.HexToAddress(account))] = struct{}{}
 	}
 }
 
@@ -322,7 +323,7 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 	return true
 }
 
-func TraceAccount(addr common.Address) bool {
+func TraceAccount(addr unique.Handle[common.Address]) bool {
 	traceInit.Do(initTraceMaps)
 	if len(tracedAccounts) != 0 {
 		_, ok := tracedAccounts[addr]

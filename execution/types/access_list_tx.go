@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // AccessTuple is the element type of an access list.
@@ -412,13 +413,20 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 
 // AsMessage returns the transaction as a core.Message.
 func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Message, error) {
+	var txTo accounts.Address
+	if tx.To == nil {
+		txTo = accounts.NilAddress
+	} else {
+		txTo = accounts.InternAddress(*tx.To)
+	}
+
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         *tx.GasPrice,
 		tipCap:           *tx.GasPrice,
 		feeCap:           *tx.GasPrice,
-		to:               tx.To,
+		to:               txTo,
 		amount:           *tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,
@@ -431,9 +439,12 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 		return nil, errors.New("eip-2930 transactions require Berlin")
 	}
 
-	var err error
-	msg.from, err = tx.Sender(s)
-	return &msg, err
+	if msgFrom, err := tx.Sender(s); err != nil {
+		return nil, err
+	} else {
+		msg.from = accounts.InternAddress(msgFrom)
+	}
+	return &msg, nil
 }
 
 func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {

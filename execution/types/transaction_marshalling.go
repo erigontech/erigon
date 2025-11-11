@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -77,7 +78,7 @@ type JsonAuthorization struct {
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
 	a.ChainID = hexutil.Big(*authorization.ChainID.ToBig())
-	a.Address = authorization.Address
+	a.Address = authorization.Address.Value()
 	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
 
 	a.YParity = (hexutil.Uint64)(authorization.YParity)
@@ -88,7 +89,7 @@ func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAu
 
 func (a JsonAuthorization) ToAuthorization() (Authorization, error) {
 	auth := Authorization{
-		Address: a.Address,
+		Address: accounts.InternAddress(a.Address),
 		Nonce:   a.Nonce.Uint64(),
 	}
 	chainId, overflow := uint256.FromBig((*big.Int)(&a.ChainID))

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type CommonTx struct {
@@ -347,13 +348,19 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 
 // AsMessage returns the transaction as a core.Message.
 func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.To)
+	}
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         *tx.GasPrice,
 		tipCap:           *tx.GasPrice,
 		feeCap:           *tx.GasPrice,
-		to:               tx.To,
+		to:               to,
 		amount:           *tx.Value,
 		data:             tx.Data,
 		accessList:       nil,
@@ -362,9 +369,12 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		checkGas:         true,
 	}
 
-	var err error
-	msg.from, err = tx.Sender(s)
-	return &msg, err
+	if msgFrom, err := tx.Sender(s); err != nil {
+		return nil, err
+	} else {
+		msg.from = accounts.InternAddress(msgFrom)
+	}
+	return &msg, nil
 }
 
 func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {

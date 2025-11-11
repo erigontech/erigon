@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -65,9 +65,9 @@ func TestInterpreterReadonly(t *testing.T) {
 		env.interpreter = evmInterpreter
 
 		dummyContract := NewContract(
-			common.Address{},
-			common.Address{},
-			common.Address{},
+			accounts.ZeroAddress,
+			accounts.ZeroAddress,
+			accounts.ZeroAddress,
 			uint256.Int{},
 			c,
 		)
@@ -322,9 +322,9 @@ func TestReadonlyBasicCases(t *testing.T) {
 				env.interpreter = evmInterpreter
 
 				dummyContract := NewContract(
-					common.Address{},
-					common.Address{},
-					common.Address{},
+					accounts.ZeroAddress,
+					accounts.ZeroAddress,
+					accounts.ZeroAddress,
 					uint256.Int{},
 					c,
 				)
@@ -414,9 +414,9 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, uint64, er
 	*st.currentIdx++
 	c := NewJumpDestCache(16)
 	nextContract := *NewContract(
-		common.Address{},
-		common.Address{},
-		common.Address{},
+		accounts.ZeroAddress,
+		accounts.ZeroAddress,
+		accounts.ZeroAddress,
 		uint256.Int{},
 		c,
 	)

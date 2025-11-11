@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -70,7 +71,7 @@ func TestCommitStatesIndore(t *testing.T) {
 		Time:   1744000028,
 	}
 
-	contractAddr := common.HexToAddress("a1")
+	contractAddr := accounts.InternAddress(common.HexToAddress("a1"))
 
 	cr.EXPECT().GetHeaderByNumber(uint64(96)).Return(&types.Header{
 		Number: big.NewInt(96),
@@ -79,8 +80,8 @@ func TestCommitStatesIndore(t *testing.T) {
 	br.EXPECT().EventsWithinTime(gomock.Any(), time.Unix(1744000000-128, 0), time.Unix(1744000028-128, 0)).Return(
 		[]*types.Message{
 			types.NewMessage(
-				common.HexToAddress(""),
-				&contractAddr,
+				accounts.ZeroAddress,
+				contractAddr,
 				0,
 				uint256.NewInt(0),
 				0,
@@ -100,7 +101,7 @@ func TestCommitStatesIndore(t *testing.T) {
 
 	called := 0
 
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		require.Equal(t, contract, contractAddr)
 		called++
 
