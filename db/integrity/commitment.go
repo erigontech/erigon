@@ -574,11 +574,12 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
+	toTxNum := maxTxNum + 1
 	sd, err := execctx.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
-	sd.GetCommitmentCtx().SetHistoryStateReader(tx, maxTxNum)
+	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
 	err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
@@ -586,8 +587,8 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if sd.BlockNum() > blockNum {
 		return fmt.Errorf("commitment blockNum gt blockNum: %d > %d", sd.BlockNum(), blockNum)
 	}
-	if sd.TxNum() > maxTxNum {
-		return fmt.Errorf("commitment txNum gt maxTxNum: %d > %d", sd.TxNum(), maxTxNum)
+	if sd.TxNum() >= toTxNum {
+		return fmt.Errorf("commitment txNum gte maxTxNum: %d > %d", sd.TxNum(), toTxNum)
 	}
 	commitmentBlockMinTxNum, err := txNumsReader.Min(tx, sd.BlockNum())
 	if err != nil {
@@ -604,10 +605,13 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return fmt.Errorf("commitment txNum gt commitment block max txNum: %d > %d", sd.TxNum(), commitmentBlockMaxTxNum)
 	}
 	partialCommitment := sd.TxNum() < commitmentBlockMaxTxNum
+	fromTxNum := sd.TxNum() + 1
 	logger.Info(
 		"commitment recalc info",
+		"fromTxNum", fromTxNum,
+		"toTxNum", toTxNum,
 		"blockNum", blockNum,
-		"blockMaxTxNum", maxTxNum,
+		"maxTxNum", maxTxNum,
 		"commitmentBlockNum", sd.BlockNum(),
 		"commitmentTxNum", sd.TxNum(),
 		"commitmentBlockMinTxNum", commitmentBlockMinTxNum,
@@ -621,16 +625,15 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		}
 		logger.Debug("commitment touched key", args...)
 	}
-	touchToTxNum := maxTxNum + 1
-	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, sd.TxNum(), touchToTxNum, touchLoggingVisitor)
+	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, fromTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
-	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, sd.TxNum(), touchToTxNum, touchLoggingVisitor)
+	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, fromTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
-	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, sd.TxNum(), touchToTxNum, touchLoggingVisitor)
+	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, fromTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
