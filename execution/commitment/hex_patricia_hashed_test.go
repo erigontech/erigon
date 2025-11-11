@@ -2227,6 +2227,36 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		buildTrieAndWitness(t, builder, fullStorageKeyToProve, true /* keyExists */)
 	})
 
+	t.Run("StorageRootIsFullNode", func(t *testing.T) {
+		t.Logf("StorageRootIsFullNode")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+		// generate storage slots to be implanted on this account
+		// generate 5 keys with same prefix
+		storagePlainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Hash, 2, 5)
+		// generate 4 keys with different prefix
+		storageKeys3, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x3}, length.Hash, 1, 4)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys3...)
+		storageSlotToProve := common.Copy(storagePlainKeysList[0])
+
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storagePlainKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
+		}
+		buildTrieAndWitness(t, builder, fullStorageKeyToProve, true /* keyExists */)
+	})
+
 	t.Run("NonExistentStorageProofBranchNodesOnly", func(t *testing.T) {
 		t.Logf("NonExistentStorageProofBranchNodesOnly")
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
