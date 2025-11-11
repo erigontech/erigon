@@ -281,3 +281,7 @@ func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) 
 func (cc *ExecutionClientRpc) HasGapInSnapshots(ctx context.Context) bool {
 	panic("unimplemented")
 }
+
+func (cc *ExecutionClientRpc) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+	return nil, nil
+}
