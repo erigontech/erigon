@@ -378,7 +378,7 @@ func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interfa
 		// 	}
 	}
 	if effectiveGasPrice, ok := rawTx["effectiveGasPrice"].(string); ok {
-		tx.EffectiveGasPrice = uint256.MustFromHex(effectiveGasPrice).Uint64()
+		tx.EffectiveGasPrice = convertHexToBigInt(effectiveGasPrice).Uint64()
 	}
 	// if hashOverride, ok := rawTx["hashOverride"].(string); ok {
 	// 	tx.HashOverride = common.HexToHash(hashOverride)
