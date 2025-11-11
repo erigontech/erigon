@@ -27,10 +27,10 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
 	libchain "github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -46,9 +46,9 @@ func TestHeaderVerification(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlInfo)
 	m := mock.MockWithGenesisEngine(t, gspec, engine, false)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
-		t.Fatalf("genetate chain: %v", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
 	for i := 0; i < chain.Length(); i++ {
@@ -94,7 +94,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlInfo)
 	m := mock.MockWithGenesisEngine(t, gspec, engine, false)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}

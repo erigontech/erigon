@@ -53,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
@@ -67,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
@@ -594,7 +594,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	mock.StreamWg.Wait()
 
 	//app expecting that genesis will always be in db
-	c := &core.ChainPack{
+	c := &blockgen.ChainPack{
 		Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},
 		Blocks:   []*types.Block{mock.Genesis},
 		TopBlock: mock.Genesis,
@@ -722,7 +722,7 @@ func (ms *MockSentry) EnableLogs() {
 	ms.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
-func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
+func (ms *MockSentry) numberOfPoWBlocks(chain *blockgen.ChainPack) int {
 	if ms.ChainConfig.TerminalTotalDifficulty == nil {
 		return chain.Length()
 	}
@@ -730,7 +730,7 @@ func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
 }
 
 func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
-func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
+func (ms *MockSentry) insertPoWBlocks(chain *blockgen.ChainPack) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n == 0 {
 		// No Proof-of-Work blocks
@@ -816,7 +816,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	return nil
 }
 
-func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
+func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n >= chain.Length() {
 		return nil
@@ -854,7 +854,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	return nil
 }
 
-func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
+func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
 
 	if err := ms.insertPoWBlocks(chain); err != nil {
 		return err
@@ -905,4 +905,24 @@ func (ms *MockSentry) NewStateReader(tx kv.TemporalGetter) state.StateReader {
 
 func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return ms.BlockReader, blockio.NewBlockWriter()
+}
+
+func (ms *MockSentry) Current(tx kv.Tx) *types.Block {
+	if tx != nil {
+		b, err := ms.BlockReader.CurrentBlock(tx)
+		if err != nil {
+			panic(err)
+		}
+		return b
+	}
+	tx, err := ms.DB.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	b, err := ms.BlockReader.CurrentBlock(tx)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

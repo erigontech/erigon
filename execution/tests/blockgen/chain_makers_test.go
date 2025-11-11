@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package core_test
+package blockgen_test
 
 import (
 	"fmt"
@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -68,7 +68,7 @@ func TestGenerateChain(t *testing.T) {
 	// each block and adds different features to gen based on the
 	// block index.
 	signer := types.LatestSignerForChainID(nil)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, gen *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.
@@ -114,8 +114,8 @@ func TestGenerateChain(t *testing.T) {
 
 	st := state.New(m.NewStateReader(tx))
 
-	if big.NewInt(5).Cmp(current(m, tx).Number()) != 0 {
-		t.Errorf("wrong block number: %d", current(m, tx).Number())
+	if big.NewInt(5).Cmp(m.Current(tx).Number()) != 0 {
+		t.Errorf("wrong block number: %d", m.Current(tx).Number())
 	}
 	balance, err := st.GetBalance(addr1)
 	if err != nil {

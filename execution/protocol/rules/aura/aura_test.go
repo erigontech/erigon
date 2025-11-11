@@ -32,11 +32,11 @@ import (
 	"github.com/erigontech/erigon/execution/abi"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -78,7 +78,7 @@ func TestEmptyBlock(t *testing.T) {
 	headers[0] = header
 	blocks[0] = block
 
-	chain := &core.ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: block}
+	chain := &blockgen.ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: block}
 	err = m.InsertChain(chain)
 	require.NoError(err)
 }
@@ -125,18 +125,18 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		return fakeVal, err
 	}
 	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil, nil)
+		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil, nil)
 	})
 
 	invalidPreMergeHeader := validPreMergeHeader
 	invalidPreMergeHeader.GasLimit = 12_123456 //a different, wrong gasLimit
 	require.Panics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil)
+		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil)
 	})
 
 	invalidPostMergeHeader := invalidPreMergeHeader
 	invalidPostMergeHeader.Difficulty = big.NewInt(0) //zero difficulty detected as PoS
 	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil)
+		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil)
 	})
 }

@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -58,7 +58,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 	db := m.DB
 
 	// We need to generate as many blocks +1 as uncles
-	chain, _ := core.GenerateChain(chain.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *core.BlockGen) {
+	chain, _ := blockgen.GenerateChain(chain.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *blockgen.BlockGen) {
 		if n == uncles {
 			// Add transactions and stuff on the last block
 			for i := 0; i < transactions; i++ {

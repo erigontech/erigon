@@ -42,13 +42,13 @@ import (
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -138,7 +138,7 @@ func (b *SimulatedBackend) Close() {
 func (b *SimulatedBackend) Commit() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err := b.m.InsertChain(&core.ChainPack{
+	if err := b.m.InsertChain(&blockgen.ChainPack{
 		Headers:  []*types.Header{b.pendingHeader},
 		Blocks:   []*types.Block{b.pendingBlock},
 		TopBlock: b.pendingBlock,
@@ -164,7 +164,7 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blockChain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {})
+	blockChain, _ := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *blockgen.BlockGen) {})
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
@@ -775,7 +775,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	chain, err := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
@@ -820,7 +820,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	chain, err := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
@@ -835,7 +835,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	return nil
 }
 
-// callMsg implements core.Message to allow passing it as a transaction simulator.
+// callMsg implements blockgen.Message to allow passing it as a transaction simulator.
 type callMsg struct {
 	ethereum.CallMsg
 }
