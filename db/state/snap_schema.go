@@ -26,16 +26,22 @@ type SnapNameSchema interface {
 	DataTag() string
 	IndexTags() []string
 	AccessorList() statecfg.Accessors
-	Parse(filename string) (f *SnapInfo, ok bool)
+	Parse(baseFileName string) (f *SnapInfo, ok bool)
 
 	// these give out full filepath, not just filename
+	// if version.IsZero(), then current version is used
+	// if version.IsSearch(), then directory is searched for existing file (with any version in supported range)
 	DataFile(version statecfg.Version, from, to RootNum) string
-	AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint64) string // index or accessor file (recsplit typically)
-	BtIdxFile(version statecfg.Version, from, to RootNum) string                      // hack to pass params required for opening btree index
+	AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint16) string // index or accessor file (recsplit typically)
+	BtIdxFile(version statecfg.Version, from, to RootNum) string
 	ExistenceFile(version statecfg.Version, from, to RootNum) string
 
+	// metadata
 	AccessorIdxCount() uint64
 	DataDirectory() string
+
+	// hack, ideally doesn't belong here but
+	// is self contained info in file
 	DataFileCompression() seg.FileCompression
 }
 
@@ -47,10 +53,6 @@ type _fileMetadata struct {
 func (f *_fileMetadata) Folder() string  { return f.folder }
 func (f *_fileMetadata) Supported() bool { return f.supported }
 
-type BtIdxParams struct {
-	Compression seg.FileCompression
-}
-
 // per entity schema for e2 entities
 type E2SnapSchema struct {
 	stepSize uint64
@@ -59,7 +61,8 @@ type E2SnapSchema struct {
 	dataFileTag   string
 	indexFileTags []string
 
-	accessors statecfg.Accessors
+	accessors      statecfg.Accessors
+	currentVersion E2SnapSchemaVersion
 
 	// caches
 	dataFileMetadata      *_fileMetadata
@@ -68,29 +71,46 @@ type E2SnapSchema struct {
 	existenceFileMetadata *_fileMetadata
 }
 
+type E2SnapSchemaVersion struct {
+	DataFileVersion version.Versions
+	AccessorVersion version.Versions
+}
+
+func NewE2SnapSchemaVersion(dataVer, accessorVer version.Versions) E2SnapSchemaVersion {
+	return E2SnapSchemaVersion{
+		DataFileVersion: dataVer,
+		AccessorVersion: accessorVer,
+	}
+}
+
 var _ SnapNameSchema = (*E2SnapSchema)(nil)
 
-func NewE2SnapSchema(dirs datadir.Dirs, dataFileTag string) *E2SnapSchema {
-	return NewE2SnapSchemaWithStep(dirs, dataFileTag, []string{dataFileTag}, 1000)
+func NewE2SnapSchema(dirs datadir.Dirs, dataFileTag string, currentVersion E2SnapSchemaVersion) *E2SnapSchema {
+	return NewE2SnapSchemaWithStep(dirs, dataFileTag, []string{dataFileTag}, 1000, currentVersion)
 }
 
-func NewE2SnapSchemaWithIndexTag(dirs datadir.Dirs, dataFileTag string, indexFileTags []string) *E2SnapSchema {
-	return NewE2SnapSchemaWithStep(dirs, dataFileTag, indexFileTags, 1000)
+func NewE2SnapSchemaWithIndexTag(dirs datadir.Dirs, dataFileTag string, indexFileTags []string, currentVersion E2SnapSchemaVersion) *E2SnapSchema {
+	return NewE2SnapSchemaWithStep(dirs, dataFileTag, indexFileTags, 1000, currentVersion)
 }
 
-func NewE2SnapSchemaWithStep(dirs datadir.Dirs, dataFileTag string, indexFileTags []string, stepSize uint64) *E2SnapSchema {
+func NewE2SnapSchemaWithStep(dirs datadir.Dirs, dataFileTag string, indexFileTags []string, stepSize uint64, currentVersion E2SnapSchemaVersion) *E2SnapSchema {
+	return NewE2SnapSchemaWithStepAndDir(dirs.Snap, dataFileTag, indexFileTags, stepSize, currentVersion)
+}
+
+func NewE2SnapSchemaWithStepAndDir(dir string, dataFileTag string, indexFileTags []string, stepSize uint64, currentVersion E2SnapSchemaVersion) *E2SnapSchema {
 	return &E2SnapSchema{
-		stepSize:      stepSize,
-		dataFileTag:   dataFileTag,
-		indexFileTags: indexFileTags,
-		accessors:     statecfg.AccessorHashMap,
+		stepSize:       stepSize,
+		dataFileTag:    dataFileTag,
+		indexFileTags:  indexFileTags,
+		accessors:      statecfg.AccessorHashMap,
+		currentVersion: currentVersion,
 
 		dataFileMetadata: &_fileMetadata{
-			folder:    dirs.Snap,
+			folder:    dir,
 			supported: true,
 		},
 		indexFileMetadata: &_fileMetadata{
-			folder:    dirs.Snap,
+			folder:    dir,
 			supported: true,
 		},
 		btIdxFileMetadata:     &_fileMetadata{},
@@ -111,14 +131,14 @@ func (a *E2SnapSchema) AccessorList() statecfg.Accessors {
 }
 
 // fileName assumes no folderName in it
-func (s *E2SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
-	ext := filepath.Ext(fileName)
+func (s *E2SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
+	ext := filepath.Ext(baseFileName)
 	if ext != string(DataExtensionSeg) && ext != string(AccessorExtensionIdx) {
 		return nil, false
 	}
-	onlyName := fileName[:len(fileName)-len(ext)]
+	onlyName := baseFileName[:len(baseFileName)-len(ext)]
 	parts := strings.SplitN(onlyName, "-", 4)
-	res := &SnapInfo{Name: fileName, Ext: ext}
+	res := &SnapInfo{Name: baseFileName, Ext: ext}
 
 	if len(parts) < 4 {
 		return nil, ok
@@ -155,10 +175,16 @@ func (s *E2SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 }
 
 func (s *E2SnapSchema) DataFile(version statecfg.Version, from, to RootNum) string {
+	if version.IsZero() {
+		version = s.currentVersion.DataFileVersion.Current
+	}
 	return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg)))
 }
 
-func (s *E2SnapSchema) AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint64) string {
+func (s *E2SnapSchema) AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint16) string {
+	if version.IsZero() {
+		version = s.currentVersion.AccessorVersion.Current
+	}
 	return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx)))
 }
 
@@ -341,10 +367,10 @@ var _ SnapNameSchema = (*E3SnapSchema)(nil)
 var stateFileRegex = regexp.MustCompile("^v([0-9]+).([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
 // fileName assumes no folderName in it
-func (s *E3SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
-	info := &SnapInfo{Name: fileName}
+func (s *E3SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
+	info := &SnapInfo{Name: baseFileName}
 
-	subs := stateFileRegex.FindStringSubmatch(fileName)
+	subs := stateFileRegex.FindStringSubmatch(baseFileName)
 	if len(subs) != 7 {
 		return nil, false
 	}
@@ -391,7 +417,7 @@ func (s *E3SnapSchema) DataFile(version statecfg.Version, from, to RootNum) stri
 	return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataExtension))
 }
 
-func (s *E3SnapSchema) AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint64) string {
+func (s *E3SnapSchema) AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint16) string {
 	if !s.indexFileMetadata.supported {
 		panic(fmt.Sprintf("%s not supported for %s", statecfg.AccessorHashMap, s.dataFileTag))
 	}

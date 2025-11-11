@@ -939,6 +939,12 @@ func CheckBorChain(chainName string) bool {
 	return slices.Contains([]string{networkname.BorMainnet, networkname.Amoy, networkname.BorE2ETestChain2Val, networkname.BorDevnet}, chainName)
 }
 
+func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs) error {
+	//schema := snapshotsync.NewCaplinSchema(dirs, 1000, snapshotsync.MakeCaplinStateSnapshotsTypes(nil))
+	return nil
+
+}
+
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	var sum uint64
 	var maxTo uint64
@@ -1327,6 +1333,9 @@ func doPublishable(cliCtx *cli.Context) error {
 	}
 	// Iterate over all fies in dat.Snap
 	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
+		return err
+	}
+	if err := checkIfCaplinSnapshotsPublishable(dat); err != nil {
 		return err
 	}
 	// check if salt-state.txt and salt-blocks.txt exist
