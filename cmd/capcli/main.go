@@ -32,7 +32,7 @@ func main() {
 	// Call the Run() method of the selected parsed command.
 	err := ctx.Run(&Context{
 		kctx:    ctx,
-		Context: context.TODO(),
+		Context: context.Background(),
 	})
 	ctx.FatalIfErrorf(err)
 }
