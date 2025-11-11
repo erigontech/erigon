@@ -112,7 +112,7 @@ func TestGetBlobsV1(t *testing.T) {
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
-	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil, nil)
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
 	require.NoError(err)
@@ -153,7 +153,7 @@ func TestGetBlobsV2(t *testing.T) {
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
-	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil, nil)
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
 	require.NoError(err)

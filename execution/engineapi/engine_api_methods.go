@@ -3,6 +3,7 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -11,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/txnprovider"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -146,8 +148,8 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 // NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and inclusion list validation.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/fulu.md#engine_newpayloadv5
 func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionListTransactions []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionListTransactions, clparams.EIP7805Version)
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList types.InclusionList) (*engine_types.PayloadStatus, error) {
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList, clparams.EIP7805Version)
 }
 
 // Returns the node's code and commit details in a slice
@@ -211,7 +213,40 @@ func (e *EngineServer) GetInclusionListV1(ctx context.Context, parentHash common
 	if inclusionList := e.getInclusionList(parentHash); inclusionList != nil {
 		return &inclusionList, nil
 	}
+	e.logger.Debug("[GetInclusionListV1] Getting inclusion list from txnProvider", "parentHash", parentHash.Hex()[:16])
 
+	// Use ProvideTxns if available, otherwise fall back to txpool.Pending
+	if e.txnProvider != nil {
+		parentBlock := e.chainRW.GetHeaderByHash(ctx, parentHash)
+		if parentBlock == nil {
+			return nil, errors.New("parent block not found")
+		}
+		transactions, err := e.txnProvider.ProvideTxns(ctx,
+			txnprovider.WithParentBlockNum(parentBlock.Number.Uint64()),
+			txnprovider.WithAvailableRlpSpace(engine_helpers.MaxBytesPerInclusionList),
+		)
+		if err != nil {
+			return nil, err
+		}
+		e.logger.Debug("[GetInclusionListV1] Got transactions from txnProvider", "transactions", len(transactions))
+		// Filter out blob transactions (ProvideTxns may include them, but inclusion lists don't)
+		var filteredTransactions types.Transactions
+		for _, tx := range transactions {
+			if tx.Type() != types.BlobTxType {
+				filteredTransactions = append(filteredTransactions, tx)
+			}
+		}
+		e.logger.Debug("[GetInclusionListV1] Filtered transactions", "transactions", len(filteredTransactions))
+
+		result, err := types.ConvertTransactionstoInclusionList(filteredTransactions)
+		if err != nil {
+			return nil, err
+		}
+
+		return &result, nil
+	}
+
+	// Fallback to old method if txnProvider is not available
 	res, err := e.txpool.Pending(ctx, &emptypb.Empty{})
 	if err != nil {
 		return nil, err
@@ -269,4 +304,16 @@ func (e *EngineServer) getInclusionList(parentHash common.Hash) types.InclusionL
 		}
 	}
 	return nil
+}
+
+// Returns an array of execution payload bodies referenced by their block hashes
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
+func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
+	return e.getPayloadBodiesByHash(ctx, hashes)
+}
+
+// Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1
+func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
+	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
 }

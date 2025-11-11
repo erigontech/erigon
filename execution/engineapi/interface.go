@@ -31,7 +31,7 @@ type EngineAPI interface {
 	NewPayloadV2(context.Context, *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error)
 	NewPayloadV3(ctx context.Context, executionPayload *engine_types.ExecutionPayload, expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash) (*engine_types.PayloadStatus, error)
 	NewPayloadV4(ctx context.Context, executionPayload *engine_types.ExecutionPayload, expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error)
-	NewPayloadV5(ctx context.Context, executionPayload *engine_types.ExecutionPayload, expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionListTransactions []hexutil.Bytes) (*engine_types.PayloadStatus, error)
+	NewPayloadV5(ctx context.Context, executionPayload *engine_types.ExecutionPayload, expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList types.InclusionList) (*engine_types.PayloadStatus, error)
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error)
 	ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error)
 	ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error)

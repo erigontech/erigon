@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/jwt"
 	"github.com/erigontech/erigon-lib/log/v3"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -148,7 +149,7 @@ func (c *JsonRpcClient) NewPayloadV5(
 	expectedBlobHashes []common.Hash,
 	parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes,
-	inclusionListTransactions []hexutil.Bytes,
+	inclusionList types.InclusionList,
 ) (*enginetypes.PayloadStatus, error) {
 	return backoff.RetryWithData(func() (*enginetypes.PayloadStatus, error) {
 		var result enginetypes.PayloadStatus
@@ -160,7 +161,7 @@ func (c *JsonRpcClient) NewPayloadV5(
 			expectedBlobHashes,
 			parentBeaconBlockRoot,
 			executionRequests,
-			inclusionListTransactions,
+			inclusionList,
 		)
 		if err != nil {
 			return nil, err

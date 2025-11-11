@@ -75,24 +75,53 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 
 					// Validate inclusion list if EIP7805 (FOCIL) fork is active
 					if !se.isMining && se.cfg.chainConfig.IsEIP7805(txTask.Header.Time) {
+						validationStart := time.Now()
 						// Read the full block to get inclusion list transactions
 						block, err := se.cfg.blockReader.BlockByNumber(ctx, se.applyTx, txTask.BlockNum)
 						if err != nil {
+							se.logger.Error("[FOCIL] Failed to read block for inclusion list validation",
+								"block", txTask.BlockNum, "err", err)
 							return fmt.Errorf("failed to read block for inclusion list validation: %w", err)
 						}
 						if block != nil {
-							inclusionList := block.InclusionListTransactions()
-							if len(inclusionList) > 0 {
+							inclusionListTransactions := block.InclusionListTransactions()
+							if len(inclusionListTransactions) > 0 {
+								se.logger.Debug("[FOCIL] Validating inclusion list during sync",
+									"block", txTask.BlockNum,
+									"hash", block.Hash().Hex()[:16],
+									"inclusion_list_size", len(inclusionListTransactions),
+									"block_txns", len(block.Transactions()))
+
 								// Create state reader for validation using SharedDomains
 								stateReader := state.NewReaderV3(se.doms.AsGetter(se.applyTx))
 								ibs := state.New(stateReader)
 
-								if !core.ValidateInclusionListTransactions(inclusionList, block, se.cfg.chainConfig, ibs) {
+								if !core.ValidateInclusionListTransactions(inclusionListTransactions, block, se.cfg.chainConfig, ibs) {
+									se.logger.Warn("[FOCIL] Inclusion list validation failed during sync - rejecting block",
+										"block", txTask.BlockNum,
+										"hash", block.Hash().Hex()[:16],
+										"validation_time_ms", time.Since(validationStart).Milliseconds())
 									return fmt.Errorf("%w: block %d does not satisfy inclusion list constraints", consensus.ErrInvalidBlock, txTask.BlockNum)
 								}
-								se.logger.Debug("Inclusion list validation passed", "block", txTask.BlockNum, "inclusion_txns", len(inclusionList))
+								se.logger.Debug("[FOCIL] Inclusion list validation passed during sync",
+									"block", txTask.BlockNum,
+									"hash", block.Hash().Hex()[:16],
+									"inclusion_txns", len(inclusionListTransactions),
+									"validation_time_ms", time.Since(validationStart).Milliseconds())
+							} else {
+								se.logger.Debug("[FOCIL] No inclusion list transactions found during sync",
+									"block", txTask.BlockNum,
+									"hash", block.Hash().Hex()[:16])
 							}
+						} else {
+							se.logger.Debug("[FOCIL] Block not found during sync",
+								"block", txTask.BlockNum,
+								"hash", txTask.Header.Hash().Hex()[:16])
 						}
+					} else {
+						se.logger.Debug("[FOCIL] No inclusion list validation during sync",
+							"block", txTask.BlockNum,
+							"hash", txTask.Header.Hash().Hex()[:16])
 					}
 				}
 

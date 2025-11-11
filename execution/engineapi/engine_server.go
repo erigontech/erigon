@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
@@ -77,7 +78,8 @@ type EngineServer struct {
 	test                   bool
 	caplin                 bool // we need to send errors for caplin.
 	executionService       execution.ExecutionClient
-	txpool                 txpool.TxpoolClient // needed for getBlobs
+	txpool                 txpool.TxpoolClient     // needed for getBlobs
+	txnProvider            txnprovider.TxnProvider // for ProvideTxns
 	inclusionListItems     []*inclusionListItem
 	inclusionListItemsLock sync.RWMutex
 	chainRW                eth1_chain_reader.ChainReaderWriterEth1
@@ -126,6 +128,7 @@ func (e *EngineServer) Start(
 	eth rpchelper.ApiBackend,
 	txPool txpool.TxpoolClient,
 	mining txpool.MiningClient,
+	txnProvider txnprovider.TxnProvider,
 ) {
 	if !e.caplin {
 		e.engineLogSpamer.Start(ctx)
@@ -133,6 +136,7 @@ func (e *EngineServer) Start(
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
 	e.txpool = txPool
+	e.txnProvider = txnProvider
 
 	apiList := []rpc.API{
 		{
@@ -183,49 +187,9 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 	return nil
 }
 
-// validateInclusionList validates that the execution payload satisfies the inclusion list constraints
-func (s *EngineServer) validateInclusionList(payload *engine_types.ExecutionPayload, inclusionListTransactions []hexutil.Bytes) error {
-	if len(inclusionListTransactions) == 0 {
-		return nil // No inclusion list to validate
-	}
-
-	inclusionListTxHashes := make(map[common.Hash]bool)
-	for _, txBytes := range inclusionListTransactions {
-		// Decode the transaction to get its hash
-		inclusionTxns, err := types.ConvertInclusionListToTransactions([][]byte{txBytes})
-		if err != nil {
-			s.logger.Debug("Failed to decode inclusion list transaction", "err", err)
-			continue // Skip invalid transactions
-		}
-		for _, tx := range inclusionTxns {
-			inclusionListTxHashes[tx.Hash()] = true
-		}
-	}
-
-	payloadTxHashes := make(map[common.Hash]bool)
-	for _, txBytes := range payload.Transactions {
-		payloadTxns, err := types.ConvertInclusionListToTransactions([][]byte{txBytes})
-		if err != nil {
-			continue // skip invalid transactions
-		}
-		for _, tx := range payloadTxns {
-			payloadTxHashes[tx.Hash()] = true
-		}
-	}
-
-	// check that all inclusion list transactions are present in the payload
-	for txHash := range inclusionListTxHashes {
-		if !payloadTxHashes[txHash] {
-			return fmt.Errorf("inclusion list transaction %s not found in payload", txHash.Hex())
-		}
-	}
-
-	return nil
-}
-
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionListTransactions []hexutil.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList types.InclusionList, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -316,7 +280,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.EIP7805Version {
-		if inclusionListTransactions == nil {
+		if inclusionList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "inclusion list transactions missing"}
 		}
 	}
@@ -382,18 +346,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	if version >= clparams.FuluVersion && inclusionListTransactions != nil {
-		// validate inclusion list constraints
-		if err := s.validateInclusionList(req, inclusionListTransactions); err != nil {
-			s.logger.Warn("Inclusion list validation failed", "err", err)
-			return &engine_types.PayloadStatus{
-				Status:          engine_types.InclusionListUnsatisfiedStatus,
-				LatestValidHash: nil,
-				ValidationError: nil,
-			}, nil
-		}
-	}
-
 	possibleStatus, err := s.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
 	if err != nil {
 		return nil, err
@@ -407,6 +359,14 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+
+	if version >= clparams.EIP7805Version && inclusionList != nil {
+		inclusionListTxns, err := types.ConvertInclusionListToTransactions(inclusionList)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert inclusion list: %w", err)
+		}
+		block = block.WithInclusionListTransactions(inclusionListTxns)
+	}
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {

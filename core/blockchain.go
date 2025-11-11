@@ -161,9 +161,9 @@ func ExecuteBlockEphemerally(
 
 	// Validate inclusion list transactions for ephemeral execution
 	inclusionListValid := true
-	inclusionList := block.InclusionListTransactions()
-	if len(inclusionList) > 0 && chainConfig.IsEIP7805(header.Time) {
-		inclusionListValid = ValidateInclusionListTransactions(inclusionList, block, chainConfig, ibs)
+	inclusionListTransactions := block.InclusionListTransactions()
+	if len(inclusionListTransactions) > 0 {
+		inclusionListValid = ValidateInclusionListTransactions(inclusionListTransactions, block, chainConfig, ibs)
 		if !inclusionListValid && !vmConfig.StatelessExec {
 			return nil, fmt.Errorf("inclusion list constraints not satisfied for block %d", block.NumberU64())
 		}
@@ -445,7 +445,7 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 // ValidateInclusionListTransactions verifies that all transactions in the inclusion list
 // are either included in the block or cannot be appended at the end of the block.
 // Returns true if the block satisfies the inclusion list constraints.
-func ValidateInclusionListTransactions(inclusionList types.Transactions, block *types.Block, chainConfig *chain.Config, ibs *state.IntraBlockState) bool {
+func ValidateInclusionListTransactions(inclusionLisTransactions types.Transactions, block *types.Block, chainConfig *chain.Config, ibs *state.IntraBlockState) bool {
 	// Build a set of transaction hashes that are included in the block
 	includedTxs := make(map[common.Hash]bool)
 	for _, txn := range block.Transactions() {
@@ -456,32 +456,50 @@ func ValidateInclusionListTransactions(inclusionList types.Transactions, block *
 	gasLeft := block.GasLimit() - block.GasUsed()
 	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
 
+	// Statistics for logging
+	var (
+		alreadyIncluded   int
+		blobTxs           int
+		insufficientGas   int
+		invalidSender     int
+		insufficientFunds int
+		invalidNonce      int
+		shouldBeIncluded  []common.Hash
+	)
+
 	// Check each inclusion list transaction
-	for _, txn := range inclusionList {
+	for _, txn := range inclusionLisTransactions {
+		txHash := txn.Hash()
+
 		// Transaction is included - constraint satisfied
-		if includedTxs[txn.Hash()] {
+		if includedTxs[txHash] {
+			alreadyIncluded++
 			continue
 		}
 
 		// Blob transactions are not subject to inclusion list constraints
 		if txn.Type() == types.BlobTxType {
+			blobTxs++
 			continue
 		}
 
 		// Check if transaction cannot be included due to gas limit
 		if txn.GetGasLimit() > gasLeft {
+			insufficientGas++
 			continue
 		}
 
 		// Check sender validity
 		from, err := txn.Sender(*signer)
 		if err != nil {
+			invalidSender++
 			continue
 		}
 
 		// Check if transaction cannot be included due to insufficient balance
 		balance, err := ibs.GetBalance(from)
 		if err != nil {
+			invalidSender++
 			continue
 		}
 
@@ -490,22 +508,64 @@ func ValidateInclusionListTransactions(inclusionList types.Transactions, block *
 		cost.Add(cost, txn.GetValue())
 
 		if balance.Cmp(cost) < 0 {
+			insufficientFunds++
 			continue
 		}
 
 		// Check if transaction cannot be included due to incorrect nonce
 		nonce, err := ibs.GetNonce(from)
 		if err != nil {
+			invalidSender++
 			continue
 		}
 		if nonce != txn.GetNonce() {
+			invalidNonce++
 			continue
 		}
 
 		// Transaction could have been included but wasn't - validation fails
+		shouldBeIncluded = append(shouldBeIncluded, txHash)
+	}
+
+	if len(shouldBeIncluded) > 0 {
+		logCount := len(shouldBeIncluded)
+		if logCount > 5 {
+			logCount = 5
+		}
+		log.Warn("[FOCIL] Inclusion list validation failed - transactions should have been included",
+			"block", header.Number.Uint64(),
+			"hash", block.Hash().Hex()[:16],
+			"missing_count", len(shouldBeIncluded),
+			"missing_hashes", shouldBeIncluded[:logCount],
+			"stats", map[string]int{
+				"already_included":   alreadyIncluded,
+				"blob_txs":           blobTxs,
+				"insufficient_gas":   insufficientGas,
+				"invalid_sender":     invalidSender,
+				"insufficient_funds": insufficientFunds,
+				"invalid_nonce":      invalidNonce,
+				"should_be_included": len(shouldBeIncluded),
+			},
+			"gas_left", gasLeft,
+			"total_inclusion_list", len(inclusionLisTransactions),
+			"block_txns", len(block.Transactions()))
 		return false
 	}
 
 	// All transactions are either included or cannot be included
+	if len(inclusionLisTransactions) > 0 {
+		log.Debug("[FOCIL] Inclusion list validation passed",
+			"block", header.Number.Uint64(),
+			"hash", block.Hash().Hex()[:16],
+			"stats", map[string]int{
+				"already_included":   alreadyIncluded,
+				"blob_txs":           blobTxs,
+				"insufficient_gas":   insufficientGas,
+				"invalid_sender":     invalidSender,
+				"insufficient_funds": insufficientFunds,
+				"invalid_nonce":      invalidNonce,
+			},
+			"total_inclusion_list", len(inclusionLisTransactions))
+	}
 	return true
 }

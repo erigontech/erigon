@@ -1203,7 +1203,15 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
-		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
+		var txnProvider txnprovider.TxnProvider
+		if config.TxPool.Disable {
+			txnProvider = nil
+		} else if config.Shutter.Enabled {
+			txnProvider = s.shutterPool
+		} else {
+			txnProvider = s.txPool
+		}
+		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, txnProvider)
 	}
 
 	// Register the backend on the node
