@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
@@ -502,12 +503,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return false
 		}
 		addr := common.BytesToAddress(a)
-		for _, p := range t.activePrecompiles {
-			if p == addr {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(t.activePrecompiles, addr)
 	})
 	vm.Set("slice", func(slice goja.Value, start, end int) goja.Value {
 		b, err := t.fromBuf(vm, slice, false)
