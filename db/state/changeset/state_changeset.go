@@ -210,7 +210,7 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 					}
 				}
 			}
-			if i == int(kv.CommitmentDomain) /*&& dbg.TraceDomain(uint16(kv.CommitmentDomain))*/ {
+			if i == int(kv.CommitmentDomain) && dbg.TraceDomain(uint16(kv.CommitmentDomain)) {
 				for _, entry := range diffSet {
 					if entry.Value == nil {
 						fmt.Printf("diffset (Block:%d): commitment [%x] => [empty]\n", blockNumber, entry.Key[:len(entry.Key)-8])
