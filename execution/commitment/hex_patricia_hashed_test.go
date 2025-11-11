@@ -2301,4 +2301,49 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		buildTrieAndWitness(t, builder, fullStorageKeyToProve, false)
 	})
 
+	t.Run("NonExistentStorageProofShortNodeToValue", func(t *testing.T) {
+		t.Logf("NonExistentStorageProofShortNodeToValue")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+
+		// 2 storage slots with prefix 54
+		storageKeys54, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 2, 2)
+		// 2 storage slots with prefix 56
+		storageKeys56, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 2, 2)
+		// 1 account with prefix 52789, will result in extension key 789...
+		storageKeys52789, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0x8, 0x9}, length.Addr, 5, 1)
+
+		// 2 storage slots with prefix 7
+		storageKeys7, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 1, 2)
+
+		// 2 accounts with prefix 9
+		storageKeys9, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Addr, 1, 2)
+
+		storageKeysList := append([][]byte(nil), storageKeys52789...)
+		storageKeysList = append(storageKeysList, storageKeys54...)
+		storageKeysList = append(storageKeysList, storageKeys56...)
+		storageKeysList = append(storageKeysList, storageKeys7...)
+		storageKeysList = append(storageKeysList, storageKeys9...)
+
+		// generate non existent storage key (e.g. with hashed prefix 53)
+		storageSlotToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0x7, 0xf}, length.Hash)
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storageKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storageKeysList[sl], storageKeysList[sl])
+		}
+
+		buildTrieAndWitness(t, builder, addrToProve, false /* keyExists */)
+	})
+
 }
