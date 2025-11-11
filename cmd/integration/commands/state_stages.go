@@ -159,7 +159,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 		return err
 	}
 
-	_, engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig, logger1)
+	_, engine, vmConfig, stateStages := newSync(ctx, db, &miningConfig, logger1)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
 	tx, err := db.BeginTemporalRw(ctx)
@@ -173,8 +173,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 		return err
 	}
 	defer sd.Close()
-
-	quit := ctx.Done()
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -300,50 +298,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 			break
 		}
 
-		nextBlock, err := br.BlockByNumber(context.Background(), tx, execAtBlock+1)
-		if err != nil {
-			panic(err)
-		}
-
-		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common.Address{}) {
-			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
-			miner.MiningConfig.ExtraData = nextBlock.Extra()
-			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				err = stagedsync.SpawnMiningCreateBlockStage(s, sd, tx,
-					stagedsync.StageMiningCreateBlockCfg(db, miner, chainConfig, engine, nil, dirs.Tmp, br),
-					quit, logger)
-				if err != nil {
-					return err
-				}
-				miner.MiningBlock.Uncles = nextBlock.Uncles()
-				miner.MiningBlock.Header.Time = nextBlock.Time()
-				miner.MiningBlock.Header.GasLimit = nextBlock.GasLimit()
-				miner.MiningBlock.Header.Difficulty = nextBlock.Difficulty()
-				miner.MiningBlock.Header.Nonce = nextBlock.Nonce()
-				miner.MiningBlock.PreparedTxns = nextBlock.Transactions()
-				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
-				return err
-			})
-			//miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-			//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txns)
-			//debugprint.Receipts(miningWorld.Block.Receipts, receiptsInDB)
-			//return stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
-			//})
-
-			_ = miningStages.SetCurrentStage(stages.MiningCreateBlock)
-			if _, err := miningStages.Run(db, sd, tx, false /* firstCycle */, false); err != nil {
-				return err
-			}
-			tx.Rollback()
-			tx, err = db.BeginTemporalRw(context.Background())
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-			minedBlock := <-miner.MiningResultCh
-			checkMinedBlock(nextBlock, minedBlock.Block, chainConfig)
-		}
-
 		// Unwind all stages to `execStage - unwind` block
 		if unwind == 0 {
 			continue
@@ -389,7 +343,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil, logger)
+	_, engine, vmConfig, sync := newSync(ctx, db, nil, logger)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {

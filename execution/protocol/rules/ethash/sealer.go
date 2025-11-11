@@ -20,16 +20,11 @@
 package ethash
 
 import (
-	"bytes"
-	"context"
 	crand "crypto/rand"
-	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
 	"math/rand"
-	"net/http"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -70,21 +65,14 @@ func (ethash *Ethash) Seal(chain rules.ChainHeaderReader, block *types.BlockWith
 	return nil
 }
 
-// This is the timeout for HTTP requests to notify external miners.
-const remoteSealerTimeout = 1 * time.Second
-
 type remoteSealer struct {
 	works        map[common.Hash]*types.BlockWithReceipts
 	rates        map[common.Hash]hashrate
 	currentBlock *types.Block
 	currentWork  [4]string
-	notifyCtx    context.Context
-	cancelNotify context.CancelFunc // cancels all notification requests
-	reqWG        sync.WaitGroup     // tracks notification request goroutines
 
 	ethash       *Ethash
 	noverify     bool
-	notifyURLs   []string
 	results      chan<- *types.BlockWithReceipts
 	workCh       chan *sealTask   // Notification channel to push new work and relative result channel to remote sealer
 	fetchWorkCh  chan *sealWork   // Channel used for remote sealer to fetch mining work
@@ -125,14 +113,10 @@ type sealWork struct {
 	res  chan [4]string
 }
 
-func startRemoteSealer(ethash *Ethash, urls []string, noverify bool) *remoteSealer {
-	ctx, cancel := context.WithCancel(context.Background())
+func startRemoteSealer(ethash *Ethash, noverify bool) *remoteSealer {
 	s := &remoteSealer{
 		ethash:       ethash,
 		noverify:     noverify,
-		notifyURLs:   urls,
-		notifyCtx:    ctx,
-		cancelNotify: cancel,
 		works:        make(map[common.Hash]*types.BlockWithReceipts),
 		rates:        make(map[common.Hash]hashrate),
 		workCh:       make(chan *sealTask),
@@ -150,8 +134,6 @@ func startRemoteSealer(ethash *Ethash, urls []string, noverify bool) *remoteSeal
 func (s *remoteSealer) loop() {
 	defer func() {
 		s.ethash.config.Log.Trace("Ethash remote sealer is exiting")
-		s.cancelNotify()
-		s.reqWG.Wait()
 		close(s.exitCh)
 	}()
 
@@ -165,7 +147,6 @@ func (s *remoteSealer) loop() {
 			// Note same work can be past twice, happens when changing CPU threads.
 			s.results = work.results
 			s.makeWork(work.block)
-			s.notifyWork()
 
 		case work := <-s.fetchWorkCh:
 			// Return current mining work to remote miner.
@@ -238,48 +219,6 @@ func (s *remoteSealer) makeWork(blockWithReceipts *types.BlockWithReceipts) {
 	// Trace the seal work fetched by remote sealer.
 	s.currentBlock = block
 	s.works[hash] = blockWithReceipts
-}
-
-// notifyWork notifies all the specified mining endpoints of the availability of
-// new work to be processed.
-func (s *remoteSealer) notifyWork() {
-	work := s.currentWork
-
-	// Encode the JSON payload of the notification. When NotifyFull is set,
-	// this is the complete block header, otherwise it is a JSON array.
-	var blob []byte
-	if s.ethash.config.NotifyFull {
-		blob, _ = json.Marshal(s.currentBlock.Header())
-	} else {
-		blob, _ = json.Marshal(work)
-	}
-
-	s.reqWG.Add(len(s.notifyURLs))
-	for _, url := range s.notifyURLs {
-		go s.sendNotification(s.notifyCtx, url, blob, work)
-	}
-}
-
-func (s *remoteSealer) sendNotification(ctx context.Context, url string, json []byte, work [4]string) {
-	defer s.reqWG.Done()
-
-	req, err := http.NewRequest("POST", url, bytes.NewReader(json))
-	if err != nil {
-		s.ethash.config.Log.Warn("Can't create remote miner notification", "err", err)
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, remoteSealerTimeout)
-	defer cancel()
-	req = req.WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		s.ethash.config.Log.Warn("Failed to notify remote miner", "err", err)
-	} else {
-		s.ethash.config.Log.Trace("Notified remote miner", "miner", url, "hash", work[0], "target", work[2])
-		resp.Body.Close()
-	}
 }
 
 // submitWork verifies the submitted pow solution, returning
