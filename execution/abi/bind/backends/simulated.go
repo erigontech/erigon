@@ -835,7 +835,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	return nil
 }
 
-// callMsg implements blockgen.Message to allow passing it as a transaction simulator.
+// callMsg implements protocol.Message to allow passing it as a transaction simulator.
 type callMsg struct {
 	ethereum.CallMsg
 }
