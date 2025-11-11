@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/protocol/rules/misc"
@@ -412,37 +411,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
-	header := types.NewEmptyHeaderForAssembling()
-	header.Root = parent.Root
-	header.ParentHash = parent.Hash()
-	header.Number = new(big.Int).Add(parent.Number, common.Big1)
-	header.Difficulty = common.Big0
-	header.Time = timestamp
-
-	parentGasLimit := parent.GasLimit
-	// Set baseFee and GasLimit if we are on an EIP-1559 chain
-	if chainConfig.IsLondon(header.Number.Uint64()) {
-		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
-		if !chainConfig.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
-		}
-	}
-	if targetGasLimit != nil {
-		header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
-	} else {
-		header.GasLimit = parentGasLimit
-	}
-
-	if chainConfig.IsCancun(header.Time) {
-		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent, header.Time)
-		header.ExcessBlobGas = &excessBlobGas
-		header.BlobGasUsed = new(uint64)
-	}
-
-	return header
-}
-
 func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
 	var time uint64
 	if parent.Time() == 0 {
@@ -451,7 +419,7 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 
-	header := MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+	header := protocol.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
 	header.Coinbase = parent.Coinbase()
 	header.Difficulty = engine.CalcDifficulty(chain, time,
 		time-10,

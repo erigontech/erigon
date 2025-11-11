@@ -17,10 +17,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package protocol
 
 import (
+	"math/big"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // CalcGasLimit computes the gas limit of the next block after parent. It aims
@@ -38,4 +44,35 @@ func CalcGasLimit(parentGasLimit, desiredLimit uint64) uint64 {
 		return max(parentGasLimit-delta, desiredLimit)
 	}
 	return limit
+}
+
+func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
+	header := types.NewEmptyHeaderForAssembling()
+	header.Root = parent.Root
+	header.ParentHash = parent.Hash()
+	header.Number = new(big.Int).Add(parent.Number, common.Big1)
+	header.Difficulty = common.Big0
+	header.Time = timestamp
+
+	parentGasLimit := parent.GasLimit
+	// Set baseFee and GasLimit if we are on an EIP-1559 chain
+	if chainConfig.IsLondon(header.Number.Uint64()) {
+		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
+		if !chainConfig.IsLondon(parent.Number.Uint64()) {
+			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+		}
+	}
+	if targetGasLimit != nil {
+		header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
+	} else {
+		header.GasLimit = parentGasLimit
+	}
+
+	if chainConfig.IsCancun(header.Time) {
+		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent, header.Time)
+		header.ExcessBlobGas = &excessBlobGas
+		header.BlobGasUsed = new(uint64)
+	}
+
+	return header
 }
