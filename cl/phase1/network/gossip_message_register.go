@@ -7,6 +7,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/net/context"
 )
 
@@ -33,12 +34,16 @@ type serviceWrapper[T any] struct {
 	service services.Service[T]
 }
 
+func (w *serviceWrapper[T]) Names() []string {
+	return w.service.Names()
+}
+
 func (w *serviceWrapper[T]) IsMyGossipMessage(name string) bool {
 	return w.service.IsMyGossipMessage(name)
 }
 
-func (w *serviceWrapper[T]) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (any, error) {
-	return w.service.DecodeGossipMessage(data, version)
+func (w *serviceWrapper[T]) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (any, error) {
+	return w.service.DecodeGossipMessage(pid, data, version)
 }
 
 func (w *serviceWrapper[T]) ProcessMessage(ctx context.Context, subnet *uint64, msg any) error {
@@ -49,10 +54,16 @@ func (w *serviceWrapper[T]) ProcessMessage(ctx context.Context, subnet *uint64, 
 }
 
 func RegisterGossipService[T any](gm *GossipManager, service services.Service[T], conditions ...func(data *sentinelproto.GossipData, curVersion clparams.StateVersion) bool) {
-	gm.registeredServices = append(gm.registeredServices, gossipService{
-		service:    wrapService(service),
+	wrappedService := wrapService(service)
+	gossipSrv := gossipService{
+		service:    wrappedService,
 		conditions: conditions,
-	})
+	}
+	gm.registeredServices = append(gm.registeredServices, gossipSrv)
+
+	for _, name := range service.Names() {
+		gm.SubscribeGossip(name, gossipSrv)
+	}
 }
 
 // withBeginVersion returns a condition that checks if the current version is greater than or equal to the begin version
