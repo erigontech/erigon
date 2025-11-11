@@ -1307,7 +1307,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 	if hph.root.hashedExtLen > 0 {
 		extKey := common.Copy(hph.root.hashedExtension[:hph.root.hashedExtLen])
 		if len(extKey) == 64 {
-			extKey = append(extKey, 0x10) // append terminator byte
+			extKey = append(extKey, terminatorHexByte) // append terminator byte
 		}
 		currentNode = &trie.ShortNode{Key: extKey, Val: &trie.FullNode{}}
 		// currentNode = &trie.ShortNode{Val: &trie.FullNode{}}

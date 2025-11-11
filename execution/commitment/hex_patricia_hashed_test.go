@@ -2228,7 +2228,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	// })
 
 	t.Run("NonExistentStorageProofBranchNodesOnly", func(t *testing.T) {
-		t.Logf("NonExistentAccountProofBranchNodesOnly")
+		t.Logf("NonExistentStorageProofBranchNodesOnly")
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
 		addrToProve := common.Copy(plainKeysList[0])
