@@ -62,19 +62,3 @@
   * [Disclaimer](get-started/about/disclaimer.md)
   * [Donate](get-started/about/donate.md)
   * [How to reach us](get-started/about/how-to-reach-us.md)
-
-## Archive
-
-* [Fundamentals](archive/fundamentals.md)
-* [Getting Started](archive/getting-started.md)
-* [Installation](archive/installation/README.md)
-  * [Linux and macOS](archive/installation/linux-and-macos/README.md)
-    * [Pre-built binaries (Linux)](archive/installation/linux-and-macos/pre-built-binaries.md)
-    * [Build from source](archive/installation/linux-and-macos/build-erigon-from-source.md)
-  * [Windows](archive/installation/windows/README.md)
-    * [Native compilation](archive/installation/windows/windows-build-executables.md)
-    * [Windows Subsystem for Linux (WSL)](archive/installation/windows/windows-wsl.md)
-  * [Docker](archive/installation/docker.md)
-* [Staking](archive/staking.md)
-* [Monitoring](archive/monitoring/README.md)
-  * [Understanding dashboards](archive/monitoring/understanding-dashboards.md)
