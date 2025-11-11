@@ -111,7 +111,7 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 			vm.Write(accountChanges.Address, NoncePath, common.Hash{}, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
-			vm.Write(accountChanges.Address, BalancePath, common.Hash{}, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Data, true)
+			vm.Write(accountChanges.Address, CodePath, common.Hash{}, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Data, true)
 		}
 	}
 
