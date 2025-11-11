@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/builder"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -58,7 +58,7 @@ func TestEmptyBlock(t *testing.T) {
 	m := mock.MockWithGenesisEngine(t, genesis, engine, false)
 
 	time := uint64(1539016985)
-	header := protocol.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
+	header := builder.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
 	header.UncleHash = empty.UncleHash
 	header.TxHash = trie.EmptyRoot
 	header.ReceiptHash = trie.EmptyRoot

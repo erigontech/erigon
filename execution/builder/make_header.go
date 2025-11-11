@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package protocol
+package builder
 
 import (
 	"math/big"
@@ -28,23 +28,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-// CalcGasLimit computes the gas limit of the next block after parent. It aims
-// to keep the baseline gas close to the provided target, and increase it towards
-// the target if the baseline gas is lower.
-func CalcGasLimit(parentGasLimit, desiredLimit uint64) uint64 {
-	delta := parentGasLimit/params.GasLimitBoundDivisor - 1
-	limit := parentGasLimit
-	desiredLimit = max(desiredLimit, params.MinBlockGasLimit)
-	// If we're outside our allowed gas range, we try to hone towards them
-	if limit < desiredLimit {
-		return min(parentGasLimit+delta, desiredLimit)
-	}
-	if limit > desiredLimit {
-		return max(parentGasLimit-delta, desiredLimit)
-	}
-	return limit
-}
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
 	header := types.NewEmptyHeaderForAssembling()
@@ -63,7 +46,7 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 		}
 	}
 	if targetGasLimit != nil {
-		header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
+		header.GasLimit = misc.CalcGasLimit(parentGasLimit, *targetGasLimit)
 	} else {
 		header.GasLimit = parentGasLimit
 	}

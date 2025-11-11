@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -419,7 +420,7 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 
-	header := protocol.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
 	header.Coinbase = parent.Coinbase()
 	header.Difficulty = engine.CalcDifficulty(chain, time,
 		time-10,
