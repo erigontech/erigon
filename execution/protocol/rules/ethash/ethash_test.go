@@ -30,7 +30,7 @@ import (
 )
 
 func TestRemoteSealer(t *testing.T) {
-	ethash := NewTester(nil, false)
+	ethash := NewTester(false)
 	defer ethash.Close()
 
 	api := &API{ethash}
@@ -78,7 +78,7 @@ func TestHashRate(t *testing.T) {
 		expect   uint64
 		ids      = []common.Hash{common.HexToHash("a"), common.HexToHash("b"), common.HexToHash("c")}
 	)
-	ethash := NewTester(nil, false)
+	ethash := NewTester(false)
 	defer ethash.Close()
 
 	if tot := ethash.Hashrate(); tot != 0 {
@@ -102,7 +102,7 @@ func TestClosedRemoteSealer(t *testing.T) {
 		t.Skip()
 	}
 
-	ethash := NewTester(nil, false)
+	ethash := NewTester(false)
 	time.Sleep(1 * time.Second) // ensure exit channel is listening
 	_ = ethash.Close()
 
