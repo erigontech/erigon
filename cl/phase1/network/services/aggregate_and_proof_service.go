@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
@@ -105,16 +106,20 @@ func NewAggregateAndProofService(
 	return a
 }
 
+func (a *aggregateAndProofServiceImpl) Names() []string {
+	return []string{gossip.TopicNameBeaconAggregateAndProof}
+}
+
 func (a *aggregateAndProofServiceImpl) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBeaconAggregateAndProof
 }
 
-func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedAggregateAndProofForGossip, error) {
+func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedAggregateAndProofForGossip, error) {
 	obj := &SignedAggregateAndProofForGossip{
-		Receiver:                copyOfPeerData(data),
+		Receiver:                &sentinelproto.Peer{Pid: pid.String()},
 		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 	}
-	if err := obj.SignedAggregateAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SignedAggregateAndProof.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil

@@ -18,7 +18,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -63,13 +63,21 @@ func NewDataColumnSidecarService(
 	}
 }
 
+func (s *dataColumnSidecarService) Names() []string {
+	names := make([]string, 0, s.cfg.DataColumnSidecarSubnetCount)
+	for i := 0; i < int(s.cfg.DataColumnSidecarSubnetCount); i++ {
+		names = append(names, gossip.TopicNameDataColumnSidecar(uint64(i)))
+	}
+	return names
+}
+
 func (s *dataColumnSidecarService) IsMyGossipMessage(name string) bool {
 	return gossip.IsTopicDataColumnSidecar(name)
 }
 
-func (s *dataColumnSidecarService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.DataColumnSidecar, error) {
+func (s *dataColumnSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.DataColumnSidecar, error) {
 	obj := &cltypes.DataColumnSidecar{}
-	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedBLSToExecutionChangeForGossip type represents SignedBLSToExecutionChange with the gossip data where it's coming from.
@@ -66,16 +67,20 @@ func NewBLSToExecutionChangeService(
 	}
 }
 
+func (s *blsToExecutionChangeService) Names() []string {
+	return []string{gossip.TopicNameBlsToExecutionChange}
+}
+
 func (s *blsToExecutionChangeService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBlsToExecutionChange
 }
 
-func (s *blsToExecutionChangeService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedBLSToExecutionChangeForGossip, error) {
+func (s *blsToExecutionChangeService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedBLSToExecutionChangeForGossip, error) {
 	obj := &SignedBLSToExecutionChangeForGossip{
-		Receiver:                   copyOfPeerData(data),
+		Receiver:                   &sentinelproto.Peer{Pid: pid.String()},
 		SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
 	}
-	if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
