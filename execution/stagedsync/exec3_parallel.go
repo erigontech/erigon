@@ -26,9 +26,9 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/exec/calltracer"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
@@ -200,7 +200,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
+						if err := protocol.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
@@ -643,7 +643,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						syscall := func(contract common.Address, data []byte) ([]byte, error) {
-							ret, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 							if err != nil {
 								return nil, err
 							}
@@ -1087,8 +1087,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	if ibs.HadInvalidRead() || result.Err != nil {
-		if err, ok := result.Err.(core.ErrExecAbortError); !ok {
-			result.Err = core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+		if err, ok := result.Err.(protocol.ErrExecAbortError); !ok {
+			result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 		}
 	}
 
@@ -1146,7 +1146,7 @@ func (d *blockDuration) Add(i time.Duration) {
 type execRequest struct {
 	blockNum     uint64
 	blockHash    common.Hash
-	gasPool      *core.GasPool
+	gasPool      *protocol.GasPool
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
@@ -1202,7 +1202,7 @@ type blockExecutor struct {
 	// cummulative gas for this block
 	gasUsed     uint64
 	blobGasUsed uint64
-	gasPool     *core.GasPool
+	gasPool     *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -1217,7 +1217,7 @@ type blockExecutor struct {
 	exhausted   *ErrLoopExhausted
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
 		blockHash:    blockHash,
@@ -1245,7 +1245,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{res, nil}
 	if res.Err != nil {
-		if execErr, ok := res.Err.(core.ErrExecAbortError); ok {
+		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
 			if execErr.OriginError != nil && be.skipCheck[tx] {
 				// If the transaction failed when we know it should not fail, this means the transaction itself is
 				// bad (e.g. wrong nonce), and we should exit the execution immediately

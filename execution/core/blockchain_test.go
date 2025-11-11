@@ -59,6 +59,7 @@ import (
 var (
 	canonicalSeed = 1
 	forkSeed      = 2
+	triesInMemory = 128
 )
 
 // makeBlockChain creates a deterministic chain of blocks rooted at parent.
@@ -1214,7 +1215,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate shared chain: %v", err)
 	}
-	original, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*core.TriesInMemory, func(i int, b *core.BlockGen) {
+	original, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*triesInMemory, func(i int, b *core.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -1224,7 +1225,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate original chain: %v", err)
 	}
-	competitor, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*core.TriesInMemory+1, func(i int, b *core.BlockGen) {
+	competitor, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*triesInMemory+1, func(i int, b *core.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -1273,7 +1274,7 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6*core.TriesInMemory, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6*triesInMemory, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		b.OffsetTime(-9)
 	})
@@ -1281,7 +1282,7 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Generate fork chain, starting from an early block
-	fork, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11+8*core.TriesInMemory, func(i int, b *core.BlockGen) {
+	fork, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11+8*triesInMemory, func(i int, b *core.BlockGen) {
 		if i < 11 {
 			b.SetCoinbase(common.Address{1})
 			b.OffsetTime(-9)

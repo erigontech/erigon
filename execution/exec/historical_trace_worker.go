@@ -37,8 +37,8 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec/calltracer"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -66,7 +66,7 @@ type HistoricalTraceWorker struct {
 
 	execArgs *ExecArgs
 
-	taskGasPool *core.GasPool
+	taskGasPool *protocol.GasPool
 
 	// calculated by .changeBlock()
 	blockHash common.Hash
@@ -110,7 +110,7 @@ func NewHistoricalTraceWorker(
 		background:  background,
 		stateReader: state.NewHistoryReaderV3(),
 
-		taskGasPool: new(core.GasPool),
+		taskGasPool: new(protocol.GasPool),
 		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
@@ -191,7 +191,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
+			ret, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -216,7 +216,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 					return err
 				}
 
-				rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
+				rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, protocol.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
 				result := rw.execAATxn(txTask, tracer)
 				return result.Err
 			}
@@ -225,7 +225,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			if err != nil {
 				return err
 			}
-			txContext := core.NewEVMTxContext(msg)
+			txContext := protocol.NewEVMTxContext(msg)
 			if rw.vmCfg.TraceJumpDest {
 				txContext.TxHash = txn.Hash()
 			}
@@ -235,7 +235,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			}
 
 			// MA applytx
-			applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
+			applyRes, err := protocol.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 			if err != nil {
 				return err
 			} else {
@@ -488,7 +488,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 				ibs := state.New(reader)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					ret, err := core.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
+					ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
 						Tracer: result.TracingHooks(),
 					})
 					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
@@ -620,14 +620,14 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		f := core.GetHashFn(header, getHeaderFunc)
+		f := protocol.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
 		getHashFn := func(n uint64) (common.Hash, error) {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
+		blockContext := protocol.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &TxTask{

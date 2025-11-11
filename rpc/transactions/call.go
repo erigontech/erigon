@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -171,7 +171,7 @@ func DoCall(
 		blockOverrides.Override(&blockCtx)
 	}
 
-	txCtx := core.NewEVMTxContext(msg)
+	txCtx := protocol.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -182,8 +182,8 @@ func DoCall(
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func DoCall(
 func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineReader, header *types.Header, tx kv.Getter,
 	reader services.CanonicalReader, config *chain.Config, blockOverrides *BlockOverrides, blockHashOverrides BlockHashOverrides) evmtypes.BlockContext {
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
-	blockContext := core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
+	blockContext := protocol.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 	if blockOverrides != nil {
 		blockOverrides.OverrideBlockContext(&blockContext, blockHashOverrides)
 	}
@@ -208,7 +208,7 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineRea
 func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
 	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
-	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
+	return protocol.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 }
 
 type BlockHashProvider func(blockNum uint64) (common.Hash, error)
@@ -271,7 +271,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	r.message.ChangeGas(r.gasCap, newGas)
 
 	// reset the EVM so that we can continue to use it with the new context
-	txCtx := core.NewEVMTxContext(r.message)
+	txCtx := protocol.NewEVMTxContext(r.message)
 	if overrides == nil {
 		r.intraBlockState = state.New(r.stateReader)
 	}
@@ -284,9 +284,9 @@ func (r *ReusableCaller) DoCallWithNewGas(
 		timedOut = true
 	}()
 
-	gp := new(core.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
+	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
-	result, err := core.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */, engine)
+	result, err := protocol.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func NewReusableCaller(
 	if blockOverrides != nil {
 		blockOverrides.Override(&blockCtx)
 	}
-	txCtx := core.NewEVMTxContext(msg)
+	txCtx := protocol.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 

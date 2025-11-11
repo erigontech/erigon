@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -49,7 +50,7 @@ type BlockGen struct {
 	stateReader state.StateReader
 	ibs         *state.IntraBlockState
 
-	gasPool  *GasPool
+	gasPool  *protocol.GasPool
 	txs      []types.Transaction
 	receipts []*types.Receipt
 	uncles   []*types.Header
@@ -70,7 +71,7 @@ func (b *BlockGen) SetCoinbase(addr common.Address) {
 		panic("coinbase can only be set once")
 	}
 	b.header.Coinbase = addr
-	b.gasPool = new(GasPool).AddGas(b.header.GasLimit)
+	b.gasPool = new(protocol.GasPool).AddGas(b.header.GasLimit)
 }
 
 // SetExtra sets the extra data field of the generated block.
@@ -121,7 +122,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	receipt, _, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
 	}
@@ -137,7 +138,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	receipt, _, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -358,7 +359,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 		}
 		if b.engine != nil {
-			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, nil, logger, nil)
+			err := protocol.InitializeBlockExecution(b.engine, nil, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
@@ -374,7 +375,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
-			blockContext := NewEVMBlockContext(b.header, GetHashFn(b.header, nil), b.engine, nil, config)
+			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, nil, config)
 			if err := ibs.CommitBlock(blockContext.Rules(config), stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}

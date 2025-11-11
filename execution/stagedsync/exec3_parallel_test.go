@@ -24,8 +24,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -129,7 +129,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			val := result.Value()
 
 			if i == 0 && val != nil && (val.(int) != t.nonce) {
-				return &exec.TxResult{Err: core.ErrExecAbortError{
+				return &exec.TxResult{Err: protocol.ErrExecAbortError{
 					DependencyTxIndex: -1,
 					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
 			}
@@ -161,7 +161,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	if dep != -1 {
-		return &exec.TxResult{Err: core.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
+		return &exec.TxResult{Err: protocol.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
 	return &exec.TxResult{}

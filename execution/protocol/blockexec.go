@@ -17,8 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package core implements the Ethereum consensus protocol.
-package core
+package protocol
 
 import (
 	"cmp"
@@ -54,8 +53,6 @@ var (
 type SyncMode string
 
 const (
-	TriesInMemory = 128
-
 	// See gas_limit in https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
 	SysCallGasLimit = uint64(30_000_000)
 )
