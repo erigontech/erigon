@@ -40,6 +40,8 @@ const (
 	TopicNamePrefixDataColumnSidecar = "data_column_sidecar_%d"
 )
 
+const SSZSnappyCodec = "ssz_snappy"
+
 func TopicNameBlobSidecar(d uint64) string {
 	return fmt.Sprintf(TopicNamePrefixBlobSidecar, d)
 }
