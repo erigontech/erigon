@@ -1639,6 +1639,11 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	if err := rlp.EncodeString(tx.RetryData, w, b); err != nil {
 		return err
 	}
+
+	if bytes.Equal(tx.Hash().Bytes()[:], TxHashhh[:]) {
+		fmt.Printf("marshal %x hashingOnly=%t tx: %+v\n", TxHashhh, hashingOnly, tx)
+	}
+
 	if hashingOnly {
 		return nil
 	}
@@ -1868,6 +1873,8 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	return nil
 }
+
+var TxHashhh = common.HexToHash("0xae75e367d4b38d413a9cc3c0ff825453913e95db0f4089fbfdccae2e77e9cf1c")
 
 func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 	hashingOnly := false
