@@ -559,7 +559,7 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 	return seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
 }
 
-func CheckHistoricalCommitmentAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, logger log.Logger) error {
+func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err

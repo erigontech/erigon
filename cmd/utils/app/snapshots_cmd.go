@@ -1010,7 +1010,7 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
-	return integrity.CheckHistoricalCommitmentAtBlk(ctx, db, blockReader, blockNum, logger)
+	return integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger)
 }
 
 func CheckBorChain(chainName string) bool {
