@@ -27,7 +27,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
@@ -61,7 +61,7 @@ func (m mockSpanReader) Producers(context.Context, uint64) (*heimdall.ValidatorS
 
 func TestCommitStatesIndore(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	cr := consensus.NewMockChainReader(ctrl)
+	cr := rules.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
 	bor := New(polychain.BorDevnet.Config, nil, nil, nil, nil, br, nil)

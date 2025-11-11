@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/secp256r1"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 

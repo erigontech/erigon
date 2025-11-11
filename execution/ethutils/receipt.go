@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/types"
 )
 

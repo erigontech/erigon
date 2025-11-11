@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec/calltracer"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -47,12 +47,12 @@ import (
 
 type Task interface {
 	Execute(evm *vm.EVM,
-		engine consensus.Engine,
+		engine rules.Engine,
 		genesis *types.Genesis,
 		ibs *state.IntraBlockState,
 		stateWriter state.StateWriter,
 		chainConfig *chain.Config,
-		chainReader consensus.ChainReader,
+		chainReader rules.ChainReader,
 		dirs datadir.Dirs,
 		calcFees bool) *TxResult
 
@@ -218,7 +218,7 @@ type TxTask struct {
 	Tracer                *calltracer.CallTracer
 	Hooks                 *tracing.Hooks
 	Config                *chain.Config
-	Engine                consensus.Engine
+	Engine                rules.Engine
 	Logger                log.Logger
 	Trace                 bool
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
@@ -445,12 +445,12 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 }
 
 func (txTask *TxTask) Execute(evm *vm.EVM,
-	engine consensus.Engine,
+	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
-	chainReader consensus.ChainReader,
+	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
 	calcFees bool) *TxResult {
 	var result TxResult

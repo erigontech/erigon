@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -86,9 +86,9 @@ type EphemeralExecResult struct {
 func ExecuteBlockEphemerally(
 	chainConfig *chain.Config, vmConfig *vm.Config,
 	blockHashFunc func(n uint64) (common.Hash, error),
-	engine consensus.Engine, block *types.Block,
+	engine rules.Engine, block *types.Block,
 	stateReader state.StateReader, stateWriter state.StateWriter,
-	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash common.Hash) (*tracing.Hooks, error),
+	chainReader rules.ChainReader, getTracer func(txIndex int, txHash common.Hash) (*tracing.Hooks, error),
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
@@ -211,7 +211,7 @@ func ExecuteBlockEphemerally(
 		}
 
 		stateSyncReceipt := &types.Receipt{}
-		if chainConfig.Consensus == chain.BorConsensus && len(blockLogs) > 0 {
+		if chainConfig.Rules == chain.BorRules && len(blockLogs) > 0 {
 			slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
 
 			if len(blockLogs) > len(logs) {
@@ -264,7 +264,7 @@ func rlpHash(x interface{}) (h common.Hash) {
 	return h
 }
 
-func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
 	var author accounts.Address
 	if isBor {
@@ -354,11 +354,11 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 }
 
 func FinalizeBlockExecution(
-	engine consensus.Engine, stateReader state.StateReader,
+	engine rules.Engine, stateReader state.StateReader,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
-	withdrawals []*types.Withdrawal, chainReader consensus.ChainReader,
+	withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
 	isMining bool,
 	logger log.Logger,
 	tracer *tracing.Hooks,
@@ -385,7 +385,7 @@ func FinalizeBlockExecution(
 	return newBlock, retRequests, nil
 }
 
-func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
+func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {

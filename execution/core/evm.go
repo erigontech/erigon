@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/merge"
-	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -40,7 +40,7 @@ import (
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
-	engine consensus.EngineReader, author accounts.Address, config *chain.Config) evmtypes.BlockContext {
+	engine rules.EngineReader, author accounts.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary accounts.Address
 	if author.IsNil() {
@@ -87,7 +87,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
-		transferFunc = consensus.Transfer
+		transferFunc = rules.Transfer
 		postApplyMessageFunc = nil
 	}
 	blockContext := evmtypes.BlockContext{

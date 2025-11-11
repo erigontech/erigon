@@ -39,9 +39,9 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -133,7 +133,7 @@ func getChainInstance(
 	addresses *testAddresses,
 	config *chain.Config,
 	parent *types.Block,
-	engine consensus.Engine,
+	engine rules.Engine,
 	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
@@ -148,7 +148,7 @@ func generateChain(
 	addresses *testAddresses,
 	config *chain.Config,
 	parent *types.Block,
-	engine consensus.Engine,
+	engine rules.Engine,
 	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {

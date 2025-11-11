@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -71,7 +71,7 @@ type ExecuteBlockCfg struct {
 	prune         prune.Mode
 	chainConfig   *chain.Config
 	notifications *shards.Notifications
-	engine        consensus.Engine
+	engine        rules.Engine
 	vmConfig      *vm.Config
 	badBlockHalt  bool
 	stateStream   bool
@@ -94,7 +94,7 @@ func StageExecuteBlocksCfg(
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
+	engine rules.Engine,
 	vmConfig *vm.Config,
 	notifications *shards.Notifications,
 	stateStream bool,

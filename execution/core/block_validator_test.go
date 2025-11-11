@@ -27,9 +27,9 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
 	libchain "github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -60,7 +60,7 @@ func TestHeaderVerification(t *testing.T) {
 					BlockReader: m.BlockReader,
 					Logger:      logger,
 				}
-				var engine consensus.Engine
+				var engine rules.Engine
 				if valid {
 					engine = ethash.NewFaker()
 				} else {
@@ -109,7 +109,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 					BlockReader: m.BlockReader,
 					Logger:      logger,
 				}
-				var engine consensus.Engine
+				var engine rules.Engine
 				if valid {
 					engine = ethash.NewFaker()
 				} else {

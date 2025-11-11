@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -77,7 +77,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
-		Transfer:    consensus.Transfer,
+		Transfer:    rules.Transfer,
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,

@@ -18,16 +18,16 @@ package statefull
 
 import (
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 type ChainContext struct {
-	Chain consensus.ChainReader
-	Bor   consensus.Engine
+	Chain rules.ChainReader
+	Bor   rules.Engine
 }
 
-func (c ChainContext) Engine() consensus.Engine {
+func (c ChainContext) Engine() rules.Engine {
 	return c.Bor
 }
 

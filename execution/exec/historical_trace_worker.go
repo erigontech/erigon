@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec/calltracer"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -62,7 +62,7 @@ type HistoricalTraceWorker struct {
 	background  bool
 	ctx         context.Context
 	stateWriter state.StateWriter
-	chain       consensus.ChainReader
+	chain       rules.ChainReader
 	logger      log.Logger
 
 	execArgs *ExecArgs
@@ -344,7 +344,7 @@ type ExecArgs struct {
 	ChainDB     kv.TemporalRoDB
 	Genesis     *types.Genesis
 	BlockReader services.FullBlockReader
-	Engine      consensus.Engine
+	Engine      rules.Engine
 	Dirs        datadir.Dirs
 	ChainConfig *chain.Config
 	Workers     int

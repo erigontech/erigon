@@ -37,8 +37,8 @@ func BenchmarkLambdaShuffledIndex(b *testing.B) {
 		return hashed[:]
 	}
 	seed := [32]byte{2, 35, 6}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		eth2shuffle.PermuteIndex(eth2ShuffleHash, uint8(clparams.MainnetBeaconConfig.ShuffleRoundCount), 10, 1000, seed)
 	}
 }
@@ -50,8 +50,8 @@ func BenchmarkErigonShuffledIndex(b *testing.B) {
 
 	seed := [32]byte{2, 35, 6}
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, keccakOptimized)
 	}
 }

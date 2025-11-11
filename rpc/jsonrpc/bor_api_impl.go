@@ -83,7 +83,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 
 // GetAuthor retrieves the author a block.
 func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Address, error) {
-	// init consensus engine
+	// init rules engine
 	borEngine, err := api.bor()
 
 	if err != nil {

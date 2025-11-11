@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -150,11 +150,11 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // `refunds` is false when it is not required to apply gas refunds
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Parity behaviour
-func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine consensus.EngineReader) (*evmtypes.ExecutionResult, error) {
+func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
 	return applyMessage(evm, msg, gp, refunds, gasBailout, false, engine)
 }
 
-func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine consensus.EngineReader) (
+func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine rules.EngineReader) (
 	*evmtypes.ExecutionResult, error) {
 	// Only zero-gas transactions may be service ones
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
@@ -171,7 +171,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	return st.TransitionDb(refunds, gasBailout)
 }
 
-func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine consensus.EngineReader) (*evmtypes.ExecutionResult, error) {
+func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
 	return applyMessage(evm, msg, gp, refunds, gasBailout, true, engine)
 }
 

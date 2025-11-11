@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -111,7 +111,7 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 
 func DoCall(
 	ctx context.Context,
-	engine consensus.EngineReader,
+	engine rules.EngineReader,
 	args ethapi2.CallArgs,
 	tx kv.Tx,
 	blockNrOrHash rpc.BlockNumberOrHash,
@@ -196,7 +196,7 @@ func DoCall(
 	return result, nil
 }
 
-func NewEVMBlockContextWithOverrides(ctx context.Context, engine consensus.EngineReader, header *types.Header, tx kv.Getter,
+func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineReader, header *types.Header, tx kv.Getter,
 	reader services.CanonicalReader, config *chain.Config, blockOverrides *BlockOverrides, blockHashOverrides BlockHashOverrides) evmtypes.BlockContext {
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
 	blockContext := core.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
@@ -206,7 +206,7 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine consensus.Engin
 	return blockContext
 }
 
-func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
+func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
 	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
 	return core.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
@@ -255,7 +255,7 @@ type ReusableCaller struct {
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
-	engine consensus.EngineReader,
+	engine rules.EngineReader,
 	overrides *ethapi2.StateOverrides,
 ) (*evmtypes.ExecutionResult, error) {
 	var cancel context.CancelFunc
@@ -301,7 +301,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 }
 
 func NewReusableCaller(
-	engine consensus.EngineReader,
+	engine rules.EngineReader,
 	stateReader state.StateReader,
 	overrides *ethapi2.StateOverrides,
 	blockOverrides *ethapi2.BlockOverrides,

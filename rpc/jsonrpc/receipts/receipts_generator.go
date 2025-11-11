@@ -21,8 +21,8 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -47,7 +47,7 @@ type Generator struct {
 
 	blockReader services.FullBlockReader
 	txNumReader rawdbv3.TxNumsReader
-	engine      consensus.EngineReader
+	engine      rules.EngineReader
 }
 
 type ReceiptEnv struct {
@@ -65,7 +65,7 @@ var (
 	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
 )
 
-func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader, evmTimeout time.Duration) *Generator {
+func NewGenerator(blockReader services.FullBlockReader, engine rules.EngineReader, evmTimeout time.Duration) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)

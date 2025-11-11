@@ -36,7 +36,6 @@ import (
 	"github.com/holiman/uint256"
 
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
-	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -789,8 +788,6 @@ func main() {
 
 	var err error
 	switch *action {
-	case "cfg":
-		flow.TestGenCfg()
 
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))

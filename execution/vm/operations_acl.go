@@ -25,7 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )

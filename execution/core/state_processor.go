@@ -24,7 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -36,7 +36,7 @@ import (
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
+func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
 	var (
@@ -97,7 +97,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine consensus.EngineReader,
+func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader,
 	author accounts.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, []byte, error) {
@@ -108,13 +108,13 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, vmenv, cfg)
 }
 
-func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine consensus.EngineReader, author accounts.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
+func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader, author accounts.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	return vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 }
 
-func ApplyTransactionWithEVM(config *chain.Config, engine consensus.EngineReader, gp *GasPool,
+func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp *GasPool,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
 	cfg vm.Config, vmenv *vm.EVM,

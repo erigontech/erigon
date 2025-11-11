@@ -2646,23 +2646,23 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
-func HexTrieExtractStateRoot(enc []byte) ([]byte, error) {
+func HexTrieExtractStateRoot(enc []byte) ([]byte, uint64, uint64, error) {
 	if len(enc) < 18 { // 8*2+2
-		return nil, fmt.Errorf("invalid state length %x (min %d expected)", len(enc), 18)
+		return nil, 0, 0, fmt.Errorf("invalid state length %x (min %d expected)", len(enc), 18)
 	}
 
-	//txn := binary.BigEndian.Uint64(enc)
-	//bn := binary.BigEndian.Uint64(enc[8:])
+	txn := binary.BigEndian.Uint64(enc)
+	bn := binary.BigEndian.Uint64(enc[8:])
 	sl := binary.BigEndian.Uint16(enc[16:18])
 	var s state
 	if err := s.Decode(enc[18 : 18+sl]); err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	root := new(cell)
 	if err := root.Decode(s.Root); err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
-	return root.hash[:], nil
+	return root.hash[:], bn, txn, nil
 }
 
 func HexTrieStateToShortString(enc []byte) (string, error) {

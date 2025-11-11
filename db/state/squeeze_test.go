@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -223,11 +224,6 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NotEqual(t, empty.RootHash.Bytes(), root)
 }
 
-// by that key stored latest root hash and tree state
-const keyCommitmentStateS = "state"
-
-var KeyCommitmentState = []byte(keyCommitmentStateS)
-
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -247,9 +243,9 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
-		rootInFiles, err = commitment.HexTrieExtractStateRoot(stateVal)
+		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
 
 		for _, f := range ac.Files(kv.CommitmentDomain) {
