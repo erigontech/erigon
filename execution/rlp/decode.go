@@ -837,6 +837,10 @@ func (s *Stream) uint(maxbits int) (uint64, error) {
 	}
 }
 
+// Deprecated: Uint256Bytes generates unecessary garbage by
+// returning a heap buffer which is immediately converted
+// into an array and disguared.  Use Uint256() instead
+// which processed the buffer internally so it doesnt leak
 func (s *Stream) Uint256Bytes() ([]byte, error) {
 	b, err := s.bigIntBytes()
 	if err != nil {
