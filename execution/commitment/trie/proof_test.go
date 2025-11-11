@@ -15,7 +15,7 @@ import (
 //go:embed proofResponse.json
 var responseJson string
 
-func TestVerifyProof(t *testing.T) {
+func TestPrintProof(t *testing.T) {
 
 	var proof accounts.AccProofResult
 	if err := json.Unmarshal([]byte(responseJson), &proof); err != nil {

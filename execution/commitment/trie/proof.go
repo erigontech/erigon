@@ -401,8 +401,7 @@ type proofNode struct {
 }
 
 // proofMap creates a map from hash to proof node
-func orderedProofNodes(proof []hexutil.Bytes) ([]proofNode, error) {
-	var res []proofNode
+func orderedProofNodes(proof []hexutil.Bytes) (res []proofNode, err error) {
 	for _, proofB := range proof {
 		hash := crypto.Keccak256Hash(proofB)
 		node, err := decodeNode(proofB)
