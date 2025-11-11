@@ -20,7 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"google.golang.org/grpc"
 
@@ -29,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -37,6 +41,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // Gossip manager is sending all messages to fork choice or others
@@ -53,6 +59,7 @@ type GossipManager struct {
 
 	registeredServices []gossipService
 	stats              *gossipMessageStats
+	p2p                *p2p.P2Pmanager
 }
 
 func NewGossipReceiver(
@@ -256,4 +263,98 @@ Reconnect:
 			}
 		}
 	}
+}
+
+func (g *GossipManager) SubscribeGossip(name string, service gossipService) error {
+	// wrap service.ProcessMessage to ValidatorEx
+	validator := pubsub.ValidatorEx(func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		// parse the topic and subnet
+		topic := extractTopicName(msg)
+		if topic == "" {
+			return pubsub.ValidationReject
+		}
+		subnet := extractSubnetIndexByGossipTopic(topic)
+		if subnet < 0 {
+			return pubsub.ValidationReject
+		}
+
+		// decode the message
+		msgData := msg.GetData()
+		if msgData == nil {
+			return pubsub.ValidationReject
+		}
+		version := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
+		msgObj, err := service.service.DecodeGossipMessage(pid, msgData, version)
+		if err != nil {
+			return pubsub.ValidationReject
+		}
+
+		// process msg
+		subnetId := uint64(subnet)
+		err = service.service.ProcessMessage(ctx, &subnetId, msgObj)
+		if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
+			return pubsub.ValidationIgnore
+		} else if err != nil {
+			return pubsub.ValidationReject
+		}
+
+		// accept
+		return pubsub.ValidationAccept
+	})
+
+	forkDigest, err := g.ethClock.CurrentForkDigest()
+	if err != nil {
+		return err
+	}
+	topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+
+	if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
+		return err
+	}
+
+	topicHandle, err := g.p2p.Pubsub().Join(topic)
+	if err != nil {
+		return err
+	}
+	if err := topicHandle.SetScoreParams(g.topicScoreParams(name)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams {
+	// todo
+	return &pubsub.TopicScoreParams{}
+}
+
+func extractTopicName(msg *pubsub.Message) string {
+	// /eth2/[fork_digest]/[topic]/ssz_snappy
+	topic := msg.GetTopic()
+	if topic == "" {
+		return ""
+	}
+	// split string
+	tokens := strings.Split(topic, "/")
+	if len(tokens) != 5 {
+		return ""
+	}
+	return tokens[3]
+}
+
+func extractSubnetIndexByGossipTopic(name string) int {
+	// e.g blob_sidecar_3, we want to extract 3
+	// reject if last character is not a number
+	if !unicode.IsNumber(rune(name[len(name)-1])) {
+		return -1
+	}
+	// get the last part of the topic
+	parts := strings.Split(name, "_")
+	// convert it to int
+	index, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil {
+		log.Warn("[Sentinel] failed to parse subnet index", "topic", name, "err", err)
+		return -1
+	}
+	return index
 }

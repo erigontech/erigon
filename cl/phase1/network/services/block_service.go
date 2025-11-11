@@ -37,7 +37,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -97,13 +97,17 @@ func NewBlockService(
 	return b
 }
 
+func (b *blockService) Names() []string {
+	return []string{gossip.TopicNameBeaconBlock}
+}
+
 func (b *blockService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBeaconBlock
 }
 
-func (b *blockService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
+func (b *blockService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
 	obj := cltypes.NewSignedBeaconBlock(b.beaconCfg, version)
-	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
