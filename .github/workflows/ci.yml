@@ -37,18 +37,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          submodules: recursive
+          lfs: true
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
           cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
 
-      - name: Install dependencies on Linux
+      - name: Install dependencies on Linux runner
         if: runner.os == 'Linux'
         run: sudo apt update -y && sudo apt install -y build-essential
 
-      - name: Build
+      - name: Testing build all
         run: make all
 
       - name: Reproducible build test
@@ -61,7 +63,7 @@ jobs:
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
 
-      - name: Test
+      - name: Execute test-short
         run: make test-short
 
   win:
@@ -86,6 +88,10 @@ jobs:
           minimum-size: 8GB
 
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          submodules: recursive
+          lfs: true
 
       - uses: actions/setup-go@v6
         with:
@@ -104,8 +110,8 @@ jobs:
         run: |
           choco upgrade mingw -y --no-progress --version 14.2.0
 
-      - name: Build
+      - name: Testing build all
         run: .\wmake.ps1 all
 
-      - name: Test
+      - name: Execute test-short
         run: .\wmake.ps1 test-short
