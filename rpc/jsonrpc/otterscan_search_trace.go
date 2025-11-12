@@ -24,8 +24,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -97,7 +97,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, err
 	}
 	header := block.Header()
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, chainConfig)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, nil, chainConfig)
 	rules := blockContext.Rules(chainConfig)
 	found := false
 	for idx, txn := range block.Transactions() {
@@ -112,7 +112,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 
 		tracer := NewTouchTracer(searchAddr)
 		ibs.SetHooks(tracer.TracingHooks())
-		txContext := core.NewEVMTxContext(msg)
+		txContext := protocol.NewEVMTxContext(msg)
 
 		vmenv := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{Tracer: tracer.TracingHooks()})
 		// FIXME (tracing): Geth has a new method ApplyEVMMessage or something like this that does the OnTxStart/OnTxEnd wrapping, let's port it too
@@ -120,7 +120,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 			tracer.TracingHooks().OnTxStart(vmenv.GetVMContext(), txn, msg.From())
 		}
 
-		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */, engine)
+		res, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.TracingHooks().OnTxEnd != nil {
 				tracer.TracingHooks().OnTxEnd(nil, err)

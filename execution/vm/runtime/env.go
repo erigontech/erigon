@@ -20,7 +20,7 @@
 package runtime
 
 import (
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -33,7 +33,7 @@ func NewEnv(cfg *Config) *vm.EVM {
 	}
 
 	blockContext := evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
+		CanTransfer: protocol.CanTransfer,
 		Transfer:    rules.Transfer,
 		GetHash:     cfg.GetHashFn,
 		Coinbase:    cfg.Coinbase,

@@ -24,7 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
@@ -120,8 +120,8 @@ func traceBorStateSyncTxn(
 		default:
 		}
 
-		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		_, err := core.ApplyMessage(evm, msg, gp, refunds, false /* gasBailout */, nil /* engine */)
+		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		_, err := protocol.ApplyMessage(evm, msg, gp, refunds, false /* gasBailout */, nil /* engine */)
 		if err != nil {
 			return nil, err
 		}

@@ -38,9 +38,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -440,7 +440,7 @@ func TestClique(t *testing.T) {
 			// Create a pristine blockchain with the genesis injected
 			m := mock.MockWithGenesisEngine(t, genesis, engine, false)
 
-			chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *core.BlockGen) {
+			chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *blockgen.BlockGen) {
 				// Cast the vote contained in this block
 				gen.SetCoinbase(accounts.address(tt.votes[j].voted))
 				if tt.votes[j].auth {
@@ -481,7 +481,7 @@ func TestClique(t *testing.T) {
 			// Pass all the headers through clique and ensure tallying succeeds
 			failed := false
 			for j := 0; j < len(batches)-1; j++ {
-				chainX := &core.ChainPack{Blocks: batches[j]}
+				chainX := &blockgen.ChainPack{Blocks: batches[j]}
 				chainX.Headers = make([]*types.Header, len(batches[j]))
 				for k, b := range batches[j] {
 					chainX.Headers[k] = b.Header()
@@ -497,7 +497,7 @@ func TestClique(t *testing.T) {
 				engine.Close()
 				return
 			}
-			chainX := &core.ChainPack{Blocks: batches[len(batches)-1]}
+			chainX := &blockgen.ChainPack{Blocks: batches[len(batches)-1]}
 			chainX.Headers = make([]*types.Header, len(batches[len(batches)-1]))
 			for k, b := range batches[len(batches)-1] {
 				chainX.Headers[k] = b.Header()
