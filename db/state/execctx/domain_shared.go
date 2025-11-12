@@ -83,7 +83,7 @@ type SharedDomains struct {
 	metrics           changeset.DomainMetrics
 }
 
-func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -100,7 +100,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
+	if err := sd.SeekCommitment(ctx, tx); err != nil {
 		return nil, err
 	}
 
@@ -175,6 +175,10 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
+}
+
+func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.mem.Unwind(txNumUnwindTo, changeset)
 }
 
 func (sd *SharedDomains) Trace() bool {
@@ -278,11 +282,16 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		sd.metrics.UpdateCacheReads(domain, start)
 		return v, _step, nil
 	}
-	//if aggTx, ok := tx.AggTx().(*state.AggregatorRoTx); ok {
-	//	v, step, _, err = aggTx.getLatest(domain, k, tx, &sd.metrics, start)
-	//} else {
-	v, step, err = tx.GetLatest(domain, k)
-	//}
+
+	type MeteredGetter interface {
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+	}
+
+	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
+		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, &sd.metrics, start)
+	} else {
+		v, step, err = tx.GetLatest(domain, k)
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -302,7 +311,9 @@ func (sd *SharedDomains) LogMetrics() []any {
 
 	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
 		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
-			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"puts", common.PrettyCounter(sd.metrics.CachePutCount),
+			"size", fmt.Sprintf("%s(%s/%s)",
+				common.PrettyCounter(sd.metrics.CachePutSize), common.PrettyCounter(sd.metrics.CachePutKeySize), common.PrettyCounter(sd.metrics.CachePutValueSize)),
 			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
 			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}

@@ -102,13 +102,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	return cfg
 }
 
-func SpawnStageSnapshots(
-	s *StageState,
-	ctx context.Context,
-	tx kv.RwTx,
-	cfg SnapshotsCfg,
-	logger log.Logger,
-) (err error) {
+func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
