@@ -60,10 +60,7 @@ func RegisterGossipService[T any](gm *GossipManager, service services.Service[T]
 		conditions: conditions,
 	}
 	gm.registeredServices = append(gm.registeredServices, gossipSrv)
-
-	for _, name := range service.Names() {
-		gm.SubscribeGossip(name, gossipSrv)
-	}
+	gm.RegisterGossipService(gossipSrv)
 }
 
 // withBeginVersion returns a condition that checks if the current version is greater than or equal to the begin version

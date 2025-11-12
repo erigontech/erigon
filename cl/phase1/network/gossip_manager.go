@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -60,6 +61,8 @@ type GossipManager struct {
 	registeredServices []gossipService
 	stats              *gossipMessageStats
 	p2p                *p2p.P2Pmanager
+
+	subscriptions TopicSubscriptions
 }
 
 func NewGossipReceiver(
@@ -265,7 +268,7 @@ Reconnect:
 	}
 }
 
-func (g *GossipManager) SubscribeGossip(name string, service gossipService) error {
+func (g *GossipManager) RegisterGossipService(service gossipService) error {
 	// wrap service.ProcessMessage to ValidatorEx
 	validator := pubsub.ValidatorEx(func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		// parse the topic and subnet
@@ -306,21 +309,48 @@ func (g *GossipManager) SubscribeGossip(name string, service gossipService) erro
 	if err != nil {
 		return err
 	}
-	topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
 
-	if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
-		return err
+	for _, name := range service.service.Names() {
+		topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+		if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
+			return err
+		}
+		topicHandle, err := g.p2p.Pubsub().Join(topic)
+		if err != nil {
+			return err
+		}
+		if err := topicHandle.SetScoreParams(g.topicScoreParams(name)); err != nil {
+			topicHandle.Close()
+			return err
+		}
+		if err := g.subscriptions.Add(topic, topicHandle); err != nil {
+			topicHandle.Close()
+			return err
+		}
 	}
+	return nil
+}
 
-	topicHandle, err := g.p2p.Pubsub().Join(topic)
+func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error {
+	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
 	}
-	if err := topicHandle.SetScoreParams(g.topicScoreParams(name)); err != nil {
-		return err
-	}
+	topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+	return g.subscriptions.SubscribeWithExpiry(topic, expiry)
+}
 
-	return nil
+func (g *GossipManager) resubscribeAllTopics(name string) error {
+	allTopics := g.subscriptions.AllTopics()
+	for _, topic := range allTopics {
+		// replace fork digest with new one
+
+		forkDigest, err := g.ethClock.CurrentForkDigest()
+		if err != nil {
+			return err
+		}
+		topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+	}
 }
 
 func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams {
@@ -357,4 +387,120 @@ func extractSubnetIndexByGossipTopic(name string) int {
 		return -1
 	}
 	return index
+}
+
+type TopicSubscription struct {
+	topic      *pubsub.Topic
+	sub        *pubsub.Subscription
+	expiration time.Time
+}
+
+type TopicSubscriptions struct {
+	subs  map[string]*TopicSubscription
+	mutex sync.RWMutex
+}
+
+func NewTopicSubscriptions() *TopicSubscriptions {
+	s := &TopicSubscriptions{
+		subs:  make(map[string]*TopicSubscription),
+		mutex: sync.RWMutex{},
+	}
+	go s.expireCheck()
+	return s
+}
+
+func (t *TopicSubscriptions) AllTopics() []string {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	topics := make([]string, 0, len(t.subs))
+	for topic := range t.subs {
+		topics = append(topics, topic)
+	}
+	return topics
+}
+
+func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	return t.subs[topic]
+}
+
+func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if _, ok := t.subs[topic]; ok {
+		return errors.New("topic already exists")
+	}
+	t.subs[topic] = &TopicSubscription{
+		topic: topicHandle,
+		sub:   nil,
+	}
+	return nil
+}
+
+func (t *TopicSubscriptions) Remove(topic string) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if _, ok := t.subs[topic]; !ok {
+		return errors.New("topic not found")
+	}
+	delete(t.subs, topic)
+	return nil
+}
+
+func (t *TopicSubscriptions) Unsubscribe(topic string) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	sub, ok := t.subs[topic]
+	if !ok {
+		return errors.New("topic not found")
+	}
+	if sub.sub == nil {
+		return errors.New("subscription already cancelled")
+	}
+	sub.sub.Cancel()
+	sub.sub = nil
+	sub.expiration = time.Unix(0, 0) // reset
+	return nil
+}
+
+func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiration time.Time) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	sub, ok := t.subs[topic]
+	if !ok {
+		return errors.New("topic not found")
+	}
+	if time.Now().Before(expiration) {
+		if sub.sub == nil {
+			// subscribe the topic
+			s, err := sub.topic.Subscribe()
+			if err != nil {
+				return err
+			}
+			sub.sub = s
+		}
+	} else {
+		if sub.sub != nil {
+			// unsubscribe the topic
+			sub.sub.Cancel()
+			sub.sub = nil
+		}
+	}
+	sub.expiration = expiration
+	return nil
+}
+
+func (t *TopicSubscriptions) expireCheck() {
+	ticker := time.NewTicker(12 * time.Second)
+	for range ticker.C {
+		t.mutex.Lock()
+		defer t.mutex.Unlock()
+		for _, sub := range t.subs {
+			if time.Now().After(sub.expiration) && sub.sub != nil {
+				sub.sub.Cancel()
+				sub.sub = nil
+			}
+		}
+	}
 }
