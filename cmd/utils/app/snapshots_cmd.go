@@ -408,6 +408,21 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "compress", Required: true, Usage: "Values compression type: all,none,keys,values"},
 			}),
 		},
+		{
+			Name:        "domain",
+			Description: "Domain related subcommands",
+			Subcommands: []*cli.Command{
+				{
+					Name:   "stat",
+					Action: domainStat,
+					Usage:  "Calculate statistics for a domain",
+					Flags: joinFlags([]cli.Flag{
+						&utils.DataDirFlag,
+						&cli.UintFlag{Name: "domain", Required: true},
+					}),
+				},
+			},
+		},
 	},
 }
 
@@ -931,6 +946,18 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.Publishable:
 			if err := doPublishable(cliCtx); err != nil {
+				return err
+			}
+		case integrity.CommitmentRoot:
+			if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
+				return err
+			}
+		case integrity.CommitmentKvi:
+			if err := integrity.CheckCommitmentKvi(ctx, db, failFast, logger); err != nil {
+				return err
+			}
+		case integrity.CommitmentKvDeref:
+			if err := integrity.CheckCommitmentKvDeref(ctx, db, failFast, logger); err != nil {
 				return err
 			}
 		default:

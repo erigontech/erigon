@@ -60,17 +60,16 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/genesiswrite"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	stages2 "github.com/erigontech/erigon/execution/stages"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -78,9 +77,9 @@ import (
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethconfig/features"
-	"github.com/erigontech/erigon/node/ethconsensusconfig"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -375,6 +374,47 @@ var cmdPrintTableSizes = &cobra.Command{
 	},
 }
 
+var cmdPrintBlockTxNumsInfo = &cobra.Command{
+	Use:   "print_block_tx_nums_info",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
+		err := doPrintBlockTxNumsInfo(ctx, logger)
+		if err != nil {
+			logger.Error("issue reading block tx nums info", "err", err)
+		}
+	},
+}
+
+func doPrintBlockTxNumsInfo(ctx context.Context, logger log.Logger) error {
+	db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	br, _ := blocksIO(db, logger)
+	txNumReader := br.TxnumReader(ctx)
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	minTxNum, err := txNumReader.Min(tx, block)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumReader.Max(tx, block)
+	if err != nil {
+		return err
+	}
+	aggTx := dbstate.AggTx(tx)
+	minStep := minTxNum / aggTx.StepSize()
+	maxStep := maxTxNum / aggTx.StepSize()
+	logger.Info("block tx nums", "minTxNum", minTxNum, "maxTxNum", maxTxNum, "minStep", minStep, "maxStep", maxStep)
+	return nil
+}
+
 var cmdPrintMigrations = &cobra.Command{
 	Use:   "print_migrations",
 	Short: "",
@@ -470,6 +510,10 @@ func init() {
 	withDataDir(cmdPrintTableSizes)
 	withOutputCsvFile(cmdPrintTableSizes)
 	rootCmd.AddCommand(cmdPrintTableSizes)
+
+	withDataDir2(cmdPrintBlockTxNumsInfo)
+	withBlock(cmdPrintBlockTxNumsInfo)
+	rootCmd.AddCommand(cmdPrintBlockTxNumsInfo)
 
 	withConfig(cmdStageSenders)
 	withIntegrityChecks(cmdStageSenders)
@@ -720,7 +764,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
-	_, _, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	br, bw := blocksIO(db, logger)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -755,7 +799,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	tmpdir := datadir.New(datadirCli).Tmp
 	chainConfig := fromdb.ChainConfig(db)
-	_, _, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 
 	must(sync.SetCurrentStage(stages.Senders))
 
@@ -836,12 +880,15 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if chainTipMode && noCommit {
+		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
+	}
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
 
-	_, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
 		if err := rawdbreset.ResetExec(ctx, db); err != nil {
@@ -951,25 +998,15 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	if chainTipMode {
-		if noCommit {
-			tx, err := db.BeginTemporalRw(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-			for bn := execProgress; bn < block; bn++ {
-				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger); err != nil {
-					return err
-				}
-			}
-		} else {
+		//if chainTip = true, forced noCommit = false
+		for bn := execProgress; bn < block; bn++ {
 			if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-				for bn := execProgress; bn < block; bn++ {
-					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger); err != nil {
-						return err
-					}
+				err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger)
+				var errExhausted *stagedsync.ErrLoopExhausted
+				if errors.As(err, &errExhausted) {
+					return nil
 				}
-				return nil
+				return err
 			}); err != nil {
 				return err
 			}
@@ -995,7 +1032,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		return err
 	}
 
-	br, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	br, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
 
 	chainConfig := fromdb.ChainConfig(db)
@@ -1135,7 +1172,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 
 func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_, _, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
 	if reset {
@@ -1319,13 +1356,11 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 const blockBufferSize = 128
 
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.MiningConfig, logger log.Logger) (
-	services.BlockRetire, consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState,
+	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
 	vmConfig := &vm.Config{}
-
-	events := shards.NewEvents()
 
 	genesis := readGenesis(chain)
 	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, dirs, logger)
@@ -1368,7 +1403,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	if borSn != nil {
 		borSn.DownloadComplete() // mark as ready
 	}
-	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
+	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1409,50 +1444,11 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	}
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 
-	stageList := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
+	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
 		signatures, logger, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	miner := stagedsync.NewMiningState(&cfg.Miner)
-	miningCancel := make(chan struct{})
-	go func() {
-		<-ctx.Done()
-		close(miningCancel)
-	}()
-
-	miningSync := stagedsync.New(
-		cfg.Sync,
-		stagedsync.MiningStages(ctx,
-			stagedsync.StageMiningCreateBlockCfg(db, miner, chainConfig, engine, nil, dirs.Tmp, blockReader),
-			stagedsync.StageExecuteBlocksCfg(
-				db,
-				cfg.Prune,
-				cfg.BatchSize,
-				sentryControlServer.ChainConfig,
-				sentryControlServer.Engine,
-				&vm.Config{},
-				notifications,
-				cfg.StateStream,
-				/*stateStream=*/ false,
-				dirs,
-				blockReader,
-				sentryControlServer.Hd,
-				cfg.Genesis,
-				cfg.Sync,
-				nil,
-			),
-			stagedsync.StageSendersCfg(db, sentryControlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, sentryControlServer.Hd),
-			stagedsync.StageMiningExecCfg(db, miner, events, chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, blockReader),
-			stagedsync.StageMiningFinishCfg(db, chainConfig, engine, miner, miningCancel, blockReader, builder.NewLatestBlockBuiltStore()),
-			false,
-		),
-		stagedsync.MiningUnwindOrder,
-		stagedsync.MiningPruneOrder,
-		logger,
-		stages.ModeBlockProduction,
-	)
-
-	return blockRetire, engine, vmConfig, sync, miningSync, miner
+	return blockRetire, engine, vmConfig, sync
 }
 
 func progress(tx kv.Getter, stage stages.SyncStage) uint64 {
@@ -1471,19 +1467,19 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 	return res
 }
 
-func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) consensus.Engine {
+func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) rules.Engine {
 	config := ethconfig.Defaults
 	var polygonBridge *bridge.Service
 	var heimdallService *heimdall.Service
 	var heimdallClient heimdall.Client
 	var bridgeClient bridge.Client
-	var consensusConfig interface{}
+	var rulesConfig interface{}
 	if cc.Clique != nil {
-		consensusConfig = chainspec.CliqueSnapshot
+		rulesConfig = chainspec.CliqueSnapshot
 	} else if cc.Aura != nil {
-		consensusConfig = &config.Aura
+		rulesConfig = &config.Aura
 	} else if cc.Bor != nil {
-		consensusConfig = cc.Bor
+		rulesConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
 			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
@@ -1492,7 +1488,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 			heimdallClient = heimdall.NewIdleClient(config.Miner)
 			bridgeClient = bridge.NewIdleClient()
 		}
-		borConfig := consensusConfig.(*borcfg.BorConfig)
+		borConfig := rulesConfig.(*borcfg.BorConfig)
 
 		polygonBridge = bridge.NewService(bridge.ServiceConfig{
 			Store:        bridgeStore,
@@ -1517,10 +1513,10 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 		})
 
 	} else {
-		consensusConfig = &config.Ethash
+		rulesConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService)
+	return rulesconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, rulesConfig,
+		false /* noVerify */, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService)
 }
 
 func readGenesis(chain string) *types.Genesis {

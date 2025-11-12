@@ -3,6 +3,7 @@
 [![Docs](https://img.shields.io/badge/docs-up-green)](https://docs.erigon.tech/)
 [![Blog](https://img.shields.io/badge/blog-up-green)](https://erigon.tech/blog/)
 [![Twitter](https://img.shields.io/twitter/follow/ErigonEth?style=social)](https://x.com/ErigonEth)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://dsc.gg/erigon)
 [![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg)](https://github.com/erigontech/erigon/actions/workflows/ci.yml)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
@@ -57,7 +58,6 @@ frontier.
     - [Erigon3 perf tricks](#erigon3-perf-tricks)
     - [Windows](#windows)
 - [Getting in touch](#getting-in-touch)
-    - [Erigon Discord Server](#erigon-discord-server)
     - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
 - [Known issues](#known-issues)
     - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
@@ -733,11 +733,6 @@ Windows users may run erigon in 3 possible ways:
 
 Getting in touch
 ================
-
-### Erigon Discord Server
-
-The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me`
-with your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
 
 ### Reporting security issues/concerns
 

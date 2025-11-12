@@ -106,8 +106,8 @@ done
 
 set -e # Re-enable exit on error after test run
 
-# Save any failed results to the requested result directory if provided
-if [ "$RUN_TESTS_EXIT_CODE" -ne 0 ] && [ -n "$RESULT_DIR" ]; then
+# Save any results to the requested result directory if provided
+if [ -n "$RESULT_DIR" ]; then
   # Copy the results to the requested result directory
   cp -r "$WORKSPACE/rpc-tests/integration/$CHAIN/results/" "$RESULT_DIR"
   # Clean up the local result directory
