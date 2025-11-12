@@ -102,6 +102,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnTxStart: t.OnTxStart,
 			OnTxEnd:   t.OnTxEnd,
 			OnOpcode:  t.OnOpcode,
+			OnExit:    t.OnExit,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -119,6 +120,20 @@ func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 		if s := t.pre[t.to]; s != nil && !s.exists() {
 			// Exclude newly created contract.
 			delete(t.pre, t.to)
+		}
+	}
+}
+
+// ExitHook is invoked when the processing of a message ends.
+func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if reverted {
+		// clear the created or deleted address beacuse the tx is reverted; and so avoid to notify wrong state change
+		for addr := range t.created {
+			delete(t.created, addr)
+		}
+
+		for addr := range t.deleted {
+			delete(t.deleted, addr)
 		}
 	}
 }
