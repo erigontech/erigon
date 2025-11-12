@@ -259,8 +259,7 @@ type DirtySegment struct {
 	frozen   bool
 	refcount atomic.Int32
 
-	canDelete   atomic.Bool
-	forceDelete atomic.Bool
+	canDelete atomic.Bool
 
 	// only caplin state
 	filePath string
@@ -494,9 +493,7 @@ type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
 	for _, seg := range s {
-		if !seg.src.frozen {
-			seg.src.refcount.Add(1)
-		}
+		seg.src.refcount.Add(1)
 	}
 	return &RoTx{Segments: s}
 }
@@ -517,12 +514,6 @@ func (s *RoTx) Close() {
 		if src == nil {
 			continue
 		}
-		if src.frozen {
-			if src.canDelete.Load() && src.forceDelete.Load() {
-				src.closeAndRemoveFiles()
-			}
-			continue
-		}
 
 		refCnt := src.refcount.Add(-1)
 
@@ -539,8 +530,7 @@ type BlockSnapshots interface {
 	OpenFolder() error
 	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
 	SegmentsMax() uint64
-	Delete(fileName string) error
-	ForceDelete(fileNames ...string) error
+	Delete(fileNames ...string) error
 	Types() []snaptype.Type
 	Close()
 	DownloadComplete()
@@ -1385,7 +1375,7 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 	return nil
 }
 
-func (s *RoSnapshots) delete(fileName string, force bool) error {
+func (s *RoSnapshots) delete(fileName string) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -1405,9 +1395,6 @@ func (s *RoSnapshots) delete(fileName string, force bool) error {
 					continue
 				}
 				sn.canDelete.Store(true)
-				if force {
-					sn.forceDelete.Store(true)
-				}
 				delSeg = sn
 				dirtySegments = s.dirty[t]
 				findDelSeg = false
@@ -1424,11 +1411,7 @@ func (s *RoSnapshots) delete(fileName string, force bool) error {
 }
 
 // prune visible segments
-func (s *RoSnapshots) Delete(fileName string) error {
-	return s.deleteFiles(false /*force*/, fileName)
-}
-
-func (s *RoSnapshots) deleteFiles(force bool, fileNames ...string) error {
+func (s *RoSnapshots) Delete(fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
@@ -1438,15 +1421,11 @@ func (s *RoSnapshots) deleteFiles(force bool, fileNames ...string) error {
 
 	defer s.recalcVisibleFiles(s.alignMin)
 	for _, fileName := range fileNames {
-		if err := s.delete(fileName, force); err != nil {
+		if err := s.delete(fileName); err != nil {
 			return fmt.Errorf("can't delete file: %w", err)
 		}
 	}
 	return nil
-}
-
-func (s *RoSnapshots) ForceDelete(fileNames ...string) error {
-	return s.deleteFiles(true /*force*/, fileNames...)
 }
 
 func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {

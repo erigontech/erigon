@@ -393,7 +393,7 @@ func SyncSnapshots(
 			if _, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader}); err != nil {
 				return err
 			}
-			if err = blockReader.Snapshots().ForceDelete(toDeleteSeg...); err != nil {
+			if err = blockReader.Snapshots().Delete(toDeleteSeg...); err != nil {
 				return err
 			}
 		}
