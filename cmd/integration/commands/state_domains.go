@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -351,9 +350,10 @@ func makeCompactableIndexDB(ctx context.Context, db kv.RwDB, files []string, dir
 }
 
 func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingCompacted bool, err error) {
-	compressionType := statecfg.Schema.GetDomainCfg(domain).Compression
-	compressCfg := statecfg.Schema.GetDomainCfg(domain).CompressCfg
-	compressCfg.Workers = runtime.NumCPU()
+	compCfg := statelib.Schema.GetDomainCfg(domain).CompressCfg
+	compressionType := compCfg.WordLvl
+	compressCfg := compCfg.WordLvlCfg
+	compressCfg.Workers = estimate.CompressSnapshot.Workers()
 	var tbl string
 	switch domain {
 	case kv.AccountsDomain:

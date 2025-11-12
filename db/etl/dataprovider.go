@@ -20,13 +20,13 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon/common/dir"
 	"io"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 

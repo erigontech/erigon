@@ -3,6 +3,8 @@ package commands
 import (
 	"path/filepath"
 
+	"github.com/spf13/cobra"
+
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
@@ -10,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/spf13/cobra"
 )
 
 func init() {

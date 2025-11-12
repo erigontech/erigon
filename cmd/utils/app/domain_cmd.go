@@ -8,13 +8,14 @@ import (
 	"slices"
 	"time"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/urfave/cli/v2"
 )
 
 func domainStat(cliCtx *cli.Context) error {

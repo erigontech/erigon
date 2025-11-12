@@ -19,14 +19,13 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
 	"testing"
 	"time"
-
-	"crypto/ecdsa"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"

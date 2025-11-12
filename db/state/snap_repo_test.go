@@ -164,7 +164,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 
 	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
 	filename := repo.schema.DataFile(version.V1_0, 0, 1024)
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultWordLvlCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
 	comp.DisableFsync()
@@ -650,12 +650,13 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 	extensions := schema.(*E3SnapSchema).FileExtensions()
 	dataFolder := schema.DataDirectory()
 
+	compCfg := seg.Cfg{}
 	// populate data files
 
 	// 1. account domain, history and ii
 	fileGen := func(filename string) {
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
-			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, compCfg.WordLvlCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			seg.DisableFsync()
 			if err = seg.AddWord([]byte("word")); err != nil {
@@ -672,7 +673,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		}
 
 		if strings.HasSuffix(filename, ".bt") {
-			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, compCfg.WordLvlCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			seg2.DisableFsync()
 			if err = seg2.AddWord([]byte("key")); err != nil {
@@ -686,7 +687,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			seg3, err := seg.NewDecompressor(filename + ".sample")
 			require.NoError(t, err)
 
-			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
+			r := seg.NewPagedReader(seg.NewReader(seg3.MakeGetter(), compCfg.WordLvl), compCfg.PageLvl)
 			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 			if err != nil {
 				t.Fatal(err)

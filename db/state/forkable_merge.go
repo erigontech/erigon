@@ -76,7 +76,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	}
 
 	if !exists {
-		cfg := seg.DefaultCfg
+		cfg := seg.DefaultWordLvlCfg
 		cfg.Workers = compressWorkers
 		cfg.ExpectMetadata = true
 		r := Registry

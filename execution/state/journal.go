@@ -22,9 +22,10 @@ package state
 import (
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/holiman/uint256"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
