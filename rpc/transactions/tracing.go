@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -66,7 +66,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 		return headerReader.HeaderByNumber(ctx, dbtx, n)
 	}
 
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, nil, cfg)
 	rules := blockContext.Rules(cfg)
 
 	// Recompute transactions up to the target index.
@@ -76,11 +76,11 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 }
 
 // ComputeTxContext returns the execution environment of a certain transaction.
-func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (core.Message, evmtypes.TxContext, error) {
+func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (protocol.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
 	statedb.SetTxContext(block.NumberU64(), txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-	txContext := core.NewEVMTxContext(msg)
+	txContext := protocol.NewEVMTxContext(msg)
 	return msg, txContext, nil
 }
 
@@ -91,7 +91,7 @@ func TraceTx(
 	ctx context.Context,
 	engine rules.EngineReader,
 	tx types.Transaction,
-	message core.Message,
+	message protocol.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
 	blockHash common.Hash,
@@ -111,11 +111,11 @@ func TraceTx(
 	defer cancel()
 
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
-		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
+		gp := new(protocol.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
 		if tracer != nil && tracer.OnTxStart != nil {
 			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
 		}
-		result, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
+		result, err := protocol.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.OnTxEnd != nil {
 				tracer.OnTxEnd(nil, err)
