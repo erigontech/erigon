@@ -67,6 +67,6 @@ Bootstrap nodes are used to help new nodes discover other nodes in the network. 
 ## Reference Documentation
 
 * [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit)
-* [Shutter Validator Registration](https://github.com/NethermindEth/shutter-validator-registration)
+* [Shutter Validator Registration](https://github.com/shutter-network/shutter-validator-registration)
 * [Shutter Specs](https://github.com/gnosischain/specs/tree/master/shutter)
 * [System Overview Dashboard](https://explorer.shutter.network/system-overview)
