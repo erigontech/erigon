@@ -570,6 +570,10 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	txNumsReader := br.TxnumReader(ctx)
+	minTxNum, err := txNumsReader.Min(tx, blockNum)
+	if err != nil {
+		return err
+	}
 	maxTxNum, err := txNumsReader.Max(tx, blockNum)
 	if err != nil {
 		return err
@@ -585,40 +589,13 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	if sd.BlockNum() > blockNum {
-		return fmt.Errorf("commitment blockNum gt blockNum: %d > %d", sd.BlockNum(), blockNum)
+	if sd.BlockNum() != blockNum {
+		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", sd.BlockNum(), blockNum)
 	}
-	if sd.TxNum() >= toTxNum {
-		return fmt.Errorf("commitment txNum gte maxTxNum: %d > %d", sd.TxNum(), toTxNum)
+	if sd.TxNum() != maxTxNum {
+		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", sd.TxNum(), maxTxNum)
 	}
-	commitmentBlockMinTxNum, err := txNumsReader.Min(tx, sd.BlockNum())
-	if err != nil {
-		return err
-	}
-	if sd.TxNum() < commitmentBlockMinTxNum {
-		return fmt.Errorf("commitment txNum lt commitment block min txNum: %d < %d", sd.TxNum(), commitmentBlockMinTxNum)
-	}
-	commitmentBlockMaxTxNum, err := txNumsReader.Max(tx, sd.BlockNum())
-	if err != nil {
-		return err
-	}
-	if sd.TxNum() > commitmentBlockMaxTxNum {
-		return fmt.Errorf("commitment txNum gt commitment block max txNum: %d > %d", sd.TxNum(), commitmentBlockMaxTxNum)
-	}
-	partialCommitment := sd.TxNum() < commitmentBlockMaxTxNum
-	fromTxNum := sd.TxNum() + 1
-	logger.Info(
-		"commitment recalc info",
-		"fromTxNum", fromTxNum,
-		"toTxNum", toTxNum,
-		"blockNum", blockNum,
-		"maxTxNum", maxTxNum,
-		"commitmentBlockNum", sd.BlockNum(),
-		"commitmentTxNum", sd.TxNum(),
-		"commitmentBlockMinTxNum", commitmentBlockMinTxNum,
-		"commitmentBlockMaxTxNum", commitmentBlockMaxTxNum,
-		"partial", partialCommitment,
-	)
+	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	touchLoggingVisitor := func(k []byte) {
 		args := []any{"key", common.Address(k[:length.Addr])}
 		if len(k) > length.Addr {
@@ -626,15 +603,15 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		}
 		logger.Debug("commitment touched key", args...)
 	}
-	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, fromTxNum, toTxNum, touchLoggingVisitor)
+	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
-	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, fromTxNum, toTxNum, touchLoggingVisitor)
+	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
-	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, fromTxNum, toTxNum, touchLoggingVisitor)
+	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
