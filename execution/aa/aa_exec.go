@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -22,7 +22,7 @@ import (
 func ValidateAATransaction(
 	tx *types.AccountAbstractionTransaction,
 	ibs *state.IntraBlockState,
-	gasPool *core.GasPool,
+	gasPool *protocol.GasPool,
 	header *types.Header,
 	evm *vm.EVM,
 	chainConfig *chain.Config,
@@ -84,7 +84,7 @@ func ValidateAATransaction(
 
 	// Deployer frame
 	msg := tx.DeployerFrame(rules, hasEIP3860)
-	applyRes, err := core.ApplyFrame(innerEvm, msg, gasPool)
+	applyRes, err := protocol.ApplyFrame(innerEvm, msg, gasPool)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -108,7 +108,7 @@ func ValidateAATransaction(
 	if err != nil {
 		return nil, 0, err
 	}
-	applyRes, err = core.ApplyFrame(innerEvm, msg, gasPool)
+	applyRes, err = protocol.ApplyFrame(innerEvm, msg, gasPool)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -134,7 +134,7 @@ func ValidateAATransaction(
 	}
 
 	if msg != nil {
-		applyRes, err = core.ApplyFrame(innerEvm, msg, gasPool)
+		applyRes, err = protocol.ApplyFrame(innerEvm, msg, gasPool)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -246,7 +246,7 @@ func ExecuteAATransaction(
 	tx *types.AccountAbstractionTransaction,
 	paymasterContext []byte,
 	validationGasUsed uint64,
-	gasPool *core.GasPool,
+	gasPool *protocol.GasPool,
 	evm *vm.EVM,
 	header *types.Header,
 	ibs *state.IntraBlockState,
@@ -263,7 +263,7 @@ func ExecuteAATransaction(
 
 	// Execution frame
 	msg := tx.ExecutionFrame()
-	applyRes, err := core.ApplyFrame(evm, msg, gasPool)
+	applyRes, err := protocol.ApplyFrame(evm, msg, gasPool)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -287,7 +287,7 @@ func ExecuteAATransaction(
 			return 0, 0, err
 		}
 
-		applyRes, err = core.ApplyFrame(evm, msg, gasPool)
+		applyRes, err = protocol.ApplyFrame(evm, msg, gasPool)
 		if err != nil {
 			return 0, 0, err
 		}

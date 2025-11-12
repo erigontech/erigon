@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
+func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, noVerify bool,
 	withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) rules.Engine {
@@ -57,7 +57,7 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 			eng = ethash.NewFaker()
 		case ethashcfg.ModeTest:
 			logger.Warn("Ethash used in test mode")
-			eng = ethash.NewTester(nil, noVerify)
+			eng = ethash.NewTester(noVerify)
 		case ethashcfg.ModeShared:
 			logger.Warn("Ethash used in shared mode")
 			eng = ethash.NewShared()
@@ -69,7 +69,7 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 				DatasetsInMem:    consensusCfg.DatasetsInMem,
 				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
-			}, notify, noVerify)
+			}, noVerify)
 		}
 	case *chainspec.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
@@ -149,6 +149,6 @@ func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, 
 		consensusConfig = &ethashCfg
 	}
 
-	return CreateRulesEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
+	return CreateRulesEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, true, /* noVerify */
 		true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
 }
