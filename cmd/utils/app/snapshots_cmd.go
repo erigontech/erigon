@@ -357,6 +357,27 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "check-commitment-hist-at-blk",
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("check commitment history at block: could not setup logger: %w", err))
+				}
+				err = doCheckCommitmentHistAtBlk(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-commitment-hist-at-blk] failure", "err", err)
+					return err
+				}
+				log.Info("[check-commitment-hist-at-blk] success")
+				return nil
+			},
+			Description: "check if our historical commitment data matches the state root at a given block",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to verify", Required: true},
+			}),
+		},
+		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
 				if err := doPublishable(cliCtx); err != nil {
@@ -966,6 +987,30 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	return nil
+}
+
+func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	_, _, _, blockRetire, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+	return integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger)
 }
 
 func CheckBorChain(chainName string) bool {
