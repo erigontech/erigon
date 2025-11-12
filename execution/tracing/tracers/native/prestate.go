@@ -91,10 +91,10 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 		}
 	}
 	// Diff mode has special semantics around account creating and deletion which
-    // requires it to include empty accounts and storage.
-    if config.DiffMode && config.IncludeEmpty {
-            return nil, fmt.Errorf("cannot use diffMode with includeEmpty")
-    }
+	// requires it to include empty accounts and storage.
+	if config.DiffMode && config.IncludeEmpty {
+		return nil, fmt.Errorf("cannot use diffMode with includeEmpty")
+	}
 
 	t := &prestateTracer{
 		pre:     state{},
