@@ -369,6 +369,35 @@ func SyncSnapshots(
 			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
 		}
 	} else {
+		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
+		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
+		if !headerchain && toBlock > 0 {
+			toTxNum, err := blockReader.TxnumReader(ctx).Min(tx, syncCfg.SnapshotDownloadToBlock)
+			if err != nil {
+				return err
+			}
+			toStep = toTxNum / stepSize
+			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
+			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
+			// so that we can correctly calculate toTxNum above (now we should delete these)
+			var toDeleteSeg, toDeleteDownloader []string
+			for _, f := range blockReader.FrozenFiles() {
+				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
+				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
+					continue
+				}
+				toDeleteSeg = append(toDeleteSeg, f)
+				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
+			}
+			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
+			if _, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader}); err != nil {
+				return err
+			}
+			if err = blockReader.Snapshots().Delete(toDeleteSeg...); err != nil {
+				return err
+			}
+		}
+
 		txNumsReader := blockReader.TxnumReader(ctx)
 
 		// This clause belongs in another function.
@@ -400,29 +429,6 @@ func SyncSnapshots(
 			blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
-			}
-		}
-
-		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
-		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
-		if !headerchain && toBlock > 0 {
-			toTxNum, err := txNumsReader.Min(tx, syncCfg.SnapshotDownloadToBlock)
-			if err != nil {
-				return err
-			}
-			toStep = toTxNum / stepSize
-			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
-			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
-			// so that we can correctly calculate toTxNum above (now we should delete these)
-			for _, f := range blockReader.FrozenFiles() {
-				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
-				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
-					continue
-				}
-				log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "file", fileInfo.Name(), "toBlock", toBlock)
-				if err := blockReader.Snapshots().Delete(fileInfo.Name()); err != nil {
-					return err
-				}
 			}
 		}
 

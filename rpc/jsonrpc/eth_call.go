@@ -36,10 +36,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -335,10 +335,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more.
-		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
+		if err != nil && !errors.Is(err, protocol.ErrIntrinsicGas) {
 			return 0, err
 		}
-		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() {
+		if errors.Is(err, protocol.ErrIntrinsicGas) || result.Failed() {
 			lo = mid
 		} else {
 			hi = mid
@@ -471,6 +471,10 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 				Proof: []hexutil.Bytes{},
 			}
 		}
+		err = trie.VerifyAccountProof(header.Root, proof)
+		if err != nil {
+			return nil, err
+		}
 		return proof, nil
 	}
 
@@ -557,7 +561,7 @@ func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrH
 	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
 }
 
-func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) error {
+func verifyExecResult(execResult *protocol.EphemeralExecResult, block *types.Block) error {
 	actualTxRoot := execResult.TxRoot.Bytes()
 	expectedTxRoot := block.TxHash().Bytes()
 	if !bytes.Equal(actualTxRoot, expectedTxRoot) {
@@ -643,9 +647,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		regenerateHash = true
 	}
 
-	engine, ok := api.engine().(consensus.Engine)
+	engine, ok := api.engine().(rules.Engine)
 	if !ok {
-		return nil, errors.New("engine is not consensus.Engine")
+		return nil, errors.New("engine is not rules.Engine")
 	}
 
 	roTx2, err := db.BeginRo(ctx)
@@ -681,7 +685,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	sdCtx := domains.GetCommitmentContext()
 
 	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
-	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
+	_, err = protocol.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -902,11 +906,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, state)
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
-		txCtx := core.NewEVMTxContext(msg)
+		txCtx := protocol.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
-		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, err
 		}

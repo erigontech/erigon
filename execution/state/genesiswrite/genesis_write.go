@@ -45,9 +45,9 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -375,7 +375,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 		}
 
 		if len(account.Constructor) > 0 {
-			if _, err = core.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
+			if _, err = protocol.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
 				return nil, nil, err
 			}
 		}

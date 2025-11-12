@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/execution/types"
@@ -63,7 +62,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		}, nil
 	}
 	defer e.semaphore.Release(1)
-	param := core.BlockBuilderParameters{
+	param := builder.Parameters{
 		ParentHash:            gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Timestamp:             req.Timestamp,
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
