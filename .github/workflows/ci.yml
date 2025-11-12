@@ -95,25 +95,15 @@ jobs:
           cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
 
       - uses: actions/cache@v4
-        #if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
-        if: 3 > 4
+        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
         with:
           path: |
             C:\ProgramData\chocolatey\lib\mingw
             C:\ProgramData\chocolatey\lib\cmake
           key: chocolatey-${{ matrix.os }}
 
-      - name: Install dependencies
-        if: 3 > 4
-        run: |
-          choco upgrade mingw -y --no-progress --version 14.2.0
-
       - name: Testing build all
-        run: |
-          gcc --version
-          g++ --version
-          echo $env:PATH
-          .\wmake.ps1 all
+        run: .\wmake.ps1 all
 
       - name: Execute test-short
         run: .\wmake.ps1 test-short
