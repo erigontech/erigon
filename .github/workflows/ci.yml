@@ -110,7 +110,7 @@ jobs:
 
       - name: Testing build all
         run: |
-          choco list --local-only --exact mingw
+          choco list --limit-output -e mingw
           .\wmake.ps1 all
 
       - name: Execute test-short
