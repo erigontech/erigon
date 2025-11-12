@@ -217,11 +217,12 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash c
 	}
 
 	return &execution.BlockBody{
-		BlockNumber:  blockNumber,
-		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
-		Transactions: in.Transactions,
-		Uncles:       HeadersToHeadersRPC(in.Uncles),
-		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
+		BlockNumber:   blockNumber,
+		BlockHash:     gointerfaces.ConvertHashToH256(blockHash),
+		Transactions:  in.Transactions,
+		Uncles:        HeadersToHeadersRPC(in.Uncles),
+		Withdrawals:   ConvertWithdrawalsToRpc(in.Withdrawals),
+		InclusionList: in.InclusionListTransactions,
 	}
 }
 
@@ -243,9 +244,10 @@ func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) (*types.RawBody, error)
 		return nil, err
 	}
 	return &types.RawBody{
-		Transactions: in.Transactions,
-		Uncles:       uncles,
-		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
+		Transactions:              in.Transactions,
+		Uncles:                    uncles,
+		Withdrawals:               ConvertWithdrawalsFromRpc(in.Withdrawals),
+		InclusionListTransactions: in.InclusionList,
 	}, nil
 }
 

@@ -593,6 +593,13 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body.Uncles = bodyForStorage.Uncles
 	body.Withdrawals = bodyForStorage.Withdrawals
 
+	inclusionListTxs, err := types.ConvertInclusionListToTransactions(bodyForStorage.InclusionList)
+	if err != nil {
+		log.Error("[FOCIL] Failed to convert inclusion list to transactions", "hash", hash, "number", number, "err", err)
+		return nil, 0, 0
+	}
+	body.InclusionListTransactions = inclusionListTxs
+
 	if bodyForStorage.TxCount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxCount))
 	}
@@ -631,11 +638,13 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err != nil {
 		return false, err
 	}
+
 	data := types.BodyForStorage{
-		BaseTxnID:   types.BaseTxnID(baseTxnID),
-		TxCount:     types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
-		Uncles:      body.Uncles,
-		Withdrawals: body.Withdrawals,
+		BaseTxnID:     types.BaseTxnID(baseTxnID),
+		TxCount:       types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
+		Uncles:        body.Uncles,
+		Withdrawals:   body.Withdrawals,
+		InclusionList: types.InclusionList(body.InclusionListTransactions),
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
@@ -653,11 +662,17 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 	if err != nil {
 		return err
 	}
+	inclusionList, err := types.ConvertTransactionstoInclusionList(body.InclusionListTransactions)
+	if err != nil {
+		log.Error("[FOCIL] Failed to convert inclusion list to transactions", "hash", hash, "number", number, "err", err)
+		return err
+	}
 	data := types.BodyForStorage{
-		BaseTxnID:   types.BaseTxnID(baseTxnID),
-		TxCount:     types.TxCountToTxAmount(len(body.Transactions)),
-		Uncles:      body.Uncles,
-		Withdrawals: body.Withdrawals,
+		BaseTxnID:     types.BaseTxnID(baseTxnID),
+		TxCount:       types.TxCountToTxAmount(len(body.Transactions)),
+		Uncles:        body.Uncles,
+		Withdrawals:   body.Withdrawals,
+		InclusionList: inclusionList,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)

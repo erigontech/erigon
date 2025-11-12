@@ -484,7 +484,8 @@ type BlockBody struct {
 	// Raw transactions in byte format.
 	Transactions  [][]byte                 `protobuf:"bytes,3,rep,name=transactions,proto3" json:"transactions,omitempty"`
 	Uncles        []*Header                `protobuf:"bytes,4,rep,name=uncles,proto3" json:"uncles,omitempty"`
-	Withdrawals   []*typesproto.Withdrawal `protobuf:"bytes,5,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"` // added in Shapella (EIP-4895)
+	Withdrawals   []*typesproto.Withdrawal `protobuf:"bytes,5,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`                          // added in Shapella (EIP-4895)
+	InclusionList [][]byte                 `protobuf:"bytes,6,rep,name=inclusion_list,json=inclusionList,proto3" json:"inclusion_list,omitempty"` // list of transactions that should be included in a payload (EIP-7805)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -550,6 +551,13 @@ func (x *BlockBody) GetUncles() []*Header {
 func (x *BlockBody) GetWithdrawals() []*typesproto.Withdrawal {
 	if x != nil {
 		return x.Withdrawals
+	}
+	return nil
+}
+
+func (x *BlockBody) GetInclusionList() [][]byte {
+	if x != nil {
+		return x.InclusionList
 	}
 	return nil
 }
@@ -1690,14 +1698,15 @@ const file_execution_execution_proto_rawDesc = "" +
 	"\n" +
 	"_aura_stepB\f\n" +
 	"\n" +
-	"_aura_seal\"\xde\x01\n" +
+	"_aura_seal\"\x85\x02\n" +
 	"\tBlockBody\x12*\n" +
 	"\n" +
 	"block_hash\x18\x01 \x01(\v2\v.types.H256R\tblockHash\x12!\n" +
 	"\fblock_number\x18\x02 \x01(\x04R\vblockNumber\x12\"\n" +
 	"\ftransactions\x18\x03 \x03(\fR\ftransactions\x12)\n" +
 	"\x06uncles\x18\x04 \x03(\v2\x11.execution.HeaderR\x06uncles\x123\n" +
-	"\vwithdrawals\x18\x05 \x03(\v2\x11.types.WithdrawalR\vwithdrawals\"\\\n" +
+	"\vwithdrawals\x18\x05 \x03(\v2\x11.types.WithdrawalR\vwithdrawals\x12%\n" +
+	"\x0einclusion_list\x18\x06 \x03(\fR\rinclusionList\"\\\n" +
 	"\x05Block\x12)\n" +
 	"\x06header\x18\x01 \x01(\v2\x11.execution.HeaderR\x06header\x12(\n" +
 	"\x04body\x18\x02 \x01(\v2\x14.execution.BlockBodyR\x04body\"N\n" +

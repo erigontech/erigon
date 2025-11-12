@@ -366,6 +366,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, fmt.Errorf("failed to convert inclusion list: %w", err)
 		}
 		block = block.WithInclusionListTransactions(inclusionListTxns)
+		s.logger.Debug("[NewPayload] inclusion list converted to transactions", "inclusionList", len(block.InclusionListTransactions()))
 	}
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)

@@ -203,7 +203,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			if err != nil {
 				logger.Error("Failed to decode inclusion list transactions", "err", err)
 			} else if len(inclusionTxns) > 0 {
-				logger.Info("Processing inclusion list transactions after normal transactions", "count", len(inclusionTxns))
+				logger.Debug("Processing inclusion list transactions after normal transactions", "count", len(inclusionTxns))
 
 				// Filter out transactions that were already added from the txpool
 				var uniqueInclusionTxns []types.Transaction
@@ -225,7 +225,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 				}
 
 				if duplicateCount > 0 {
-					logger.Info("Filtered out duplicate transactions from inclusion list", "duplicates", duplicateCount, "unique", len(uniqueInclusionTxns))
+					logger.Debug("Filtered out duplicate transactions from inclusion list", "duplicates", duplicateCount, "unique", len(uniqueInclusionTxns))
 				}
 
 				if len(uniqueInclusionTxns) > 0 {
@@ -304,6 +304,14 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
+
+	inclusionListTxns, err := types.ConvertInclusionListToTransactions(cfg.inclusionList)
+	if err != nil {
+		return fmt.Errorf("failed to convert inclusion list to transactions: %s", err)
+	}
+	block = block.WithInclusionListTransactions(inclusionListTxns)
+
+	log.Debug("[FOCIL] FinalizeBlockExecution", "block", block.Header().Number, "txn", block.Transactions().Len(), "inclusionList", len(block.InclusionListTransactions()))
 
 	// Simulate the block execution to get the final state root
 	if err = rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {

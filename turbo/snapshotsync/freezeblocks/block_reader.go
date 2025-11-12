@@ -976,6 +976,11 @@ func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *snapshotsync.Visi
 	body := new(types.Body)
 	body.Uncles = b.Uncles
 	body.Withdrawals = b.Withdrawals
+	inclusionListTxns, err := types.ConvertInclusionListToTransactions(b.InclusionList)
+	if err != nil {
+		return nil, 0, 0, buf, err
+	}
+	body.InclusionListTransactions = inclusionListTxns
 	var txCount uint32
 	if b.TxCount >= 2 {
 		txCount = b.TxCount - 2

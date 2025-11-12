@@ -589,18 +589,20 @@ func (h *Header) SanityCheck() error {
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
-	Transactions []Transaction
-	Uncles       []*Header
-	Withdrawals  []*Withdrawal
+	Transactions              []Transaction
+	Uncles                    []*Header
+	Withdrawals               []*Withdrawal
+	InclusionListTransactions Transactions // EIP-7805: Fork-Choice Inclusion List
 }
 
 // RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
 // It is useful in the situations when actual transaction context is not important, for example
 // when downloading Block bodies from other peers or serving them to other peers
 type RawBody struct {
-	Transactions [][]byte
-	Uncles       []*Header
-	Withdrawals  []*Withdrawal
+	Transactions              [][]byte
+	Uncles                    []*Header
+	Withdrawals               []*Withdrawal
+	InclusionListTransactions [][]byte // EIP-7805: Fork-Choice Inclusion List
 }
 
 // BaseTxnID represents internal auto-incremented transaction number in block, may be different across the nodes
@@ -667,10 +669,11 @@ func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
 }
 
 type BodyForStorage struct {
-	BaseTxnID   BaseTxnID
-	TxCount     uint32
-	Uncles      []*Header
-	Withdrawals []*Withdrawal
+	BaseTxnID     BaseTxnID
+	TxCount       uint32
+	Uncles        []*Header
+	Withdrawals   []*Withdrawal
+	InclusionList InclusionList // EIP-7805: Fork-Choice Inclusion List
 }
 
 // Alternative representation of the Block.
@@ -722,6 +725,17 @@ func (r RawBlock) AsBlock() (*Block, error) {
 	}
 	b.transactions = txs
 
+	var inclusionListTxs Transactions
+	// Convert inclusion list from bytes to transactions if present
+	if len(r.Body.InclusionListTransactions) > 0 {
+		var err error
+		inclusionListTxs, err = ConvertInclusionListToTransactions(r.Body.InclusionListTransactions)
+		if err != nil {
+			return nil, err
+		}
+	}
+	b.inclusionListTransactions = inclusionListTxs
+
 	return b, nil
 }
 
@@ -732,7 +746,7 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
-	inclusionList Transactions
+	inclusionListTransactions Transactions
 	// caches
 	size atomic.Uint64
 }
@@ -1287,7 +1301,7 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
-	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
+	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals, InclusionListTransactions: b.inclusionListTransactions}
 	bd.SendersFromTxs()
 	return bd
 }
@@ -1302,16 +1316,23 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 
 // InclusionListTransactions returns the inclusion list transactions of the block.
 func (b *Block) InclusionListTransactions() Transactions {
-	return b.inclusionList
+	return b.inclusionListTransactions
 }
 
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
+	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals, InclusionListTransactions: make([][]byte, len(b.inclusionListTransactions))}
 	for i, txn := range b.transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(txn)
+		if err != nil {
+			panic(err)
+		}
+	}
+	for i, txn := range b.inclusionListTransactions {
+		var err error
+		br.InclusionListTransactions[i], err = rlp.EncodeToBytes(txn)
 		if err != nil {
 			panic(err)
 		}
@@ -1321,10 +1342,17 @@ func (b *Block) RawBody() *RawBody {
 
 // RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals, InclusionListTransactions: make([][]byte, len(b.InclusionListTransactions))}
 	for i, txn := range b.Transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(txn)
+		if err != nil {
+			panic(err)
+		}
+	}
+	for i, txn := range b.InclusionListTransactions {
+		var err error
+		br.InclusionListTransactions[i], err = rlp.EncodeToBytes(txn)
 		if err != nil {
 			panic(err)
 		}
@@ -1445,11 +1473,11 @@ func (b *Block) Copy() *Block {
 	}
 
 	newB := &Block{
-		header:        CopyHeader(b.header),
-		uncles:        uncles,
-		transactions:  CopyTxs(b.transactions),
-		withdrawals:   withdrawals,
-		inclusionList: b.inclusionList,
+		header:                    CopyHeader(b.header),
+		uncles:                    uncles,
+		transactions:              CopyTxs(b.transactions),
+		withdrawals:               withdrawals,
+		inclusionListTransactions: b.inclusionListTransactions,
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1463,22 +1491,22 @@ func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy.mutable = false
 	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
-		header:        headerCopy,
-		transactions:  b.transactions,
-		uncles:        b.uncles,
-		withdrawals:   b.withdrawals,
-		inclusionList: b.inclusionList,
+		header:                    headerCopy,
+		transactions:              b.transactions,
+		uncles:                    b.uncles,
+		withdrawals:               b.withdrawals,
+		inclusionListTransactions: b.inclusionListTransactions,
 	}
 }
 
 // WithInclusionListTransactions sets the inclusion list transactions of the block.
-func (b *Block) WithInclusionListTransactions(inclusionList Transactions) *Block {
+func (b *Block) WithInclusionListTransactions(inclusionListTxs Transactions) *Block {
 	return &Block{
-		header:        b.header,
-		transactions:  b.transactions,
-		uncles:        b.uncles,
-		withdrawals:   b.withdrawals,
-		inclusionList: inclusionList,
+		header:                    b.header,
+		transactions:              b.transactions,
+		uncles:                    b.uncles,
+		withdrawals:               b.withdrawals,
+		inclusionListTransactions: inclusionListTxs,
 	}
 }
 

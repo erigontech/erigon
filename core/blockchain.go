@@ -167,6 +167,8 @@ func ExecuteBlockEphemerally(
 		if !inclusionListValid && !vmConfig.StatelessExec {
 			return nil, fmt.Errorf("inclusion list constraints not satisfied for block %d", block.NumberU64())
 		}
+	} else {
+		logger.Debug("[FOCIL] Ephemeral execution: No inclusion list transactions found for block %d", block.NumberU64())
 	}
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
