@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -278,17 +279,23 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
 	start := time.Now()
-	if v, _step, ok := sd.mem.GetLatest(domain, k); ok {
+	maxStep := kv.Step(math.MaxUint64)
+
+	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		sd.metrics.UpdateCacheReads(domain, start)
-		return v, _step, nil
+		return v, step, nil
+	} else {
+		if step > 0 {
+			maxStep = step
+		}
 	}
 
 	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
 
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
-		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, &sd.metrics, start)
+		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
 	} else {
 		v, step, err = tx.GetLatest(domain, k)
 	}

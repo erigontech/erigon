@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -179,6 +180,12 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 		currentKeys, ok, err = doms.GetDiffset(rwTx, currentHash, currentBlock)
 		if !ok {
 			if changeSet == nil {
+				// this handles the edge case where we're traversing backwards from
+				// the current block and we've not found the first diff yet it just
+				// means the current block(s) has not been processed yet so has no
+				// state.  This can only happen at the start of the traversal once
+				// one processed block has been found there should be diffsets for
+				// all previous blocks
 				continue
 			}
 			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
@@ -218,6 +225,11 @@ func unwindExec3State(ctx context.Context,
 
 	//TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		//TODO: This is broken - becuase it does not handle the way value changes
+		// for previous steps are represented - they will pass nil values here
+		// which will look like a delete (12/11/25 - I've not fixed this as it has
+		// been here for a while and I'm not sure what if anything recieves these
+		// changes at what it does with them)
 		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var account accounts.Account
@@ -226,11 +238,6 @@ func unwindExec3State(ctx context.Context,
 				}
 				var address common.Address
 				copy(address[:], k)
-
-				if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
-					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
-				}
-
 				newV := accounts.SerialiseV3(&account)
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, account.Incarnation, newV)
@@ -240,9 +247,6 @@ func unwindExec3State(ctx context.Context,
 				copy(address[:], k)
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
-				}
-				if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
-					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x\n", blockUnwindTo, txUnwindTo, address)
 				}
 			}
 			return nil
@@ -271,8 +275,29 @@ func unwindExec3State(ctx context.Context,
 
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
-		for _, kv := range accountDiffs {
-			if err := stateChanges.Collect(toBytesZeroCopy(kv.Key)[:length.Addr], kv.Value); err != nil {
+		for _, entry := range accountDiffs {
+			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
+				address := entry.Key[:len(entry.Key)-8]
+				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
+				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
+				if len(entry.Value) > 0 {
+					var account accounts.Account
+					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
+						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
+					}
+				} else {
+					if keyStep != prevStep {
+						if prevStep == 0 {
+							fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [empty], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
+						} else {
+							fmt.Printf("unwind (Block:%d,Tx:%d): acc: %x, in prev step: {key: %d, prev: %d}\n", blockUnwindTo, txUnwindTo, address, keyStep, prevStep)
+						}
+					} else {
+						fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
+					}
+				}
+			}
+			if err := stateChanges.Collect(toBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
 				return err
 			}
 		}

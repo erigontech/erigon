@@ -186,15 +186,24 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 			if i == int(kv.AccountsDomain) && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				for _, entry := range diffSet {
 					address := entry.Key[:len(entry.Key)-8]
+					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
+					prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
 					if len(entry.Value) > 0 {
 						var account accounts.Account
 						if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
-							fmt.Printf("diffset (Block:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", blockNumber, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+							fmt.Printf("diffset (Block:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockNumber, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 						}
 					} else {
-						fmt.Printf("diffset (Block:%d): del acc: %x\n", blockNumber, address)
+						if keyStep != prevStep {
+							if prevStep == 0 {
+								fmt.Printf("diffset (Block:%d): acc %x: [empty], step: %d\n", blockNumber, address, keyStep)
+							} else {
+								fmt.Printf("diffset (Block:%d): acc: %x, in prev step: {key: %d, prev: %d}\n", blockNumber, address, keyStep, prevStep)
+							}
+						} else {
+							fmt.Printf("diffset (Block:%d): del acc: %x, step: %d\n", blockNumber, address, keyStep)
+						}
 					}
-
 				}
 			}
 			if i == int(kv.StorageDomain) && dbg.TraceDomain(uint16(kv.StorageDomain)) {
