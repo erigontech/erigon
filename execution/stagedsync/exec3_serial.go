@@ -147,7 +147,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return b.HeaderNoCopy(), rwTx, nil
 		}
 
-		if !dbg.BatchCommitments || shouldGenerateChangesets {
+		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
@@ -160,10 +160,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 
 			computeCommitmentDuration += time.Since(start)
-			se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-			if !se.inMemExec {
-				if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
-					return nil, rwTx, err
+			if shouldGenerateChangesets {
+				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
+				if !se.inMemExec {
+					if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
+						return nil, rwTx, err
+					}
 				}
 			}
 			se.doms.SetChangesetAccumulator(nil)
