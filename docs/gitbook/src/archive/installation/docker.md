@@ -23,17 +23,17 @@ Install [Docker Engine](https://docs.docker.com/engine/install) if you run Linux
 
 ### Download and start Erigon in Docker
 
-Here are the steps to download and start Erigon in Docker.&#x20;
+Here are the steps to download and start Erigon in Docker.
 
 {% stepper %}
 {% step %}
-### Check which version you want to download
+#### Check which version you want to download
 
 Check in the GitHub [Release Notes](https://github.com/erigontech/erigon/releases) page which version you want to download (normally latest is the best choice).
 {% endstep %}
 
 {% step %}
-### Download Erigon container
+#### Download Erigon container
 
 Download the chosen version replacing `<version_tag>` with the actual version:
 
@@ -41,13 +41,13 @@ Download the chosen version replacing `<version_tag>` with the actual version:
 docker pull erigontech/erigon:<version_tag>
 ```
 
-&#x20;For example:
+For example:
 
 {% include "../../.gitbook/includes/docker-pull-erigontech-erig....md" %}
 {% endstep %}
 
 {% step %}
-### Start the Erigon container
+#### Start the Erigon container
 
 Start the Erigon container in your terminal:
 
@@ -67,7 +67,7 @@ docker run -v /erigon-data:/erigon-data -it erigontech/erigon:v3.2.2 --chain=hoo
 
 * `-v` connects a folder on your computer to the container
 * `-it` lets you see what's happening and interact with Erigon
-* `--chain=hoodi` specifies which [network](../../get-started/fundamentals/supported-networks.md) to sync&#x20;
+* `--chain=hoodi` specifies which [network](../../get-started/fundamentals/supported-networks.md) to sync
 * `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](../../get-started/fundamentals/sync-modes.md)
 * `--datadir` tells Erigon where to store data inside the container
 {% endstep %}
