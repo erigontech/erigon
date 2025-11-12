@@ -110,7 +110,9 @@ jobs:
 
       - name: Testing build all
         run: |
-          choco list --limit-output -e mingw
+          gcc --version
+          g++ --version
+          echo $env:PATH
           .\wmake.ps1 all
 
       - name: Execute test-short
