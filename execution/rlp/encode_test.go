@@ -156,7 +156,7 @@ var encTests = []encTest{
 	{val: *big.NewInt(0xFFFFFF), output: "83FFFFFF"},
 
 	// negative ints are not supported
-	{val: big.NewInt(-1), error: "rlp: cannot encode negative *big.Int"},
+	{val: big.NewInt(-1), error: "rlp: cannot encode negative big.Int"},
 
 	// uint256 integers (should match uint for small values)
 	{val: uint256.NewInt(0), output: "80"},
