@@ -779,6 +779,12 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			}
 			executor.execTasks.clearPending(i)
 		case len(execRequest.accessList) != 0:
+			// if we have an access list we can assume that all
+			// writes are already in the shared memory map so
+			// we can go ahead and schedule all tx jobs
+			// optimistically without needing to worry about
+			// clashes, this should signifigatly improve tx
+			// concurrency
 			break
 		default:
 			sender, err := t.TxSender()
