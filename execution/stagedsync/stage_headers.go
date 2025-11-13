@@ -201,6 +201,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err := cfg.blockWriter.MakeBodiesCanonical(tx, firstBlock); err != nil {
 			return fmt.Errorf("failed to make bodies canonical %d: %w", firstBlock, err)
 		}
+		cfg.hd.SetSynced()
 		return nil
 	}
 
