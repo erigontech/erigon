@@ -12,6 +12,7 @@ import (
 type gossipMessageStats struct {
 	accepts    map[string]int64
 	rejects    map[string]int64
+	ignores    map[string]int64
 	statsMutex sync.Mutex
 }
 
@@ -45,6 +46,21 @@ func (s *gossipMessageStats) addReject(name string) {
 	s.rejects[name]++
 }
 
+func (s *gossipMessageStats) addIgnore(name string) {
+	tokens := strings.Split(name, "_")
+	// if last token is a number, remove it
+	if _, err := strconv.Atoi(tokens[len(tokens)-1]); err == nil {
+		name = strings.Join(tokens[:len(tokens)-1], "_")
+	}
+
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+	if s.ignores == nil {
+		s.ignores = make(map[string]int64)
+	}
+	s.ignores[name]++
+}
+
 func (s *gossipMessageStats) goPrintStats() {
 	go func() {
 		duration := time.Minute
@@ -58,6 +74,9 @@ func (s *gossipMessageStats) goPrintStats() {
 			}
 			for name, count := range s.rejects {
 				log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
+			}
+			for name, count := range s.ignores {
+				log.Debug("Gossip Message Ignores Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
 			}
 			s.statsMutex.Unlock()
 			times++

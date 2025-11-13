@@ -20,13 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
-
-	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -40,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -63,9 +60,10 @@ type GossipManager struct {
 	p2p                *p2p.P2Pmanager
 
 	subscriptions TopicSubscriptions
+	subscribeAll  bool
 }
 
-func NewGossipReceiver(
+func NewGossipManager(
 	s sentinelproto.SentinelClient,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconConfig *clparams.BeaconChainConfig,
@@ -110,10 +108,12 @@ func NewGossipReceiver(
 	// fulu
 	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64))
 
+	gm.goCheckResubscribe()
 	gm.stats.goPrintStats()
 	return gm
 }
 
+/*
 func (g *GossipManager) onRecv(ctx context.Context, data *sentinelproto.GossipData, l log.Ctx) (err error) {
 	defer func() {
 		r := recover()
@@ -267,20 +267,27 @@ Reconnect:
 		}
 	}
 }
+*/
 
-func (g *GossipManager) RegisterGossipService(service gossipService) error {
+func (g *GossipManager) registerGossipService(service gossipService) error {
 	// wrap service.ProcessMessage to ValidatorEx
 	validator := pubsub.ValidatorEx(func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
+		passes := service.SatisfiesConditions(pid, msg, curVersion)
+		if !passes {
+			g.stats.addReject(msg.GetTopic())
+			return pubsub.ValidationIgnore
+		}
+
 		// parse the topic and subnet
-		topic := extractTopicName(msg)
+		topic := msg.GetTopic()
 		if topic == "" {
 			return pubsub.ValidationReject
 		}
-		subnet := extractSubnetIndexByGossipTopic(topic)
-		if subnet < 0 {
+		name := extractTopicName(topic)
+		if name == "" {
 			return pubsub.ValidationReject
 		}
-
 		// decode the message
 		msgData := msg.GetData()
 		if msgData == nil {
@@ -289,19 +296,32 @@ func (g *GossipManager) RegisterGossipService(service gossipService) error {
 		version := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		msgObj, err := service.service.DecodeGossipMessage(pid, msgData, version)
 		if err != nil {
+			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
 
 		// process msg
-		subnetId := uint64(subnet)
-		err = service.service.ProcessMessage(ctx, &subnetId, msgObj)
+		var subnetId *uint64
+		if gossip.IsTopicNameWithSubnet(name) {
+			subnet := extractSubnetIndexByGossipTopic(name)
+			if subnet < 0 {
+				g.stats.addReject(name)
+				return pubsub.ValidationReject
+			}
+			subnetIdVal := uint64(subnet)
+			subnetId = &subnetIdVal
+		}
+		err = service.service.ProcessMessage(ctx, subnetId, msgObj)
 		if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
 			return pubsub.ValidationIgnore
 		} else if err != nil {
+			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
 
 		// accept
+		monitor.ObserveGossipTopicSeen(name, len(msgData))
+		g.stats.addAccept(name)
 		return pubsub.ValidationAccept
 	})
 
@@ -310,6 +330,7 @@ func (g *GossipManager) RegisterGossipService(service gossipService) error {
 		return err
 	}
 
+	// register all topics and subscribe
 	for _, name := range service.service.Names() {
 		topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
 		if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
@@ -323,12 +344,30 @@ func (g *GossipManager) RegisterGossipService(service gossipService) error {
 			topicHandle.Close()
 			return err
 		}
-		if err := g.subscriptions.Add(topic, topicHandle); err != nil {
+		if err := g.subscriptions.Add(topic, topicHandle, validator); err != nil {
 			topicHandle.Close()
+			return err
+		}
+		if err := g.subscriptions.SubscribeWithExpiry(topic, g.defaultExpiryForTopic(name)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (g *GossipManager) defaultExpiryForTopic(name string) time.Time {
+	if g.subscribeAll {
+		return time.Unix(0, math.MaxInt64)
+	}
+
+	if gossip.IsTopicBeaconAttestation(name) ||
+		gossip.IsTopicSyncCommittee(name) ||
+		gossip.IsTopicDataColumnSidecar(name) {
+		// control by other modules
+		return time.Unix(0, 0)
+	}
+
+	return time.Unix(0, math.MaxInt64)
 }
 
 func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error {
@@ -340,17 +379,79 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 	return g.subscriptions.SubscribeWithExpiry(topic, expiry)
 }
 
-func (g *GossipManager) resubscribeAllTopics(name string) error {
-	allTopics := g.subscriptions.AllTopics()
-	for _, topic := range allTopics {
-		// replace fork digest with new one
+func (g *GossipManager) goCheckResubscribe() {
+	// check upcoming fork digest every slot
+	ticker := time.NewTicker(time.Duration(g.beaconConfig.SecondsPerSlot))
+	defer ticker.Stop()
+	forkDigest, err := g.ethClock.CurrentForkDigest()
+	if err != nil {
+		log.Error("[GossipManager] failed to get current fork digest", "err", err)
+		panic(err)
+	}
+	go func() {
+		for {
+			// compute upcoming ForkDigest immediately
+			epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + 2)
+			upcomingForkDigest, err := g.ethClock.ComputeForkDigest(epoch)
+			if err != nil {
+				log.Warn("[GossipManager] failed to compute upcoming fork digest", "err", err)
+				continue
+			}
+			if upcomingForkDigest != forkDigest {
+				go func(oldForkDigest common.Bytes4) {
+					// unsubscribe old topics after 2 slots
+					time.Sleep(2 * time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second)
+					allTopics := g.subscriptions.AllTopics()
+					for _, topic := range allTopics {
+						if strings.Contains(topic, fmt.Sprintf("%x", oldForkDigest)) {
+							if err := g.subscriptions.Remove(topic); err != nil {
+								log.Warn("[GossipManager] failed to remove old topic", "topic", topic, "err", err)
+							}
+						}
+					}
+				}(forkDigest)
 
-		forkDigest, err := g.ethClock.CurrentForkDigest()
+				// subscribe new topics immediately
+				g.subscribeUpcomingTopics(upcomingForkDigest)
+				forkDigest = upcomingForkDigest
+			}
+
+			<-ticker.C
+		}
+	}()
+}
+
+func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
+	allTopics := g.subscriptions.AllTopics()
+	for _, oldTopic := range allTopics {
+		// replace fork digest with new one
+		name := extractTopicName(oldTopic)
+		if name == "" {
+			continue
+		}
+		prevTopicHandle := g.subscriptions.Get(oldTopic)
+		// register and subscribe new newTopic
+		newTopic := fmt.Sprintf("/eth2/%x/%s/%s", digest, name, gossip.SSZSnappyCodec)
+		if newTopic == oldTopic {
+			continue
+		}
+		topicHandle, err := g.p2p.Pubsub().Join(newTopic)
 		if err != nil {
 			return err
 		}
-		topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+		if err := topicHandle.SetScoreParams(g.topicScoreParams(name)); err != nil {
+			topicHandle.Close()
+			return err
+		}
+		if err := g.subscriptions.Add(newTopic, topicHandle, prevTopicHandle.validator); err != nil {
+			topicHandle.Close()
+			return err
+		}
+		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiration); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams {
@@ -358,13 +459,8 @@ func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams 
 	return &pubsub.TopicScoreParams{}
 }
 
-func extractTopicName(msg *pubsub.Message) string {
+func extractTopicName(topic string) string {
 	// /eth2/[fork_digest]/[topic]/ssz_snappy
-	topic := msg.GetTopic()
-	if topic == "" {
-		return ""
-	}
-	// split string
 	tokens := strings.Split(topic, "/")
 	if len(tokens) != 5 {
 		return ""
@@ -387,120 +483,4 @@ func extractSubnetIndexByGossipTopic(name string) int {
 		return -1
 	}
 	return index
-}
-
-type TopicSubscription struct {
-	topic      *pubsub.Topic
-	sub        *pubsub.Subscription
-	expiration time.Time
-}
-
-type TopicSubscriptions struct {
-	subs  map[string]*TopicSubscription
-	mutex sync.RWMutex
-}
-
-func NewTopicSubscriptions() *TopicSubscriptions {
-	s := &TopicSubscriptions{
-		subs:  make(map[string]*TopicSubscription),
-		mutex: sync.RWMutex{},
-	}
-	go s.expireCheck()
-	return s
-}
-
-func (t *TopicSubscriptions) AllTopics() []string {
-	t.mutex.RLock()
-	defer t.mutex.RUnlock()
-	topics := make([]string, 0, len(t.subs))
-	for topic := range t.subs {
-		topics = append(topics, topic)
-	}
-	return topics
-}
-
-func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
-	t.mutex.RLock()
-	defer t.mutex.RUnlock()
-	return t.subs[topic]
-}
-
-func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	if _, ok := t.subs[topic]; ok {
-		return errors.New("topic already exists")
-	}
-	t.subs[topic] = &TopicSubscription{
-		topic: topicHandle,
-		sub:   nil,
-	}
-	return nil
-}
-
-func (t *TopicSubscriptions) Remove(topic string) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	if _, ok := t.subs[topic]; !ok {
-		return errors.New("topic not found")
-	}
-	delete(t.subs, topic)
-	return nil
-}
-
-func (t *TopicSubscriptions) Unsubscribe(topic string) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	sub, ok := t.subs[topic]
-	if !ok {
-		return errors.New("topic not found")
-	}
-	if sub.sub == nil {
-		return errors.New("subscription already cancelled")
-	}
-	sub.sub.Cancel()
-	sub.sub = nil
-	sub.expiration = time.Unix(0, 0) // reset
-	return nil
-}
-
-func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiration time.Time) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	sub, ok := t.subs[topic]
-	if !ok {
-		return errors.New("topic not found")
-	}
-	if time.Now().Before(expiration) {
-		if sub.sub == nil {
-			// subscribe the topic
-			s, err := sub.topic.Subscribe()
-			if err != nil {
-				return err
-			}
-			sub.sub = s
-		}
-	} else {
-		if sub.sub != nil {
-			// unsubscribe the topic
-			sub.sub.Cancel()
-			sub.sub = nil
-		}
-	}
-	sub.expiration = expiration
-	return nil
-}
-
-func (t *TopicSubscriptions) expireCheck() {
-	ticker := time.NewTicker(12 * time.Second)
-	for range ticker.C {
-		t.mutex.Lock()
-		defer t.mutex.Unlock()
-		for _, sub := range t.subs {
-			if time.Now().After(sub.expiration) && sub.sub != nil {
-				sub.sub.Cancel()
-				sub.sub = nil
-			}
-		}
-	}
 }

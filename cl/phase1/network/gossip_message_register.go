@@ -6,19 +6,21 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/net/context"
 )
 
+type conditionFunc func(peer.ID, *pubsub.Message, clparams.StateVersion) bool
+
 type gossipService struct {
 	service    services.Service[any]
-	conditions []func(*sentinelproto.GossipData, clparams.StateVersion) bool
+	conditions []conditionFunc
 }
 
-func (s *gossipService) SatisfiesConditions(data *sentinelproto.GossipData, curVersion clparams.StateVersion) bool {
+func (s *gossipService) SatisfiesConditions(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 	for _, condition := range s.conditions {
-		if !condition(data, curVersion) {
+		if !condition(pid, msg, curVersion) {
 			return false
 		}
 	}
@@ -53,42 +55,43 @@ func (w *serviceWrapper[T]) ProcessMessage(ctx context.Context, subnet *uint64, 
 	return fmt.Errorf("unexpected message type: %T", msg)
 }
 
-func RegisterGossipService[T any](gm *GossipManager, service services.Service[T], conditions ...func(data *sentinelproto.GossipData, curVersion clparams.StateVersion) bool) {
+func RegisterGossipService[T any](gm *GossipManager, service services.Service[T], conditions ...conditionFunc) {
+
 	wrappedService := wrapService(service)
 	gossipSrv := gossipService{
 		service:    wrappedService,
 		conditions: conditions,
 	}
 	gm.registeredServices = append(gm.registeredServices, gossipSrv)
-	gm.RegisterGossipService(gossipSrv)
+	gm.registerGossipService(gossipSrv)
 }
 
 // withBeginVersion returns a condition that checks if the current version is greater than or equal to the begin version
-func withBeginVersion(beginVersion clparams.StateVersion) func(_ *sentinelproto.GossipData, curVersion clparams.StateVersion) bool {
-	return func(_ *sentinelproto.GossipData, curVersion clparams.StateVersion) bool {
+func withBeginVersion(beginVersion clparams.StateVersion) conditionFunc {
+	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return curVersion >= beginVersion
 	}
 }
 
 // withEndVersion returns a condition that checks if the current version is less than the end version
-func withEndVersion(endVersion clparams.StateVersion) func(_ *sentinelproto.GossipData, curVersion clparams.StateVersion) bool {
-	return func(_ *sentinelproto.GossipData, curVersion clparams.StateVersion) bool {
+func withEndVersion(endVersion clparams.StateVersion) conditionFunc {
+	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return curVersion < endVersion
 	}
 }
 
 // withGlobalTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
-func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) func(_ *sentinelproto.GossipData, curVersion clparams.StateVersion) bool {
+func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) conditionFunc {
 	limiter := newTimeBasedRateLimiter(duration, maxRequests)
-	return func(_ *sentinelproto.GossipData, _ clparams.StateVersion) bool {
+	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.tryAcquire()
 	}
 }
 
 // withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
-func withRateLimiterByPeer(ratePerSecond float64, burst int) func(_ *sentinelproto.GossipData, _ clparams.StateVersion) bool {
+func withRateLimiterByPeer(ratePerSecond float64, burst int) conditionFunc {
 	limiter := newTokenBucketRateLimiter(ratePerSecond, burst)
-	return func(data *sentinelproto.GossipData, _ clparams.StateVersion) bool {
-		return limiter.acquire(data.Peer.Pid)
+	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
+		return limiter.acquire(pid.String())
 	}
 }
