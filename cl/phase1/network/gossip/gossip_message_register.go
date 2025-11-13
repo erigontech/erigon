@@ -1,24 +1,35 @@
-package network
+package gossip
 
 import (
 	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/network/services"
+	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/net/context"
 )
 
+func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...conditionFunc) {
+
+	wrappedService := wrapService(service)
+	gossipSrv := GossipService{
+		Service:    wrappedService,
+		conditions: conditions,
+	}
+	gm.registeredServices = append(gm.registeredServices, gossipSrv)
+	gm.registerGossipService(gossipSrv)
+}
+
 type conditionFunc func(peer.ID, *pubsub.Message, clparams.StateVersion) bool
 
-type gossipService struct {
-	service    services.Service[any]
+type GossipService struct {
+	Service    serviceintf.Service[any]
 	conditions []conditionFunc
 }
 
-func (s *gossipService) SatisfiesConditions(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
+func (s *GossipService) SatisfiesConditions(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 	for _, condition := range s.conditions {
 		if !condition(pid, msg, curVersion) {
 			return false
@@ -28,12 +39,12 @@ func (s *gossipService) SatisfiesConditions(pid peer.ID, msg *pubsub.Message, cu
 }
 
 // wrapService wraps a service to return an any type service
-func wrapService[T any](service services.Service[T]) services.Service[any] {
+func wrapService[T any](service serviceintf.Service[T]) serviceintf.Service[any] {
 	return &serviceWrapper[T]{service: service}
 }
 
 type serviceWrapper[T any] struct {
-	service services.Service[T]
+	service serviceintf.Service[T]
 }
 
 func (w *serviceWrapper[T]) Names() []string {
@@ -55,41 +66,30 @@ func (w *serviceWrapper[T]) ProcessMessage(ctx context.Context, subnet *uint64, 
 	return fmt.Errorf("unexpected message type: %T", msg)
 }
 
-func RegisterGossipService[T any](gm *GossipManager, service services.Service[T], conditions ...conditionFunc) {
-
-	wrappedService := wrapService(service)
-	gossipSrv := gossipService{
-		service:    wrappedService,
-		conditions: conditions,
-	}
-	gm.registeredServices = append(gm.registeredServices, gossipSrv)
-	gm.registerGossipService(gossipSrv)
-}
-
-// withBeginVersion returns a condition that checks if the current version is greater than or equal to the begin version
-func withBeginVersion(beginVersion clparams.StateVersion) conditionFunc {
+// WithBeginVersion returns a condition that checks if the current version is greater than or equal to the begin version
+func WithBeginVersion(beginVersion clparams.StateVersion) conditionFunc {
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return curVersion >= beginVersion
 	}
 }
 
-// withEndVersion returns a condition that checks if the current version is less than the end version
-func withEndVersion(endVersion clparams.StateVersion) conditionFunc {
+// WithEndVersion returns a condition that checks if the current version is less than the end version
+func WithEndVersion(endVersion clparams.StateVersion) conditionFunc {
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return curVersion < endVersion
 	}
 }
 
-// withGlobalTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
-func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) conditionFunc {
+// WithGlobalTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
+func WithGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) conditionFunc {
 	limiter := newTimeBasedRateLimiter(duration, maxRequests)
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.tryAcquire()
 	}
 }
 
-// withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
-func withRateLimiterByPeer(ratePerSecond float64, burst int) conditionFunc {
+// WithRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
+func WithRateLimiterByPeer(ratePerSecond float64, burst int) conditionFunc {
 	limiter := newTokenBucketRateLimiter(ratePerSecond, burst)
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.acquire(pid.String())

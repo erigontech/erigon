@@ -16,6 +16,7 @@ import (
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -55,6 +56,7 @@ type peerdas struct {
 	blobStorage       blob_storage.BlobStorage
 	sentinel          sentinelproto.SentinelClient
 	ethClock          eth_clock.EthereumClock
+	gossipManager     *gossipmgr.GossipManager
 	recoverBlobsQueue chan recoverBlobsRequest
 
 	recoveringMutex   sync.Mutex
@@ -73,6 +75,7 @@ func NewPeerDas(
 	nodeID enode.ID,
 	ethClock eth_clock.EthereumClock,
 	peerDasState *peerdasstate.PeerDasState,
+	gossipManager *gossipmgr.GossipManager,
 ) PeerDas {
 	kzg.InitKZGCtx()
 	p := &peerdas{
@@ -85,6 +88,7 @@ func NewPeerDas(
 		blobStorage:       blobStorage,
 		sentinel:          sentinel,
 		ethClock:          ethClock,
+		gossipManager:     gossipManager,
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
 
 		recoveringMutex:   sync.Mutex{},

@@ -25,7 +25,7 @@ type Gater struct {
 	filter *multiaddr.Filters
 }
 
-func NewGater(cfg *SentinelConfig) (g *Gater, err error) {
+func NewGater(cfg *P2PConfig) (g *Gater, err error) {
 	g = &Gater{}
 	g.filter, err = configureFilter(cfg)
 	if err != nil {
@@ -102,7 +102,7 @@ func filterConnections(f *multiaddr.Filters, a multiaddr.Multiaddr) bool {
 	return !f.AddrBlocked(a)
 }
 
-func configureFilter(cfg *SentinelConfig) (*multiaddr.Filters, error) {
+func configureFilter(cfg *P2PConfig) (*multiaddr.Filters, error) {
 	var err error
 	addrFilter := multiaddr.NewFilters()
 	if !cfg.LocalDiscovery {

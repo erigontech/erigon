@@ -46,7 +46,7 @@ func multiAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) 
 	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/tcp/%d", ipAddr, port))
 }
 
-func buildOptions(cfg *SentinelConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option, error) {
+func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option, error) {
 
 	listen, err := multiAddressBuilder(cfg.IpAddr, cfg.TCPPort)
 	if err != nil {

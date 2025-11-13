@@ -11,7 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 )
 
-type SentinelConfig struct {
+type P2PConfig struct {
 	NetworkConfig *clparams.NetworkConfig
 	BeaconConfig  *clparams.BeaconChainConfig
 	IpAddr        string
@@ -32,13 +32,13 @@ type SentinelConfig struct {
 }
 
 type P2Pmanager struct {
-	cfg    *SentinelConfig
+	cfg    *P2PConfig
 	pubsub *pubsub.PubSub
 	bwc    *metrics.BandwidthCounter
 	host   host.Host
 }
 
-func NewP2Pmanager(ctx context.Context, cfg *SentinelConfig) (*P2Pmanager, error) {
+func NewP2Pmanager(ctx context.Context, cfg *P2PConfig) (*P2Pmanager, error) {
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
 		return nil, err
