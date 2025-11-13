@@ -742,8 +742,8 @@ var (
 func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool) (lastBlockNum uint64, err error) {
 	var (
 		batchSize                = uint64(20)
-		blockRPS, blockBurst     = 5000, 5
-		receiptRPS, receiptBurst = 500, 4
+		blockRPS, blockBurst     = 5000, 5 // rps, amount of simultaneous requests
+		receiptRPS, receiptBurst = 500, 4  // rps, amount of simultaneous requests
 
 		logInterval   = time.Second * 40
 		logEvery      = time.NewTicker(logInterval)
@@ -769,8 +769,8 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 		}
 
 		last := blocks[len(blocks)-1]
-		lastBlockNum = prev
-		prev = last.NumberU64() + 1
+		lastBlockNum = last.NumberU64()
+		prev = lastBlockNum + 1
 		lastBlockHash = last.Hash()
 
 		select {

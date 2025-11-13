@@ -189,10 +189,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err != nil {
 			return fmt.Errorf("error reading header progress from db: %w", err)
 		}
-		if err = cfg.blockWriter.MakeBodiesCanonical(tx, lastCommittedBlockNum); err != nil {
-			return fmt.Errorf("failed to append canonical txnum %d: %w", lastCommittedBlockNum, err)
-		}
-
 		if err = cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), firstBlock+1, lastCommittedBlockNum, ctx, logger); err != nil {
 			return err
 		}
@@ -200,7 +196,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err = cfg.bodyDownload.UpdateFromDb(tx); err != nil {
 			return err
 		}
-		defer cfg.bodyDownload.ClearBodyCache()
+		//defer cfg.bodyDownload.ClearBodyCache()
 
 		if err := cfg.blockWriter.MakeBodiesCanonical(tx, firstBlock); err != nil {
 			return fmt.Errorf("failed to make bodies canonical %d: %w", firstBlock, err)
