@@ -1,4 +1,4 @@
-package network
+package gossip
 
 import (
 	"errors"
