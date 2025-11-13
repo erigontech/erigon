@@ -226,8 +226,7 @@ func (n *RemoteNotifier) activate() error {
 
 func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 	params, _ := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
-	ctx := context.Background()
-	return n.h.conn.WriteJSON(ctx, &jsonrpcMessage{
+	return n.h.conn.WriteJSON(context.Background(), &jsonrpcMessage{
 		Version: vsn,
 		Method:  n.namespace + notificationMethodSuffix,
 		Params:  params,
