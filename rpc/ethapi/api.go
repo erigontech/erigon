@@ -25,12 +25,14 @@ import (
 	"fmt"
 	"math/big"
 
+	blockstype "github.com/erigontech/erigon/arb/blocks"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
+	arb_txn "github.com/erigontech/erigon/arb/txn"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/abi"
@@ -488,7 +490,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 }
 
 func fillArbitrumHeaderInfo(header *types.Header, fields map[string]interface{}) {
-	info := types.DeserializeHeaderExtraInformation(header)
+	info := blockstype.DeserializeHeaderExtraInformation(header)
 	fields["l1BlockNumber"] = hexutil.Uint64(info.L1BlockNumber)
 	fields["sendRoot"] = info.SendRoot
 	fields["sendCount"] = hexutil.Uint64(info.SendCount)
@@ -616,23 +618,23 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 
 	// Arbitrum transaction types
 	switch tx := txn.(type) {
-	case *types.ArbitrumInternalTx:
+	case *arb_txn.ArbitrumInternalTx:
 		result.GasPrice = (*hexutil.Big)(tx.GetPrice().ToBig())
-	case *types.ArbitrumDepositTx:
+	case *arb_txn.ArbitrumDepositTx:
 		result.GasPrice = (*hexutil.Big)(tx.GetPrice().ToBig())
 		result.RequestId = &tx.L1RequestId
-	case *types.ArbitrumContractTx:
+	case *arb_txn.ArbitrumContractTx:
 		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
 		result.RequestId = &tx.RequestId
 		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
-	case *types.ArbitrumRetryTx:
+	case *arb_txn.ArbitrumRetryTx:
 		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
 		result.TicketId = &tx.TicketId
 		result.RefundTo = &tx.RefundTo
 		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
 		result.MaxRefund = (*hexutil.Big)(tx.MaxRefund)
 		result.SubmissionFeeRefund = (*hexutil.Big)(tx.SubmissionFeeRefund)
-	case *types.ArbitrumSubmitRetryableTx:
+	case *arb_txn.ArbitrumSubmitRetryableTx:
 		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
 		result.RequestId = &tx.RequestId
 		result.L1BaseFee = (*hexutil.Big)(tx.L1BaseFee)
@@ -644,10 +646,10 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 		result.RefundTo = &tx.FeeRefundAddr
 		result.MaxSubmissionFee = (*hexutil.Big)(tx.MaxSubmissionFee)
 		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
-	case *types.ArbitrumUnsignedTx:
+	case *arb_txn.ArbitrumUnsignedTx:
 		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
 	}
-	signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId.ToBig()))
+	signer := arb_txn.NewArbitrumSigner(*types.LatestSignerForChainID(chainId.ToBig()))
 	var err error
 	result.From, err = signer.Sender(txn)
 	if err != nil {

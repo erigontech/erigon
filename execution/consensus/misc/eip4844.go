@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/blocks"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/chain"
@@ -47,7 +48,7 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	if parent.BlobGasUsed != nil {
 		parentBlobGasUsed = *parent.BlobGasUsed
 	}
-	arbOsVersion := types.GetArbOSVersion(parent, config)
+	arbOsVersion := blockstype.GetArbOSVersion(parent, config)
 	target := config.GetTargetBlobsPerBlock(currentHeaderTime, arbOsVersion)
 	targetBlobGas := target * params.GasPerBlob
 

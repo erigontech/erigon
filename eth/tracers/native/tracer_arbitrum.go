@@ -20,10 +20,10 @@
 package native
 
 import (
+	"github.com/erigontech/erigon/arb/txn"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 type arbitrumTransfer struct {
@@ -54,11 +54,11 @@ func (t *callTracer) CaptureArbitrumTransfer(from, to *libcommon.Address, value 
 }
 
 func (t *prestateTracer) CaptureArbitrumStorageGet(key libcommon.Hash, depth int, before bool) {
-	t.lookupAccount(types.ArbosStateAddress)
-	t.lookupStorage(types.ArbosStateAddress, key)
+	t.lookupAccount(txn.ArbosStateAddress)
+	t.lookupStorage(txn.ArbosStateAddress, key)
 }
 
 func (t *prestateTracer) CaptureArbitrumStorageSet(key, value libcommon.Hash, depth int, before bool) {
-	t.lookupAccount(types.ArbosStateAddress)
-	t.lookupStorage(types.ArbosStateAddress, key)
+	t.lookupAccount(txn.ArbosStateAddress)
+	t.lookupStorage(txn.ArbosStateAddress, key)
 }

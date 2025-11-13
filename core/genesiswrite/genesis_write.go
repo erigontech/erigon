@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	blockstype "github.com/erigontech/erigon/arb/blocks"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -378,7 +379,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 		}
 	}
 
-	arbosVersion := types.GetArbOSVersion(head, g.Config)
+	arbosVersion := blockstype.GetArbOSVersion(head, g.Config)
 
 	var withdrawals []*types.Withdrawal
 	if g.Config != nil && g.Config.IsShanghai(g.Timestamp, arbosVersion) {

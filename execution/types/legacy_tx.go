@@ -126,7 +126,7 @@ func (tx *LegacyTx) GetAuthorizations() []Authorization {
 }
 
 func (tx *LegacyTx) Protected() bool {
-	return isProtectedV(&tx.V)
+	return IsProtectedV(&tx.V)
 }
 
 func (tx *LegacyTx) Unwrap() Transaction {
@@ -236,8 +236,8 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
 		return err
 	}
@@ -307,8 +307,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
 		return err
 	}
@@ -464,7 +464,7 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender common.Address, ok bool) {
+func (tx *LegacyTx) CachedSender() (sender common.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false
