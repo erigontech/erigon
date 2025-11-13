@@ -80,10 +80,11 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: configure Pagefile
+      - name: Configure Pagefile
         uses: al-cheb/configure-pagefile-action@v1.5
         with:
           minimum-size: 8GB
+          disk-root: "C:"
 
       - uses: actions/checkout@v5
         with:
