@@ -126,12 +126,12 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
 		evm := vm.NewEVM(*e.blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
-		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, evm, e.chainConfig)
+		paymasterContext, validationGasUsed, preTxCost, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, evm, e.chainConfig)
 		if err != nil {
 			return err
 		}
 
-		_, _, err = aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gp, evm, e.header, e.ibs)
+		_, _, err = aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, preTxCost, gp, evm, e.header, e.ibs)
 		if err != nil {
 			return err
 		}
