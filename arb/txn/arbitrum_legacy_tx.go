@@ -14,6 +14,14 @@ import (
 	"github.com/holiman/uint256"
 )
 
+func init() {
+	types.RegisterTransaction(txn_types.ArbitrumLegacyTxType, createArbitrumLegacyTx)
+}
+
+func createArbitrumLegacyTx() types.Transaction {
+	return &ArbitrumLegacyTxData{}
+}
+
 type ArbitrumLegacyTxData struct {
 	*types.LegacyTx
 	HashOverride      common.Hash // Hash cannot be locally computed from other fields

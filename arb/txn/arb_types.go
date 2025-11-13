@@ -59,6 +59,16 @@ var skipAccountChecks = [...]bool{
 	txn_types.ArbitrumUnsignedTxType:        false,
 }
 
+func init() {
+	types.RegisterTransaction(txn_types.ArbitrumDepositTxType, createArbitrumDespoitTxn)
+	types.RegisterTransaction(txn_types.ArbitrumRetryTxType, createArbitrumRetryTx)
+	types.RegisterTransaction(txn_types.ArbitrumSubmitRetryableTxType, createArbitrumSubmitRetryableTx)
+	types.RegisterTransaction(txn_types.ArbitrumInternalTxType, createArbitrumInternalTx)
+	types.RegisterTransaction(txn_types.ArbitrumContractTxType, createArbitrumContractTx)
+	types.RegisterTransaction(txn_types.ArbitrumUnsignedTxType, createArbitrumUnsignedTx)
+	types.RegisterTransaction(txn_types.ArbitrumLegacyTxType, createArbitrumLegacyTx)
+}
+
 // func (tx *LegacyTx) skipAccountChecks() bool                  { return false }
 // func (tx *AccessListTx) skipAccountChecks() bool              { return false }
 // func (tx *DynamicFeeTransaction) skipAccountChecks() bool     { return false }
@@ -68,6 +78,10 @@ var skipAccountChecks = [...]bool{
 // func (tx *ArbitrumSubmitRetryableTx) skipAccountChecks() bool { return true }
 // func (tx *ArbitrumDepositTx) skipAccountChecks() bool         { return true }
 // func (tx *ArbitrumInternalTx) skipAccountChecks() bool        { return true }
+
+func createArbitrumUnsignedTx() types.Transaction {
+	return &ArbitrumUnsignedTx{}
+}
 
 type ArbitrumUnsignedTx struct {
 	NoTimeBoosted
@@ -454,6 +468,10 @@ func (tx *ArbitrumUnsignedTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	}
 //	return dst.Set(baseFee)
 //}
+
+func createArbitrumContractTx() types.Transaction {
+	return &ArbitrumContractTx{}
+}
 
 type ArbitrumContractTx struct {
 	NoTimeBoosted
@@ -869,6 +887,10 @@ func (tx *ArbitrumContractTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	}
 //	return dst.Set(baseFee)
 //}
+
+func createArbitrumRetryTx() types.Transaction {
+	return &ArbitrumRetryTx{}
+}
 
 type ArbitrumRetryTx struct {
 	ChainId             *big.Int
@@ -1387,6 +1409,10 @@ func (tx *ArbitrumRetryTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	}
 //	return dst.Set(baseFee)
 //}
+
+func createArbitrumSubmitRetryableTx() types.Transaction {
+	return &ArbitrumSubmitRetryableTx{}
+}
 
 type ArbitrumSubmitRetryableTx struct {
 	NoTimeBoosted
@@ -1937,6 +1963,10 @@ func (tx *ArbitrumSubmitRetryableTx) decode(input []byte) error {
 //	return dst.Set(baseFee)
 //}
 
+func createArbitrumDespoitTxn() types.Transaction {
+	return &ArbitrumDepositTx{}
+}
+
 type ArbitrumDepositTx struct {
 	NoTimeBoosted
 	ChainId     *big.Int
@@ -2253,6 +2283,10 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 //func (tx *ArbitrumDepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)
 //}
+
+func createArbitrumInternalTx() types.Transaction {
+	return &ArbitrumInternalTx{}
+}
 
 type ArbitrumInternalTx struct {
 	NoTimeBoosted

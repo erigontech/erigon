@@ -56,6 +56,27 @@ const (
 	AccountAbstractionTxType
 )
 
+type constructTxnFunc = func() Transaction
+
+var externalTxnTypes map[byte]constructTxnFunc
+
+func RegisterTransaction(txnType byte, creator constructTxnFunc) {
+	if externalTxnTypes == nil {
+		externalTxnTypes = make(map[byte]constructTxnFunc)
+	}
+	externalTxnTypes[txnType] = creator
+}
+
+func CreateTransactioByType(txnType byte) Transaction {
+	if externalTxnTypes == nil {
+		externalTxnTypes = make(map[byte]constructTxnFunc)
+	}
+	if ctor, ok := externalTxnTypes[txnType]; ok {
+		return ctor()
+	}
+	return nil
+}
+
 // Transaction is an Ethereum transaction.
 type Transaction interface {
 	Type() byte
@@ -190,42 +211,31 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	}
 	s, done := rlp.NewStreamFromPool(bytes.NewReader(data[1:]), uint64(len(data)-1))
 	defer done()
+	// Externall type
 	var t Transaction
-	switch data[0] {
-	case AccessListTxType:
-		t = &AccessListTx{}
-	case DynamicFeeTxType:
-		t = &DynamicFeeTransaction{}
-	case BlobTxType:
-		if blobTxnsAreWrappedWithBlobs {
-			t = &BlobTxWrapper{}
-		} else {
-			t = &BlobTx{}
+	if t = CreateTransactioByType(data[0]); t == nil {
+		switch data[0] {
+		case AccessListTxType:
+			t = &AccessListTx{}
+		case DynamicFeeTxType:
+			t = &DynamicFeeTransaction{}
+		case BlobTxType:
+			if blobTxnsAreWrappedWithBlobs {
+				t = &BlobTxWrapper{}
+			} else {
+				t = &BlobTx{}
+			}
+		case SetCodeTxType:
+			t = &SetCodeTransaction{}
+		case AccountAbstractionTxType:
+			t = &AccountAbstractionTransaction{}
+		default:
+			if data[0] >= 0x80 {
+				// txn is type legacy which is RLP encoded
+				return DecodeTransaction(data)
+			}
+			return nil, ErrTxTypeNotSupported
 		}
-	case SetCodeTxType:
-		t = &SetCodeTransaction{}
-	case AccountAbstractionTxType:
-		t = &AccountAbstractionTransaction{}
-	//case ArbitrumDepositTxType:
-	//	t = &ArbitrumDepositTx{}
-	//case ArbitrumUnsignedTxType:
-	//	t = &ArbitrumUnsignedTx{}
-	//case ArbitrumContractTxType:
-	//	t = &ArbitrumContractTx{}
-	//case ArbitrumRetryTxType:
-	//	t = &ArbitrumRetryTx{}
-	//case ArbitrumSubmitRetryableTxType:
-	//	t = &ArbitrumSubmitRetryableTx{}
-	//case ArbitrumInternalTxType:
-	//	t = &ArbitrumInternalTx{}
-	//case ArbitrumLegacyTxType:
-	//	t = &ArbitrumLegacyTxData{}
-	default:
-		if data[0] >= 0x80 {
-			// txn is type legacy which is RLP encoded
-			return DecodeTransaction(data)
-		}
-		return nil, ErrTxTypeNotSupported
 	}
 	if err := t.DecodeRLP(s); err != nil {
 		return nil, err
