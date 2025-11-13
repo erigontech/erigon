@@ -337,7 +337,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	// Create the gossip manager
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, networkConfig, ethClock, emitters, committeeSub,
+	gossipManager := network.NewGossipManager(sentinel, forkChoice, beaconConfig, networkConfig, ethClock, emitters, committeeSub,
 		blockService, blobService, dataColumnSidecarService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
 		attestationService, voluntaryExitService, blsToExecutionChangeService, proposerSlashingService)
 	{ // start ticking forkChoice
@@ -354,10 +354,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}()
 	}
 
-	{ // start the gossip manager
-		go gossipManager.Start(ctx)
-		logger.Info("Started Ethereum 2.0 Gossip Service")
-	}
+	logger.Info("Started Ethereum 2.0 Gossip Service")
 
 	{ // start logging peers
 		go func() {

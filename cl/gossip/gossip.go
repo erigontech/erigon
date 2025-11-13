@@ -42,6 +42,10 @@ const (
 
 const SSZSnappyCodec = "ssz_snappy"
 
+func IsTopicNameWithSubnet(name string) bool {
+	return IsTopicBeaconAttestation(name) || IsTopicSyncCommittee(name) || IsTopicBlobSidecar(name) || IsTopicDataColumnSidecar(name)
+}
+
 func TopicNameBlobSidecar(d uint64) string {
 	return fmt.Sprintf(TopicNamePrefixBlobSidecar, d)
 }

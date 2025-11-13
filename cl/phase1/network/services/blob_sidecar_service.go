@@ -83,8 +83,8 @@ func NewBlobSidecarService(
 }
 
 func (b *blobSidecarService) Names() []string {
-	names := make([]string, 0, b.beaconCfg.BlobSidecarSubnetCount)
-	for i := 0; i < int(b.beaconCfg.BlobSidecarSubnetCount); i++ {
+	names := make([]string, 0, b.beaconCfg.BlobSidecarSubnetCountElectra)
+	for i := 0; i < int(b.beaconCfg.BlobSidecarSubnetCountElectra); i++ {
 		names = append(names, gossip.TopicNameBlobSidecar(uint64(i)))
 	}
 	return names
