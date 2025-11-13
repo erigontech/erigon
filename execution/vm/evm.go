@@ -194,7 +194,7 @@ func (evm *EVM) call(typ OpCode, caller common.Address, callerAddress common.Add
 		}
 	}
 
-	// BAL: record address access even if call fails due to gas/call depth
+	// BAL: record address access even if call fails due to gas/call depth and to precompiles
 	evm.intraBlockState.VersionRead(addr, state.AddressPath, common.Hash{}, state.MapRead, evm.intraBlockState.Version(), nil)
 
 	// Invoke tracer hooks that signal entering/exiting a call frame

@@ -797,6 +797,8 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 			sdb.touch(addr)
 		}
 
+		// BAL: record coinbase/selfdestruct recipients even with 0 value
+		sdb.VersionRead(addr, BalancePath, common.Hash{}, MapRead, sdb.Version(), nil)
 		return nil
 	}
 
