@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -105,7 +104,7 @@ type EthereumExecutionModule struct {
 	logger log.Logger
 	// Block building
 	nextPayloadId  uint64
-	lastParameters *core.BlockBuilderParameters
+	lastParameters *builder.Parameters
 	builderFunc    builder.BlockBuilderFunc
 	builders       map[uint64]*builder.BlockBuilder
 

@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package blockgen
 
 import (
 	"context"
@@ -29,8 +29,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/protocol/rules/misc"
@@ -49,7 +50,7 @@ type BlockGen struct {
 	stateReader state.StateReader
 	ibs         *state.IntraBlockState
 
-	gasPool  *GasPool
+	gasPool  *protocol.GasPool
 	txs      []types.Transaction
 	receipts []*types.Receipt
 	uncles   []*types.Header
@@ -70,7 +71,7 @@ func (b *BlockGen) SetCoinbase(addr common.Address) {
 		panic("coinbase can only be set once")
 	}
 	b.header.Coinbase = addr
-	b.gasPool = new(GasPool).AddGas(b.header.GasLimit)
+	b.gasPool = new(protocol.GasPool).AddGas(b.header.GasLimit)
 }
 
 // SetExtra sets the extra data field of the generated block.
@@ -121,7 +122,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	receipt, _, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
 	}
@@ -137,7 +138,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	receipt, _, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -358,7 +359,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 		}
 		if b.engine != nil {
-			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, nil, logger, nil)
+			err := protocol.InitializeBlockExecution(b.engine, nil, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
@@ -374,7 +375,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
-			blockContext := NewEVMBlockContext(b.header, GetHashFn(b.header, nil), b.engine, nil, config)
+			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, nil, config)
 			if err := ibs.CommitBlock(blockContext.Rules(config), stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
@@ -411,37 +412,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
-	header := types.NewEmptyHeaderForAssembling()
-	header.Root = parent.Root
-	header.ParentHash = parent.Hash()
-	header.Number = new(big.Int).Add(parent.Number, common.Big1)
-	header.Difficulty = common.Big0
-	header.Time = timestamp
-
-	parentGasLimit := parent.GasLimit
-	// Set baseFee and GasLimit if we are on an EIP-1559 chain
-	if chainConfig.IsLondon(header.Number.Uint64()) {
-		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
-		if !chainConfig.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
-		}
-	}
-	if targetGasLimit != nil {
-		header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
-	} else {
-		header.GasLimit = parentGasLimit
-	}
-
-	if chainConfig.IsCancun(header.Time) {
-		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent, header.Time)
-		header.ExcessBlobGas = &excessBlobGas
-		header.BlobGasUsed = new(uint64)
-	}
-
-	return header
-}
-
 func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
 	var time uint64
 	if parent.Time() == 0 {
@@ -450,7 +420,7 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 
-	header := MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
 	header.Coinbase = parent.Coinbase()
 	header.Difficulty = engine.CalcDifficulty(chain, time,
 		time-10,

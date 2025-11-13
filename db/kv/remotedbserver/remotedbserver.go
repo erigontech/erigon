@@ -159,7 +159,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 	}
 	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
 	if errBegin != nil {
-		return fmt.Errorf("kvserver: %w", err)
+		return fmt.Errorf("kvserver: %w", errBegin)
 	}
 	s.txs[id] = &threadSafeTx{TemporalTx: newTx}
 	return nil

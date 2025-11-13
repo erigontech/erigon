@@ -40,9 +40,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -271,7 +271,7 @@ func TestSetupGenesis(t *testing.T) {
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 				m := mock.MockWithGenesis(t, &oldcustomg, key, false)
 
-				chainBlocks, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
+				chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -294,7 +294,6 @@ func TestSetupGenesis(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
 			tmpdir := t.TempDir()
 			dirs := datadir.New(tmpdir)
 			db := temporaltest.NewTestDB(t, dirs)

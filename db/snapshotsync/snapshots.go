@@ -493,9 +493,7 @@ type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
 	for _, seg := range s {
-		if !seg.src.frozen {
-			seg.src.refcount.Add(1)
-		}
+		seg.src.refcount.Add(1)
 	}
 	return &RoTx{Segments: s}
 }
@@ -513,7 +511,7 @@ func (s *RoTx) Close() {
 
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
-		if src == nil || src.frozen {
+		if src == nil {
 			continue
 		}
 
@@ -532,7 +530,7 @@ type BlockSnapshots interface {
 	OpenFolder() error
 	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
 	SegmentsMax() uint64
-	Delete(fileName string) error
+	Delete(fileNames ...string) error
 	Types() []snaptype.Type
 	Close()
 	DownloadComplete()
@@ -1413,7 +1411,7 @@ func (s *RoSnapshots) delete(fileName string) error {
 }
 
 // prune visible segments
-func (s *RoSnapshots) Delete(fileName string) error {
+func (s *RoSnapshots) Delete(fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
@@ -1422,8 +1420,10 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	defer v.Close()
 
 	defer s.recalcVisibleFiles(s.alignMin)
-	if err := s.delete(fileName); err != nil {
-		return fmt.Errorf("can't delete file: %w", err)
+	for _, fileName := range fileNames {
+		if err := s.delete(fileName); err != nil {
+			return fmt.Errorf("can't delete file: %w", err)
+		}
 	}
 	return nil
 }

@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/clique"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -75,7 +75,7 @@ func TestReimportMirroredState(t *testing.T) {
 		return h, err
 	}
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
 		// lets unset (nil). Set it here to the correct value.
 		block.SetDifficulty(clique.DiffInTurn)

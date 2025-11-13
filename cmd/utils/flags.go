@@ -54,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
@@ -1106,6 +1105,8 @@ var (
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
 
+var devnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
+
 // setNodeKey loads a node key from command line flags if provided,
 // otherwise it tries to load it from datadir,
 // otherwise it generates a new key in datadir.
@@ -1349,7 +1350,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 
 	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.Dev || chainName == networkname.BorDevnet {
 		if etherbase == "" {
-			cfg.Miner.Etherbase = core.DevnetEtherbase
+			cfg.Miner.Etherbase = devnetEtherbase
 		}
 	}
 }

@@ -1,7 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
-// (original work)
 // Copyright 2024 The Erigon Authors
-// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,27 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package builder
 
 import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// NewTxsEvent is posted when a batch of transactions enter the transaction pool.
-type NewTxsEvent struct{ Txs []types.Transaction }
-
-// RemovedLogsEvent is posted when a reorg happens
-type RemovedLogsEvent struct{ Logs []*types.Log }
-
-type ChainEvent struct {
-	Block *types.Block
-	Hash  common.Hash
-	Logs  []*types.Log
+// Parameters for PoS block building
+// See also https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3
+type Parameters struct {
+	PayloadId             uint64
+	ParentHash            common.Hash
+	Timestamp             uint64
+	PrevRandao            common.Hash
+	SuggestedFeeRecipient common.Address
+	Withdrawals           []*types.Withdrawal // added in Shapella (EIP-4895)
+	ParentBeaconBlockRoot *common.Hash        // added in Dencun (EIP-4788)
 }
-
-type ChainSideEvent struct {
-	Block *types.Block
-}
-
-type ChainHeadEvent struct{ Block *types.Block }
