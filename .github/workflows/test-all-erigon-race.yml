@@ -54,15 +54,14 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           set +x
-          echo "I am being served by this runner: $RUNNER_NAME"
+          echo "This workflow is being executed by this runner: $RUNNER_NAME"
           
       - name: Checkout code
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v5
         with:
-          submodules: recursive
-          lfs: true
-        
+          fetch-depth: 1
+
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v6
