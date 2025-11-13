@@ -24,7 +24,10 @@ func TestVersioMonitorHeimdallV2(t *testing.T) {
 		FetchChainManagerStatus(gomock.Any()).
 		Return(status, nil)
 
-	monitor := poshttp.NewVersionMonitor(context.TODO(), heimdallClient, log.New(), time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	monitor := poshttp.NewVersionMonitor(ctx, heimdallClient, log.New(), time.Minute)
 	resolved := monitor.Version()
 
 	require.Equal(t, resolved, poshttp.HeimdallV2)
@@ -41,7 +44,10 @@ func TestVersioMonitorHeimdallV1(t *testing.T) {
 		FetchChainManagerStatus(gomock.Any()).
 		Return(status, nil)
 
-	monitor := poshttp.NewVersionMonitor(context.TODO(), heimdallClient, log.New(), time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	monitor := poshttp.NewVersionMonitor(ctx, heimdallClient, log.New(), time.Minute)
 	resolved := monitor.Version()
 
 	require.Equal(t, resolved, poshttp.HeimdallV1)
