@@ -162,11 +162,18 @@ func (d *peerdas) resubscribeGossip() {
 	if d.IsArchivedMode() {
 		// subscribe to all subnets
 		for subnet := range d.beaconConfig.DataColumnSidecarSubnetCount {
-			if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
+			/*if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
 				Topic:          gossip.TopicNameDataColumnSidecar(subnet),
 				ExpiryUnixSecs: uint64(time.Unix(0, math.MaxInt64).Unix()),
 			}); err != nil {
 				log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "subnet", subnet)
+			} else {
+				log.Debug("[peerdas] subscribed to column sidecar subnet", "subnet", subnet)
+			}*/
+			topicName := gossip.TopicNameDataColumnSidecar(subnet)
+			expiry := time.Unix(0, math.MaxInt64)
+			if err := d.gossipManager.SubscribeWithExpiry(topicName, expiry); err != nil {
+				log.Warn("[peerdas] failed to subscribe to column sidecar subnet", "err", err, "subnet", subnet)
 			} else {
 				log.Debug("[peerdas] subscribed to column sidecar subnet", "subnet", subnet)
 			}
@@ -182,11 +189,18 @@ func (d *peerdas) resubscribeGossip() {
 	}
 	for column := range custodyColumns {
 		subnet := ComputeSubnetForDataColumnSidecar(column)
-		if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
+		/*if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
 			Topic:          gossip.TopicNameDataColumnSidecar(subnet),
 			ExpiryUnixSecs: uint64(time.Unix(0, math.MaxInt64).Unix()),
 		}); err != nil {
 			log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "column", column, "subnet", subnet)
+		} else {
+			log.Debug("[peerdas] subscribed to column sidecar", "column", column, "subnet", subnet)
+		}*/
+		topicName := gossip.TopicNameDataColumnSidecar(subnet)
+		expiry := time.Unix(0, math.MaxInt64)
+		if err := d.gossipManager.SubscribeWithExpiry(topicName, expiry); err != nil {
+			log.Warn("[peerdas] failed to subscribe to column sidecar", "err", err, "column", column, "subnet", subnet)
 		} else {
 			log.Debug("[peerdas] subscribed to column sidecar", "column", column, "subnet", subnet)
 		}
