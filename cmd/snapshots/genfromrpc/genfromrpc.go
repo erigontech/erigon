@@ -803,9 +803,9 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 }
 
 func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
-	var blk *types.Block
+	var latest *types.Block
 	var blockNum uint64
-	for _, blk = range blocks {
+	for _, blk := range blocks {
 		blockNum = blk.NumberU64()
 
 		if err := rawdb.WriteBlock(tx, blk); err != nil {
@@ -817,16 +817,16 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 		if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
 			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
 		}
+		latest = blk
 	}
 
-	if len(blocks) > 0 {
-		if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+	if latest != nil {
+		rawdb.WriteHeadBlockHash(tx, latest.Hash())
+		if err := rawdb.WriteHeadHeaderHash(tx, latest.Hash()); err != nil {
 			return err
 		}
-		rawdb.WriteHeadBlockHash(tx, blk.Hash())
 
 		syncStages := []stages.SyncStage{
-			stages.Snapshots,
 			stages.Headers,
 			stages.BlockHashes,
 			stages.Bodies,
