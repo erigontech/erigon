@@ -26,10 +26,10 @@ func ValidateAATransaction(
 	header *types.Header,
 	evm *vm.EVM,
 	chainConfig *chain.Config,
-) (paymasterContext []byte, validationGasUsed uint64, err error) {
+) (paymasterContext []byte, validationGasUsed uint64, preTxCost uint64, err error) {
 	senderCodeSize, err := ibs.GetCodeSize(*tx.SenderAddress)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 
 	var paymasterCodeSize, deployerCodeSize int
@@ -37,33 +37,33 @@ func ValidateAATransaction(
 	if tx.Paymaster != nil {
 		paymasterCodeSize, err = ibs.GetCodeSize(*tx.Paymaster)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 	}
 
 	if tx.Deployer != nil {
 		deployerCodeSize, err = ibs.GetCodeSize(*tx.Deployer)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 	}
 
 	if err := PerformTxnStaticValidation(tx, senderCodeSize, paymasterCodeSize, deployerCodeSize); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 
 	vmConfig := evm.Config()
 	rules := evm.ChainRules()
 	hasEIP3860 := vmConfig.HasEip3860(rules)
 
-	preTxCost, err := tx.PreTransactionGasCost(rules, hasEIP3860)
+	preTxCost, err = tx.PreTransactionGasCost(rules, hasEIP3860)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	validationGasUsed = preTxCost
 
 	if err = chargeGas(header, tx, gasPool, ibs, preTxCost); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 
 	var originalEvmHook tracing.EnterHook
@@ -79,17 +79,17 @@ func ValidateAATransaction(
 
 	senderNonce, _ := ibs.GetNonce(*tx.SenderAddress)
 	if tx.Nonce > senderNonce+1 { // ibs returns last used nonce
-		return nil, 0, errors.New("nonce too low")
+		return nil, 0, 0, errors.New("nonce too low")
 	}
 
 	// Deployer frame
 	msg := tx.DeployerFrame(rules, hasEIP3860)
 	applyRes, err := protocol.ApplyFrame(innerEvm, msg, gasPool)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, preTxCost, err
 	}
 	if applyRes.Failed() {
-		return nil, 0, newValidationPhaseError(
+		return nil, 0, preTxCost, newValidationPhaseError(
 			applyRes.Err,
 			applyRes.ReturnData,
 			"deployer",
@@ -97,7 +97,7 @@ func ValidateAATransaction(
 		)
 	}
 	if err := deployValidation(tx, ibs); err != nil {
-		return nil, 0, err
+		return nil, 0, preTxCost, err
 	}
 	entryPointTracer.Reset()
 
@@ -106,14 +106,14 @@ func ValidateAATransaction(
 	// Validation frame
 	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed, rules, hasEIP3860)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, preTxCost, err
 	}
 	applyRes, err = protocol.ApplyFrame(innerEvm, msg, gasPool)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, preTxCost, err
 	}
 	if applyRes.Failed() {
-		return nil, 0, newValidationPhaseError(
+		return nil, 0, preTxCost, newValidationPhaseError(
 			applyRes.Err,
 			applyRes.ReturnData,
 			"account",
@@ -121,7 +121,7 @@ func ValidateAATransaction(
 		)
 	}
 	if err := validationValidation(tx, header, entryPointTracer); err != nil {
-		return nil, 0, err
+		return nil, 0, preTxCost, err
 	}
 	entryPointTracer.Reset()
 
@@ -130,16 +130,16 @@ func ValidateAATransaction(
 	// Paymaster frame
 	msg, err = tx.PaymasterFrame(chainConfig.ChainID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, preTxCost, err
 	}
 
 	if msg != nil {
 		applyRes, err = protocol.ApplyFrame(innerEvm, msg, gasPool)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, preTxCost, err
 		}
 		if applyRes.Failed() {
-			return nil, 0, newValidationPhaseError(
+			return nil, 0, preTxCost, newValidationPhaseError(
 				applyRes.Err,
 				applyRes.ReturnData,
 				"paymaster",
@@ -148,7 +148,7 @@ func ValidateAATransaction(
 		}
 		paymasterContext, err = paymasterValidation(tx, header, entryPointTracer)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, preTxCost, err
 		}
 		entryPointTracer.Reset()
 		validationGasUsed += applyRes.GasUsed
@@ -156,7 +156,7 @@ func ValidateAATransaction(
 
 	log.Info("validation gas report", "gasUsed", validationGasUsed, "nonceManager", 0, "refund", 0, "pretransactioncost", preTxCost)
 
-	return paymasterContext, validationGasUsed, nil
+	return paymasterContext, validationGasUsed, preTxCost, nil
 }
 
 func validateValidityTimeRange(time uint64, validAfter uint64, validUntil uint64) error {
@@ -246,6 +246,7 @@ func ExecuteAATransaction(
 	tx *types.AccountAbstractionTransaction,
 	paymasterContext []byte,
 	validationGasUsed uint64,
+	preTxCost uint64,
 	gasPool *protocol.GasPool,
 	evm *vm.EVM,
 	header *types.Header,
@@ -305,7 +306,7 @@ func ExecuteAATransaction(
 		log.Info("post op gas used", "gasUsed", applyRes.GasUsed, "penalty", validationGasPenalty)
 	}
 
-	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
+	if err = refundGas(header, tx, ibs, gasUsed-gasRefund, preTxCost); err != nil {
 		return 0, 0, err
 	}
 
@@ -313,7 +314,7 @@ func ExecuteAATransaction(
 		return 0, 0, err
 	}
 
-	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
+	gasPool.AddGas(preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
 }
