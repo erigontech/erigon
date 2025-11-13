@@ -14,11 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package network
+package gossip
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -26,16 +25,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -45,68 +39,39 @@ import (
 
 // Gossip manager is sending all messages to fork choice or others
 type GossipManager struct {
-	forkChoice *forkchoice.ForkChoiceStore
-	sentinel   sentinelproto.SentinelClient
+	sentinel sentinelproto.SentinelClient
 	// configs
 	beaconConfig  *clparams.BeaconChainConfig
 	networkConfig *clparams.NetworkConfig
 	ethClock      eth_clock.EthereumClock
 
-	emitters     *beaconevents.EventEmitter
-	committeeSub *committee_subscription.CommitteeSubscribeMgmt
-
-	registeredServices []gossipService
+	registeredServices []GossipService
 	stats              *gossipMessageStats
 	p2p                *p2p.P2Pmanager
 
-	subscriptions TopicSubscriptions
+	subscriptions *TopicSubscriptions
 	subscribeAll  bool
 }
 
 func NewGossipManager(
+	p2p *p2p.P2Pmanager,
 	s sentinelproto.SentinelClient,
-	forkChoice *forkchoice.ForkChoiceStore,
 	beaconConfig *clparams.BeaconChainConfig,
 	networkConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
-	emitters *beaconevents.EventEmitter,
-	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
-	blockService services.BlockService,
-	blobService services.BlobSidecarsService,
-	dataColumnSidecarService services.DataColumnSidecarService,
-	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
-	syncContributionService services.SyncContributionService,
-	aggregateAndProofService services.AggregateAndProofService,
-	attestationService services.AttestationService,
-	voluntaryExitService services.VoluntaryExitService,
-	blsToExecutionChangeService services.BLSToExecutionChangeService,
-	proposerSlashingService services.ProposerSlashingService,
+	subscribeAll bool,
 ) *GossipManager {
 	gm := &GossipManager{
+		p2p:                p2p,
 		sentinel:           s,
-		forkChoice:         forkChoice,
-		emitters:           emitters,
 		beaconConfig:       beaconConfig,
 		networkConfig:      networkConfig,
 		ethClock:           ethClock,
-		committeeSub:       comitteeSub,
-		registeredServices: []gossipService{},
+		registeredServices: []GossipService{},
 		stats:              &gossipMessageStats{},
+		subscriptions:      NewTopicSubscriptions(),
+		subscribeAll:       subscribeAll,
 	}
-	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
-	// register services
-	RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2))
-	RegisterGossipService(gm, syncContributionService, withRateLimiterByPeer(8, 16))
-	RegisterGossipService(gm, aggregateAndProofService, withRateLimiterByPeer(8, 16))
-	RegisterGossipService(gm, syncCommitteeMessagesService, withRateLimiterByPeer(8, 16))
-	RegisterGossipService(gm, attesterSlashingService, withRateLimiterByPeer(2, 8))
-	RegisterGossipService(gm, voluntaryExitService, withRateLimiterByPeer(2, 8))
-	RegisterGossipService(gm, blsToExecutionChangeService, withRateLimiterByPeer(2, 8))
-	RegisterGossipService(gm, proposerSlashingService, withRateLimiterByPeer(2, 8))
-	RegisterGossipService(gm, attestationService, withGlobalTimeBasedRateLimiter(6*time.Second, 250))
-	RegisterGossipService(gm, blobService, withBeginVersion(clparams.DenebVersion), withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, 32))
-	// fulu
-	RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64))
 
 	gm.goCheckResubscribe()
 	gm.stats.goPrintStats()
@@ -269,7 +234,7 @@ Reconnect:
 }
 */
 
-func (g *GossipManager) registerGossipService(service gossipService) error {
+func (g *GossipManager) registerGossipService(service GossipService) error {
 	// wrap service.ProcessMessage to ValidatorEx
 	validator := pubsub.ValidatorEx(func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
@@ -294,7 +259,7 @@ func (g *GossipManager) registerGossipService(service gossipService) error {
 			return pubsub.ValidationReject
 		}
 		version := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
-		msgObj, err := service.service.DecodeGossipMessage(pid, msgData, version)
+		msgObj, err := service.Service.DecodeGossipMessage(pid, msgData, version)
 		if err != nil {
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
@@ -311,8 +276,9 @@ func (g *GossipManager) registerGossipService(service gossipService) error {
 			subnetIdVal := uint64(subnet)
 			subnetId = &subnetIdVal
 		}
-		err = service.service.ProcessMessage(ctx, subnetId, msgObj)
-		if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
+		err = service.Service.ProcessMessage(ctx, subnetId, msgObj)
+		//if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
+		if true {
 			return pubsub.ValidationIgnore
 		} else if err != nil {
 			g.stats.addReject(name)
@@ -331,7 +297,7 @@ func (g *GossipManager) registerGossipService(service gossipService) error {
 	}
 
 	// register all topics and subscribe
-	for _, name := range service.service.Names() {
+	for _, name := range service.Service.Names() {
 		topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
 		if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
 			return err
@@ -398,18 +364,19 @@ func (g *GossipManager) goCheckResubscribe() {
 				continue
 			}
 			if upcomingForkDigest != forkDigest {
-				go func(oldForkDigest common.Bytes4) {
+				oldForkDigest := fmt.Sprintf("%x", forkDigest)
+				go func(oldForkDigest string) {
 					// unsubscribe old topics after 2 slots
 					time.Sleep(2 * time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second)
 					allTopics := g.subscriptions.AllTopics()
 					for _, topic := range allTopics {
-						if strings.Contains(topic, fmt.Sprintf("%x", oldForkDigest)) {
+						if strings.Contains(topic, oldForkDigest) {
 							if err := g.subscriptions.Remove(topic); err != nil {
 								log.Warn("[GossipManager] failed to remove old topic", "topic", topic, "err", err)
 							}
 						}
 					}
-				}(forkDigest)
+				}(oldForkDigest)
 
 				// subscribe new topics immediately
 				g.subscribeUpcomingTopics(upcomingForkDigest)

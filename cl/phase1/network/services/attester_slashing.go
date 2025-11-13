@@ -16,7 +16,7 @@ type attesterSlashingService struct {
 
 func NewAttesterSlashingService(
 	forkchoiceStore *forkchoice.ForkChoiceStore,
-) *attesterSlashingService {
+) AttesterSlashingService {
 	return &attesterSlashingService{
 		forkchoiceStore: forkchoiceStore,
 	}
