@@ -194,6 +194,9 @@ func (evm *EVM) call(typ OpCode, caller common.Address, callerAddress common.Add
 		}
 	}
 
+	// BAL: record address access even if call fails due to gas/call depth
+	evm.intraBlockState.VersionRead(addr, state.AddressPath, common.Hash{}, state.MapRead, evm.intraBlockState.Version(), nil)
+
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if evm.Config().Tracer != nil {
 		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
@@ -382,6 +385,9 @@ func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemai
 	}
 
 	depth := evm.interpreter.Depth()
+
+	// BAL: record target address even on failed CREATE/CREATE2 calls
+	evm.intraBlockState.VersionRead(address, state.AddressPath, common.Hash{}, state.MapRead, evm.intraBlockState.Version(), nil)
 
 	if evm.Config().Tracer != nil {
 		evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gasRemaining, value, nil)

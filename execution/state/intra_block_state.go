@@ -1445,7 +1445,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
-	sdb.versionRead(addr, BalancePath, common.Hash{}, source, version, newObj.Balance())
+	sdb.VersionRead(addr, BalancePath, common.Hash{}, source, version, newObj.Balance())
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
 
 	return nil
@@ -1827,7 +1827,7 @@ func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Ha
 func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
-		sdb.versionRead(addr, AddressPath, common.Hash{}, source, version, &data)
+		sdb.VersionRead(addr, AddressPath, common.Hash{}, source, version, &data)
 	}
 }
 
@@ -1853,7 +1853,7 @@ func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath
 	}
 }
 
-func (sdb *IntraBlockState) versionRead(addr common.Address, path AccountPath, key common.Hash, source ReadSource, version Version, val any) {
+func (sdb *IntraBlockState) VersionRead(addr common.Address, path AccountPath, key common.Hash, source ReadSource, version Version, val any) {
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}
