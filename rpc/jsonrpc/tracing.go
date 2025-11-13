@@ -215,7 +215,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			refunds = false
 		}
 
-		if refunds == true && block.GasUsed() != gasUsed {
+		if refunds && block.GasUsed() != gasUsed {
 			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), gasUsed, blockNumber))
 		}
 	}
