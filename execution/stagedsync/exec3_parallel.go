@@ -439,7 +439,7 @@ func (pe *parallelExecutor) LogCommitted(commitStart time.Time, committedBlocks 
 }
 
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
-	pe.progress.LogComplete(pe.rs.StateV3, pe, stepsInDb)
+	pe.progress.LogComplete(pe, stepsInDb)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domains", pe.logPrefix), domainMetrics...)
 	}

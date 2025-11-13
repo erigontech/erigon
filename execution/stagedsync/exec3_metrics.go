@@ -673,7 +673,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	mxExecTransactions.Set(float64(executedDiffTxs) / seconds)
 	mxExecTxnPerBlock.Set(float64(executedDiffBlocks) / float64(executedDiffTxs))
 
-	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
+	p.log("executed", suffix, te, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
 		executedDiffTxs, executedTxSec, executedGasSec, uncommitedGas, 0, execVals)
 
 	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval)
@@ -764,7 +764,7 @@ func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
 	}
 
-	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
+	p.log("committed", suffix, te, interval, te.lastCommittedBlockNum, committedDiffBlocks,
 		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
 
 	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval)
@@ -778,7 +778,7 @@ func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time
 	}
 }
 
-func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64) {
+func (p *Progress) LogComplete(ex executor, stepsInDb float64) {
 	interval := time.Since(p.initialTime)
 	var te *txExecutor
 	var suffix string
@@ -818,10 +818,10 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 	}
 	diffBlocks := max(int64(lastBlockNum)-int64(p.initialBlockNum), 0)
 
-	p.log("done", suffix, te, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, 0, stepsInDb, nil)
+	p.log("done", suffix, te, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, 0, stepsInDb, nil)
 }
 
-func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,
+func (p *Progress) log(mode string, suffix string, te *txExecutor, interval time.Duration,
 	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []interface{}) {
 
 	var m runtime.MemStats

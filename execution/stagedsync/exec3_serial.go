@@ -314,7 +314,7 @@ func (se *serialExecutor) LogCommitted(commitStart time.Time, committedBlocks ui
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {
-	se.progress.LogComplete(se.rs.StateV3, se, stepsInDb)
+	se.progress.LogComplete(se, stepsInDb)
 }
 
 func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, time.Duration, error) {
