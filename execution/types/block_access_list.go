@@ -7,10 +7,11 @@ import (
 	"io"
 	"math"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/holiman/uint256"
 )
 
 type BlockAccessList []*AccountChanges
@@ -61,7 +62,7 @@ type CodeChange struct {
 
 // indexedChange interface for generic validation of change types with indices
 type indexedChange interface {
-	*BalanceChange | *NonceChange | *CodeChange
+	*StorageChange | *BalanceChange | *NonceChange | *CodeChange
 	GetIndex() uint16
 }
 
@@ -69,6 +70,7 @@ type indexedChange interface {
 func (bc *BalanceChange) GetIndex() uint16 { return bc.Index }
 func (nc *NonceChange) GetIndex() uint16   { return nc.Index }
 func (cc *CodeChange) GetIndex() uint16    { return cc.Index }
+func (sc *StorageChange) GetIndex() uint16 { return sc.Index }
 
 func (ac *AccountChanges) EncodingSize() int {
 	size := 21 // address (1 prefix + 20 bytes)
@@ -167,6 +169,9 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 
 	return s.ListEnd()
 }
+
+// GetBytes methods for byte sorting
+func (sc *SlotChanges) GetBytes() []byte { return sc.Slot[:] }
 
 func (sc *SlotChanges) EncodingSize() int {
 	size := rlp.StringLen(sc.Slot[:])

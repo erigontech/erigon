@@ -2,6 +2,8 @@ package stagedsync
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -34,20 +36,19 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO) types.BlockAccessList {
 	}
 
 	// construct BAL from map
-	bal := make([]*types.AccountChanges, 0)
+	bal := make([]*types.AccountChanges, 0, len(ac))
 	for _, account := range ac {
 		account.finalize()
+		normalizeAccountChanges(account.changes)
 		bal = append(bal, account.changes)
 	}
 
-	// order everything as per EIP
+	sort.Slice(bal, func(i, j int) bool {
+		return bal[i].Address.Cmp(bal[j].Address) < 0
+	})
 
-	// Convert to slice of values for proper logging
-	balValues := make([]types.AccountChanges, len(bal))
-	for i, changes := range bal {
-		balValues[i] = *changes
-	}
-	log.Info("BAL", "blockNum", blockNum, "accounts", len(bal), "raw", balValues)
+	// Write BAL to text file for debugging/analysis
+	writeBALToFile(bal, blockNum)
 
 	return bal
 }
@@ -60,20 +61,8 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead, accessInd
 	switch vr.Path {
 	case state.StoragePath:
 		account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
-	case state.BalancePath:
-		if val, ok := vr.Val.(uint256.Int); ok {
-			account.balance.recordRead(accessIndex, val)
-		}
-	case state.NoncePath:
-		if val, ok := vr.Val.(uint64); ok {
-			account.nonce.recordRead(accessIndex, val)
-		}
-	case state.CodePath:
-		if val, ok := vr.Val.([]byte); ok {
-			account.code.recordRead(accessIndex, val)
-		}
 	default:
-		log.Info("unhandled default case", "path", vr.Path)
+		// Only track storage reads for BAL. Balance/nonce/code changes are tracked via writes, others are ignored
 	}
 }
 
@@ -106,6 +95,9 @@ func ensureAccountState(accounts map[common.Address]*accountState, addr common.A
 	}
 	account := &accountState{
 		changes: &types.AccountChanges{Address: addr},
+		balance: newBalanceTracker(),
+		nonce:   newNonceTracker(),
+		code:    newCodeTracker(),
 	}
 	accounts[addr] = account
 	return account
@@ -117,18 +109,21 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 		addStorageUpdate(account.changes, vw, accessIndex)
 	case state.BalancePath:
 		if val, ok := vw.Val.(uint256.Int); ok {
-			account.balance.recordWrite(accessIndex, val)
+			account.balance.recordWrite(accessIndex, val, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
+				return a.Eq(&b)
+			})
 		}
 	case state.NoncePath:
 		if val, ok := vw.Val.(uint64); ok {
-			account.nonce.recordWrite(accessIndex, val)
+			account.nonce.recordWrite(accessIndex, val, func(v uint64) uint64 { return v }, func(a, b uint64) bool {
+				return a == b
+			})
 		}
 	case state.CodePath:
 		if val, ok := vw.Val.([]byte); ok {
-			account.code.recordWrite(accessIndex, val)
+			account.code.recordWrite(accessIndex, val, cloneBytes, bytes.Equal)
 		}
 	default:
-		log.Info("Unknown storage path", "path", vw.Path)
 	}
 }
 
@@ -138,35 +133,31 @@ func blockAccessIndex(txIndex int) uint16 {
 
 type accountState struct {
 	changes *types.AccountChanges
-	balance balanceTracker
-	nonce   nonceTracker
-	code    codeTracker
+	balance *fieldTracker[uint256.Int]
+	nonce   *fieldTracker[uint64]
+	code    *fieldTracker[[]byte]
 }
 
 // check pre- and post-values, add to BAL if different
 func (a *accountState) finalize() {
-	a.balance.applyTo(a.changes)
-	a.nonce.applyTo(a.changes)
-	a.code.applyTo(a.changes)
+	applyToBalance(a.balance, a.changes)
+	applyToNonce(a.nonce, a.changes)
+	applyToCode(a.code, a.changes)
 }
 
-type balanceTracker struct {
-	changes changeTracker[uint256.Int]
+type fieldTracker[T any] struct {
+	changes changeTracker[T]
 }
 
-func (bt *balanceTracker) recordRead(idx uint16, value uint256.Int) {
-	bt.changes.recordRead(idx, value, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
-		return a.Eq(&b)
-	})
+func (ft *fieldTracker[T]) recordWrite(idx uint16, value T, copyFn func(T) T, equal func(T, T) bool) {
+	ft.changes.recordWrite(idx, value, copyFn, equal)
 }
 
-func (bt *balanceTracker) recordWrite(idx uint16, value uint256.Int) {
-	bt.changes.recordWrite(idx, value, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
-		return a.Eq(&b)
-	})
+func newBalanceTracker() *fieldTracker[uint256.Int] {
+	return &fieldTracker[uint256.Int]{}
 }
 
-func (bt *balanceTracker) applyTo(ac *types.AccountChanges) {
+func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges) {
 	bt.changes.apply(func(idx uint16, value uint256.Int) {
 		ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
 			Index: idx,
@@ -175,23 +166,11 @@ func (bt *balanceTracker) applyTo(ac *types.AccountChanges) {
 	})
 }
 
-type nonceTracker struct {
-	changes changeTracker[uint64]
+func newNonceTracker() *fieldTracker[uint64] {
+	return &fieldTracker[uint64]{}
 }
 
-func (nt *nonceTracker) recordRead(idx uint16, value uint64) {
-	nt.changes.recordRead(idx, value, func(v uint64) uint64 { return v }, func(a, b uint64) bool {
-		return a == b
-	})
-}
-
-func (nt *nonceTracker) recordWrite(idx uint16, value uint64) {
-	nt.changes.recordWrite(idx, value, func(v uint64) uint64 { return v }, func(a, b uint64) bool {
-		return a == b
-	})
-}
-
-func (nt *nonceTracker) applyTo(ac *types.AccountChanges) {
+func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
 	nt.changes.apply(func(idx uint16, value uint64) {
 		ac.NonceChanges = append(ac.NonceChanges, &types.NonceChange{
 			Index: idx,
@@ -200,19 +179,11 @@ func (nt *nonceTracker) applyTo(ac *types.AccountChanges) {
 	})
 }
 
-type codeTracker struct {
-	changes changeTracker[[]byte]
+func newCodeTracker() *fieldTracker[[]byte] {
+	return &fieldTracker[[]byte]{}
 }
 
-func (ct *codeTracker) recordRead(idx uint16, value []byte) {
-	ct.changes.recordRead(idx, value, cloneBytes, bytes.Equal)
-}
-
-func (ct *codeTracker) recordWrite(idx uint16, value []byte) {
-	ct.changes.recordWrite(idx, value, cloneBytes, bytes.Equal)
-}
-
-func (ct *codeTracker) applyTo(ac *types.AccountChanges) {
+func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
 	ct.changes.apply(func(idx uint16, value []byte) {
 		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
 			Index: idx,
@@ -222,76 +193,110 @@ func (ct *codeTracker) applyTo(ac *types.AccountChanges) {
 }
 
 type changeTracker[T any] struct {
-	entries map[uint16]*changeEntry[T]
+	entries map[uint16]T
 	equal   func(T, T) bool
 }
 
-type changeEntry[T any] struct {
-	index      uint16
-	read       bool
-	readValue  T
-	write      bool
-	writeValue T
-}
-
-func (ct *changeTracker[T]) recordRead(idx uint16, value T, copyFn func(T) T, equal func(T, T) bool) {
-	ct.ensureEqual(equal)
-	entry := ct.ensureEntry(idx)
-	if entry.read {
-		return
-	}
-	entry.read = true
-	entry.readValue = copyFn(value)
-}
-
 func (ct *changeTracker[T]) recordWrite(idx uint16, value T, copyFn func(T) T, equal func(T, T) bool) {
-	ct.ensureEqual(equal)
-	entry := ct.ensureEntry(idx)
-	entry.write = true
-	entry.writeValue = copyFn(value)
+	if ct.entries == nil {
+		ct.entries = make(map[uint16]T)
+		ct.equal = equal
+	}
+	ct.entries[idx] = copyFn(value)
 }
 
 func (ct *changeTracker[T]) apply(applyFn func(uint16, T)) {
 	if len(ct.entries) == 0 {
 		return
 	}
-	for _, idx := range sortedChangeKeys(ct.entries) {
-		entry := ct.entries[idx]
-		if !entry.write {
+
+	indices := make([]uint16, 0, len(ct.entries))
+	for idx := range ct.entries {
+		indices = append(indices, idx)
+	}
+	sort.Slice(indices, func(i, j int) bool { return indices[i] < indices[j] })
+
+	for _, idx := range indices {
+		applyFn(idx, ct.entries[idx])
+	}
+}
+
+func normalizeAccountChanges(ac *types.AccountChanges) {
+	if len(ac.StorageChanges) > 1 {
+		sortByBytes(ac.StorageChanges)
+	}
+
+	for _, slotChange := range ac.StorageChanges {
+		if len(slotChange.Changes) > 1 {
+			sortByIndex(slotChange.Changes)
+			slotChange.Changes = dedupByIndex(slotChange.Changes)
+		}
+	}
+
+	if len(ac.StorageReads) > 1 {
+		sortHashes(ac.StorageReads)
+		ac.StorageReads = dedupByEquality(ac.StorageReads)
+	}
+
+	if len(ac.BalanceChanges) > 1 {
+		sortByIndex(ac.BalanceChanges)
+		ac.BalanceChanges = dedupByIndex(ac.BalanceChanges)
+	}
+	if len(ac.NonceChanges) > 1 {
+		sortByIndex(ac.NonceChanges)
+		ac.NonceChanges = dedupByIndex(ac.NonceChanges)
+	}
+	if len(ac.CodeChanges) > 1 {
+		sortByIndex(ac.CodeChanges)
+		ac.CodeChanges = dedupByIndex(ac.CodeChanges)
+	}
+}
+
+func dedupByIndex[T interface{ GetIndex() uint16 }](changes []T) []T {
+	if len(changes) == 0 {
+		return changes
+	}
+	out := changes[:1]
+	for i := 1; i < len(changes); i++ {
+		if changes[i].GetIndex() == out[len(out)-1].GetIndex() {
+			out[len(out)-1] = changes[i]
 			continue
 		}
-		if entry.read && ct.equal != nil && ct.equal(entry.writeValue, entry.readValue) {
+		out = append(out, changes[i])
+	}
+	return out
+}
+
+func dedupByEquality[T comparable](items []T) []T {
+	if len(items) == 0 {
+		return items
+	}
+	out := items[:1]
+	for i := 1; i < len(items); i++ {
+		if items[i] == out[len(out)-1] {
 			continue
 		}
-		applyFn(entry.index, entry.writeValue)
+		out = append(out, items[i])
 	}
+	return out
 }
 
-func (ct *changeTracker[T]) ensureEntry(idx uint16) *changeEntry[T] {
-	if ct.entries == nil {
-		ct.entries = make(map[uint16]*changeEntry[T])
-	}
-	if entry, ok := ct.entries[idx]; ok {
-		return entry
-	}
-	entry := &changeEntry[T]{index: idx}
-	ct.entries[idx] = entry
-	return entry
+func sortByIndex[T interface{ GetIndex() uint16 }](changes []T) {
+	sort.Slice(changes, func(i, j int) bool {
+		return changes[i].GetIndex() < changes[j].GetIndex()
+	})
 }
 
-func (ct *changeTracker[T]) ensureEqual(equal func(T, T) bool) {
-	if ct.equal == nil {
-		ct.equal = equal
-	}
+func sortByBytes[T interface{ GetBytes() []byte }](items []T) {
+	sort.Slice(items, func(i, j int) bool {
+		return bytes.Compare(items[i].GetBytes(), items[j].GetBytes()) < 0
+	})
 }
 
-func sortedChangeKeys[T any](entries map[uint16]*changeEntry[T]) []uint16 {
-	keys := make([]uint16, 0, len(entries))
-	for k := range entries {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-	return keys
+func sortHashes(hashes []common.Hash) {
+	sort.Slice(hashes, func(i, j int) bool {
+		return bytes.Compare(hashes[i][:], hashes[j][:]) < 0
+	})
 }
 
 func cloneBytes(input []byte) []byte {
@@ -301,4 +306,84 @@ func cloneBytes(input []byte) []byte {
 	out := make([]byte, len(input))
 	copy(out, input)
 	return out
+}
+
+// writeBALToFile writes the Block Access List to a text file for debugging/analysis
+func writeBALToFile(bal types.BlockAccessList, blockNum uint64) {
+	filename := fmt.Sprintf("/Users/shohamc1/bals/bal_block_%d.txt", blockNum)
+
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Warn("Failed to create BAL file", "blockNum", blockNum, "error", err)
+		return
+	}
+	defer file.Close()
+
+	// Write header information
+	fmt.Fprintf(file, "Block Access List for Block %d\n", blockNum)
+	fmt.Fprintf(file, "Total Accounts: %d\n\n", len(bal))
+
+	// Write each account's changes
+	for _, account := range bal {
+		fmt.Fprintf(file, "Account: %s\n", account.Address.Hex())
+
+		// Storage changes
+		if len(account.StorageChanges) > 0 {
+			fmt.Fprintf(file, "  Storage Changes (%d):\n", len(account.StorageChanges))
+			for _, slotChange := range account.StorageChanges {
+				fmt.Fprintf(file, "    Slot: %s\n", slotChange.Slot.Hex())
+				for _, change := range slotChange.Changes {
+					fmt.Fprintf(file, "      [%d] -> %s\n", change.Index, change.Value.Hex())
+				}
+			}
+		}
+
+		// Storage reads
+		if len(account.StorageReads) > 0 {
+			fmt.Fprintf(file, "  Storage Reads (%d):\n", len(account.StorageReads))
+			for _, read := range account.StorageReads {
+				fmt.Fprintf(file, "    %s\n", read.Hex())
+			}
+		}
+
+		// Balance changes
+		if len(account.BalanceChanges) > 0 {
+			fmt.Fprintf(file, "  Balance Changes (%d):\n", len(account.BalanceChanges))
+			for _, change := range account.BalanceChanges {
+				fmt.Fprintf(file, "    [%d] -> %s\n", change.Index, change.Value.String())
+			}
+		}
+
+		// Nonce changes
+		if len(account.NonceChanges) > 0 {
+			fmt.Fprintf(file, "  Nonce Changes (%d):\n", len(account.NonceChanges))
+			for _, change := range account.NonceChanges {
+				fmt.Fprintf(file, "    [%d] -> %d\n", change.Index, change.Value)
+			}
+		}
+
+		// Code changes
+		if len(account.CodeChanges) > 0 {
+			fmt.Fprintf(file, "  Code Changes (%d):\n", len(account.CodeChanges))
+			for _, change := range account.CodeChanges {
+				fmt.Fprintf(file, "    [%d] -> %d bytes\n", change.Index, len(change.Data))
+				if len(change.Data) <= 64 {
+					fmt.Fprintf(file, "      Data: %x\n", change.Data)
+				} else {
+					fmt.Fprintf(file, "      Data: %x... (truncated)\n", change.Data[:64])
+				}
+			}
+		}
+
+		// If no changes, indicate that
+		if len(account.StorageChanges) == 0 && len(account.StorageReads) == 0 &&
+			len(account.BalanceChanges) == 0 && len(account.NonceChanges) == 0 &&
+			len(account.CodeChanges) == 0 {
+			fmt.Fprintf(file, "  No changes (accessed only)\n")
+		}
+
+		fmt.Fprintf(file, "\n")
+	}
+
+	log.Info("BAL written to file", "blockNum", blockNum, "filename", filename, "accounts", len(bal))
 }
