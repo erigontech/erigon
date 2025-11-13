@@ -560,6 +560,8 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 }
 
 func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, logger log.Logger) error {
+	logger.Info("checking commitment hist at block", "blockNum", blockNum)
+	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -603,6 +605,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		}
 		logger.Debug("commitment touched key", args...)
 	}
+	touchStart := time.Now()
 	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
@@ -615,7 +618,9 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	logger.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches)
+	touchDur := time.Since(touchStart)
+	logger.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
+	recalcStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */)
 	if err != nil {
 		return err
@@ -624,7 +629,33 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if header.Root != rootHash {
 		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
 	}
-	logger.Info("commitment root matches", "root", rootHash, "blockNum", blockNum, "txNum", maxTxNum)
+	logger.Info(
+		"commitment root matches",
+		"blockNum", blockNum,
+		"txNum", maxTxNum,
+		"root", rootHash,
+		"totalDur", time.Since(start),
+		"touchDur", touchDur,
+		"recalcDur", time.Since(recalcStart),
+	)
+	return nil
+}
+
+func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
+	if from >= to {
+		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
+	}
+	start := time.Now()
+	for blockNum := from; blockNum < to; blockNum++ {
+		err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
+		if err != nil {
+			return err
+		}
+	}
+	dur := time.Since(start)
+	blks := to - from
+	rate := float64(blks) / dur.Seconds()
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to)
 	return nil
 }
 
