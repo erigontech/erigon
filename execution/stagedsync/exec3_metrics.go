@@ -134,16 +134,20 @@ func (g *gaugeResetTask) run(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				g.Lock()
-				defer g.Unlock()
-				g.reset()
-				g.stopped = true
+				func() {
+					g.Lock()
+					defer g.Unlock()
+					g.reset()
+					g.stopped = true
+				}()
 				return
 			case <-g.C:
-				g.Lock()
-				defer g.Unlock()
-				g.reset()
-				g.stopped = true
+				func() {
+					g.Lock()
+					defer g.Unlock()
+					g.reset()
+					g.stopped = true
+				}()
 				return
 			}
 		}
