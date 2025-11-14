@@ -969,7 +969,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				var receipt ReceiptJson
 				for attempt := 0; attempt < maxRetries; attempt++ {
 					err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
-					fmt.Printf("%s %+v\n", receipt.TransactionHash.String(), receipt)
+					//fmt.Printf("%s %+v\n", receipt.TransactionHash.String(), receipt)
 					if err == nil {
 						if tx.Hash() != receipt.TransactionHash {
 							receipt = ReceiptJson{}
