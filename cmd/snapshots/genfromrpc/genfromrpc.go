@@ -972,9 +972,6 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					fmt.Printf("%s %+v\n", receipt.TransactionHash.String(), receipt)
 					if err == nil {
 						if tx.Hash() != receipt.TransactionHash {
-							log.Error("remote receipt tx hash mismatch", "expected", txData["hash"],
-								"got", receipt.TransactionHash, "txIndex", idx,
-								"receipt", fmt.Sprintf("%+v", receipt))
 							receipt = ReceiptJson{}
 							continue
 						}
