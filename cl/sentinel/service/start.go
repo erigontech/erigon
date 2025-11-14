@@ -110,7 +110,7 @@ func createSentinel(
 	if err != nil {
 		return nil, nil, err
 	}
-	gossipTopics := []sentinel.GossipTopic{
+	/*gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
 		//sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
@@ -178,7 +178,7 @@ func createSentinel(
 		if err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
-	}
+	}*/
 	return sent, localNode, nil
 }
 

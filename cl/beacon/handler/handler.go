@@ -151,6 +151,7 @@ func NewApiHandler(
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
+	gossipManager *gossipMgr.GossipManager,
 	enableMemoizedHeadState bool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
@@ -201,6 +202,7 @@ func NewApiHandler(
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
 		builderClient:                    builderClient,
+		gossipManager:                    gossipManager,
 		enableMemoizedHeadState:          enableMemoizedHeadState,
 	}
 }
