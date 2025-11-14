@@ -151,6 +151,7 @@ func NewApiHandler(
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
+	gossipManager *gossipMgr.GossipManager,
 	enableMemoizedHeadState bool,
 	peerDas das.PeerDas,
 ) *ApiHandler {
@@ -203,6 +204,7 @@ func NewApiHandler(
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
 		builderClient:                    builderClient,
+		gossipManager:                    gossipManager,
 		enableMemoizedHeadState:          enableMemoizedHeadState,
 	}
 }

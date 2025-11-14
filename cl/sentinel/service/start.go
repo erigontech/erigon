@@ -110,7 +110,7 @@ func createSentinel(
 	if err != nil {
 		return nil, nil, err
 	}
-	gossipTopics := []sentinel.GossipTopic{
+	/*gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
 		//sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
@@ -169,6 +169,16 @@ func createSentinel(
 		}
 	}
 
+	for k := 0; k < AttestationSubnetSubscriptions; k++ {
+		if err := sent.Unsubscribe(attestationSubnetTopics[k]); err != nil {
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
+			continue
+		}
+		_, err := sent.SubscribeGossip(attestationSubnetTopics[k], time.Unix(0, math.MaxInt64)) // Listen forever.
+		if err != nil {
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
+		}
+	}*/
 	return sent, localNode, nil
 }
 
