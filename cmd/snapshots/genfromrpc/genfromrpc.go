@@ -108,12 +108,6 @@ type ReceiptJson struct {
 	GasUsed         *hexutil.Big   `json:"gasUsed,omitempty"`
 }
 
-// receiptData holds parsed receipt information for a transaction
-type receiptData struct {
-	timeboosted      bool
-	effectiveGasUsed *big.Int
-}
-
 // convertHexToBigInt converts a hex string (with a "0x" prefix) to a *big.Int.
 func convertHexToBigInt(hexStr string) *big.Int {
 	bi := new(big.Int)
@@ -976,8 +970,8 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				for attempt := 0; attempt < maxRetries; attempt++ {
 					err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
 					if err == nil {
-						if txData["hash"] != receipt.TransactionHash {
-							log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
+						if txData["hash"] != receipt.TransactionHash.String() {
+							log.Error("remote receipt tx hash mismatch", "expected", txData["hash"],
 								"got", receipt.TransactionHash, "txIndex", idx,
 								"receipt", fmt.Sprintf("%+v", receipt))
 							continue
@@ -999,7 +993,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					log.Info("receipt queries", "total", receiptQueries.Load())
 					return fmt.Errorf("failed to get receipt for tx %s after %d attempts: %w", txData["hash"], maxRetries, err)
 				}
-				if txData["hash"] != receipt.TransactionHash {
+				if txData["hash"] != receipt.TransactionHash.String() {
 					log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
 						"got", receipt.TransactionHash, "txIndex", idx,
 						"receipt", fmt.Sprintf("%+v", receipt))
