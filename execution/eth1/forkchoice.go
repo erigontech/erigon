@@ -43,6 +43,8 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
+const startPruneFrom = 1024
+
 type forkchoiceOutcome struct {
 	receipt *executionproto.ForkChoiceReceipt
 	err     error
@@ -600,7 +602,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("head updated", logArgs...)
 		}
 	}
-	e.runPostForkchoiceInBackground(initialCycle)
+	if *headNumber >= startPruneFrom {
+		e.runPostForkchoiceInBackground(initialCycle)
+	}
+
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
 		Status:          status,
