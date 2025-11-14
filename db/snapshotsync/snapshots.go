@@ -425,8 +425,13 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		f := s.FilePath()
 		s.closeIdx()
 		s.closeSeg()
+		toRemove := make([]string, 0, 2)
+		toRemove = append(toRemove, f)
+		for _, index := range s.indexes {
+			toRemove = append(toRemove, index.FilePath())
+		}
 
-		removeOldFiles([]string{f})
+		removeOldFiles(toRemove)
 	}
 }
 
