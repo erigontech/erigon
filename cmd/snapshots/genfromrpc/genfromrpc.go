@@ -101,9 +101,11 @@ type BlockJson struct {
 
 // ReceiptJson holds the minimal receipt data needed for timeboosted transactions
 type ReceiptJson struct {
-	TransactionHash common.Hash  `json:"transactionHash"`
-	Timeboosted     bool         `json:"timeboosted"`
-	GasUsed         *hexutil.Big `json:"gasUsed,omitempty"`
+	Status          hexutil.Uint64 `json:"status"`
+	Type            string         `json:"type"`
+	TransactionHash common.Hash    `json:"transactionHash"`
+	Timeboosted     *bool          `json:"timeboosted,omitempty"`
+	GasUsed         *hexutil.Big   `json:"gasUsed,omitempty"`
 }
 
 // receiptData holds parsed receipt information for a transaction
@@ -901,7 +903,6 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 
 func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	txs := make(types.Transactions, len(rawTxs))
-	receipts := make([]receiptData, len(rawTxs))
 
 	receiptsEnabled := client != nil
 	var unmarshalWg errgroup.Group
@@ -957,9 +958,9 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 			default:
 				return fmt.Errorf("unknown tx type: %s at index %d", typeTx, idx)
 			}
-			if txData["hash"] == "0xf468d0b9e699ddeb7635108b9d9a1d970913fc8272e576d71d7c320897001cf4" {
-				log.Info("debug tx", "index", idx, "type", typeTx, "data", txData)
-			}
+			//if txData["hash"] == "0xf468d0b9e699ddeb7635108b9d9a1d970913fc8272e576d71d7c320897001cf4" {
+			//	log.Info("debug tx", "index", idx, "type", typeTx, "data", txData)
+			//}
 
 			if receiptsEnabled && timeboostedTxTypes[typeTx] {
 				if txData["hash"] == "" {
@@ -972,11 +973,15 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				backoff := time.Millisecond * 150
 
 				var receipt ReceiptJson
-				var set bool
 				for attempt := 0; attempt < maxRetries; attempt++ {
 					err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
 					if err == nil {
-						set = true
+						if txData["hash"] != receipt.TransactionHash {
+							log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
+								"got", receipt.TransactionHash, "txIndex", idx,
+								"receipt", fmt.Sprintf("%+v", receipt))
+							continue
+						}
 						break
 					}
 					if !isRetryableError(err) {
@@ -990,12 +995,20 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					}
 				}
 
-				if err != nil || !set {
-					log.Info("receipt queries", "total", receiptQueries.Load(), "result set", set)
+				if err != nil {
+					log.Info("receipt queries", "total", receiptQueries.Load())
 					return fmt.Errorf("failed to get receipt for tx %s after %d attempts: %w", txData["hash"], maxRetries, err)
 				}
+				if txData["hash"] != receipt.TransactionHash {
+					log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
+						"got", receipt.TransactionHash, "txIndex", idx,
+						"receipt", fmt.Sprintf("%+v", receipt))
+					return fmt.Errorf("receipt tx hash mismatch for tx %s", txData["hash"])
+				}
 
-				tx.SetTimeboosted(&receipts[idx].timeboosted)
+				if receipt.Timeboosted != nil {
+					tx.SetTimeboosted(receipt.Timeboosted)
+				}
 				if tx.Type() == types.ArbitrumSubmitRetryableTxType {
 					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
 						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
