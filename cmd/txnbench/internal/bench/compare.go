@@ -3,6 +3,7 @@ package bench
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 type agg struct {
@@ -29,9 +30,9 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 	}
 	slices.Sort(blocks)
 
-	out := ""
-	out += "FIRST-LATENCY (cold)\n"
-	out += "name\told avg ms\tnew avg ms\tdelta\n"
+	var out strings.Builder
+	out.WriteString("FIRST-LATENCY (cold)\n")
+	out.WriteString("name\told avg ms\tnew avg ms\tdelta\n")
 	for _, b := range blocks {
 		oc, ok1 := oldAgg[b]
 		nc, ok2 := newAgg[b]
@@ -41,11 +42,11 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 		om := mean(oc.Cold)
 		nm := mean(nc.Cold)
 		delta := pctDelta(om, nm)
-		out += fmt.Sprintf("block_%d\t%.3f\t%.3f\t%+.1f%%\n", b, om, nm, delta)
+		out.WriteString(fmt.Sprintf("block_%d\t%.3f\t%.3f\t%+.1f%%\n", b, om, nm, delta))
 	}
 
-	out += "\nWARM-LATENCY (avg of repeats)\n"
-	out += "name\told avg ms\tnew avg ms\tdelta\n"
+	out.WriteString("\nWARM-LATENCY (avg of repeats)\n")
+	out.WriteString("name\told avg ms\tnew avg ms\tdelta\n")
 	for _, b := range blocks {
 		ow, ok1 := oldAgg[b]
 		nw, ok2 := newAgg[b]
@@ -55,10 +56,10 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 		om := mean(ow.Warm)
 		nm := mean(nw.Warm)
 		delta := pctDelta(om, nm)
-		out += fmt.Sprintf("block_%d\t%.3f\t%.3f\t%+.1f%%\n", b, om, nm, delta)
+		out.WriteString(fmt.Sprintf("block_%d\t%.3f\t%.3f\t%+.1f%%\n", b, om, nm, delta))
 	}
 
-	return out
+	return out.String()
 }
 
 func aggregateByBlock(out BenchOutput) map[uint64]agg {
