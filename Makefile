@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+.SHELLFLAGS := -euo pipefail -c
 
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
@@ -198,7 +199,7 @@ db-tools:
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test-filtered:
-	(set -o pipefail && $(GOTEST) | tee run.log | (grep -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' -e '--- PASS:' || true))
+	$(GOTEST) | tee run.log | (grep -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' -e '--- PASS:' || true)
 
 # Rather than add more special cases here, I'd suggest using GO_FLAGS and calling `make test-filtered GO_FLAGS='-cool flag' or `make test GO_FLAGS='-cool flag'`.
 test-short: override GO_FLAGS += -short -failfast
