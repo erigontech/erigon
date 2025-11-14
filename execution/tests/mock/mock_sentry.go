@@ -817,15 +817,15 @@ func (ms *MockSentry) insertPoWBlocks(chain *blockgen.ChainPack) error {
 }
 
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	n := ms.numberOfPoWBlocks(chain)
-	if n >= chain.Length() {
-		return nil
-	}
+	//n := ms.numberOfPoWBlocks(chain)
+	//if n >= chain.Length() {
+	//	return nil
+	//}
 
 	wr := eth1_chain_reader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
 	ctx := context.Background()
-	for i := n; i < chain.Length(); i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(false); err != nil {
 			return err
 		}
@@ -855,10 +855,10 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 }
 
 func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
-
-	if err := ms.insertPoWBlocks(chain); err != nil {
-		return err
-	}
+	//
+	//if err := ms.insertPoWBlocks(chain); err != nil {
+	//	return err
+	//}
 	if err := ms.insertPoSBlocks(chain); err != nil {
 		return err
 	}
