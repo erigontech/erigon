@@ -27,7 +27,6 @@ import (
 	"math"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -53,8 +52,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -827,23 +824,6 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 
 	if err = m.InsertChain(chain); err != nil {
 		return err
-	}
-	// make sure background pruning has finished post the InsertChain FCU
-	for waits := 0; ; waits++ {
-		require.LessOrEqual(waits, 500)
-		r, err := m.Eth1ExecutionService.UpdateForkChoice(t.Context(), &executionproto.ForkChoice{
-			HeadBlockHash:      gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()),
-			SafeBlockHash:      gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()),
-			FinalizedBlockHash: gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()),
-		})
-		require.NoError(err)
-		if r.Status == executionproto.ExecutionStatus_Busy {
-			m.Log.Debug("waiting for background pruning to finish")
-			time.Sleep(time.Millisecond * 10)
-			continue
-		}
-		require.Equal(executionproto.ExecutionStatus_Success, r.Status)
-		break
 	}
 
 	tx, err := m.DB.BeginRo(context.Background())

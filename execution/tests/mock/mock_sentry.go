@@ -19,7 +19,6 @@ package mock
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -739,23 +738,13 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	for waits := 0; ; waits++ {
-		if waits > 500 {
-			return errors.New("failed to insert blocks and set fcu after 100 tries")
-		}
-		status, _, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
-		if err != nil {
-			return err
-		}
-		if status == executionproto.ExecutionStatus_Busy {
-			ms.Log.Debug("fcu busy, retrying", "waits", waits)
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		if status != executionproto.ExecutionStatus_Success {
-			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
-		}
-		break
+	status, _, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	if err != nil {
+		return err
+	}
+
+	if status != executionproto.ExecutionStatus_Success {
+		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 
 	return nil
