@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -107,8 +106,8 @@ type FullBlockReader interface {
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
-	Snapshots() snapshotsync.BlockSnapshots
-	BorSnapshots() snapshotsync.BlockSnapshots
+	Snapshots() BlockSnapshots
+	BorSnapshots() BlockSnapshots
 
 	Ready(ctx context.Context) <-chan error
 
@@ -125,7 +124,7 @@ type BlockRetire interface {
 		miBlockNum uint64,
 		maxBlockNum uint64,
 		lvl log.Lvl,
-		seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+		seedNewSnapshots func(downloadRequest []DownloadRequest) error,
 		onDelete func(l []string) error,
 		onFinishRetire func() error,
 		onDone func()) bool
@@ -140,4 +139,23 @@ type DBEventNotifier interface {
 
 type Range struct {
 	From, To uint64
+}
+
+type BlockSnapshots interface {
+	LogStat(label string)
+	OpenFolder() error
+	OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error
+	SegmentsMax() uint64
+	Delete(fileNames ...string) error
+	Types() []snaptype.Type
+	Close()
+	DownloadComplete()
+	RemoveOverlaps(onDelete func(l []string) error) error
+	DownloadReady() bool
+	Ready(context.Context) <-chan error
+}
+
+type DownloadRequest struct {
+	Path        string
+	TorrentHash string
 }
