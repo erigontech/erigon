@@ -737,7 +737,7 @@ var (
 
 func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool) (lastBlockNum uint64, err error) {
 	var (
-		batchSize                = uint64(20)
+		batchSize                = uint64(5)
 		blockRPS, blockBurst     = 5000, 5 // rps, amount of simultaneous requests
 		receiptRPS, receiptBurst = 200, 1  // rps, amount of simultaneous requests
 
