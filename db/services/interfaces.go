@@ -144,7 +144,7 @@ type Range struct {
 type BlockSnapshots interface {
 	LogStat(label string)
 	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
+	OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error
 	SegmentsMax() uint64
 	Delete(fileNames ...string) error
 	Types() []snaptype.Type
