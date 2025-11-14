@@ -394,3 +394,33 @@ func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proo
 
 	return nil
 }
+
+type proofNode struct {
+	hash common.Hash
+	node Node
+}
+
+// proofMap creates a map from hash to proof node
+func orderedProofNodes(proof []hexutil.Bytes) (res []proofNode, err error) {
+	for _, proofB := range proof {
+		hash := crypto.Keccak256Hash(proofB)
+		node, err := decodeNode(proofB)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, proofNode{hash, node})
+	}
+	return res, nil
+}
+
+// Print proof to human readable format
+func PrintProof(proof []hexutil.Bytes) error {
+	proofNodes, err := orderedProofNodes(proof)
+	if err != nil {
+		return err
+	}
+	for i, proofNode := range proofNodes {
+		fmt.Printf("Level %d: hash=%x -> %s\n", i, proofNode.hash, proofNode.node.String())
+	}
+	return nil
+}
