@@ -739,7 +739,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 	var (
 		batchSize                = uint64(20)
 		blockRPS, blockBurst     = 5000, 5 // rps, amount of simultaneous requests
-		receiptRPS, receiptBurst = 500, 4  // rps, amount of simultaneous requests
+		receiptRPS, receiptBurst = 400, 3  // rps, amount of simultaneous requests
 
 		logInterval   = time.Second * 40
 		logEvery      = time.NewTicker(logInterval)
@@ -969,11 +969,13 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				var receipt ReceiptJson
 				for attempt := 0; attempt < maxRetries; attempt++ {
 					err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
+					fmt.Printf("%s %+v\n", receipt.TransactionHash.String(), receipt)
 					if err == nil {
-						if txData["hash"] != receipt.TransactionHash.String() {
+						if tx.Hash() != receipt.TransactionHash {
 							log.Error("remote receipt tx hash mismatch", "expected", txData["hash"],
 								"got", receipt.TransactionHash, "txIndex", idx,
 								"receipt", fmt.Sprintf("%+v", receipt))
+							receipt = ReceiptJson{}
 							continue
 						}
 						break
@@ -981,6 +983,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					if !isRetryableError(err) {
 						break
 					}
+
 					receipt = ReceiptJson{}
 
 					if attempt < maxRetries-1 {
@@ -993,7 +996,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					log.Info("receipt queries", "total", receiptQueries.Load())
 					return fmt.Errorf("failed to get receipt for tx %s after %d attempts: %w", txData["hash"], maxRetries, err)
 				}
-				if txData["hash"] != receipt.TransactionHash.String() {
+				if tx.Hash() != receipt.TransactionHash {
 					log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
 						"got", receipt.TransactionHash, "txIndex", idx,
 						"receipt", fmt.Sprintf("%+v", receipt))
