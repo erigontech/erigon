@@ -1667,7 +1667,8 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
 
-		Tx: tx,
+		EffectiveGas: tx.EffectiveGasUsed,
+		Tx:           tx,
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))

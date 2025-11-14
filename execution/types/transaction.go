@@ -422,6 +422,7 @@ type Message struct {
 	SkipL1Charging    bool
 	TxRunMode         MessageRunMode // deprecated (shoudl be)
 	Tx                Transaction
+	EffectiveGas      uint64 // amount of gas effectively used by transaction (used in ArbitrumSubmitRetryableTx)
 }
 
 // Arbitrum

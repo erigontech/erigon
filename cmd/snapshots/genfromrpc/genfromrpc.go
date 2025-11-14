@@ -1000,6 +1000,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
 						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
 							srtx.EffectiveGasUsed = egu.Uint64()
+							tx = srtx
 						}
 					}
 				}
