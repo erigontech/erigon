@@ -2,7 +2,7 @@
 description: Customizing your Erigon node
 ---
 
-# Configuring Erigon
+# CLI Reference
 
 The Erigon CLI has a wide range of flags that can be used to customize its behavior. There are 3 ways to configure Erigon, listed by priority:
 
@@ -323,16 +323,16 @@ These flags control the block synchronization and data downloading process, incl
 
 * `--downloader.api.addr value`: The downloader address.
 * `--downloader.disable.ipv4`: Disables IPv4 for the downloader.
-    * Default: `false`
+  * Default: `false`
 * `--downloader.disable.ipv6`: Disables IPv6 for the downloader.
-    * Default: `false`
+  * Default: `false`
 * `--no-downloader`: Disables the downloader component.
-    * Default: `false`
+  * Default: `false`
 * `--downloader.verify`: Verifies snapshots on startup.
-    * Default: `false`
+  * Default: `false`
 * `--sync.loop.throttle value`: Sets the minimum time between sync loop starts.
 * `--sync.loop.block.limit value`: Sets the maximum number of blocks to process per loop iteration.
-    * Default: `5000`
+  * Default: `5000`
 * `--sync.loop.break.after value`: Sets the last stage of the sync loop to run.
 * `--bad.block value`: Marks a block as bad and forces a reorg.
 * `--webseed value`: Comma-separated URLs for network support infrastructure.
@@ -340,19 +340,19 @@ These flags control the block synchronization and data downloading process, incl
 #### BitTorrent Options
 
 * `--torrent.port value`: The port to listen for the BitTorrent protocol.
-    * Default: `42069`
+  * Default: `42069`
 * `--torrent.maxpeers value`: An unused parameter.
-    * Default: `100`
+  * Default: `100`
 * `--torrent.conns.perfile value`: The number of connections per file.
-    * Default: `10`
+  * Default: `10`
 * `--torrent.trackers.disable`: Disables conventional BitTorrent trackers.
-    * Default: `false`
+  * Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
-    * Default: `32mb`
+  * Default: `32mb`
 * `--torrent.download.rate value`: The download rate in bytes per second.
 * `--torrent.webseed.download.rate value`: The download rate for webseeds.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs.
-    * Default: `1`
+  * Default: `1`
 
 ### Caplin (Consensus Layer)
 
@@ -559,7 +559,7 @@ COMMANDS:
    help, h                                      Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --datadir value                                                                     Data directory for the databases (default: /home/bloxster/.local/share/erigon)
+   --datadir value                                                                     Data directory for the databases (default: /home/usr/.local/share/erigon)
    --ethash.dagdir value                                                               Directory to store the ethash mining DAGs (default: /home/bloxster/.local/share/erigon-ethash)
    --externalcl                                                                        Enables the external consensus layer (default: false)
    --txpool.disable                                                                    External pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer. (default: false)
