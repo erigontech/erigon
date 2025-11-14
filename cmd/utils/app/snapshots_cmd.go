@@ -378,6 +378,28 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "check-commitment-hist-at-blk-range",
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("check commitment history at block range: could not setup logger: %w", err))
+				}
+				err = doCheckCommitmentHistAtBlkRange(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-commitment-hist-at-blk-range] failure", "err", err)
+					return err
+				}
+				log.Info("[check-commitment-hist-at-blk-range] success")
+				return nil
+			},
+			Description: "check if our historical commitment data matches the state roots of headers for a given [from,to) block range",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
+				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+			}),
+		},
+		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
 				if err := doPublishable(cliCtx); err != nil {
@@ -1011,6 +1033,31 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
 	return integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger)
+}
+
+func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	_, _, _, blockRetire, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	from := cliCtx.Uint64("from")
+	to := cliCtx.Uint64("to")
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, logger)
 }
 
 func CheckBorChain(chainName string) bool {
