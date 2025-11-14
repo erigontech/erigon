@@ -62,7 +62,7 @@ docker compose up
 
 * `-it` lets you see what's happening and interact with Erigon
 * `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
-* Add `--prune.mode=minimal` to run minimal [Sync Mode](https://erigon.gitbook.io/docs/summary/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
+* Add `--prune.mode=minimal` to run minimal [Sync Mode](https://erigon.gitbook.io/docs/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet.md)
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
 
