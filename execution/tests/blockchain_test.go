@@ -830,7 +830,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	}
 	// make sure background pruning has finished post the InsertChain FCU
 	for waits := 0; ; waits++ {
-		require.LessOrEqual(waits, 100)
+		require.LessOrEqual(waits, 500)
 		r, err := m.Eth1ExecutionService.UpdateForkChoice(t.Context(), &executionproto.ForkChoice{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()),

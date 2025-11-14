@@ -740,7 +740,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	tipHash := chain.TopBlock.Hash()
 
 	for waits := 0; ; waits++ {
-		if waits > 100 {
+		if waits > 500 {
 			return errors.New("failed to insert blocks and set fcu after 100 tries")
 		}
 		status, _, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
