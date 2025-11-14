@@ -962,7 +962,6 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 			}
 
 			if receiptsEnabled && timeboostedTxTypes[typeTx] {
-				var receipt ReceiptJson
 				if txData["hash"] == "" {
 					return errors.New("missing tx hash for receipt fetch")
 				}
@@ -972,11 +971,18 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				maxRetries := 4
 				backoff := time.Millisecond * 150
 
+				var receipt ReceiptJson
+				var set bool
 				for attempt := 0; attempt < maxRetries; attempt++ {
 					err = client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txData["hash"])
-					if err == nil || !isRetryableError(err) {
+					if err == nil {
+						set = true
 						break
 					}
+					if !isRetryableError(err) {
+						break
+					}
+					receipt = ReceiptJson{}
 
 					if attempt < maxRetries-1 {
 						time.Sleep(backoff)
@@ -984,8 +990,8 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					}
 				}
 
-				if err != nil {
-					log.Info("receipt queries", "total", receiptQueries.Load())
+				if err != nil || !set {
+					log.Info("receipt queries", "total", receiptQueries.Load(), "result set", set)
 					return fmt.Errorf("failed to get receipt for tx %s after %d attempts: %w", txData["hash"], maxRetries, err)
 				}
 
