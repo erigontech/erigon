@@ -34,7 +34,7 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 			logger.Warn("[snapshots:history] Stat", "err", err)
 			return
 		}
-		str = append(str, fmt.Sprintf("%d=%dK", item.EndRootNum()/at.StepSize(), bn/1_000))
+		str = append(str, fmt.Sprintf("%d=%s", item.EndRootNum()/at.StepSize(), common.PrettyCounter(bn)))
 	}
 
 	firstHistoryIndexBlockInDB, err := tx2block(at.MinStepInDb(tx, kv.AccountsDomain) * at.StepSize())

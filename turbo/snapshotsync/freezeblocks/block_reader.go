@@ -1737,6 +1737,15 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 	}
 
 	if blockIndex == len(bodies) {
+		// total := uint64(0)
+		// for i := len(bodies) - 1; i >= 0; i-- {
+		//      total++
+		//      if total == 100 {
+		//              break
+		//      }
+		//      mtx, _ := cache.GetLastMaxTxNum(bodies[i].Range, getMaxTxNum(bodies[i]))
+		//      fmt.Printf("maxTxNum %d %s\n", mtx, bodies[i].Src().FileName())
+		// }
 		// not in snapshots
 		blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
 		if err != nil {

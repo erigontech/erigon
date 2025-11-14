@@ -551,6 +551,9 @@ func (br *BlockRetire) DisableReadAhead() {
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
+	if firstTxNum == 0 {
+		firstTxNum = blockReader.FirstTxnNumNotInSnapshots()
+	}
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig) {
 		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
 		if err != nil {
@@ -667,6 +670,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		txn2, err := types.DecodeTransaction(v)
 		if err != nil {
 			return nil, err
+		}
+
+		if txn2.Type() == types.ArbitrumSubmitRetryableTxType && txn2.(*types.ArbitrumSubmitRetryableTx).EffectiveGasUsed > 0 {
+			fmt.Printf("Tx %x EGU %d\n", txn2.Hash(), txn2.(*types.ArbitrumSubmitRetryableTx).EffectiveGasUsed)
 		}
 		hash := txn2.Hash()
 		hashFirstByte := hash[:1]
