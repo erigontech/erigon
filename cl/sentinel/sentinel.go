@@ -204,6 +204,7 @@ func New(
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
+	p2p *p2p.P2Pmanager,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx:                ctx,
@@ -217,6 +218,7 @@ func New(
 		ethClock:           ethClock,
 		dataColumnStorage:  dataColumnStorage,
 		peerDasStateReader: peerDasStateReader,
+		p2p:                p2p,
 	}
 
 	// Setup discovery
