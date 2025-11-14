@@ -19,7 +19,7 @@ jobs:
     strategy:
       matrix:
         #        disable macos-15 until https://github.com/erigontech/erigon/issues/8789
-        os: [ ubuntu-latest ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-24.04 ] # required check includes runner version. Do not change it only here.
     runs-on: ${{ matrix.os }}
 
     steps:
