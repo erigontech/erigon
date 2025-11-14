@@ -525,20 +525,6 @@ func (s *RoTx) Close() {
 	//fmt.Println("CRO", s.segments)
 }
 
-type BlockSnapshots interface {
-	LogStat(label string)
-	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
-	SegmentsMax() uint64
-	Delete(fileNames ...string) error
-	Types() []snaptype.Type
-	Close()
-	DownloadComplete()
-	RemoveOverlaps(onDelete func(l []string) error) error
-	DownloadReady() bool
-	Ready(context.Context) <-chan error
-}
-
 type retireOperators struct {
 	rangeExtractor snaptype.RangeExtractor
 	indexBuilder   snaptype.IndexBuilder
