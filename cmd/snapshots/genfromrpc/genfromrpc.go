@@ -963,7 +963,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 
 				receiptQueries.Add(1)
 
-				maxRetries := 4
+				maxRetries := 10
 				backoff := time.Millisecond * 150
 
 				var receipt ReceiptJson
