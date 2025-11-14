@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1697,15 +1696,6 @@ func removeOldFiles(toDel []string) {
 	for _, f := range toDel {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = dir.RemoveFile(withoutExt + ".idx")
-		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
-		if isTxnType {
-			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
-			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
-		}
 	}
 }
 
