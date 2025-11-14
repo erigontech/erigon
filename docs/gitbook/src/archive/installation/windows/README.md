@@ -1,0 +1,19 @@
+---
+description: How to install and run Erigon on Windows
+---
+
+# Windows
+
+Since pre-compiled binaries are not available for Windows, users must choose one of the following methods, listed from easiest to most difficult setup:
+
+| **Installation Method & Difficulty**                                                  | **Use Case**                                                                                              | **Advantages (Pros)**                                                                                                                                                                    | **Disadvantages (Cons)**                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <p>1. <a href="../docker.md">Docker</a><br> (Easiest)</p>                             | Quick deployment; consistent, isolated environment; avoiding host OS dependencies.                        | <p>✅ <strong>Simplicity</strong>: Fastest initial setup once Docker is installed. <br>✅ <strong>Isolation</strong>: Runs cleanly and independently from the host OS dependencies.</p>    | 🚫 **Resource Overhead**: Uses more resources than native/WSL due to containerization.                                                                                                                                                                        |
+| <p>2. <a href="windows-wsl.md">Window Subsystem for Linux</a><br> (Medium)</p>        | Production environment where Linux tooling and performance are desired; utilizing the native Linux build. | <p>✅ <strong>Best Performance</strong>: Near-native Linux file system and I/O performance. <br>✅ <strong>Linux Compatibility</strong>: Uses the well-tested Linux build and tooling.</p> | <p>🚫 <strong>Dual Environment</strong>: Requires managing the WSL/Linux environment.<br>🚫 <strong>Data Performance Risk</strong>: Data on mounted Windows partitions (e.g., <code>/mnt/c/</code>) has poor performance due to the file system bridge.</p>   |
+| <p>3. <a href="windows-build-executables.md">Native Compilation</a> <br>(Hardest)</p> | Developers comfortable with the Windows build environment; users who must avoid both containers and WSL.  | ✅ **Pure Windows**: Runs directly on the Windows host OS without emulation or containers.                                                                                                | <p>🚫 <strong>High Setup Overhead</strong>: Requires complex installation of Chocolatey, MinGW, and manual Path configuration.<br> 🚫 <strong>Compilation Issues</strong>: Prone to anti-virus false positives during the MinGW compiler detection phase.</p> |
+
+### ⚠️ Key Considerations
+
+* **WSL Version**: Only WSL Version 2 is supported.
+* **Data Location is Critical**: For the best performance using WSL 2, the Erigon data directory (`datadir`) must be hosted on the native Linux filesystem within WSL.
+* **Overall Performance**: If configured optimally (i.e., data on the native Linux filesystem), WSL 2 offers the best performance profile, making it the superior choice for high-throughput nodes, despite being medium in difficulty.

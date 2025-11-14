@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/dataflow"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -240,7 +240,7 @@ func (hd *HeaderDownload) LogAnchorState() {
 	hd.logAnchorState()
 }
 
-func (hd *HeaderDownload) Engine() consensus.Engine {
+func (hd *HeaderDownload) Engine() rules.Engine {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.engine
@@ -548,7 +548,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		if !link.verified {
 			if err := hd.VerifyHeader(link.header); err != nil {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
-				if errors.Is(err, consensus.ErrFutureBlock) {
+				if errors.Is(err, rules.ErrFutureBlock) {
 					// This may become valid later
 					hd.logger.Warn("[downloader] Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
 					return false, false, 0, lastTime, nil // prevent removal of the link from the hd.linkQueue
@@ -1164,7 +1164,7 @@ func (hd *HeaderDownload) SetFirstPoSHeight(blockHeight uint64) {
 	}
 }
 
-func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {
+func (hd *HeaderDownload) SetHeaderReader(headerReader rules.ChainHeaderReader) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.consensusHeaderReader = headerReader

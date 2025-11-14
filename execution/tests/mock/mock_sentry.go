@@ -53,12 +53,11 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
@@ -67,19 +66,20 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/ethconsensusconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -103,7 +103,7 @@ type MockSentry struct {
 	cancel               context.CancelFunc
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
-	Engine               consensus.Engine
+	Engine               rules.Engine
 	ChainConfig          *chain.Config
 	Sync                 *stagedsync.Sync
 	MiningSync           *stagedsync.Sync
@@ -249,13 +249,13 @@ func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey,
 	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, withPosDownloader)
 }
 
 func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
-	var engine consensus.Engine
+	var engine rules.Engine
 
 	switch {
 	case gspec.Config.Bor != nil:
@@ -267,7 +267,7 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, blockBufferSize int, withTxPool, withPosDownloader bool) *MockSentry {
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool, withPosDownloader bool) *MockSentry {
 	tmpdir := os.TempDir()
 	if tb != nil {
 		tmpdir = tb.TempDir()
@@ -457,10 +457,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	snapDownloader := mockDownloader(ctrl)
 
 	miningConfig := cfg.Miner
-	miningConfig.Enabled = true
-	miningConfig.Noverify = false
 	miningConfig.Etherbase = mock.Address
-	miningConfig.SigKey = mock.Key
 	miningCancel := make(chan struct{})
 	go func() {
 		<-mock.Ctx.Done()
@@ -471,7 +468,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	mock.PendingBlocks = miner.PendingResultCh
 	mock.MinedBlocks = miner.MiningResultCh
 	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	assembleBlockPOS := func(param *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&cfg.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
@@ -597,7 +594,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	mock.StreamWg.Wait()
 
 	//app expecting that genesis will always be in db
-	c := &core.ChainPack{
+	c := &blockgen.ChainPack{
 		Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},
 		Blocks:   []*types.Block{mock.Genesis},
 		TopBlock: mock.Genesis,
@@ -717,7 +714,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), chainConfig, log.New())
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
 	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader)
 }
 
@@ -725,7 +722,7 @@ func (ms *MockSentry) EnableLogs() {
 	ms.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
-func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
+func (ms *MockSentry) numberOfPoWBlocks(chain *blockgen.ChainPack) int {
 	if ms.ChainConfig.TerminalTotalDifficulty == nil {
 		return chain.Length()
 	}
@@ -733,7 +730,7 @@ func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
 }
 
 func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
-func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
+func (ms *MockSentry) insertPoWBlocks(chain *blockgen.ChainPack) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n == 0 {
 		// No Proof-of-Work blocks
@@ -819,7 +816,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	return nil
 }
 
-func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
+func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n >= chain.Length() {
 		return nil
@@ -857,7 +854,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	return nil
 }
 
-func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
+func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
 
 	if err := ms.insertPoWBlocks(chain); err != nil {
 		return err
@@ -908,4 +905,24 @@ func (ms *MockSentry) NewStateReader(tx kv.TemporalGetter) state.StateReader {
 
 func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return ms.BlockReader, blockio.NewBlockWriter()
+}
+
+func (ms *MockSentry) Current(tx kv.Tx) *types.Block {
+	if tx != nil {
+		b, err := ms.BlockReader.CurrentBlock(tx)
+		if err != nil {
+			panic(err)
+		}
+		return b
+	}
+	tx, err := ms.DB.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	b, err := ms.BlockReader.CurrentBlock(tx)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

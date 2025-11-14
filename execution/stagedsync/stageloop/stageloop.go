@@ -38,10 +38,10 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -599,17 +599,17 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 	return nil
 }
 
-func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader consensus.ChainReader, currentHeader *types.Header, currentBody *types.RawBody) error {
+func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.RawBody) error {
 	currentHeight := currentHeader.Number.Uint64()
 	currentHash := currentHeader.Hash()
 	if chainReader != nil {
 		if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
 			log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-			return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
+			return fmt.Errorf("%w: %v", rules.ErrInvalidBlock, err)
 		}
 		if err := engine.VerifyUncles(chainReader, currentHeader, currentBody.Uncles); err != nil {
 			log.Warn("Unlcles Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-			return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
+			return fmt.Errorf("%w: %v", rules.ErrInvalidBlock, err)
 		}
 	}
 	// Prepare memory state for block execution
@@ -662,7 +662,7 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
+func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())

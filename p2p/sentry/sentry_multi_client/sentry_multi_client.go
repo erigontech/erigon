@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
@@ -199,7 +199,7 @@ type MultiClient struct {
 	ChainConfig                       *chain.Config
 	db                                kv.TemporalRoDB
 	WitnessBuffer                     *stagedsync.WitnessBuffer
-	Engine                            consensus.Engine
+	Engine                            rules.Engine
 	blockReader                       services.FullBlockReader
 	statusDataProvider                StatusGetter
 	logPeerInfo                       bool
@@ -220,7 +220,7 @@ var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-che
 func NewMultiClient(
 	db kv.TemporalRoDB,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
+	engine rules.Engine,
 	sentries []sentryproto.SentryClient,
 	syncCfg ethconfig.Sync,
 	blockReader services.FullBlockReader,

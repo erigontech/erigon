@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -32,8 +32,8 @@ import (
 
 //go:generate mockgen -typed=true -destination=./spanner_mock.go -package=bor . Spanner
 type Spanner interface {
-	GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error)
-	CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error
+	GetCurrentSpan(syscall rules.SystemCall) (*heimdall.Span, error)
+	CommitSpan(heimdallSpan heimdall.Span, syscall rules.SystemCall) error
 }
 
 type ABI interface {
@@ -61,7 +61,7 @@ func NewChainSpanner(validatorSet ABI, chainConfig *chain.Config, withoutHeimdal
 }
 
 // GetCurrentSpan get current span from contract
-func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error) {
+func (c *ChainSpanner) GetCurrentSpan(syscall rules.SystemCall) (*heimdall.Span, error) {
 	// method
 	const method = "getCurrentSpan"
 
@@ -103,7 +103,7 @@ type ChainHeaderReader interface {
 	FrozenBlocks() uint64
 }
 
-func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
+func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall rules.SystemCall) error {
 	// method
 	const method = "commitSpan"
 

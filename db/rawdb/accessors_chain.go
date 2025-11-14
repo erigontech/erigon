@@ -406,7 +406,7 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
-		log.Error("ReadBodyRLP failed", "err", err)
+		log.Error("ReadStorageBodyRLP failed", "err", err)
 	}
 	return bodyRlp
 }
