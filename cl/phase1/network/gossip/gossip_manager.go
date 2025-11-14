@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -343,6 +344,20 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 	}
 	topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
 	return g.subscriptions.SubscribeWithExpiry(topic, expiry)
+}
+
+func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) error {
+	compressedData := utils.CompressSnappy(data)
+	forkDigest, err := g.ethClock.CurrentForkDigest()
+	if err != nil {
+		return err
+	}
+	topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+	topicHandle := g.subscriptions.Get(topic)
+	if topicHandle == nil {
+		return fmt.Errorf("topic not found: %s", topic)
+	}
+	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
 }
 
 func (g *GossipManager) goCheckResubscribe() {

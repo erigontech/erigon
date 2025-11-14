@@ -358,7 +358,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	s.subManager.Start(s.ctx)
 
 	go s.listenForPeers()
-	go s.forkWatcher()
+	//go s.forkWatcher()
 	go s.observeBandwidth(s.ctx)
 
 	return s.LocalNode(), nil
