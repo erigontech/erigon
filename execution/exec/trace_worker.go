@@ -119,23 +119,23 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	if e.vmConfig.TraceJumpDest {
 		txContext.TxHash = txn.Hash()
 	}
-	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 
 	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
-		evm := vm.NewEVM(*e.blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
-		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, evm, e.chainConfig)
+		e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
+		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, e.evm, e.chainConfig)
 		if err != nil {
 			return err
 		}
 
-		_, _, err = aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gp, evm, e.header, e.ibs)
+		_, _, err = aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gp, e.evm, e.header, e.ibs)
 		if err != nil {
 			return err
 		}
 	} else {
+		e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 		result, err := protocol.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
 		if err != nil {
 			if result == nil {
