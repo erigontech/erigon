@@ -19,6 +19,7 @@ package mock
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -287,6 +288,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
+	cfg.Prune = prune
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -836,19 +838,23 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, _, lvh, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
-
-	if err != nil {
-		return err
-	}
-	if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
-		rawdb.WriteHeadBlockHash(tx, lvh)
-		return nil
-	}); err != nil {
-		return err
-	}
-	if status != executionproto.ExecutionStatus_Success {
-		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
+	for waits := 0; ; waits++ {
+		if waits > 100 {
+			return errors.New("failed to insert blocks and set fcu after 100 tries")
+		}
+		status, _, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+		if err != nil {
+			return err
+		}
+		if status == executionproto.ExecutionStatus_Busy {
+			ms.Log.Debug("fcu busy, retrying", "waits", waits)
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		if status != executionproto.ExecutionStatus_Success {
+			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
+		}
+		break
 	}
 
 	return nil

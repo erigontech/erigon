@@ -27,6 +27,7 @@ import (
 	"math"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -52,6 +53,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -297,57 +300,52 @@ func testBrokenChain(t *testing.T) {
 	}
 }
 
-// Tests that reorganising a long difficult chain after a short easy one
-// overwrites the canonical numbers and links in the database.
+// Tests that reorganising a long chain after a short one overwrites the canonical numbers and links in the database.
 func TestReorgLongBlocks(t *testing.T) { testReorgLong(t) }
 
 func testReorgLong(t *testing.T) {
 	t.Parallel()
-	testReorg(t, []int64{0, 0, -9}, []int64{0, 0, 0, -9}, 393280)
+	testReorg(t, []int64{0, 0, -9}, []int64{0, 0, 0, -9}, 524352)
 }
 
-// Tests that reorganising a short difficult chain after a long easy one
-// overwrites the canonical numbers and links in the database.
+// Tests that reorganising a short chain after a long one overwrites the canonical numbers and links in the database.
 func TestReorgShortBlocks(t *testing.T) { testReorgShort(t) }
 
 func testReorgShort(t *testing.T) {
 	t.Parallel()
-	// Create a long easy chain vs. a short heavy one. Due to difficulty adjustment
-	// we need a fairly long chain of blocks with different difficulties for a short
-	// one to become heavier than a long one. The 96 is an empirical value.
-	easy := make([]int64, 96)
-	for i := 0; i < len(easy); i++ {
-		easy[i] = 60
+	long := make([]int64, 96)
+	for i := 0; i < len(long); i++ {
+		long[i] = 60
 	}
-	diff := make([]int64, len(easy)-1)
-	for i := 0; i < len(diff); i++ {
-		diff[i] = -9
+	short := make([]int64, len(long)-1)
+	for i := 0; i < len(short); i++ {
+		short[i] = -9
 	}
-	testReorg(t, easy, diff, 12615120)
+	testReorg(t, long, short, 12746192)
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
 	require := require.New(t)
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
-	// Insert an easy and a difficult chain afterwards
-	easyChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(first), func(i int, b *blockgen.BlockGen) {
+	// Insert one chain first, then the other
+	firstChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(first), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(first[i])
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	diffChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(second), func(i int, b *blockgen.BlockGen) {
+	secondChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(second), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(second[i])
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	if err = m.InsertChain(easyChain); err != nil {
+	if err = m.InsertChain(firstChain); err != nil {
 		t.Fatalf("failed to insert easy chain: %v", err)
 	}
-	if err = m.InsertChain(diffChain); err != nil {
+	if err = m.InsertChain(secondChain); err != nil {
 		t.Fatalf("failed to insert difficult chain: %v", err)
 	}
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -422,6 +420,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	require.NoError(err)
 	if have.Cmp(want) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
+	}
+	// Make sure the canonical chain is the correct one
+	require.Equal(secondChain.TopBlock.Hash(), rawdb.ReadHeadHeaderHash(tx))
+	for _, h := range secondChain.Headers {
+		canon, err := rawdb.ReadCanonicalHash(tx, h.Number.Uint64())
+		require.NoError(err)
+		require.Equal(h.Hash(), canon)
 	}
 }
 
@@ -822,6 +827,23 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 
 	if err = m.InsertChain(chain); err != nil {
 		return err
+	}
+	// make sure background pruning has finished post the InsertChain FCU
+	for waits := 0; ; waits++ {
+		require.LessOrEqual(waits, 100)
+		r, err := m.Eth1ExecutionService.UpdateForkChoice(t.Context(), &executionproto.ForkChoice{
+			HeadBlockHash:      gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()),
+			SafeBlockHash:      gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()),
+			FinalizedBlockHash: gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()),
+		})
+		require.NoError(err)
+		if r.Status == executionproto.ExecutionStatus_Busy {
+			m.Log.Debug("waiting for background pruning to finish")
+			time.Sleep(time.Millisecond * 10)
+			continue
+		}
+		require.Equal(executionproto.ExecutionStatus_Success, r.Status)
+		break
 	}
 
 	tx, err := m.DB.BeginRo(context.Background())
