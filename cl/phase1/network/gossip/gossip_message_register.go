@@ -19,7 +19,9 @@ func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service
 		conditions: conditions,
 	}
 	gm.registeredServices = append(gm.registeredServices, gossipSrv)
-	gm.registerGossipService(gossipSrv)
+	if err := gm.registerGossipService(gossipSrv); err != nil {
+		panic(err)
+	}
 }
 
 type conditionFunc func(peer.ID, *pubsub.Message, clparams.StateVersion) bool

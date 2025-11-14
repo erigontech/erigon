@@ -318,6 +318,7 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 		if err := g.subscriptions.SubscribeWithExpiry(topic, g.defaultExpiryForTopic(name)); err != nil {
 			return err
 		}
+		log.Debug("[GossipManager] registered topic", "topic", topic)
 	}
 	return nil
 }
