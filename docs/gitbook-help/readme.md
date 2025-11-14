@@ -1,1 +1,0 @@
-This folder serves the Help Center at https://docs.erigon.tech/help-center.
