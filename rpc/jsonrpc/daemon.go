@@ -44,7 +44,6 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, cfg)
 	web3Impl := NewWeb3APIImpl(eth)
-	dbImpl := NewDBAPIImpl() /* deprecated */
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(base, db)
 
@@ -123,6 +122,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Version:   "1.0",
 			})
 		case "db": /* Deprecated */
+			dbImpl := NewDBAPIImpl() /* deprecated */
 			list = append(list, rpc.API{
 				Namespace: "db",
 				Public:    true,
