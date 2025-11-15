@@ -233,7 +233,7 @@ type opkey struct {
 var randomPathGenerator = func(i int, j int, total int) opkey {
 	addr := common.BigToAddress((big.NewInt(int64(i % 10))))
 	hash := common.BigToHash((big.NewInt(int64(total))))
-	return opkey{addr, hash, state.StatePath}
+	return opkey{addr, hash, state.StoragePath}
 }
 
 var dexPathGenerator = func(i int, j int, total int) opkey {
@@ -573,7 +573,7 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 
 	applyResults := make(chan applyResult, 1000)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, tasks, applyResults, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, profile, nil}
 
 	// TODO get results back
 

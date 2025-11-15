@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/holiman/uint256"
 )
 
 type BlockAccessList []*AccountChanges
@@ -41,12 +41,12 @@ type SlotChanges struct {
 
 type StorageChange struct {
 	Index uint16
-	Value common.Hash
+	Value uint256.Int
 }
 
 type BalanceChange struct {
 	Index uint16
-	Value *big.Int
+	Value uint256.Int
 }
 
 type NonceChange struct {
@@ -219,9 +219,8 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (sc *StorageChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(sc.Index))
-	size += rlp.StringLen(sc.Value[:])
-	return size
+	return 1 + rlp.IntLenExcludingHead(uint64(sc.Index)) +
+		1 + rlp.Uint256LenExcludingHead(sc.Value)
 }
 
 func (sc *StorageChange) EncodeRLP(w io.Writer) error {
@@ -235,7 +234,7 @@ func (sc *StorageChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(uint64(sc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeString(sc.Value[:], w, b[:])
+	return rlp.EncodeUint256(sc.Value, w, b[:])
 }
 
 func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
@@ -250,31 +249,21 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	sc.Index = uint16(idx)
-	b, err := s.Bytes()
+	sc.Value, err = s.Uint256()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	if len(b) != len(common.Hash{}) {
-		return fmt.Errorf("wrong size for storage value: %d", len(b))
-	}
-	sc.Value = common.BytesToHash(b)
 	return s.ListEnd()
 }
 
 func (bc *BalanceChange) EncodingSize() int {
 	size := 1 + rlp.IntLenExcludingHead(uint64(bc.Index))
 	size++
-	if bc.Value != nil {
-		size += rlp.BigIntLenExcludingHead(bc.Value)
-	}
+	size += rlp.Uint256LenExcludingHead(bc.Value)
 	return size
 }
 
 func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
-	if err := bc.validate(); err != nil {
-		return err
-	}
-
 	b := newEncodingBuf()
 	defer releaseEncodingBuf(b)
 
@@ -285,11 +274,7 @@ func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(uint64(bc.Index), w, b[:]); err != nil {
 		return err
 	}
-	value, err := normaliseBigInt(bc.Value)
-	if err != nil {
-		return err
-	}
-	return rlp.EncodeBigInt(value, w, b[:])
+	return rlp.EncodeUint256(bc.Value, w, b[:])
 }
 
 func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
@@ -304,13 +289,9 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	bc.Index = uint16(idx)
-	b, err := s.Uint256Bytes()
+	bc.Value, err = s.Uint256()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
-	}
-	bc.Value = new(big.Int).SetBytes(b)
-	if err := bc.validate(); err != nil {
-		return err
 	}
 	return s.ListEnd()
 }
@@ -786,22 +767,6 @@ func validateStorageReads(reads []common.Hash) error {
 	return validateHashOrdering(reads, maxStorageReadsPerAccount, "storage reads")
 }
 
-func (bc *BalanceChange) validate() error {
-	if bc == nil {
-		return errors.New("nil balance change entry")
-	}
-	if bc.Value != nil {
-		if bc.Value.Sign() < 0 {
-			return errors.New("balance change value cannot be negative")
-		}
-		// balance should fit in uint256
-		if bc.Value.BitLen() > 256 {
-			return errors.New("balance change exceeds 256 bits")
-		}
-	}
-	return nil
-}
-
 func validateBalanceChangeList(changes []*BalanceChange) error {
 	return validateIndexedChanges(changes, maxIndexedChangesPerAccount, "balance")
 }
@@ -812,20 +777,6 @@ func validateNonceChangeList(changes []*NonceChange) error {
 
 func validateCodeChangeList(changes []*CodeChange) error {
 	return validateIndexedChanges(changes, maxIndexedChangesPerAccount, "code")
-}
-
-func normaliseBigInt(v *big.Int) (*big.Int, error) {
-	if v == nil {
-		return new(big.Int), nil
-	}
-	if v.Sign() < 0 {
-		return nil, errors.New("block access balance change cannot be negative")
-	}
-	// balance should fit in uint256
-	if v.BitLen() > 256 {
-		return nil, fmt.Errorf("block access balance change exceeds 256 bits")
-	}
-	return v, nil
 }
 
 // validateIndexedChanges validates that indices are strictly increasing
