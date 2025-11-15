@@ -48,7 +48,7 @@ func TestE2SnapSchema(t *testing.T) {
 	require.False(t, ok)
 
 	// for transactions
-	p = NewE2SnapSchemaWithIndexTag(dirs, "transactions", []string{"transactions", "transactions-to-block"})
+	p = NewE2SnapSchemaWithIndexTag(dirs, "transactions", []string{"transactions", "transactions-to-block"}, NewE2SnapSchemaVersion(version.V1_0, version.V1_0))
 	_, ok = p.Parse("v1.0-000100-000500-transactions.seg")
 	require.True(t, ok)
 

@@ -29,7 +29,7 @@ import (
 )
 
 type bundle struct {
-	domain, history, ii *state.E3SnapSchema
+	domain, history, ii state.SnapNameSchema
 }
 
 type RootNum = kv.RootNum
@@ -84,7 +84,7 @@ func createFiles(t *testing.T, dirs datadir.Dirs, from, to int, b *bundle) {
 		file.Close()
 	}
 
-	genFile := func(schema *state.E3SnapSchema) {
+	genFile := func(schema state.SnapNameSchema) {
 		touchFile(schema.DataFile(version.V1_0, rootFrom, rootTo))
 		acc := schema.AccessorList()
 		if acc.Has(statecfg.AccessorBTree) {
