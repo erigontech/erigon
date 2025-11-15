@@ -21,16 +21,14 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/filters"
 )
 
 func TestFiltersDeadlock(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, logger)
+	f := newTestFilters(t, config)
 	crit := filters.FilterCriteria{
 		Addresses: nil,
 		Topics:    [][]common.Hash{},
@@ -41,7 +39,8 @@ func TestFiltersDeadlock(t *testing.T) {
 		id LogsSubID
 		ch <-chan *types.Log
 	}
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	for i := 0; i < subCount; i++ {
 		n := &sub{}
 		n.ch, n.id = f.SubscribeLogs(128, crit)
