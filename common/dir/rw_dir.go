@@ -198,6 +198,19 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 	return paths, nil
 }
 
+func RemoveFilesByMask(path string) error {
+	matches, err := filepath.Glob(path)
+	if err != nil {
+		return fmt.Errorf("invalid pattern: %w", err)
+	}
+	for _, match := range matches {
+		if err := RemoveFile(match); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func RemoveFile(path string) error {
 	if dbg.TraceDeletion {
 		log.Debug("[removing] removing file", "path", path, "stack", dbg.Stack())
