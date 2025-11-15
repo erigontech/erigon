@@ -70,7 +70,7 @@ func writeGoFile(path string, src []byte) error {
 /* ---------- Helpers ---------- */
 
 func versLit(v Version) string {
-	return fmt.Sprintf("version.FileVersion{%d, %d}", v.Major, v.Minor)
+	return fmt.Sprintf("version.Version{%d, %d}", v.Major, v.Minor)
 }
 
 func goStruct(dom string) string {
