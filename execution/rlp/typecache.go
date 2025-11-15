@@ -205,7 +205,7 @@ func (e structTagError) Error() string {
 func parseStructTag(typ reflect.Type, fi, lastPublic int) (tags, error) {
 	f := typ.Field(fi)
 	var ts tags
-	for _, t := range strings.Split(f.Tag.Get("rlp"), ",") {
+	for t := range strings.SplitSeq(f.Tag.Get("rlp"), ",") {
 		switch t = strings.TrimSpace(t); t {
 		case "":
 		case "-":
