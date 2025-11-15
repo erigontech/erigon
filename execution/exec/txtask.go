@@ -93,6 +93,7 @@ type Task interface {
 type AAValidationResult struct {
 	PaymasterContext []byte
 	GasUsed          uint64
+	PreTxCost        uint64
 }
 
 // TxResult is the ouput of the task execute process
@@ -597,7 +598,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 					break
 				}
 
-				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, txTask.Header, evm, chainConfig)
+				paymasterContext, validationGasUsed, preTxCost, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, txTask.Header, evm, chainConfig)
 				if err != nil {
 					outerErr = err
 					break
@@ -606,6 +607,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 				validationResults[i-startIdx] = AAValidationResult{
 					PaymasterContext: paymasterContext,
 					GasUsed:          validationGasUsed,
+					PreTxCost:        preTxCost,
 				}
 			} else {
 				outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
@@ -630,7 +632,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	validationRes := result.ValidationResults[0]
 	result.ValidationResults = result.ValidationResults[1:]
 
-	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, gasPool, evm, txTask.Header, ibs)
+	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, validationRes.PreTxCost, gasPool, evm, txTask.Header, ibs)
 	if err != nil {
 		result.Err = err
 		return &result

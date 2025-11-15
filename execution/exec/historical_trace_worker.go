@@ -275,7 +275,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 					break
 				}
 
-				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, rw.ibs, rw.taskGasPool, txTask.Header, rw.evm, rw.execArgs.ChainConfig)
+				paymasterContext, validationGasUsed, preTxCost, err := aa.ValidateAATransaction(aaTxn, rw.ibs, rw.taskGasPool, txTask.Header, rw.evm, rw.execArgs.ChainConfig)
 				if err != nil {
 					outerErr = err
 					break
@@ -284,6 +284,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 				validationResults[i-startIdx] = AAValidationResult{
 					PaymasterContext: paymasterContext,
 					GasUsed:          validationGasUsed,
+					PreTxCost:        preTxCost,
 				}
 			} else {
 				outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
@@ -308,7 +309,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 	validationRes := result.ValidationResults[0]
 	result.ValidationResults = result.ValidationResults[1:]
 
-	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, txTask.Header, rw.ibs)
+	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, validationRes.PreTxCost, rw.taskGasPool, rw.evm, txTask.Header, rw.ibs)
 	if err != nil {
 		result.Err = err
 		return result

@@ -462,14 +462,14 @@ func addTransactionsToMiningBlock(
 			aaTxn := txn.(*types.AccountAbstractionTransaction)
 			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, &coinbase, chainConfig)
 			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
-			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
+			paymasterContext, validationGasUsed, preTxCost, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
 				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
 				return nil, err
 			}
 
-			status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
+			status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, preTxCost, gasPool, evm, header, ibs)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
 				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs

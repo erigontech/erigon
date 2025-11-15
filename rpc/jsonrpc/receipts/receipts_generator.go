@@ -228,7 +228,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
 		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
 		evm = vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vm.Config{})
-		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, genEnv.ibs, genEnv.gp, header, evm, cfg)
+		paymasterContext, validationGasUsed, preTxCost, err := aa.ValidateAATransaction(aaTxn, genEnv.ibs, genEnv.gp, header, evm, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -240,7 +240,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			evm.Cancel()
 		}()
 
-		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
+		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, preTxCost, genEnv.gp, evm, header, genEnv.ibs)
 		if err != nil {
 			return nil, err
 		}
