@@ -278,7 +278,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("getCodeSize failed")
 		}
 		if args.To != nil && codeSize == 0 {
-			result, err := caller.DoCallWithNewGas(ctx, params.TxGas, engine, overrides)
+			result, err := caller.DoCallWithNewGas(ctx, params.TxGas, engine)
 			if err == nil && result != nil && !result.Failed() {
 				return hexutil.Uint64(params.TxGas), nil
 			}
@@ -287,7 +287,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// We first execute the transaction at the highest allowable gas limit, since if this fails we
 	// can return error immediately.
-	result, err := caller.DoCallWithNewGas(ctx, hi, engine, overrides)
+	result, err := caller.DoCallWithNewGas(ctx, hi, engine)
 	if err != nil || result == nil {
 		return 0, err
 	}
@@ -314,7 +314,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// binary search.
 	optimisticGasLimit := (result.GasUsed + params.CallStipend) * 64 / 63
 	if optimisticGasLimit < hi {
-		result, err := caller.DoCallWithNewGas(ctx, optimisticGasLimit, engine, overrides)
+		result, err := caller.DoCallWithNewGas(ctx, optimisticGasLimit, engine)
 		if err != nil || result == nil {
 			return 0, err
 		}
@@ -331,7 +331,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			break
 		}
 		mid := (hi + lo) / 2
-		result, err := caller.DoCallWithNewGas(ctx, mid, engine, overrides)
+		result, err := caller.DoCallWithNewGas(ctx, mid, engine)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more.
