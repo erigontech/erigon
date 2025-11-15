@@ -987,6 +987,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
+		case integrity.StateProgress:
+			if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
 		case integrity.Publishable:
 			if err := doPublishable(cliCtx); err != nil {
 				return err
