@@ -129,42 +129,41 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	if start > b.slotToDownload.Load() {
 		start = 0
 	}
-	var atomicResp atomic.Value
-	atomicResp.Store([]*cltypes.SignedBeaconBlock{})
+
+	var responses []*cltypes.SignedBeaconBlock
+	var received = make(chan []*cltypes.SignedBeaconBlock)
 
 Loop:
 	for {
 		select {
 		case <-b.reqInterval.C:
-			go func() {
-				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
-					return
-				}
-				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
-				if err != nil {
-					b.rpc.BanPeer(peerId)
-					return
-				}
-				if responses == nil {
-					b.rpc.BanPeer(peerId)
-					return
-				}
-				if len(responses) == 0 {
-					b.rpc.BanPeer(peerId)
-					return
-				}
-				atomicResp.Store(responses)
-			}()
+			if len(received) == 0 {
+				go func() {
+					blocks, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+					if err != nil {
+						b.rpc.BanPeer(peerId)
+						return
+					}
+					if blocks == nil {
+						b.rpc.BanPeer(peerId)
+						return
+					}
+					if len(blocks) == 0 {
+						b.rpc.BanPeer(peerId)
+						return
+					}
+					if len(received) == 0 {
+						received <- blocks
+					}
+				}()
+			}
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
-			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
-				break Loop
-			}
-			time.Sleep(10 * time.Millisecond)
+		case responses = <-received:
+			break Loop
 		}
 	}
-	responses := atomicResp.Load().([]*cltypes.SignedBeaconBlock)
+
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
 		if b.finished.Load() {
