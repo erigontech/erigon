@@ -812,7 +812,7 @@ func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *T
 	slot.DataLen = len(execData)
 
 	nonZeroDataLen := 0
-	for b := range execData {
+	for _, b := range execData {
 		if b != 0 {
 			nonZeroDataLen++
 		}
