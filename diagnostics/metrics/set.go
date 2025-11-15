@@ -392,8 +392,8 @@ func (s *Set) GetOrCreateGaugeVec(name string, labels []string, help ...string) 
 		return nil, fmt.Errorf("metric %q is nil", name)
 	}
 
-	metricType := reflect.TypeOf(nm.metric)
-	if metricType != reflect.TypeOf(&prometheus.GaugeVec{}) {
+	metricType := reflect.TypeFor[*prometheus.GaugeVec]()
+	if metricType != reflect.TypeFor[*prometheus.GaugeVec]() {
 		return nil, fmt.Errorf("metric %q isn't a GaugeVec. It is %s", name, metricType)
 	}
 

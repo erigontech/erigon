@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	hashT = reflect.TypeOf(Hash{})
+	hashT = reflect.TypeFor[Hash]()
 )
 
 const (

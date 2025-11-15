@@ -129,7 +129,7 @@ func (c *Cell) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hexutil.Bytes(c[:]))
 }
 
-var cellType = reflect.TypeOf(Cell{})
+var cellType = reflect.TypeFor[Cell]()
 
 func (c *Cell) UnmarshalJSON(in []byte) error {
 	return hexutil.UnmarshalFixedJSON(cellType, in, c[:])

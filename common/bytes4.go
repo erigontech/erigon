@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	bytes4T = reflect.TypeOf(Bytes4{})
+	bytes4T = reflect.TypeFor[Bytes4]()
 )
 
 type Bytes4 [length.Bytes4]byte

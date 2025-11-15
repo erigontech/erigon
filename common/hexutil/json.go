@@ -32,9 +32,9 @@ import (
 )
 
 var (
-	bigT    = reflect.TypeOf((*Big)(nil))
-	uintT   = reflect.TypeOf(Uint(0))
-	uint64T = reflect.TypeOf(Uint64(0))
+	bigT    = reflect.TypeFor[*Big]()
+	uintT   = reflect.TypeFor[Uint]()
+	uint64T = reflect.TypeFor[Uint64]()
 )
 
 // UnmarshalFixedUnprefixedText decodes the input as a string with optional 0x prefix. The

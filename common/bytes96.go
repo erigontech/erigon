@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	blsSignatureT = reflect.TypeOf(Bytes96{})
+	blsSignatureT = reflect.TypeFor[Bytes96]()
 )
 
 type Bytes96 [length.Bytes96]byte
