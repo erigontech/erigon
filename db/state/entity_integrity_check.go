@@ -6,7 +6,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -73,7 +72,6 @@ type DirtyFilesGetter func() *btree2.BTreeG[*FilesItem]
 // (accounts in this example)
 type DependencyIntegrityChecker struct {
 	dependencyMap map[UniversalEntity][]*DependentInfo
-	dirs          datadir.Dirs
 	trace         bool
 	logger        log.Logger
 	disable       bool
@@ -87,10 +85,9 @@ type DependentInfo struct {
 
 // dependency/referred: account/storage
 // dependent/referencing: commitment
-func NewDependencyIntegrityChecker(dirs datadir.Dirs, logger log.Logger) *DependencyIntegrityChecker {
+func NewDependencyIntegrityChecker(logger log.Logger) *DependencyIntegrityChecker {
 	return &DependencyIntegrityChecker{
 		dependencyMap: make(map[UniversalEntity][]*DependentInfo),
-		dirs:          dirs,
 		logger:        logger,
 		//		trace:         true,
 	}
