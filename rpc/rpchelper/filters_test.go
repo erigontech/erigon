@@ -271,10 +271,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	_, id1 := f.SubscribeLogs(1, criteria1)
 
 	// request should have all addresses and topics enabled
-	if lastFilterRequest.AllAddresses == false {
+	if !lastFilterRequest.AllAddresses {
 		t.Error("1: expected all addresses to be true")
 	}
-	if lastFilterRequest.AllTopics == false {
+	if !lastFilterRequest.AllTopics {
 		t.Error("1: expected all topics to be true")
 	}
 
@@ -286,10 +286,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	_, id2 := f.SubscribeLogs(1, criteria2)
 
 	// request should have all addresses and all topics still and the new address
-	if lastFilterRequest.AllAddresses == false {
+	if !lastFilterRequest.AllAddresses {
 		t.Error("2: expected all addresses to be true")
 	}
-	if lastFilterRequest.AllTopics == false {
+	if !lastFilterRequest.AllTopics {
 		t.Error("2: expected all topics to be true")
 	}
 	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
@@ -304,10 +304,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	_, id3 := f.SubscribeLogs(1, criteria3)
 
 	// request should have all addresses and all topics as well as the previous address and new topic
-	if lastFilterRequest.AllAddresses == false {
+	if !lastFilterRequest.AllAddresses {
 		t.Error("3: expected all addresses to be true")
 	}
-	if lastFilterRequest.AllTopics == false {
+	if !lastFilterRequest.AllTopics {
 		t.Error("3: expected all topics to be true")
 	}
 	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
@@ -323,10 +323,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// have empty addresses and topics between the two of them.  Effectively the state should be the same as the
 	// subscription in step 3
 	f.UnsubscribeLogs(id1)
-	if lastFilterRequest.AllAddresses == false {
+	if !lastFilterRequest.AllAddresses {
 		t.Error("4: expected all addresses to be true")
 	}
-	if lastFilterRequest.AllTopics == false {
+	if !lastFilterRequest.AllTopics {
 		t.Error("4: expected all topics to be true")
 	}
 	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
@@ -340,10 +340,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// specifies a topic.  All addresses should be present still.  The state should represent the single
 	// subscription in step 3
 	f.UnsubscribeLogs(id2)
-	if lastFilterRequest.AllAddresses == false {
+	if !lastFilterRequest.AllAddresses {
 		t.Error("5: expected all addresses to be true")
 	}
-	if lastFilterRequest.AllTopics == true {
+	if lastFilterRequest.AllTopics {
 		t.Error("5: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {
@@ -356,10 +356,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// unsubscribing the last filter should leave us with false for the all addresses and all topics
 	// and nothing in the address or topics lists
 	f.UnsubscribeLogs(id3)
-	if lastFilterRequest.AllAddresses == true {
+	if lastFilterRequest.AllAddresses {
 		t.Error("6: expected all addresses to be false")
 	}
-	if lastFilterRequest.AllTopics == true {
+	if lastFilterRequest.AllTopics {
 		t.Error("6: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {
