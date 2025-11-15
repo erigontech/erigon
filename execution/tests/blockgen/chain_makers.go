@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -289,15 +288,6 @@ func (cp *ChainPack) Copy() *ChainPack {
 		Receipts: receipts,
 		TopBlock: topBlock,
 	}
-}
-
-func (cp *ChainPack) NumberOfPoWBlocks() int {
-	for i, header := range cp.Headers {
-		if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
-			return i
-		}
-	}
-	return len(cp.Headers)
 }
 
 // GenerateChain creates a chain of n blocks. The first block's
