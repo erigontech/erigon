@@ -17,12 +17,12 @@ jobs:
 
     steps:
       - name: Download arm64 artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar
 
       - name: Download amd64v2 artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar
 
@@ -113,7 +113,7 @@ jobs:
           ls -l *deb *.checksum
 
       - name: Upload artifact amd64.deb
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ inputs.application }}_${{ inputs.version }}_amd64.deb
           path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_amd64.deb
@@ -122,7 +122,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact amd64.deb.checksum
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
           path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
@@ -131,7 +131,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact arm64.deb
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ inputs.application }}_${{ inputs.version }}_arm64.deb
           path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_arm64.deb
@@ -140,7 +140,7 @@ jobs:
           if-no-files-found: error
   
       - name: Upload artifact arm64.deb.checksum
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  ## v5.0.0
         with:
           name: ${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
           path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum

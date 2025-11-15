@@ -163,6 +163,7 @@ func (n *Node) Record() *enr.Record {
 }
 
 // ValidateComplete checks whether n has a valid IP and UDP port.
+//
 // Deprecated: don't use this method.
 func (n *Node) ValidateComplete() error {
 	if n.Incomplete() {

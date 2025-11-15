@@ -21,13 +21,13 @@ package vm
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -69,7 +69,7 @@ func ActivateableEips() []string {
 	for k := range activators {
 		nums = append(nums, strconv.Itoa(k))
 	}
-	sort.Strings(nums)
+	slices.Sort(nums)
 	return nums
 }
 
@@ -93,13 +93,13 @@ func enable1884(jt *JumpTable) {
 	}
 }
 
-func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
+func opSelfBalance(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error) {
 	balance, err := interpreter.evm.IntraBlockState().GetBalance(callContext.Contract.Address())
 	if err != nil {
-		return nil, err
+		return pc, nil, err
 	}
-	callContext.Stack.push(&balance)
-	return nil, nil
+	callContext.Stack.push(balance)
+	return pc, nil, nil
 }
 
 // enable1344 applies EIP-1344 (ChainID Opcode)
@@ -115,10 +115,10 @@ func enable1344(jt *JumpTable) {
 }
 
 // opChainID implements CHAINID opcode
-func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
+func opChainID(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error) {
 	chainId, _ := uint256.FromBig(interpreter.evm.ChainRules().ChainID)
-	callContext.Stack.push(chainId)
-	return nil, nil
+	callContext.Stack.push(*chainId)
+	return pc, nil, nil
 }
 
 // enable2200 applies EIP-2200 (Rebalance net-metered SSTORE)
@@ -202,30 +202,30 @@ func enable1153(jt *JumpTable) {
 }
 
 // opTload implements TLOAD opcode
-func opTload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opTload(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
 	hash := common.Hash(loc.Bytes32())
 	val := interpreter.evm.IntraBlockState().GetTransientState(scope.Contract.Address(), hash)
 	loc.SetBytes(val.Bytes())
-	return nil, nil
+	return pc, nil, nil
 }
 
 // opTstore implements TSTORE opcode
-func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opTstore(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	if interpreter.readOnly {
-		return nil, ErrWriteProtection
+		return pc, nil, ErrWriteProtection
 	}
 	loc := scope.Stack.pop()
 	val := scope.Stack.pop()
 	interpreter.evm.IntraBlockState().SetTransientState(scope.Contract.Address(), loc.Bytes32(), val)
-	return nil, nil
+	return pc, nil, nil
 }
 
 // opBaseFee implements BASEFEE opcode
-func opBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
+func opBaseFee(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error) {
 	baseFee := interpreter.evm.Context.BaseFee
 	callContext.Stack.push(baseFee)
-	return nil, nil
+	return pc, nil, nil
 }
 
 // enable3855 applies EIP-3855 (PUSH0 opcode)
@@ -240,9 +240,9 @@ func enable3855(jt *JumpTable) {
 }
 
 // opPush0 implements the PUSH0 opcode
-func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.push(new(uint256.Int))
-	return nil, nil
+func opPush0(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.push(uint256.Int{})
+	return pc, nil, nil
 }
 
 // EIP-3860: Limit and meter initcode
@@ -264,7 +264,7 @@ func enable4844(jt *JumpTable) {
 }
 
 // opBlobHash implements the BLOBHASH opcode
-func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opBlobHash(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	idx := scope.Stack.peek()
 	if idx.LtUint64(uint64(len(interpreter.evm.BlobHashes))) {
 		hash := interpreter.evm.BlobHashes[idx.Uint64()]
@@ -272,14 +272,14 @@ func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	} else {
 		idx.Clear()
 	}
-	return nil, nil
+	return pc, nil, nil
 }
 
-func opCLZ(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opCLZ(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	x := scope.Stack.peek()
 	// count leading zero bits in x
 	x.SetUint64(256 - uint64(x.BitLen()))
-	return nil, nil
+	return pc, nil, nil
 }
 
 // enable5656 enables EIP-5656 (MCOPY opcode)
@@ -296,7 +296,7 @@ func enable5656(jt *JumpTable) {
 }
 
 // opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
-func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opMcopy(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	var (
 		dst    = scope.Stack.pop()
 		src    = scope.Stack.pop()
@@ -305,7 +305,7 @@ func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	// These values are checked for overflow during memory expansion calculation
 	// (the memorySize function on the opcode).
 	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
-	return nil, nil
+	return pc, nil, nil
 }
 
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
@@ -314,10 +314,10 @@ func enable6780(jt *JumpTable) {
 }
 
 // opBlobBaseFee implements the BLOBBASEFEE opcode
-func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
+func opBlobBaseFee(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error) {
 	blobBaseFee := interpreter.evm.Context.BlobBaseFee
 	callContext.Stack.push(blobBaseFee)
-	return nil, nil
+	return pc, nil, nil
 }
 
 // enable7516 applies EIP-7516 (BLOBBASEFEE opcode)

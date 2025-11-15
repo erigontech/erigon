@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -209,7 +210,7 @@ var compactDomains = &cobra.Command{
 			logger.Error("No domains specified")
 			return
 		}
-		supportedDomain := []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain}
+		supportedDomain := []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain}
 		var compactionDomains []kv.Domain
 
 		for _, domain := range domainsStr {
@@ -532,7 +533,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := dbstate.NewSharedDomains(temporalTx, logger)
+	domains, err := execctx.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return err
 	}

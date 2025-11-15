@@ -242,6 +242,10 @@ func (b *appendSortableBuffer) Len() int {
 	return len(b.entries)
 }
 func (b *appendSortableBuffer) Sort() {
+	b.sortedBuf = b.sortedBuf[:0]
+	if cap(b.sortedBuf) < len(b.entries) {
+		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
+	}
 	for key, val := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(key), value: val})
 	}
@@ -268,7 +272,7 @@ func (b *appendSortableBuffer) Reset() {
 }
 func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
+	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
 	return b
 }
 
@@ -340,6 +344,10 @@ func (b *oldestEntrySortableBuffer) Len() int {
 }
 
 func (b *oldestEntrySortableBuffer) Sort() {
+	b.sortedBuf = b.sortedBuf[:0]
+	if cap(b.sortedBuf) < len(b.entries) {
+		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
+	}
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
@@ -366,7 +374,7 @@ func (b *oldestEntrySortableBuffer) Reset() {
 }
 func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
+	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
 	return b
 }
 

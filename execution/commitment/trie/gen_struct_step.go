@@ -128,11 +128,7 @@ func GenStructStepEx(
 		}
 		succLen := prefixLen(succ, curr)
 		var maxLen int
-		if precLen > succLen {
-			maxLen = precLen
-		} else {
-			maxLen = succLen
-		}
+		maxLen = max(precLen, succLen)
 		if trace || maxLen >= len(curr) {
 			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
 		}
@@ -376,11 +372,7 @@ func GenStructStepOld(
 		}
 		succLen := prefixLen(succ, curr)
 		var maxLen int
-		if precLen > succLen {
-			maxLen = precLen
-		} else {
-			maxLen = succLen
-		}
+		maxLen = max(precLen, succLen)
 		if trace || maxLen >= len(curr) {
 			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
 		}

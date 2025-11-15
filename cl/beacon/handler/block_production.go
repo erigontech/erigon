@@ -59,6 +59,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -1031,10 +1033,25 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+
 	if signedBlindedBlock.Version().AfterOrEqual(clparams.FuluVersion) {
+		requestsList := cltypes.GetExecutionRequestsList(a.beaconChainCfg, executionRequests)
+		requestsHash := cltypes.ComputeExecutionRequestHash(requestsList)
+		header, err := blockPayload.RlpHeader(&signedBlindedBlock.Block.ParentRoot, requestsHash)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		}
+		rawBlock := types.RawBlock{Header: header, Body: blockPayload.Body()}
+		blockRlpSize := rawBlock.EncodingSize()
+		blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
+		if blockRlpSize > params.MaxRlpBlockSize {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("block payload rlp size exceeds the limit: %d > %d", blockRlpSize, params.MaxRlpBlockSize))
+		}
+
 		log.Info("Successfully submitted blinded block", "block_num", signedBlindedBlock.Block.Body.ExecutionPayload.BlockNumber, "api_version", apiVersion)
 		return newBeaconResponse(nil), nil
 	}
+
 	signedBlock, err := signedBlindedBlock.Unblind(blockPayload)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)

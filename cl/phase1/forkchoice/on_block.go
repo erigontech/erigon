@@ -115,15 +115,28 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		})
 	}
 
-	// Check if blob data is available
-	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 {
+	elHasBlobs := false
+	if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+		blobsWithProof, proofs := f.engine.GetBlobs(ctx, versionedHashes)
+		elHasBlobs = len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
+		log.Debug("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+	}
+
+	// Check if blob data is available (skip if blobs are in txpool)
+	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
 		if block.Version() >= clparams.FuluVersion {
 			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 			if err != nil {
 				return err
 			}
 			if !available {
-				return ErrEIP7594ColumnDataNotAvailable
+				if f.syncedDataManager.Syncing() {
+					return ErrEIP7594ColumnDataNotAvailable
+				} else {
+					if err := f.peerDas.SyncColumnDataLater(block); err != nil {
+						log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
+					}
+				}
 			}
 		} else if block.Version() >= clparams.DenebVersion {
 			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
@@ -274,16 +287,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
 	lastProcessedState.SetFinalizedCheckpoint(finalizedCheckpoint)
 	lastProcessedState.SetJustificationBits(justificationBits)
-	// Load next proposer indicies for the parent root
-	idxs := make([]uint64, 0, foreseenProposers)
-	for i := lastProcessedState.Slot() + 1; i < f.beaconCfg.SlotsPerEpoch; i++ {
-		idx, err := lastProcessedState.GetBeaconProposerIndexForSlot(i)
-		if err != nil {
-			return err
-		}
-		idxs = append(idxs, idx)
-	}
-	f.nextBlockProposers.Add(blockRoot, idxs)
+
 	// If the block is from a prior epoch, apply the realized values
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())

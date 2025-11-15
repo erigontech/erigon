@@ -102,6 +102,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnTxStart: t.OnTxStart,
 			OnTxEnd:   t.OnTxEnd,
 			OnOpcode:  t.OnOpcode,
+			OnExit:    t.OnExit,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -123,6 +124,20 @@ func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	}
 }
 
+// ExitHook is invoked when the processing of a message ends.
+func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if reverted {
+		// clear the created or deleted address beacuse the tx is reverted; and so avoid to notify wrong state change
+		for addr := range t.created {
+			delete(t.created, addr)
+		}
+
+		for addr := range t.deleted {
+			delete(t.deleted, addr)
+		}
+	}
+}
+
 // OnOpcode implements the EVMLogger interface to trace a single step of VM execution.
 func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	op := vm.OpCode(opcode)
@@ -137,8 +152,17 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		addr := common.Address(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
 		if op == vm.SELFDESTRUCT {
-			t.deleted[caller] = true
+			if t.env.ChainConfig.IsCancun(t.env.Time) {
+				// EIP-6780: Post Dancum/Cancun only delete if created in same transaction
+				if t.created[caller] {
+					t.deleted[caller] = true
+				}
+			} else {
+				// EIP-6780: Pre Dancum/Cancun only delete if created in same transaction
+				t.deleted[caller] = true
+			}
 		}
+
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
 		addr := common.Address(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
@@ -226,6 +250,21 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 			if !bytes.Equal(newCode, t.pre[addr].Code) {
 				modified = true
 				postAccount.Code = newCode
+			}
+
+			newCodeHash := common.Hash{}
+			if len(newCode) > 0 {
+				newCodeHash = crypto.Keccak256Hash(newCode)
+			}
+
+			prevCodeHash := common.Hash{}
+			if t.pre[addr].CodeHash != nil {
+				prevCodeHash = *t.pre[addr].CodeHash
+			}
+
+			if newCodeHash != prevCodeHash {
+				modified = true
+				postAccount.CodeHash = &newCodeHash
 			}
 		}
 

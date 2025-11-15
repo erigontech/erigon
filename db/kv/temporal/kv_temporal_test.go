@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 )
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
@@ -35,7 +36,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
 
-	sd, err := state.NewSharedDomains(rwTtx1, log.Root())
+	sd, err := execctx.NewSharedDomains(rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -240,7 +241,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
-	sd, err := state.NewSharedDomains(rwTtx1, log.Root())
+	sd, err := execctx.NewSharedDomains(rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 

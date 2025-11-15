@@ -39,9 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_logs_spammer"
@@ -49,6 +46,9 @@ import (
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -83,7 +83,7 @@ type EngineServer struct {
 	printPectraBanner bool
 }
 
-const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+const DefaultFcuTimeout = 1 * time.Second
 
 func NewEngineServer(
 	logger log.Logger,
@@ -94,8 +94,12 @@ func NewEngineServer(
 	proposing bool,
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
+	fcuTimeout time.Duration,
 ) *EngineServer {
-	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
+	if fcuTimeout == 0 {
+		fcuTimeout = DefaultFcuTimeout
+	}
+	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
@@ -121,7 +125,7 @@ func (e *EngineServer) Start(
 	blockReader services.FullBlockReader,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
-	engineReader consensus.EngineReader,
+	engineReader rules.EngineReader,
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
 ) error {
@@ -284,8 +288,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
-		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash(),
-			"payload", req, "parentBeaconBlockRoot", parentBeaconBlockRoot, "requests", executionRequests)
+		s.logger.Error(
+			"[NewPayload] invalid block hash",
+			"stated", blockHash,
+			"actual", header.Hash(),
+			"parentBeaconBlockRoot", parentBeaconBlockRoot,
+			"requests", executionRequests,
+		)
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
@@ -352,7 +361,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
-		if errors.Is(err, consensus.ErrInvalidBlock) {
+		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
@@ -602,7 +611,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 		status, err = s.HandlesForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
 		if err != nil {
-			if errors.Is(err, consensus.ErrInvalidBlock) {
+			if errors.Is(err, rules.ErrInvalidBlock) {
 				return &engine_types.ForkChoiceUpdatedResponse{
 					PayloadStatus: &engine_types.PayloadStatus{
 						Status:          engine_types.InvalidStatus,

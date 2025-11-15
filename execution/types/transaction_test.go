@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -665,7 +665,7 @@ func newRandBlobTx() *BlobTx {
 			To:       randAddr(),
 			Value:    uint256.NewInt(rand.Uint64()),
 			Data:     randData(),
-			V:        *uint256.NewInt(0),
+			V:        uint256.Int{},
 			R:        *uint256.NewInt(rand.Uint64()),
 			S:        *uint256.NewInt(rand.Uint64()),
 		},

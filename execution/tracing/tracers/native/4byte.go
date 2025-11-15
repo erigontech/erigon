@@ -21,6 +21,7 @@ package native
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"sync/atomic"
 
@@ -77,12 +78,7 @@ func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer
 
 // isPrecompiled returns whether the addr is a precompile. Logic borrowed from newJsTracer in execution/tracing/tracers/js/tracer.go
 func (t *fourByteTracer) isPrecompiled(addr common.Address) bool {
-	for _, p := range t.activePrecompiles {
-		if p == addr {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(t.activePrecompiles, addr)
 }
 
 // store saves the given identifier and datasize.
@@ -100,7 +96,7 @@ func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
-func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) { // Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return

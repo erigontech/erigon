@@ -86,7 +86,7 @@ jobs:
 
     steps:
       - name: configure Pagefile
-        uses: al-cheb/configure-pagefile-action@v1.4
+        uses: al-cheb/configure-pagefile-action@v1.5
         with:
           minimum-size: 8GB
       - uses: actions/checkout@v5
