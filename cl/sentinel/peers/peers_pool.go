@@ -23,9 +23,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 )
 
 type PeeredObject[T any] struct {
