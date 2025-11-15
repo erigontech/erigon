@@ -254,9 +254,7 @@ type ReusableCaller struct {
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
-	engine rules.EngineReader,
-	overrides *ethapi2.StateOverrides,
-) (*evmtypes.ExecutionResult, error) {
+	engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
 	var cancel context.CancelFunc
 	if r.callTimeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, r.callTimeout)
@@ -272,11 +270,8 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	// reset the EVM so that we can continue to use it with the new context
 	txCtx := protocol.NewEVMTxContext(r.message)
-	if overrides == nil {
-		r.intraBlockState = state.New(r.stateReader)
-	}
 
-	r.evm.Reset(txCtx, r.intraBlockState)
+	r.evm.Reset(txCtx, r.intraBlockState.Copy())
 
 	timedOut := false
 	go func() {
