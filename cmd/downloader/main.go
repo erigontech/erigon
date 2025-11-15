@@ -201,7 +201,7 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if cmd.Name() != "torrent_cat" {
 			logger = debug.SetupCobra(cmd, "downloader")
-			logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
+			logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit, "build_time", version.BuildTime)
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
