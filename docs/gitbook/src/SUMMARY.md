@@ -19,7 +19,7 @@
 
   * [Basic Usage](get-started/fundamentals/basic-usage.md)
   * [Sync Modes](get-started/fundamentals/sync-modes.md)
-  * [Configuring Erigon](get-started/fundamentals/configuring-erigon.md)
+  * [CLI Reference](get-started/fundamentals/configuring-erigon.md)
   * [Supported Networks](get-started/fundamentals/supported-networks.md)
   * [Default ports](get-started/fundamentals/default-ports.md)
   * [Layer 2 Networks](get-started/fundamentals/layer-2-networks.md)

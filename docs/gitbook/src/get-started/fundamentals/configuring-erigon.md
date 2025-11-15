@@ -2,7 +2,7 @@
 description: Customizing your Erigon node
 ---
 
-# Configuring Erigon
+# CLI Reference
 
 The Erigon CLI has a wide range of flags that can be used to customize its behavior. There are 3 ways to configure Erigon, listed by priority:
 
@@ -315,9 +315,11 @@ Flags for configuring the Sentry component.
 * `--sentinel.bootnodes value`: Comma-separated enode URLs for P2P discovery bootstrap for the sentinel.
 * `--sentinel.staticpeers value`: Connects to comma-separated consensus static peers.
 
-### Downloader
+Here is the rewritten and merged Downloader section, combining the two original sections and ensuring consistent formatting:
 
-Flags for controlling the downloader component.
+### Downloader and Synchronization
+
+These flags control the block synchronization and data downloading process, including the BitTorrent protocol settings.
 
 * `--downloader.api.addr value`: The downloader address.
 * `--downloader.disable.ipv4`: Disables IPv4 for the downloader.
@@ -334,6 +336,23 @@ Flags for controlling the downloader component.
 * `--sync.loop.break.after value`: Sets the last stage of the sync loop to run.
 * `--bad.block value`: Marks a block as bad and forces a reorg.
 * `--webseed value`: Comma-separated URLs for network support infrastructure.
+
+#### BitTorrent Options
+
+* `--torrent.port value`: The port to listen for the BitTorrent protocol.
+  * Default: `42069`
+* `--torrent.maxpeers value`: An unused parameter.
+  * Default: `100`
+* `--torrent.conns.perfile value`: The number of connections per file.
+  * Default: `10`
+* `--torrent.trackers.disable`: Disables conventional BitTorrent trackers.
+  * Default: `false`
+* `--torrent.upload.rate value`: The upload rate in bytes per second.
+  * Default: `32mb`
+* `--torrent.download.rate value`: The download rate in bytes per second.
+* `--torrent.webseed.download.rate value`: The download rate for webseeds.
+* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs.
+  * Default: `1`
 
 ### Caplin (Consensus Layer)
 
@@ -389,25 +408,6 @@ Flags for configuring the Shutter Network encrypted transactions mempool.
 * `--shutter.p2p.bootstrap.nodes value`: Overrides the default P2P bootstrap nodes.
 * `--shutter.p2p.listen.port value`: Overrides the default P2P listen port.
   * Default: `0`
-
-### Downloader
-
-Flags for managing the Downloader for data synchronization.
-
-* `--torrent.port value`: The port to listen for the BitTorrent protocol.
-  * Default: `42069`
-* `--torrent.maxpeers value`: An unused parameter.
-  * Default: `100`
-* `--torrent.conns.perfile value`: The number of connections per file.
-  * Default: `10`
-* `--torrent.trackers.disable`: Disables conventional BitTorrent trackers.
-  * Default: `false`
-* `--torrent.upload.rate value`: The upload rate in bytes per second.
-  * Default: `32mb`
-* `--torrent.download.rate value`: The download rate in bytes per second.
-* `--torrent.webseed.download.rate value`: The download rate for webseeds.
-* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs.
-  * Default: `1`
 
 ## Configuration file
 
@@ -548,7 +548,7 @@ USAGE:
    erigon [command] [flags]
 
 VERSION:
-   3.2.1-0b0fde3a
+   3.2.2-bc54d33c
 
 COMMANDS:
    init                                         Bootstrap and initialize a new genesis block
@@ -559,8 +559,8 @@ COMMANDS:
    help, h                                      Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --datadir value                                                                     Data directory for the databases (default: /home/user/.local/share/erigon)
-   --ethash.dagdir value                                                               Directory to store the ethash mining DAGs (default: /home/user/.local/share/erigon-ethash)
+   --datadir value                                                                     Data directory for the databases (default: /home/usr/.local/share/erigon)
+   --ethash.dagdir value                                                               Directory to store the ethash mining DAGs (default: /home/bloxster/.local/share/erigon-ethash)
    --externalcl                                                                        Enables the external consensus layer (default: false)
    --txpool.disable                                                                    External pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer. (default: false)
    --txpool.pricelimit value                                                           Minimum gas price (fee cap) limit to enforce for acceptance into the pool (default: 1)
