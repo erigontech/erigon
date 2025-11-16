@@ -165,7 +165,7 @@ func DoCall(
 	}
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
-		if err := stateOverrides.Override2(state, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(state, blockCtx.Rules(chainConfig)); err != nil {
 			return nil, err
 		}
 	}
@@ -326,7 +326,7 @@ func NewReusableCaller(
 
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if stateOverrides != nil {
-		if err := stateOverrides.Override2(ibs, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(ibs, blockCtx.Rules(chainConfig)); err != nil {
 			return nil, err
 		}
 	}

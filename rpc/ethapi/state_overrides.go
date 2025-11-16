@@ -32,7 +32,7 @@ import (
 
 type StateOverrides map[common.Address]Account
 
-func (so *StateOverrides) Override2(ibs *state.IntraBlockState, rules *chain.Rules) error {
+func (so *StateOverrides) Override(ibs *state.IntraBlockState, rules *chain.Rules) error {
 	for addr, account := range *so {
 		// Override account nonce.
 		if account.Nonce != nil {
@@ -85,60 +85,8 @@ func (so *StateOverrides) Override2(ibs *state.IntraBlockState, rules *chain.Rul
 	return nil
 }
 
-func (so *StateOverrides) Override(ibs *state.IntraBlockState) error {
-	for addr, account := range *so {
-		// Override account nonce.
-		if account.Nonce != nil {
-			if err := ibs.SetNonce(addr, uint64(*account.Nonce)); err != nil {
-				return err
-			}
-		}
-		// Override account (contract) code.
-		if account.Code != nil {
-			if err := ibs.SetCode(addr, *account.Code); err != nil {
-				return err
-			}
-		}
-		// Override account balance.
-		if account.Balance != nil {
-			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
-			if overflow {
-				return errors.New("account.Balance higher than 2^256-1")
-			}
-			if err := ibs.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
-				return err
-			}
-		}
-		if account.State != nil && account.StateDiff != nil {
-			return fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
-		}
-		// Replace entire state if caller requires.
-		if account.State != nil {
-			intState := map[common.Hash]uint256.Int{}
-			for key, value := range *account.State {
-				intValue := new(uint256.Int).SetBytes32(value.Bytes())
-				intState[key] = *intValue
-			}
-			if err := ibs.SetStorage(addr, intState); err != nil {
-				return err
-			}
-		}
-		// Apply state diff into specified accounts.
-		if account.StateDiff != nil {
-			for key, value := range *account.StateDiff {
-				intValue := new(uint256.Int).SetBytes32(value.Bytes())
-				if err := ibs.SetState(addr, key, *intValue); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func (so *StateOverrides) OverrideWithPrecompiles(state *state.IntraBlockState, precompiles vm.PrecompiledContracts) error {
-	err := so.Override(state)
+func (so *StateOverrides) OverrideWithPrecompiles(state *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
+	err := so.Override(state, rules)
 	if err != nil {
 		return err
 	}
