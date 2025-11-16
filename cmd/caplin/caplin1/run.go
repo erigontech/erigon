@@ -327,7 +327,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	// Create the gossip manager
-	gossipManager := gossip.NewGossipManager(p2p, sentinel, beaconConfig, networkConfig, ethClock, config.SubscribeAllTopics)
+	gossipManager := gossip.NewGossipManager(p2p, sentinel, beaconConfig, networkConfig, ethClock, config.SubscribeAllTopics, uint64(len(activeIndicies)))
 
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
