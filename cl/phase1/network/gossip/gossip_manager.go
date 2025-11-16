@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
-	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -286,7 +285,7 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 			subnetId = &subnetIdVal
 		}
 		err = service.Service.ProcessMessage(ctx, subnetId, msgObj)
-		if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
+		if errors.Is(err, synced_data.ErrNotSynced) || strings.Contains(err.Error(), "ignore") {
 			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore
 		} else if err != nil {
