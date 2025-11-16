@@ -286,6 +286,7 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 		}
 		err = service.Service.ProcessMessage(ctx, subnetId, msgObj)
 		if errors.Is(err, synced_data.ErrNotSynced) || strings.Contains(err.Error(), "ignore") {
+			// services.ErrIgnore is a big package. To avoid circular dependency, we use a simple string check.
 			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore
 		} else if err != nil {
