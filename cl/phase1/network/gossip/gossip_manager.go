@@ -263,12 +263,14 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 		// decode the message
 		msgData := msg.GetData()
 		if msgData == nil {
+			log.Debug("[GossipManager] reject nil message", "topic", name)
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
 		version := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		msgObj, err := service.Service.DecodeGossipMessage(pid, msgData, version)
 		if err != nil {
+			log.Debug("[GossipManager] reject decode message", "topic", name, "err", err)
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
@@ -278,6 +280,7 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 		if gossip.IsTopicNameWithSubnet(name) {
 			subnet := extractSubnetIndexByGossipTopic(name)
 			if subnet < 0 {
+				log.Debug("[GossipManager] reject invalid subnet", "topic", name, "subnet", subnet)
 				g.stats.addReject(name)
 				return pubsub.ValidationReject
 			}
@@ -290,6 +293,7 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore
 		} else if err != nil {
+			log.Debug("[GossipManager] reject message", "topic", name, "err", err)
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
