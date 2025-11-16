@@ -1085,7 +1085,7 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 	}
 	defer c.Close()
 
-	logEvery := time.NewTimer(30 * time.Second)
+	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	i := 0
