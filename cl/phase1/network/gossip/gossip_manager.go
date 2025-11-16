@@ -310,9 +310,11 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 		if err != nil {
 			return err
 		}
-		if err := topicHandle.SetScoreParams(g.topicScoreParams(name)); err != nil {
-			topicHandle.Close()
-			return err
+		if params := g.topicScoreParams(name); params != nil {
+			if err := topicHandle.SetScoreParams(params); err != nil {
+				topicHandle.Close()
+				return err
+			}
 		}
 		if err := g.subscriptions.Add(topic, topicHandle, validator); err != nil {
 			topicHandle.Close()
@@ -425,9 +427,11 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
 		if err != nil {
 			return err
 		}
-		if err := topicHandle.SetScoreParams(g.topicScoreParams(name)); err != nil {
-			topicHandle.Close()
-			return err
+		if params := g.topicScoreParams(name); params != nil {
+			if err := topicHandle.SetScoreParams(params); err != nil {
+				topicHandle.Close()
+				return err
+			}
 		}
 		if err := g.subscriptions.Add(newTopic, topicHandle, prevTopicHandle.validator); err != nil {
 			topicHandle.Close()
