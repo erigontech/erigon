@@ -293,7 +293,7 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore
 		} else if err != nil {
-			log.Debug("[GossipManager] reject message", "topic", name, "err", err)
+			log.Warn("[GossipManager] reject message", "topic", name, "err", err)
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
