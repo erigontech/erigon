@@ -267,6 +267,12 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
+		msgData, err := utils.DecompressSnappy(msgData, true)
+		if err != nil {
+			log.Debug("[GossipManager] reject decompress message", "topic", name, "err", err)
+			g.stats.addReject(name)
+			return pubsub.ValidationReject
+		}
 		version := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		msgObj, err := service.Service.DecodeGossipMessage(pid, msgData, version)
 		if err != nil {
