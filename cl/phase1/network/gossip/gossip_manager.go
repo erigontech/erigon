@@ -18,6 +18,7 @@ package gossip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -25,10 +26,12 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
+	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -242,12 +245,6 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 	// wrap service.ProcessMessage to ValidatorEx
 	validator := pubsub.ValidatorEx(func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
-		passes := service.SatisfiesConditions(pid, msg, curVersion)
-		if !passes {
-			g.stats.addReject(msg.GetTopic())
-			return pubsub.ValidationIgnore
-		}
-
 		// parse the topic and subnet
 		topic := msg.GetTopic()
 		if topic == "" {
@@ -257,9 +254,17 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 		if name == "" {
 			return pubsub.ValidationReject
 		}
+
+		passes := service.SatisfiesConditions(pid, msg, curVersion)
+		if !passes {
+			g.stats.addIgnore(name)
+			return pubsub.ValidationIgnore
+		}
+
 		// decode the message
 		msgData := msg.GetData()
 		if msgData == nil {
+			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
 		version := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
@@ -281,8 +286,8 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 			subnetId = &subnetIdVal
 		}
 		err = service.Service.ProcessMessage(ctx, subnetId, msgObj)
-		//if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
-		if true {
+		if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
+			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore
 		} else if err != nil {
 			g.stats.addReject(name)
