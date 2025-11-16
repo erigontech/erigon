@@ -115,7 +115,7 @@ func DoCall(
 	tx kv.Tx,
 	blockNrOrHash rpc.BlockNumberOrHash,
 	header *types.Header,
-	overrides *ethapi2.StateOverrides,
+	stateOverrides *ethapi2.StateOverrides,
 	blockOverrides *ethapi2.BlockOverrides,
 	gasCap uint64,
 	chainConfig *chain.Config,
@@ -132,13 +132,6 @@ func DoCall(
 	*/
 
 	state := state.New(stateReader)
-
-	// Override the fields of specified contracts before execution.
-	if overrides != nil {
-		if err := overrides.Override(state); err != nil {
-			return nil, err
-		}
-	}
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -169,6 +162,12 @@ func DoCall(
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
 		blockOverrides.Override(&blockCtx)
+	}
+	// Override the fields of specified contracts before execution.
+	if stateOverrides != nil {
+		if err := stateOverrides.Override2(state, blockCtx.Rules(chainConfig)); err != nil {
+			return nil, err
+		}
 	}
 
 	txCtx := protocol.NewEVMTxContext(msg)
@@ -297,7 +296,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 func NewReusableCaller(
 	engine rules.EngineReader,
 	stateReader state.StateReader,
-	overrides *ethapi2.StateOverrides,
+	stateOverrides *ethapi2.StateOverrides,
 	blockOverrides *ethapi2.BlockOverrides,
 	header *types.Header,
 	initialArgs ethapi2.CallArgs,
@@ -308,13 +307,8 @@ func NewReusableCaller(
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
-	ibs := state.New(stateReader)
 
-	if overrides != nil {
-		if err := overrides.Override(ibs); err != nil {
-			return nil, err
-		}
-	}
+	ibs := state.New(stateReader)
 
 	var baseFee *uint256.Int
 	if header != nil && header.BaseFee != nil {
@@ -331,6 +325,12 @@ func NewReusableCaller(
 	}
 
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	if stateOverrides != nil {
+		if err := stateOverrides.Override2(ibs, blockCtx.Rules(chainConfig)); err != nil {
+			return nil, err
+		}
+	}
+
 	if blockOverrides != nil {
 		blockOverrides.Override(&blockCtx)
 	}
