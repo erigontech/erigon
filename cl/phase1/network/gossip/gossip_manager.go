@@ -50,8 +50,9 @@ type GossipManager struct {
 	stats              *gossipMessageStats
 	p2p                *p2p.P2Pmanager
 
-	subscriptions *TopicSubscriptions
-	subscribeAll  bool
+	activeIndicies uint64
+	subscriptions  *TopicSubscriptions
+	subscribeAll   bool
 }
 
 func NewGossipManager(
@@ -61,6 +62,7 @@ func NewGossipManager(
 	networkConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
 	subscribeAll bool,
+	activeIndicies uint64,
 ) *GossipManager {
 	gm := &GossipManager{
 		p2p:                p2p,
@@ -72,6 +74,7 @@ func NewGossipManager(
 		stats:              &gossipMessageStats{},
 		subscriptions:      NewTopicSubscriptions(),
 		subscribeAll:       subscribeAll,
+		activeIndicies:     activeIndicies,
 	}
 
 	gm.goCheckResubscribe()
@@ -435,11 +438,6 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
 		}
 	}
 	return nil
-}
-
-func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams {
-	// todo
-	return &pubsub.TopicScoreParams{}
 }
 
 func extractTopicName(topic string) string {
