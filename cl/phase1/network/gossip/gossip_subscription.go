@@ -2,6 +2,7 @@ package gossip
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -10,10 +11,10 @@ import (
 )
 
 type TopicSubscription struct {
-	topic      *pubsub.Topic
-	sub        *pubsub.Subscription
-	expiration time.Time
-	validator  pubsub.ValidatorEx
+	topic     *pubsub.Topic
+	sub       *pubsub.Subscription
+	expiry    time.Time
+	validator pubsub.ValidatorEx
 }
 
 type TopicSubscriptions struct {
@@ -54,15 +55,15 @@ func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, valida
 		return errors.New("topic already exists")
 	}
 	t.subs[topic] = &TopicSubscription{
-		topic:      topicHandle,
-		sub:        nil,
-		validator:  validator,
-		expiration: time.Unix(0, 0),
+		topic:     topicHandle,
+		sub:       nil,
+		validator: validator,
+		expiry:    time.Unix(0, 0),
 	}
-	if expiration, ok := t.toSubscribes[topic]; ok {
+	if expiry, ok := t.toSubscribes[topic]; ok {
 		delete(t.toSubscribes, topic)
 		t.mutex.Unlock()
-		return t.SubscribeWithExpiry(topic, expiration)
+		return t.SubscribeWithExpiry(topic, expiry)
 	}
 	t.mutex.Unlock()
 	return nil
@@ -96,37 +97,33 @@ func (t *TopicSubscriptions) Unsubscribe(topic string) error {
 		sub.sub.Cancel()
 		sub.sub = nil
 	}
-	sub.expiration = time.Unix(0, 0) // reset
+	sub.expiry = time.Unix(0, 0) // reset
 	return nil
 }
 
-func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiration time.Time) error {
+func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	sub, ok := t.subs[topic]
 	if !ok {
-		t.toSubscribes[topic] = expiration
+		t.toSubscribes[topic] = expiry
 		return errors.New("topic not found")
 	}
-	if time.Now().Before(expiration) {
-		if sub.sub == nil {
-			// subscribe the topic
-			s, err := sub.topic.Subscribe()
-			if err != nil {
-				return err
-			}
-			log.Info("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiration)
-			sub.sub = s
-		}
-	} else {
-		if sub.sub != nil {
-			// unsubscribe the topic
-			sub.sub.Cancel()
-			sub.sub = nil
-			log.Info("[GossipManager] Unsubscribed from topic", "topic", topic, "expiration", expiration)
-		}
+
+	if time.Now().After(expiry) {
+		return fmt.Errorf("expiry is in the past: %s", expiry.Format(time.RFC3339))
 	}
-	sub.expiration = expiration
+
+	if sub.sub == nil {
+		// subscribe the topic
+		s, err := sub.topic.Subscribe()
+		if err != nil {
+			return err
+		}
+		log.Info("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
+		sub.sub = s
+	}
+	sub.expiry = expiry
 	return nil
 }
 
@@ -135,7 +132,7 @@ func (t *TopicSubscriptions) expireCheck() {
 	for range ticker.C {
 		t.mutex.Lock()
 		for _, sub := range t.subs {
-			if time.Now().After(sub.expiration) && sub.sub != nil {
+			if time.Now().After(sub.expiry) && sub.sub != nil {
 				sub.sub.Cancel()
 				sub.sub = nil
 			}
