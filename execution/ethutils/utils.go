@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -33,31 +32,6 @@ var (
 	ErrMismatchBlobHashes  = errors.New("mismatch blob hashes")
 	ErrInvalidVersiondHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
 )
-
-// IsLocalBlock checks whether the specified block is mined
-// by local miner accounts.
-//
-// We regard two types of accounts as local miner account: etherbase
-// and accounts specified via `txpool.locals` flag.
-func IsLocalBlock(engine rules.Engine, etherbase common.Address, txPoolLocals []common.Address, header *types.Header) bool {
-	author, err := engine.Author(header)
-	if err != nil {
-		log.Warn("Failed to retrieve block author", "number", header.Number, "header_hash", header.Hash(), "err", err)
-		return false
-	}
-	// Check whether the given address is etherbase.
-	if author == etherbase {
-		return true
-	}
-	// Check whether the given address is specified by `txpool.local`
-	// CLI flag.
-	for _, account := range txPoolLocals {
-		if account == author {
-			return true
-		}
-	}
-	return false
-}
 
 func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []common.Hash, transactions *[]types.Transaction) error {
 	if expectedBlobHashes == nil {
