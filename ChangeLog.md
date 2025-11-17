@@ -55,12 +55,7 @@ https://keepachangelog.com/en/1.1.0/
 - eth/67 protocol support removed (#17318)
 - SkipAnalysis VM optimization removed (#17217)
 
-
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.0...v3.3.0
-
-Milestone: https://github.com/erigontech/erigon/milestone/58
-
-Total commits between v3.2.0 and v3.3.0: **381 commits**
 
 ---
 
