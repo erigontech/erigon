@@ -43,8 +43,8 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/eth1"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/module"
+	"github.com/erigontech/erigon/execution/module/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -822,7 +822,7 @@ func (e *EngineServer) HandleNewPayload(
 			}
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
-				missingBlkHash, isMissingChainErr := eth1.GetBlockHashFromMissingSegmentError(err)
+				missingBlkHash, isMissingChainErr := module.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
 					e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 					if e.test {
@@ -865,7 +865,7 @@ func (e *EngineServer) HandleNewPayload(
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
-		missingBlkHash, isMissingChainErr := eth1.GetBlockHashFromMissingSegmentError(err)
+		missingBlkHash, isMissingChainErr := module.GetBlockHashFromMissingSegmentError(err)
 		if isMissingChainErr {
 			e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 			if e.test {

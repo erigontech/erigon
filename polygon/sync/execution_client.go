@@ -28,7 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	eth1utils "github.com/erigontech/erigon/execution/eth1/eth1_utils"
+	eth1utils "github.com/erigontech/erigon/execution/module/eth1_utils"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
