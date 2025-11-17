@@ -76,10 +76,7 @@ https://keepachangelog.com/en/1.1.0/
 - `eth_syncing`: Initial highest block calculation (#17409)
 - `eth_call`: Block override support (#17261)
 - Hive simulatev1: Error code compatibility (#17584)
-- HTTP client timeout: Prevent infinite hangs (#16788)
 - GetModifiedAccountsByNumber/Hash semantics (#17513)
-- Error handling in OnOpcode memory copy (#15075)
-- Modified account access list order (#17291)
 
 #### Execution
 
