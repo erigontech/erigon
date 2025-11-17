@@ -27,7 +27,7 @@ import (
 	"sort"
 	"sync/atomic"
 
-	blockstype "github.com/erigontech/erigon/arb/blocks"
+	arbBlocks "github.com/erigontech/erigon/arb/blocks"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -118,7 +118,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	}
 	bf.gasUsedRatio = float64(bf.header.GasUsed) / float64(bf.header.GasLimit)
 
-	arbOsVersion := blockstype.GetArbOSVersion(bf.header, chainconfig)
+	arbOsVersion := arbBlocks.GetArbOSVersion(bf.header, chainconfig)
 	if blobGasUsed := bf.header.BlobGasUsed; blobGasUsed != nil && chainconfig.GetMaxBlobGasPerBlock(bf.header.Time, arbOsVersion) != 0 {
 		bf.blobGasUsedRatio = float64(*blobGasUsed) / float64(chainconfig.GetMaxBlobGasPerBlock(bf.header.Time, arbOsVersion))
 	}

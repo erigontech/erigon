@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	blockstype "github.com/erigontech/erigon/arb/blocks"
+	arbBlocks "github.com/erigontech/erigon/arb/blocks"
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -119,7 +119,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 
 	gasUsed := new(uint64)
 	usedBlobGas := new(uint64)
-	arbOsVersion := blockstype.GetArbOSVersion(header, cfg)
+	arbOsVersion := arbBlocks.GetArbOSVersion(header, cfg)
 	gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time, arbOsVersion))
 
 	noopWriter := state.NewNoopWriter()

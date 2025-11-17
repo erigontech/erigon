@@ -48,7 +48,7 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	if parent.BlobGasUsed != nil {
 		parentBlobGasUsed = *parent.BlobGasUsed
 	}
-	arbOsVersion := blockstype.GetArbOSVersion(parent, config)
+	arbOsVersion := arbBlocks.GetArbOSVersion(parent, config)
 	target := config.GetTargetBlobsPerBlock(currentHeaderTime, arbOsVersion)
 	targetBlobGas := target * params.GasPerBlob
 

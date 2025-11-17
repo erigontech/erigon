@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/arb/txn_types"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
@@ -43,7 +42,7 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 		require.NoError(t, err)
 
 		encodedBytes := buf.Bytes()
-		require.Equal(t, txn_types.ArbitrumLegacyTxType, encodedBytes[0])
+		require.Equal(t, ArbitrumLegacyTxType, encodedBytes[0])
 
 		decodedTx := &ArbitrumLegacyTxData{
 			LegacyTx: &types.LegacyTx{},
@@ -122,7 +121,7 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 	})
 
 	t.Run("Type byte verification", func(t *testing.T) {
-		require.Equal(t, txn_types.ArbitrumLegacyTxType, arbLegacyTx.Type())
+		require.Equal(t, ArbitrumLegacyTxType, arbLegacyTx.Type())
 
 		var buf bytes.Buffer
 		err := arbLegacyTx.EncodeRLP(&buf)
@@ -130,7 +129,7 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 
 		bytes := buf.Bytes()
 		require.Greater(t, len(bytes), 0)
-		require.Equal(t, txn_types.ArbitrumLegacyTxType, bytes[0])
+		require.Equal(t, ArbitrumLegacyTxType, bytes[0])
 	})
 
 	t.Run("LegacyTx embedding verification", func(t *testing.T) {
@@ -270,7 +269,7 @@ func TestArbitrumLegacyTxData_TypeByteHandling(t *testing.T) {
 
 		encoded := buf.Bytes()
 		require.Greater(t, len(encoded), 1)
-		require.Equal(t, txn_types.ArbitrumLegacyTxType, encoded[0])
+		require.Equal(t, ArbitrumLegacyTxType, encoded[0])
 
 		decoded := &ArbitrumLegacyTxData{
 			LegacyTx: &types.LegacyTx{},
@@ -291,7 +290,7 @@ func TestArbitrumLegacyTxData_TypeByteHandling(t *testing.T) {
 		require.NoError(t, err)
 
 		encoded := buf.Bytes()
-		require.Equal(t, txn_types.ArbitrumLegacyTxType, encoded[0])
+		require.Equal(t, ArbitrumLegacyTxType, encoded[0])
 
 		// Decode skipping type byte
 		decoded := &ArbitrumLegacyTxData{
@@ -336,7 +335,7 @@ func TestArbitrumLegacyTxData_ArbTxIntegration(t *testing.T) {
 	}
 
 	arbTx := NewArbTx(arbLegacyTxData)
-	require.Equal(t, txn_types.ArbitrumLegacyTxType, arbTx.Type())
+	require.Equal(t, ArbitrumLegacyTxType, arbTx.Type())
 
 	// Encode using the inner transaction's EncodeRLP (which includes type byte)
 	var buf bytes.Buffer
@@ -346,7 +345,7 @@ func TestArbitrumLegacyTxData_ArbTxIntegration(t *testing.T) {
 	encodedBytes := buf.Bytes()
 
 	// Verify first byte is the type
-	require.Equal(t, txn_types.ArbitrumLegacyTxType, encodedBytes[0])
+	require.Equal(t, ArbitrumLegacyTxType, encodedBytes[0])
 
 	// Decode using ArbTx's decodeTyped (skip the type byte)
 	newArbTx := &ArbTx{}
@@ -396,11 +395,11 @@ func TestArbitrumLegacyTxData_TypeBasedDecodingPattern(t *testing.T) {
 	require.Greater(t, len(encoded), 0)
 
 	txType := encoded[0]
-	require.Equal(t, txn_types.ArbitrumLegacyTxType, txType)
+	require.Equal(t, ArbitrumLegacyTxType, txType)
 
 	var decodedTx types.Transaction
 	switch txType {
-	case txn_types.ArbitrumLegacyTxType:
+	case ArbitrumLegacyTxType:
 		decodedTx = &ArbitrumLegacyTxData{
 			LegacyTx: &types.LegacyTx{},
 		}

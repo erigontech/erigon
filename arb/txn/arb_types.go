@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/arb/txn_types"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -47,26 +46,37 @@ type FallbackClient interface {
 	CallContext(ctx context.Context, result interface{}, method string, args ...interface{}) error
 }
 
+// Transaction types.
+const (
+	ArbitrumDepositTxType         byte = 0x64
+	ArbitrumUnsignedTxType        byte = 0x65
+	ArbitrumContractTxType        byte = 0x66
+	ArbitrumRetryTxType           byte = 0x68
+	ArbitrumSubmitRetryableTxType byte = 0x69
+	ArbitrumInternalTxType        byte = 0x6A
+	ArbitrumLegacyTxType          byte = 0x78
+)
+
 var bigZero = big.NewInt(0)
 var uintZero = uint256.NewInt(0)
 
 var skipAccountChecks = [...]bool{
-	txn_types.ArbitrumDepositTxType:         true,
-	txn_types.ArbitrumRetryTxType:           true,
-	txn_types.ArbitrumSubmitRetryableTxType: true,
-	txn_types.ArbitrumInternalTxType:        true,
-	txn_types.ArbitrumContractTxType:        true,
-	txn_types.ArbitrumUnsignedTxType:        false,
+	ArbitrumDepositTxType:         true,
+	ArbitrumRetryTxType:           true,
+	ArbitrumSubmitRetryableTxType: true,
+	ArbitrumInternalTxType:        true,
+	ArbitrumContractTxType:        true,
+	ArbitrumUnsignedTxType:        false,
 }
 
 func init() {
-	types.RegisterTransaction(txn_types.ArbitrumDepositTxType, createArbitrumDespoitTxn)
-	types.RegisterTransaction(txn_types.ArbitrumRetryTxType, createArbitrumRetryTx)
-	types.RegisterTransaction(txn_types.ArbitrumSubmitRetryableTxType, createArbitrumSubmitRetryableTx)
-	types.RegisterTransaction(txn_types.ArbitrumInternalTxType, createArbitrumInternalTx)
-	types.RegisterTransaction(txn_types.ArbitrumContractTxType, createArbitrumContractTx)
-	types.RegisterTransaction(txn_types.ArbitrumUnsignedTxType, createArbitrumUnsignedTx)
-	types.RegisterTransaction(txn_types.ArbitrumLegacyTxType, createArbitrumLegacyTx)
+	types.RegisterTransaction(ArbitrumDepositTxType, createArbitrumDespoitTxn)
+	types.RegisterTransaction(ArbitrumRetryTxType, createArbitrumRetryTx)
+	types.RegisterTransaction(ArbitrumSubmitRetryableTxType, createArbitrumSubmitRetryableTx)
+	types.RegisterTransaction(ArbitrumInternalTxType, createArbitrumInternalTx)
+	types.RegisterTransaction(ArbitrumContractTxType, createArbitrumContractTx)
+	types.RegisterTransaction(ArbitrumUnsignedTxType, createArbitrumUnsignedTx)
+	types.RegisterTransaction(ArbitrumLegacyTxType, createArbitrumLegacyTx)
 }
 
 // func (tx *LegacyTx) skipAccountChecks() bool                  { return false }
@@ -123,7 +133,7 @@ func (tx *ArbitrumUnsignedTx) copy() types.Transaction {
 	return cpy
 }
 
-func (tx *ArbitrumUnsignedTx) Type() byte                               { return txn_types.ArbitrumUnsignedTxType }
+func (tx *ArbitrumUnsignedTx) Type() byte                               { return ArbitrumUnsignedTxType }
 func (tx *ArbitrumUnsignedTx) GetChainID() *uint256.Int                 { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumUnsignedTx) GetNonce() uint64                         { return tx.Nonce }
 func (tx *ArbitrumUnsignedTx) GetPrice() *uint256.Int                   { return uint256.MustFromBig(tx.GasFeeCap) }
@@ -172,7 +182,7 @@ func (tx *ArbitrumUnsignedTx) WithSignature(signer types.Signer, sig []byte) (ty
 
 func (tx *ArbitrumUnsignedTx) Hash() common.Hash {
 	//TODO implement me
-	return types.PrefixedRlpHash(txn_types.ArbitrumUnsignedTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
 		tx.ChainId,
 		tx.From,
 		tx.Nonce,
@@ -329,7 +339,7 @@ func (tx *ArbitrumUnsignedTx) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode TxType
-	b[0] = txn_types.ArbitrumUnsignedTxType
+	b[0] = ArbitrumUnsignedTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -416,7 +426,7 @@ func (tx *ArbitrumUnsignedTx) MarshalBinary(w io.Writer) error {
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
 	// encode TxType
-	b[0] = txn_types.ArbitrumUnsignedTxType
+	b[0] = ArbitrumUnsignedTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -512,7 +522,7 @@ func (tx *ArbitrumContractTx) copy() *ArbitrumContractTx {
 	}
 	return cpy
 }
-func (tx *ArbitrumContractTx) Type() byte                               { return txn_types.ArbitrumContractTxType }
+func (tx *ArbitrumContractTx) Type() byte                               { return ArbitrumContractTxType }
 func (tx *ArbitrumContractTx) GetChainID() *uint256.Int                 { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumContractTx) GetNonce() uint64                         { return 0 }
 func (tx *ArbitrumContractTx) GetPrice() *uint256.Int                   { return uint256.MustFromBig(tx.GasFeeCap) }
@@ -572,7 +582,7 @@ func (tx *ArbitrumContractTx) WithSignature(signer types.Signer, sig []byte) (ty
 
 func (tx *ArbitrumContractTx) Hash() common.Hash {
 	//TODO implement me
-	return types.PrefixedRlpHash(txn_types.ArbitrumContractTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumContractTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
 		tx.From,
@@ -734,7 +744,7 @@ func (tx *ArbitrumContractTx) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode TxType
-	b[0] = txn_types.ArbitrumContractTxType
+	b[0] = ArbitrumContractTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -825,7 +835,7 @@ func (tx *ArbitrumContractTx) MarshalBinary(w io.Writer) error {
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
 	// encode TxType
-	b[0] = txn_types.ArbitrumContractTxType
+	b[0] = ArbitrumContractTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -945,7 +955,7 @@ func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
 	return cpy
 }
 
-func (tx *ArbitrumRetryTx) Type() byte                               { return txn_types.ArbitrumRetryTxType }
+func (tx *ArbitrumRetryTx) Type() byte                               { return ArbitrumRetryTxType }
 func (tx *ArbitrumRetryTx) GetChainID() *uint256.Int                 { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumRetryTx) GetNonce() uint64                         { return tx.Nonce }
 func (tx *ArbitrumRetryTx) GetPrice() *uint256.Int                   { return uint256.MustFromBig(tx.GasFeeCap) }
@@ -1004,7 +1014,7 @@ func (tx *ArbitrumRetryTx) WithSignature(signer types.Signer, sig []byte) (types
 
 func (tx *ArbitrumRetryTx) Hash() common.Hash {
 	//TODO implement me
-	return types.PrefixedRlpHash(txn_types.ArbitrumRetryTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumRetryTxType, []interface{}{
 		tx.ChainId,
 		tx.Nonce,
 		tx.From,
@@ -1218,7 +1228,7 @@ func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode TxType
-	b[0] = txn_types.ArbitrumRetryTxType
+	b[0] = ArbitrumRetryTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -1340,7 +1350,7 @@ func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
 	// encode TxType
-	b[0] = txn_types.ArbitrumRetryTxType
+	b[0] = ArbitrumRetryTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -1476,7 +1486,7 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 	return cpy
 }
 
-func (tx *ArbitrumSubmitRetryableTx) Type() byte                               { return txn_types.ArbitrumSubmitRetryableTxType }
+func (tx *ArbitrumSubmitRetryableTx) Type() byte                               { return ArbitrumSubmitRetryableTxType }
 func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash             { return []common.Hash{} }
 func (tx *ArbitrumSubmitRetryableTx) GetGasLimit() uint64                      { return tx.Gas }
 func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64                       { return 0 }
@@ -1723,7 +1733,7 @@ func (tx *ArbitrumSubmitRetryableTx) WithSignature(signer types.Signer, sig []by
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Hash() common.Hash {
-	return types.PrefixedRlpHash(txn_types.ArbitrumSubmitRetryableTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumSubmitRetryableTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
 		tx.From,
@@ -1771,7 +1781,7 @@ func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode TxType
-	b[0] = txn_types.ArbitrumSubmitRetryableTxType
+	b[0] = ArbitrumSubmitRetryableTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -1904,7 +1914,7 @@ func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
 	// encode TxType
-	b[0] = txn_types.ArbitrumSubmitRetryableTxType
+	b[0] = ArbitrumSubmitRetryableTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -1993,7 +2003,7 @@ func (d *ArbitrumDepositTx) copy() *ArbitrumDepositTx {
 	return tx
 }
 
-func (tx *ArbitrumDepositTx) Type() byte                               { return txn_types.ArbitrumDepositTxType }
+func (tx *ArbitrumDepositTx) Type() byte                               { return ArbitrumDepositTxType }
 func (tx *ArbitrumDepositTx) GetChainID() *uint256.Int                 { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumDepositTx) GetNonce() uint64                         { return 0 }
 func (tx *ArbitrumDepositTx) GetPrice() *uint256.Int                   { return uintZero }
@@ -2059,7 +2069,7 @@ func (d *ArbitrumDepositTx) WithSignature(signer types.Signer, sig []byte) (type
 
 func (d *ArbitrumDepositTx) Hash() common.Hash {
 	//TODO implement me
-	return types.PrefixedRlpHash(txn_types.ArbitrumDepositTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumDepositTxType, []interface{}{
 		d.ChainId,
 		d.L1RequestId,
 		d.From,
@@ -2098,7 +2108,7 @@ func (d *ArbitrumDepositTx) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode TxType
-	b[0] = txn_types.ArbitrumDepositTxType
+	b[0] = ArbitrumDepositTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -2240,7 +2250,7 @@ func (d *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
 	// encode TxType
-	b[0] = txn_types.ArbitrumDepositTxType
+	b[0] = ArbitrumDepositTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -2302,7 +2312,7 @@ func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	return cpy
 }
 
-func (tx *ArbitrumInternalTx) Type() byte                               { return txn_types.ArbitrumInternalTxType }
+func (tx *ArbitrumInternalTx) Type() byte                               { return ArbitrumInternalTxType }
 func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int                 { return tx.ChainId }
 func (tx *ArbitrumInternalTx) GetNonce() uint64                         { return 0 }
 func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int                   { return uintZero }
@@ -2365,7 +2375,7 @@ func (tx *ArbitrumInternalTx) WithSignature(signer types.Signer, sig []byte) (ty
 
 func (tx *ArbitrumInternalTx) Hash() common.Hash {
 	//TODO implement me
-	return types.PrefixedRlpHash(txn_types.ArbitrumInternalTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumInternalTxType, []interface{}{
 		tx.ChainId,
 		tx.Data,
 	})
@@ -2430,7 +2440,7 @@ func (tx *ArbitrumInternalTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TxType
-	b[0] = txn_types.ArbitrumInternalTxType
+	b[0] = ArbitrumInternalTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -2465,7 +2475,7 @@ func (tx *ArbitrumInternalTx) MarshalBinary(w io.Writer) error {
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
 	// encode TxType
-	b[0] = txn_types.ArbitrumInternalTxType
+	b[0] = ArbitrumInternalTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}

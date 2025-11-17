@@ -3,7 +3,6 @@ package txn
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon/arb/txn_types"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -13,37 +12,37 @@ func init() {
 
 func ArbUnmarshalJSON(txType byte, input []byte) (types.Transaction, error) {
 	switch txType {
-	case txn_types.ArbitrumDepositTxType:
+	case ArbitrumDepositTxType:
 		tx := new(ArbitrumDepositTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
-	case txn_types.ArbitrumInternalTxType:
+	case ArbitrumInternalTxType:
 		tx := new(ArbitrumInternalTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
-	case txn_types.ArbitrumUnsignedTxType:
+	case ArbitrumUnsignedTxType:
 		tx := new(ArbitrumUnsignedTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
-	case txn_types.ArbitrumContractTxType:
+	case ArbitrumContractTxType:
 		tx := new(ArbitrumContractTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
-	case txn_types.ArbitrumRetryTxType:
+	case ArbitrumRetryTxType:
 		tx := new(ArbitrumRetryTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
-	case txn_types.ArbitrumSubmitRetryableTxType:
+	case ArbitrumSubmitRetryableTxType:
 		tx := new(ArbitrumSubmitRetryableTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
-	case txn_types.ArbitrumLegacyTxType:
+	case ArbitrumLegacyTxType:
 		tx := new(ArbitrumLegacyTxData)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err

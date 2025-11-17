@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"math/big"
 
-	blockstype "github.com/erigontech/erigon/arb/blocks"
+	arbBlocks "github.com/erigontech/erigon/arb/blocks"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -490,7 +490,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 }
 
 func fillArbitrumHeaderInfo(header *types.Header, fields map[string]interface{}) {
-	info := blockstype.DeserializeHeaderExtraInformation(header)
+	info := arbBlocks.DeserializeHeaderExtraInformation(header)
 	fields["l1BlockNumber"] = hexutil.Uint64(info.L1BlockNumber)
 	fields["sendRoot"] = info.SendRoot
 	fields["sendCount"] = hexutil.Uint64(info.SendCount)

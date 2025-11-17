@@ -98,7 +98,7 @@ func ExecuteBlockEphemerally(
 	gasUsed := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	arbOsVersion := blockstype.GetArbOSVersion(header, chainConfig)
+	arbOsVersion := arbBlocks.GetArbOSVersion(header, chainConfig)
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time(), arbOsVersion))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {

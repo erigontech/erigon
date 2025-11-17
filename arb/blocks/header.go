@@ -1,4 +1,4 @@
-package blockstype
+package arbBlocks
 
 import (
 	"encoding/binary"

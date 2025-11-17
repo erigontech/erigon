@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/arb/txn_types"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
@@ -173,7 +172,7 @@ func TestArbitrumSubmitRetryableTxGasUsed(t *testing.T) {
 }
 
 func Test_RegisterExternalTypes(t *testing.T) {
-	externalTypes := []byte{txn_types.ArbitrumDepositTxType, txn_types.ArbitrumRetryTxType, txn_types.ArbitrumSubmitRetryableTxType, txn_types.ArbitrumInternalTxType, txn_types.ArbitrumContractTxType, txn_types.ArbitrumUnsignedTxType, txn_types.ArbitrumLegacyTxType}
+	externalTypes := []byte{ArbitrumDepositTxType, ArbitrumRetryTxType, ArbitrumSubmitRetryableTxType, ArbitrumInternalTxType, ArbitrumContractTxType, ArbitrumUnsignedTxType, ArbitrumLegacyTxType}
 	for _, txType := range externalTypes {
 		require.NotNil(t, types.CreateTransactioByType(txType))
 
