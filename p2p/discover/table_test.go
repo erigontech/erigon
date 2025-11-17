@@ -506,15 +506,13 @@ func newkey() *ecdsa.PrivateKey {
 	return key
 }
 
-// BenchmarkTable_findnodeByID benchmarks the findnodeByID function with different
-
-func BenchmarkTable_findnodeByID(b *testing.B) {
+func Benchmark_findnodeByID(b *testing.B) {
 	benchmarks := []struct {
 		name       string
 		tableSize  int
 		nresults   int
 		preferLive bool
-		liveRatio  float64 // ratio of live nodes (0.0 to 1.0)
+		liveRatio  float64
 	}{
 		{"SmallTable_5Results_NoPreferLive", 50, 5, false, 0.0},
 		{"SmallTable_16Results_NoPreferLive", 50, 16, false, 0.0},
@@ -548,19 +546,15 @@ func BenchmarkTable_findnodeByID(b *testing.B) {
 			defer db.Close()
 			defer tab.close()
 
-			// Wait for table initialization
 			<-tab.initDone
 
-			// Fill table with nodes (returns []*node — the internal wrapper)
 			nodes := generateTestNodes(bm.tableSize, tab.self().ID())
 			fillTable(tab, nodes)
 
-			// Set some nodes as live based on liveRatio
 			if bm.preferLive && bm.liveRatio > 0 {
 				setNodesLive(tab, nodes, bm.liveRatio)
 			}
 
-			// Generate a random target ID once per benchmark run
 			target := generateRandomID()
 
 			b.ResetTimer()
@@ -572,7 +566,6 @@ func BenchmarkTable_findnodeByID(b *testing.B) {
 	}
 }
 
-// generateTestNodes creates a slice of test *node (internal wrapper) with random IDs.
 func generateTestNodes(count int, baseID enode.ID) []*node {
 	nodes := make([]*node, count)
 	for i := 0; i < count; i++ {
@@ -586,7 +579,6 @@ func generateTestNodes(count int, baseID enode.ID) []*node {
 	return nodes
 }
 
-// setNodesLive sets a percentage of nodes in the table as live.
 func setNodesLive(tab *Table, nodes []*node, liveRatio float64) {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
@@ -603,7 +595,6 @@ func setNodesLive(tab *Table, nodes []*node, liveRatio float64) {
 	}
 }
 
-// generateRandomID generates a random enode.ID for use as a target.
 func generateRandomID() enode.ID {
 	var id enode.ID
 	rand.Read(id[:])
