@@ -2,137 +2,58 @@
 
 https://keepachangelog.com/en/1.1.0/
 
-
 ## [3.3.0] – 2025-11-17
 
 ### Added
 
-- Support of historical `eth_getProof` (https://github.com/erigontech/erigon/issues/12984). It requires `--prune.experimental.include-commitment-history` flag.
-- 
+- Support of historical `eth_getProof` (https://github.com/erigontech/erigon/issues/12984). It requires
+  `--prune.experimental.include-commitment-history` flag.
+-
 
-#### RPC Endpoints 
-- `eth_simulateV1`: Complete implementation of Ethereum simulation API with support for state overrides, blob transactions, block overrides, and historical state roots (#15771)
+#### RPC Endpoints
+
+- `eth_simulateV1`: Complete implementation of Ethereum simulation API with support for state overrides, blob
+  transactions, block overrides, and historical state roots (#15771)
 - `eth_createAccessList`: StateOverrides parameter support (#17653)
 - Support for `eth_call` with blockOverrides (#17261)
 - `trace_filter`: Block tags support (#17238)
 
 #### Consensus & Execution
+
 - Fusaka scheduling enabled on Ethereum mainnet (#17734)
 - EIP-7928: BlockAccessList type support (#17544)
 - EIP-7934: EstimateGas capped by MaxTxnGasLimit in Osaka (#17251)
 - EIP-7825: Gas limit enforcement in Osaka (#17251)
 - EIP-7702 transaction support (#17412)
 - Rewrite bytecode support for post-Merge blocks (#17770)
+- Self-destruct operation validation (EIP 6780) (#17728)
+- Ethereum mainnet default block gas limit to 60M (#16949)
 
 #### Caplin (Consensus Layer)
-- Get blobs support (Fusaka compatibility) (#17829)
 
-#### Error Handling & Validation
-- Self-destruct operation validation (EIP 6780) (#17728)
+- Get blobs support (Fusaka compatibility) (#17829)
 
 ### Changed
 
 #### Performance Optimizations
+
 - Reduce goroutines amount produced by BitTorrent library (#17765)
-- Zero allocation interpreter call loop in VM (#17573)
-- VM memory resize refactoring (#17730)
-- Improved string sorting with slices.Sort (#17744)
-- Reduced allocations in ETL pre-allocation and sort buffer (#17695)
-- Improved BTree index Get operation performance (#17707)
 
 #### RPC Improvements
-- `eth_getProof`: Support for proofs on non-existent keys and extension nodes (#17760, #17802, #17551)
+
 - `eth_getTransactionReceipt`: Pre-Byzantium transaction handling (#17479, #17509)
 - `eth_estimateGas`: Improved handling with StateOverrides (#17914, #17295)
 - `debug_traceCall`: System contract execution support (#17339)
-- Filter operations: Better error handling for missing filters (#17327)
-- State override handling throughout RPC layer (#17460, #17581, #17313, #17390)
-- RPC storage slot validation (#17340)
 - Blob transaction and blob base fee override support (#17313)
-- Hive compatibility improvements (#17584, #17520, #17509)
-- Nonce validation in eth_simulateV1 (#17390)
 
 #### Execution Engine
-- Block building: Deadlock prevention with single builder (#17213)
-- Newpayload processing: Optimized to avoid background file building (#17436)
-- ChainTip pruning: 500ms timeout enforcement (#17889)
-- E3 file collation: Reorg protection (#17469)
-- Block limit exhausted handling in parallel flows (#17683, #17679, #17455)
-- E3 file collation reorg protection (#17469)
-- Parallel ExecV3 processing (#16922)
-- Execution engine → rules engine rename (#17807)
 
-#### State & Commitment
-- Historical state query improvements (#17413)
-- Proof verification for non-existent accounts (#17802)
-- Storage slot validation enhancements (#17340)
-- CachedWriter: Incarnation=1 conflict prevention (#17498)
-- Domain compaction: State root key protection (#17380)
-- Final commitment calculation support (#17361)
-- Commitment extraction and interface improvements (#17531, #17530)
-- GetAsOf() dereferencing support (#17687)
-
-#### Consensus Layer
-- Fork schedule: Fixed initial previous_version handling (#17263)
-- Blob request support after Fusaka (#17492)
-- Electra transition: Demoted verbose logging (#15835)
-- Custody columns revision (#17247)
-- Data column parameters and constraints (#17239, #17248, #17241)
-- Pending epoch deletion order fix (#17416)
+- Experimental Parallel Exec (#16922)
 - MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP for Gnosis (#17501)
 
-#### Network & P2P
-- Gossip manager refactoring with rate limiting (#17606)
-- RequestMore: Switched to channel-based communication (#17881)
-- Context handling: Cancellable context for batch signature verification (#17400)
-- NAT mapping error propagation (#16761)
-- P2P PRNG seed improvement (#17410)
-- Error string caching in p2p discovery (#17781)
-
-#### Data Handling
-- Column data validation before marking as seen (#17241)
-- EIP-7594: wrapper_version validation for blob transactions (#17481)
-- BlockUpdateRange packet validation (#17464)
-- Legacy transaction decoding: Catch trailing bits (#17555)
-- Transaction commitment count validation (#17553)
-
-#### Code Organization
-- Directories reorganized: `core` integrated into `execution` (#17384, #17812)
-- VM integrated into execution (#17367)
-- `ethstats` moved to `node` package (#17442)
-- `spectest` moved to `cl/spectest` (#17579)
-- Interfaces moved from erigon-lib to node (#17223)
-- Top-level `eth` split across appropriate packages (#17393)
-- Kill erigon-lib go module (#17337)
-- Trie moved into commitment (#17526)
-
 #### Docker & Build
-- Updated to Go 1.25-trixie (#17837)
-- Debian 13 "trixie" for Docker images (#17774)
-- Customized Docker build process (#17524)
 
-#### Dependencies & Build
-- golangci-lint: Updated to v2.5.0 (#17516)
-- roaring bitmap: Version upgrade (#17587)
-- gnark-crypto: Updated to 0.19.1 (#17721)
-- quic-go: Updated to 0.49.1 (#17420)
-- mdbx: Updated to 0.13.7 with fixes (#17517)
-- Default MDBX flags set (#17621)
-- Context cancellation improvements (#17623)
-
-#### Mining
-- Removed PoW mining code organization (#17813)
-
-#### Blockchain Parameters
-- Ethereum mainnet default block gas limit to 60M (#16949)
-- Rio Hard Fork Block for bor-mainnet (#17254)
-
-### Deprecated
-
-- Deprecated DB API stub removed in favor of typed interfaces (#17863)
-- Legacy .ef conversion tools deprecated and removed (#17536)
-- DiagFlags removed (#17671)
-- SkipAnalysis VM optimization removed (#17217)
+- Up base image to `Go 1.25-trixie` (#17837)
 
 ### Removed
 
@@ -149,24 +70,12 @@ https://keepachangelog.com/en/1.1.0/
 - Unused ticker in buildFiles (#17425)
 - Unused utils.c from sais library (#17443)
 - Unused splitOntoHexNibbles helper (#17708)
-- Old block downloader flow (#17333)
-- BaseAPI.genesis helper (#17722)
-- Unused print stages cmd flags (#17514)
-- Redundant variable declarations in for loops (#17657)
-- Obsolete //+build tag (#17577)
-- Unused useDefaultValue from BlockAmount and Distance (#17489)
-- Unused RetryableHttpLogger adapter (#17072)
-- Time.Tick in trackRemovedFiles preventing timer leak (#17283)
-- Unnecessary CopyBytes in cl/rpc (#17792)
-- Dead loadSkipFunc and unused stepBytes (#17569)
-- Over-allocation in ETL Prealloc (#17695)
-- NextBlockProposers usage (#17576)
-- Redundant boolean comparison in tracing assertion (#17885)
-- math/rand fallback for subscription IDs (now uses crypto/rand) (#17199)
+- SkipAnalysis VM optimization removed (#17217)
 
 ### Fixed
 
 #### RPC
+
 - `eth_estimateGas`: StateOverrides handling (#17914)
 - `eth_getTransactionReceipt`: Pre-Byzantium support and post-state caching (#17509, #17520)
 - `eth_getFilter`: No changes and filter not found error handling (#17327)
@@ -183,6 +92,7 @@ https://keepachangelog.com/en/1.1.0/
 - Modified account access list order (#17291)
 
 #### Execution
+
 - Block building deadlock with single builder (#17213)
 - ChainTip mode in stage_exec (#17482)
 - Block limit exhausted in parallel flow (#17683, #17679)
@@ -193,6 +103,7 @@ https://keepachangelog.com/en/1.1.0/
 - Deadlock in TestWebsocketLargeCall (#17706, #17762)
 
 #### State & Commitment
+
 - Historical state queries from commitment (#17413)
 - Proof verification for non-existent accounts (#17802)
 - GetAsOf() for commitment dereferencing (#17687)
@@ -202,6 +113,7 @@ https://keepachangelog.com/en/1.1.0/
 - Data race in HexPatriciaHashed parallel tests (#17423)
 
 #### Consensus Layer
+
 - Fork schedule initial previous_version (#17263)
 - Initial cycle flag on first FCU with empty DB (#17515)
 - Block downloader behavior in various modes (#17897)
@@ -211,6 +123,7 @@ https://keepachangelog.com/en/1.1.0/
 - Electra state transition logging (#15835)
 
 #### Data Handling
+
 - Column data validation and length constraints (#17241, #17248)
 - EIP-7594 wrapper_version validation (#17481)
 - Legacy transaction decoding: trailing bits (#17555)
@@ -220,6 +133,7 @@ https://keepachangelog.com/en/1.1.0/
 - Blob requests after Fusaka (#17492)
 
 #### Testing & QA
+
 - Tip-tracking under memory constraints re-enabled (#17497)
 - Sync with external CL test reliability (#17640)
 - HexPatriciaHashed data race in parallel tests (#17423)
@@ -233,6 +147,7 @@ https://keepachangelog.com/en/1.1.0/
 - ERIGON_PID assignment in remote tests (#17761)
 
 #### Monitoring & Diagnostics
+
 - Diag goroutines appearing without diag flags (#17888)
 - ReadStorageBodyRLP incorrect log message (#17825)
 - Broken links in documentation (#17900, #17903)
@@ -243,6 +158,7 @@ https://keepachangelog.com/en/1.1.0/
 - Download execution history ETA calculation (#17691)
 
 #### Infrastructure
+
 - Bash test pipeline (#17895)
 - CI workflow for remote RPC testing (#17699)
 - Docker login condition in GitHub Actions (#17598, #17639)
@@ -250,6 +166,7 @@ https://keepachangelog.com/en/1.1.0/
 - Broken Gitbook links and layout (#17875, #17900)
 
 #### Cryptography & Security
+
 - Hash length validation in no-cgo Sign (#17831)
 - GasPrice check when NoBaseFee (#17196)
 
@@ -277,6 +194,7 @@ https://keepachangelog.com/en/1.1.0/
 ### Tests & CI
 
 #### Benchmark & Performance Tests
+
 - Improved BTree index benchmark tests (#17486)
 - Improved benchmarks for bt index (#17583)
 - Benchmark tests using b.Loop() (#17427, #17456, #17457, #17465, #17468, #17470, #17471)
@@ -288,6 +206,7 @@ https://keepachangelog.com/en/1.1.0/
 - Executor bench script update (#17395)
 
 #### Hive & Compatibility Tests
+
 - Update EEST to v5.3.0 (#17507, #17418)
 - Change simulation target from eest to eels (#17599)
 - Hive rpc-compat suite zero failures (#17608)
@@ -295,6 +214,7 @@ https://keepachangelog.com/en/1.1.0/
 - Hive fork to enable commitment history (#17504)
 
 #### QA & Integration Tests
+
 - Tip-tracking with load test improvements (#17355, #17446, #17697, #17839)
 - Re-enable "tip-tracking under memory constraints" test (#17497)
 - Sync-with-externalcl test improvements (#17640, #17582, #17848)
@@ -308,6 +228,7 @@ https://keepachangelog.com/en/1.1.0/
 - Hoodi test report addition (#17198)
 
 #### Unit & Integration Tests
+
 - Add unit tests (#17206)
 - Fuzzers moved into native packages (#17688)
 - Large files catch in git history (#17655)
@@ -320,6 +241,7 @@ https://keepachangelog.com/en/1.1.0/
 - RPC-tests version bump to 1.94.0 (#17389)
 
 #### Workflow & CI
+
 - Race tests on go-1.25 (#17512)
 - Re-enable docker login for tests with secrets (#17205)
 - Cleanup step in test-all-erigon workflow (#17758)
@@ -329,6 +251,7 @@ https://keepachangelog.com/en/1.1.0/
 - Git history large file detection (#17655)
 
 #### Flaky Test Fixes
+
 - TestMergedFileGet flakiness (#17545, #17594, #17668)
 - TestWebsocketLargeCall deadlock (#17706, #17762)
 - Tip event channel tests (#17200)
@@ -357,8 +280,10 @@ Total commits between v3.2.0 and v3.3.0: **381 commits**
 
 ## [3.2.0] "Quirky Quests" – 2025-10-02
 
-Erigon 3.2.0 has a complete implementation of [Fusaka](https://eips.ethereum.org/EIPS/eip-7607) and schedules it on the test nets (#17197):
-- Holesky on  Wednesday, 1 October 2025 08:48:00 UTC
+Erigon 3.2.0 has a complete implementation of [Fusaka](https://eips.ethereum.org/EIPS/eip-7607) and schedules it on the
+test nets (#17197):
+
+- Holesky on Wednesday, 1 October 2025 08:48:00 UTC
 - Sepolia on Tuesday, 14 October 2025 07:36:00 UTC
 - Hoodi on Tuesday, 28 October 2025 18:53:12 UTC
 
@@ -382,7 +307,9 @@ Erigon 3.2.0 has a complete implementation of [Fusaka](https://eips.ethereum.org
 
 **New features**
 
-- Complete Fusaka implementation (#16183, #16185, #16186, #16187, #16184, #16391, #16401, #16207, #16420, #16428, #16494, #16457, #16644, #16928, #16945, #17060, #16989, #17076, #17169) by @taratorio, @yperbasis, @Giulio2002 and @domiwei
+- Complete Fusaka implementation (#16183, #16185, #16186, #16187, #16184, #16391, #16401, #16207, #16420, #16428,
+  #16494, #16457, #16644, #16928, #16945, #17060, #16989, #17076, #17169) by @taratorio, @yperbasis, @Giulio2002 and
+  @domiwei
 - Implement eth/69 (#15279, #17186, #17171) by @shohamc1
 - RPC: implement new eth_config spec (#16218, #16410) by @taratorio
 - RPC: impl admin_RemovePeer (#16292) by @lupin012
