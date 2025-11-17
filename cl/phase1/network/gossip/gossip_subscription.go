@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -114,6 +115,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiration time.T
 			if err != nil {
 				return err
 			}
+			log.Info("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiration)
 			sub.sub = s
 		}
 	} else {
@@ -121,6 +123,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiration time.T
 			// unsubscribe the topic
 			sub.sub.Cancel()
 			sub.sub = nil
+			log.Info("[GossipManager] Unsubscribed from topic", "topic", topic, "expiration", expiration)
 		}
 	}
 	sub.expiration = expiration

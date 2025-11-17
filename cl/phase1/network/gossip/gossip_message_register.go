@@ -12,7 +12,6 @@ import (
 )
 
 func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...conditionFunc) {
-
 	wrappedService := wrapService(service)
 	gossipSrv := GossipService{
 		Service:    wrappedService,
