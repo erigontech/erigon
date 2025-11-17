@@ -254,6 +254,7 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 			return pubsub.ValidationReject
 		}
 
+		// check if the message satisfies the extra conditions
 		passes := service.SatisfiesConditions(pid, msg, curVersion)
 		if !passes {
 			g.stats.addIgnore(name)
@@ -400,6 +401,7 @@ func (g *GossipManager) goCheckResubscribe() {
 				continue
 			}
 			if upcomingForkDigest != forkDigest {
+				log.Debug("[GossipManager] upcoming fork digest", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
 				oldForkDigest := fmt.Sprintf("%x", forkDigest)
 				go func(oldForkDigest string) {
 					// unsubscribe old topics after 2 slots
