@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/module/eth1_utils"
+	"github.com/erigontech/erigon/execution/module/moduleutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
@@ -50,11 +50,11 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if block.Header.BlockNumber < frozenBlocks {
 			continue
 		}
-		header, err := eth1_utils.HeaderRpcToHeader(block.Header)
+		header, err := moduleutil.HeaderRpcToHeader(block.Header)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
 		}
-		body, err := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
+		body, err := moduleutil.ConvertRawBlockBodyFromRpc(block.Body)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
 		}

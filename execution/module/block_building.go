@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/execution/module/eth1_utils"
+	"github.com/erigontech/erigon/execution/module/moduleutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -67,7 +67,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		Timestamp:             req.Timestamp,
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
-		Withdrawals:           eth1_utils.ConvertWithdrawalsFromRpc(req.Withdrawals),
+		Withdrawals:           moduleutil.ConvertWithdrawalsFromRpc(req.Withdrawals),
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
@@ -170,7 +170,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	}
 	if block.Withdrawals() != nil {
 		payload.Version = 2
-		payload.Withdrawals = eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals())
+		payload.Withdrawals = moduleutil.ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
 	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {
