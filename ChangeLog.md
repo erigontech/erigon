@@ -60,10 +60,6 @@ https://keepachangelog.com/en/1.1.0/
 - PoW mining code removed (#17813)
 - Holesky network support removed (#17685)
 - eth/67 protocol support removed (#17318)
-- Unused convertToParityTrace stub removed (#17754)
-- Unused ticker in buildFiles (#17425)
-- Unused utils.c from sais library (#17443)
-- Unused splitOntoHexNibbles helper (#17708)
 - SkipAnalysis VM optimization removed (#17217)
 
 ### Fixed
