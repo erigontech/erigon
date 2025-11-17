@@ -1,7 +1,5 @@
 # Changelog
 
-https://keepachangelog.com/en/1.1.0/
-
 ## [3.3.0] – 2025-11-17
 
 ### Added
@@ -99,3 +97,4 @@ test nets (#17197):
  
 -----
 
+File following Keep a Changelog spec: https://keepachangelog.com/en/1.1.0/
