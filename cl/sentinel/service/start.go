@@ -18,25 +18,19 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"math/rand/v2"
 	"net"
-	"strings"
-	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
-	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/node/direct"
@@ -51,35 +45,6 @@ type ServerConfig struct {
 	Addr          string
 	Creds         credentials.TransportCredentials
 	InitialStatus *cltypes.Status
-}
-
-func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
-	topics := make([]sentinel.GossipTopic, 0, maxIds)
-	for i := 0; i < maxIds; i++ {
-		topics = append(topics, sentinel.GossipTopic{
-			Name:     fmt.Sprintf(template, i),
-			CodecStr: sentinel.SSZSnappyCodec,
-		})
-	}
-
-	if template == gossip.TopicNamePrefixBeaconAttestation {
-		rand.Shuffle(len(topics), func(i, j int) {
-			topics[i], topics[j] = topics[j], topics[i]
-		})
-	}
-	return topics
-}
-
-func getExpirationForTopic(topic string, subscribeAll bool) time.Time {
-	if subscribeAll {
-		return time.Unix(0, math.MaxInt64)
-	}
-	if strings.Contains(topic, "beacon_attestation") ||
-		(strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
-		return time.Unix(0, 0)
-	}
-
-	return time.Unix(0, math.MaxInt64)
 }
 
 func createSentinel(
@@ -235,7 +200,7 @@ func StartServe(
 	}
 	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
-	go server.ListenToGossip()
+	//go server.ListenToGossip()
 	// Regiser our server as a gRPC server
 	sentinelproto.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {
