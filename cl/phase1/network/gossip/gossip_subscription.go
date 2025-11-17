@@ -2,12 +2,15 @@ package gossip
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+)
+
+var (
+	ErrExpiryInThePast = errors.New("expiry is in the past")
 )
 
 type TopicSubscription struct {
@@ -111,7 +114,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 	}
 
 	if time.Now().After(expiry) {
-		return fmt.Errorf("expiry is in the past: %s", expiry.Format(time.RFC3339))
+		return ErrExpiryInThePast
 	}
 
 	if sub.sub == nil {
