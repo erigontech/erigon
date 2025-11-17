@@ -881,7 +881,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		state := state.New(stateReader)
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
-			if err := stateOverrides.Override(state, blockCtx.Rules(chainConfig)); err != nil {
+			if err := stateOverrides.Override(state); err != nil {
 				return nil, err
 			}
 		}
