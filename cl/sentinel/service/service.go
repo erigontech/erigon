@@ -19,7 +19,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,7 +31,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils"
@@ -388,6 +386,7 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelproto.PeersIn
 	return filtered, nil
 }
 
+/*
 func (s *SentinelServer) ListenToGossip() {
 	for {
 		select {
@@ -398,9 +397,10 @@ func (s *SentinelServer) ListenToGossip() {
 		}
 	}
 }
+*/
 
 func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
-	var (
+	/*var (
 		topic      = expiryReq.GetTopic()
 		expiryTime = time.Unix(int64(expiryReq.GetExpiryUnixSecs()), 0)
 	)
@@ -409,62 +409,9 @@ func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sent
 		return nil, errors.New("no such subscription")
 	}
 	subs.OverwriteSubscriptionExpiry(expiryTime)
-	return &sentinelproto.EmptyMessage{}, nil
-}
-
-func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
-	var err error
-	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.TopicName)
-
-	data := pkt.Data
-	topic := pkt.TopicName
-	// If we use snappy codec then decompress it accordingly.
-	if strings.Contains(topic, sentinel.SSZSnappyCodec) {
-		data, err = utils.DecompressSnappy(data, true)
-		if err != nil {
-			return err
-		}
-	}
-	textPid, err := pkt.From.MarshalText()
-	if err != nil {
-		return err
-	}
-
-	msgType, gossipTopic := parseTopic(topic)
-	trackPeerStatistics(string(textPid), true, msgType, gossipTopic, len(data))
-
-	switch gossipTopic {
-	case gossip.TopicNameBeaconBlock,
-		gossip.TopicNameBeaconAggregateAndProof,
-		gossip.TopicNameVoluntaryExit,
-		gossip.TopicNameProposerSlashing,
-		gossip.TopicNameAttesterSlashing,
-		gossip.TopicNameBlsToExecutionChange,
-		gossip.TopicNameSyncCommitteeContributionAndProof:
-		s.gossipNotifier.notify(&gossipObject{
-			data:     data,
-			t:        gossipTopic,
-			pid:      string(textPid),
-			subnetId: nil,
-		})
-	default:
-		// case for:
-		// TopicNamePrefixBlobSidecar
-		// TopicNamePrefixBeaconAttestation
-		// TopicNamePrefixSyncCommittee
-		subnet := extractSubnetIndexByGossipTopic(gossipTopic)
-		if subnet < 0 {
-			break
-		}
-		subnetId := uint64(subnet)
-		s.gossipNotifier.notify(&gossipObject{
-			data:     data,
-			t:        gossipTopic,
-			pid:      string(textPid),
-			subnetId: &subnetId,
-		})
-	}
-	return nil
+	return &sentinelproto.EmptyMessage{}, nil*/
+	panic("do not call this")
+	return nil, nil
 }
 
 func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
