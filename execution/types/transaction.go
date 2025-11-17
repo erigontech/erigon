@@ -430,20 +430,6 @@ func (m *Message) SetGasPrice(f *uint256.Int) { m.gasPrice.Set(f) }
 func (m *Message) SetFeeCap(f *uint256.Int)   { m.feeCap.Set(f) }
 func (m *Message) SetTip(f *uint256.Int)      { m.tipCap.Set(f) }
 
-type MessageRunMode uint8
-
-const (
-	MessageCommitMode MessageRunMode = iota
-	MessageGasEstimationMode
-	MessageEthcallMode
-	MessageReplayMode
-)
-
-// these message modes are executed onchain so cannot make any gas shortcuts
-func (m MessageRunMode) ExecutedOnChain() bool { // can use isFree for that??
-	return m == MessageCommitMode || m == MessageReplayMode
-}
-
 // eof arbitrum
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,

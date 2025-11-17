@@ -356,8 +356,11 @@ func (c *Config) IsPrague(time uint64, currentArbosVersion uint64) bool {
 }
 
 // IsOsaka returns whether time is either equal to the Osaka fork time or greater.
-func (c *Config) IsOsaka(time uint64) bool {
-	return isForked(c.OsakaTime, time)
+func (c *Config) IsOsaka(num, time, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= osver.ArbosVersion_50
+	}
+	return c.IsLondon(num) && isForked(c.OsakaTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) *common.Address {
@@ -448,7 +451,8 @@ func (c *Config) GetBlobGasPriceUpdateFraction(time uint64, currentArbosVer uint
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
-	if c.IsOsaka(time) {
+	// TODO arbitrum fields
+	if c.IsOsaka(0, time, 0) {
 		return params.MaxRlpBlockSize
 	}
 	return math.MaxInt
@@ -730,7 +734,7 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		IsNapoli:           c.IsNapoli(num),
 		IsBhilai:           c.IsBhilai(num),
 		IsPrague:           c.IsPrague(time, currentArbosVersion) || c.IsBhilai(num),
-		IsOsaka:            c.IsOsaka(time),
+		IsOsaka:            c.IsOsaka(num, time, currentArbosVersion),
 		IsAura:             c.Aura != nil,
 		ArbOSVersion:       currentArbosVersion,
 		IsArbitrum:         c.IsArbitrum(),

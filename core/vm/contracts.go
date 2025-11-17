@@ -63,9 +63,9 @@ func Precompiles(chainRules *chain.Rules) map[common.Address]PrecompiledContract
 	case chainRules.IsBhilai:
 		return PrecompiledContractsBhilai
 	case chainRules.IsStylus:
-		return PrecompiledContractsArbOS30
+		return PrecompiledContractsStartingFromArbOS30
 	case chainRules.IsArbitrum:
-		return PrecompiledContractsArbitrum
+		return PrecompiledContractsBeforeArbOS30
 	case chainRules.IsPrague:
 		return PrecompiledContractsPrague
 	case chainRules.IsNapoli:
@@ -266,9 +266,9 @@ func init() {
 func ActivePrecompiles(rules *chain.Rules) []common.Address {
 	switch {
 	case rules.IsStylus:
-		return PrecompiledAddressesArbOS30
+		return PrecompiledAddressesStartingFromArbOS30
 	case rules.IsArbitrum:
-		return PrecompiledAddressesArbitrum
+		return PrecompiledAddressesBeforeArbOS30
 
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka
