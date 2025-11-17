@@ -139,7 +139,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
 		//a.scheduleAggregateForLaterProcessing(aggregateAndProof)
-		return ErrIgnore
+		return fmt.Errorf("%w: aggregate is for a future slot: %d > %d", ErrIgnore, aggregateData.Slot, a.syncedDataManager.HeadSlot())
 	}
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
@@ -165,7 +165,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
 		if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
-			return ErrIgnore
+			return fmt.Errorf("%w: epoch is not in previous or current epoch: %d", ErrIgnore, epoch)
 		}
 
 		// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
@@ -184,12 +184,12 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateData.BeaconBlockRoot,
 			finalizedSlot,
 		) != finalizedCheckpoint.Root {
-			return ErrIgnore
+			return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
 		}
 
 		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
 		if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot); !ok {
-			return ErrIgnore
+			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
 		}
 
 		// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
@@ -198,7 +198,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
 		if a.seenAggreatorIndexes.Contains(seenIndex) {
-			return ErrIgnore
+			return fmt.Errorf("%w: aggregator already seen: %v", ErrIgnore, seenIndex)
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
@@ -272,8 +272,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	// push the signatures to verify asynchronously and run final functions after that.
 	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-
-	return ErrIgnore
+	return nil
 
 }
 

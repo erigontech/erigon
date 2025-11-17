@@ -102,7 +102,8 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sen
 }
 
 func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.GossipData) (*sentinelproto.EmptyMessage, error) {
-	manager := s.sentinel.GossipManager()
+	panic("do not call this")
+	/*manager := s.sentinel.GossipManager()
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
 
@@ -149,7 +150,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.Gos
 	if subscription == nil {
 		return &sentinelproto.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
 	}
-	return &sentinelproto.EmptyMessage{}, subscription.Publish(compressedData)
+	return &sentinelproto.EmptyMessage{}, subscription.Publish(compressedData)*/
 }
 
 func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
