@@ -23,8 +23,9 @@ type TopicSubscriptions struct {
 
 func NewTopicSubscriptions() *TopicSubscriptions {
 	s := &TopicSubscriptions{
-		subs:  make(map[string]*TopicSubscription),
-		mutex: sync.RWMutex{},
+		subs:         make(map[string]*TopicSubscription),
+		mutex:        sync.RWMutex{},
+		toSubscribes: make(map[string]time.Time),
 	}
 	go s.expireCheck()
 	return s
