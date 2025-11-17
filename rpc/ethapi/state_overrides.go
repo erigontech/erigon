@@ -86,7 +86,7 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState) error {
 
 func (so *StateOverrides) OverrideAndCommit(ibs *state.IntraBlockState, rules *chain.Rules) error {
 	err := so.Override(ibs)
-	if err != nil {
+	if err == nil {
 		ibs.CommitBlock(rules, state.NewNoopWriter())
 	}
 	return err
