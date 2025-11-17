@@ -671,10 +671,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		if err != nil {
 			return nil, err
 		}
-
-		if txn2.Type() == types.ArbitrumSubmitRetryableTxType && txn2.(*types.ArbitrumSubmitRetryableTx).EffectiveGasUsed > 0 {
-			fmt.Printf("Tx %x EGU %d\n", txn2.Hash(), txn2.(*types.ArbitrumSubmitRetryableTx).EffectiveGasUsed)
-		}
 		hash := txn2.Hash()
 		hashFirstByte := hash[:1]
 		if len(senders) > 0 {
