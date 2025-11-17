@@ -21,6 +21,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Cleanup space
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+
+
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
