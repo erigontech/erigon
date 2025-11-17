@@ -140,6 +140,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
 		//a.scheduleAggregateForLaterProcessing(aggregateAndProof)
 		return fmt.Errorf("%w: aggregate is for a future slot: %d > %d", ErrIgnore, aggregateData.Slot, a.syncedDataManager.HeadSlot())
+
 	}
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
