@@ -223,6 +223,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if !dbg.DiscardCommitment() {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 							applyResult.Exhausted != nil ||
+							pe.cfg.syncCfg.KeepExecutionProofs ||
 							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 
 							resetExecGauges(ctx)
@@ -312,10 +313,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							resetCommitmentGauges(ctx)
 
-							pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
-							if !pe.inMemExec {
-								if err := changeset.WriteDiffSet(rwTx, applyResult.BlockNum, applyResult.BlockHash, changeSet); err != nil {
-									return err
+							if shouldGenerateChangesets {
+								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
+								if !pe.inMemExec {
+									if err := changeset.WriteDiffSet(rwTx, applyResult.BlockNum, applyResult.BlockHash, changeSet); err != nil {
+										return err
+									}
 								}
 							}
 							pe.domains().SetChangesetAccumulator(nil)

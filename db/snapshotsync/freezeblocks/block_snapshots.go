@@ -267,7 +267,7 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 	return !haveGap, nil
 }
 
-func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -305,7 +305,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	return ok || merged, err
 }
 
-func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (merged bool, err error) {
+func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (merged bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
@@ -325,9 +325,7 @@ func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnap
 		}
 
 		if seedNewSnapshots != nil {
-			downloadRequest := []snapshotsync.DownloadRequest{
-				snapshotsync.NewDownloadRequest("", ""),
-			}
+			downloadRequest := []services.DownloadRequest{{Path: "", TorrentHash: ""}}
 			if err := seedNewSnapshots(downloadRequest); err != nil {
 				return err
 			}
@@ -408,7 +406,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	minBlockNum,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+	seedNewSnapshots func(downloadRequest []services.DownloadRequest) error,
 	onDeleteSnapshots func(l []string) error,
 	onFinishRetire func() error,
 	onDone func(),
@@ -449,7 +447,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	return true
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum uint64, requestedMaxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {
+func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum uint64, requestedMaxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {
 	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(requestedMaxBlockNum)
 	}

@@ -65,7 +65,7 @@ If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should foll
 
 Follow the below instructions depending on your installation method:
 
-* [Pre-built binaries](upgrading.md#pre-built-binaries)
+* [Pre-built binaries](upgrading.md#pre-built-binaries-only-linux-and-macos)
 * [Docker](upgrading.md#docker)
 * [Compiled source code](upgrading.md#compiled-from-source)
 
@@ -75,10 +75,10 @@ Download the latest binary file from [https://github.com/erigontech/erigon/relea
 
 ### Docker
 
-If you're using Docker to run Erigon, the process to upgrade to a newer version of the software is straightforward and revolves around pulling the latest Docker image and then running it.&#x20;
+If you're using Docker to run Erigon, the process to upgrade to a newer version of the software is straightforward and revolves around pulling the latest Docker image and then running it.
 
 Simply follow the [Docker](upgrading.md#docker) instructions and install and launch the new version.
 
 ### Compiled from source
 
-To upgrade Erigon to a newer version when you've originally installed it via Git and manual compilation,  follow the installation instructions from step 2 "[Check Out the Desired Stable Version (Tag)](../../archive/installation/linux-and-macos/build-erigon-from-source.md#check-out-the-desired-stable-version-tag)".
+To upgrade Erigon to a newer version when you've originally installed it via Git and manual compilation, follow the installation instructions from step 2 "[Check Out the Desired Stable Version (Tag)](../../archive/installation/linux-and-macos/build-erigon-from-source.md#check-out-the-desired-stable-version-tag)".
