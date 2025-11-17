@@ -53,6 +53,15 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
 
+      - name: Cleanup space
+        if: runner.os == 'Linux'
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+
       - name: Build
         run: make all
 
