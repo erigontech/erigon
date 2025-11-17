@@ -85,14 +85,6 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Cleanup space
-        run: |
-          rm -fr /opt/az \
-                 /opt/microsoft \
-                 /usr/share/dotnet \
-                 /usr/share/miniconda \
-                 /usr/share/swift
-
       - name: configure Pagefile
         uses: al-cheb/configure-pagefile-action@v1.5
         with:
