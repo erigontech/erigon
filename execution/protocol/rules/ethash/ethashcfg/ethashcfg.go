@@ -30,10 +30,6 @@ type Config struct {
 	DatasetsLockMmap bool
 	PowMode          Mode
 
-	// When set, notifications sent by the remote sealer will
-	// be block header JSON objects instead of work package arrays.
-	NotifyFull bool
-
 	Log log.Logger `toml:"-"`
 }
 
