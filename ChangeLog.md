@@ -26,27 +26,15 @@ https://keepachangelog.com/en/1.1.0/
 
 #### Caplin (Consensus Layer)
 - Get blobs support (Fusaka compatibility) (#17829)
-- Faster Data Availability recovery (#17392)
-- Better waiting heuristic for snapshot downloader (#17204)
-- Improved block downloader (#15255)
-
-#### Monitoring
-- Block serial execution metric (#17353)
-- BlockRangeUpdate publishing every 32 blocks (#17567)
-- Client-level trackers implementation (#17765)
 
 #### Error Handling & Validation
 - Self-destruct operation validation (EIP 6780) (#17728)
-- Gossip manager with rate limiting (#17606)
-- CODEOWNERS configuration (#17644)
-- Filters returning empty arrays instead of null (#17615)
 
 ### Changed
 
 #### Performance Optimizations
+- Reduce goroutines amount produced by BitTorrent library (#17765)
 - Zero allocation interpreter call loop in VM (#17573)
-- Reduced memory copies in changeset operations (#17659)
-- BTree seek optimization: reduced disk reads and allocations (#17693)
 - VM memory resize refactoring (#17730)
 - Improved string sorting with slices.Sort (#17744)
 - Reduced allocations in ETL pre-allocation and sort buffer (#17695)
