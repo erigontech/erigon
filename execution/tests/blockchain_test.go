@@ -340,10 +340,10 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	}
 
 	if err = m.InsertChain(firstChain); err != nil {
-		t.Fatalf("failed to insert easy chain: %v", err)
+		t.Fatalf("failed to insert first chain: %v", err)
 	}
 	if err = m.InsertChain(secondChain); err != nil {
-		t.Fatalf("failed to insert difficult chain: %v", err)
+		t.Fatalf("failed to insert second chain: %v", err)
 	}
 	tx, err := m.DB.BeginRw(m.Ctx)
 	if err != nil {
