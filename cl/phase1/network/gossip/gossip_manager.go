@@ -35,14 +35,13 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-// Gossip manager is sending all messages to fork choice or others
+// GossipManager is responsible for managing the gossip subscriptions and publications
+// making sure that this module is simple and don't depend on network services pkg
 type GossipManager struct {
-	sentinel sentinelproto.SentinelClient
 	// configs
 	beaconConfig  *clparams.BeaconChainConfig
 	networkConfig *clparams.NetworkConfig
@@ -59,7 +58,6 @@ type GossipManager struct {
 
 func NewGossipManager(
 	p2p *p2p.P2Pmanager,
-	s sentinelproto.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig,
 	networkConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
@@ -68,7 +66,6 @@ func NewGossipManager(
 ) *GossipManager {
 	gm := &GossipManager{
 		p2p:                p2p,
-		sentinel:           s,
 		beaconConfig:       beaconConfig,
 		networkConfig:      networkConfig,
 		ethClock:           ethClock,
@@ -455,7 +452,7 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
 			topicHandle.Close()
 			return err
 		}
-		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiration); err != nil {
+		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil {
 			return err
 		}
 	}
