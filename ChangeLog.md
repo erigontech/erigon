@@ -35,10 +35,6 @@ https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
-#### Performance Optimizations
-
-- Reduce goroutines amount produced by BitTorrent library (#17765)
-
 #### RPC Improvements
 
 - `eth_getTransactionReceipt`: Pre-Byzantium transaction handling (#17479, #17509)
@@ -50,9 +46,7 @@ https://keepachangelog.com/en/1.1.0/
 
 - Experimental Parallel Exec (#16922)
 - MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP for Gnosis (#17501)
-
-#### Docker & Build
-
+- Reduce goroutines amount produced by BitTorrent library (#17765)
 - Up base image to `Go 1.25-trixie` (#17837)
 
 ### Removed
@@ -61,21 +55,6 @@ https://keepachangelog.com/en/1.1.0/
 - eth/67 protocol support removed (#17318)
 - SkipAnalysis VM optimization removed (#17217)
 
-### Fixed
-
-#### RPC
-
-- `eth_estimateGas`: StateOverrides handling (#17914)
-- `eth_getTransactionReceipt`: Pre-Byzantium support and post-state caching (#17509, #17520)
-- `eth_getFilter`: No changes and filter not found error handling (#17327)
-- `eth_simulateV1`: State root, blob gas, nonce validation, and cache hit issues (#17276, #17401, #17390, #17520)
-- `debug_traceCall`: System contract execution (#17339)
-- `debug_traceBlockByNumber`: Clear error messaging for missing blocks (#17663)
-- `eth_getProof`: Key quantity and root hash verification (#17301, #17374, #17687)
-- `eth_syncing`: Initial highest block calculation (#17409)
-- `eth_call`: Block override support (#17261)
-- Hive simulatev1: Error code compatibility (#17584)
-- GetModifiedAccountsByNumber/Hash semantics (#17513)
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.0...v3.3.0
 
