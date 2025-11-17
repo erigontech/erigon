@@ -33,4 +33,5 @@ jobs:
         with:
           version: 'v2.6.1'
 
+      - run: du -hsc /tmp/*
       - run: make lint
