@@ -386,12 +386,6 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	ibs := state.New(stateReader)
 
-	if config != nil && config.StateOverrides != nil {
-		if err := config.StateOverrides.Override(ibs); err != nil {
-			return fmt.Errorf("override state: %v", err)
-		}
-	}
-
 	var baseFee *uint256.Int
 	if header.BaseFee != nil {
 		var overflow bool
@@ -424,6 +418,12 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	if config != nil && config.StateOverrides != nil {
+		if err := config.StateOverrides.Override(ibs, blockCtx.Rules(chainConfig)); err != nil {
+			return fmt.Errorf("override state: %v", err)
+		}
+	}
+
 	if config != nil && config.BlockOverrides != nil {
 		err := config.BlockOverrides.Override(&blockCtx)
 		if err != nil {
@@ -536,7 +536,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		err = config.StateOverrides.Override(ibs)
+		err = config.StateOverrides.Override(ibs, rules)
 		if err != nil {
 			return err
 		}
