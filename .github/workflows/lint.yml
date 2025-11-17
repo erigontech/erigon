@@ -27,14 +27,14 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-
-      - run: du -hsc /tmp/*
-
       - run: df -h
 
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
           version: 'v2.6.1'
+        args: -vvvv
+
+      - run: du -hsc /tmp/*
 
       - run: make lint
