@@ -8,7 +8,7 @@ https://keepachangelog.com/en/1.1.0/
 
 - Support of historical `eth_getProof` (https://github.com/erigontech/erigon/issues/12984). It requires
   `--prune.experimental.include-commitment-history` flag.
--
+- Look our new Docs and HelpCenter: https://docs.erigon.tech/
 
 #### RPC Endpoints
 
@@ -77,95 +77,6 @@ https://keepachangelog.com/en/1.1.0/
 - `eth_call`: Block override support (#17261)
 - Hive simulatev1: Error code compatibility (#17584)
 - GetModifiedAccountsByNumber/Hash semantics (#17513)
-
-#### Execution
-
-- Block building deadlock with single builder (#17213)
-- ChainTip mode in stage_exec (#17482)
-- Block limit exhausted in parallel flow (#17683, #17679)
-- Newpayload/block building race conditions (#17436)
-- E3 file collation reorg protection (#17469)
-- Initial cycle flag on first FCU with empty DB (#17515)
-- Error in stage_exec with --no-commit (#17311)
-- Deadlock in TestWebsocketLargeCall (#17706, #17762)
-
-#### State & Commitment
-
-- Historical state queries from commitment (#17413)
-- Proof verification for non-existent accounts (#17802)
-- GetAsOf() for commitment dereferencing (#17687)
-- Shortened key accessor check in findShortenedKey (#17850)
-- CachedWriter incarnation handling (#17498)
-- Domain compaction commitment key protection (#17380)
-- Data race in HexPatriciaHashed parallel tests (#17423)
-
-#### Consensus Layer
-
-- Fork schedule initial previous_version (#17263)
-- Initial cycle flag on first FCU with empty DB (#17515)
-- Block downloader behavior in various modes (#17897)
-- Blob epoch ordering (#17493)
-- EpochData SSZ marshalling (#17495)
-- Validator block production on Hoodi (#17499)
-- Electra state transition logging (#15835)
-
-#### Data Handling
-
-- Column data validation and length constraints (#17241, #17248)
-- EIP-7594 wrapper_version validation (#17481)
-- Legacy transaction decoding: trailing bits (#17555)
-- BlockAccessList packet validation before send/receive (#17464)
-- EEST error returns (#17300)
-- DeleteNewerEpochs deletion order (#17416)
-- Blob requests after Fusaka (#17492)
-
-#### Testing & QA
-
-- Tip-tracking under memory constraints re-enabled (#17497)
-- Sync with external CL test reliability (#17640)
-- HexPatriciaHashed data race in parallel tests (#17423)
-- TestWebsocketLargeCall deadlock (#17706, #17762)
-- TestMergedFileGet flakiness (#17594, #17545, #17668)
-- Bash test pipeline (#17895)
-- Test filtering improvements (#17852)
-- Race conditions in exec3 metrics (#17293)
-- Tip event channel tests flakiness (#17200)
-- DUMP_RESPONSE in RPC test runner (#17719, #17275)
-- ERIGON_PID assignment in remote tests (#17761)
-
-#### Monitoring & Diagnostics
-
-- Diag goroutines appearing without diag flags (#17888)
-- ReadStorageBodyRLP incorrect log message (#17825)
-- Broken links in documentation (#17900, #17903)
-- Parameter expansion in shell code (#17224)
-- Log directory permissions (0764 → 0755) (#17860)
-- Brittleness in integrity check (#17698)
-- Rebuild commitment when datadir name contains commitment (#17749)
-- Download execution history ETA calculation (#17691)
-
-#### Infrastructure
-
-- Bash test pipeline (#17895)
-- CI workflow for remote RPC testing (#17699)
-- Docker login condition in GitHub Actions (#17598, #17639)
-- Shutter validator registration URL (#17865)
-- Broken Gitbook links and layout (#17875, #17900)
-
-#### Cryptography & Security
-
-- Hash length validation in no-cgo Sign (#17831)
-- GasPrice check when NoBaseFee (#17196)
-
-### Security
-
-- Switched to `crypto/rand` for subscription ID generation; removed math/rand fallback (#17199)
-- NAT mapping: Propagated internalAddress error (#16761)
-- Improved error propagation in database operations (#17265, #17854, #17565)
-- User input sanitization in shell and test scripts (#17228, #17207, #17212, #17224)
-- Large file detection in git history (#17655)
-- Hash length validation in no-cgo Sign (#17831)
-- Max RLP block size enforcement from MEV relays (#17620)
 
 ### Documentation
 
