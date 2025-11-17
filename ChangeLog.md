@@ -7,10 +7,11 @@ https://keepachangelog.com/en/1.1.0/
 
 ### Added
 
-#### RPC Endpoints
+- Support of historical `eth_getProof` (https://github.com/erigontech/erigon/issues/12984). It requires `--prune.experimental.include-commitment-history` flag.
+- 
+
+#### RPC Endpoints 
 - `eth_simulateV1`: Complete implementation of Ethereum simulation API with support for state overrides, blob transactions, block overrides, and historical state roots (#15771)
-- `internal_getStepsInDB`: New diagnostic RPC endpoint (#17618)
-- `internal_getPruningProgress`: Track database pruning progress via RPC (#17690)
 - `eth_createAccessList`: StateOverrides parameter support (#17653)
 - Support for `eth_call` with blockOverrides (#17261)
 - `trace_filter`: Block tags support (#17238)
@@ -20,31 +21,10 @@ https://keepachangelog.com/en/1.1.0/
 - EIP-7928: BlockAccessList type support (#17544)
 - EIP-7934: EstimateGas capped by MaxTxnGasLimit in Osaka (#17251)
 - EIP-7825: Gas limit enforcement in Osaka (#17251)
-- Parallel ExecV3 processing for improved transaction validation (#16922)
-- Commitment history with externalized step size configuration (#17534, #17448)
 - EIP-7702 transaction support (#17412)
 - Rewrite bytecode support for post-Merge blocks (#17770)
 
-#### Database & Storage
-- Block versioning support with serial versioning (#17285)
-- Enhanced BTree index performance and benchmarking (#17486)
-- SharedDomains package separation with improved architecture (#17667)
-- Domain statistics analysis tool (#17795)
-- History snapshots dump utility (#17864)
-- Block index benchmarking tool (#17614)
-- Improved index names for file operations (#17898)
-- Block TxNum info printing command (#17750)
-
-#### Diagnostics & Tools
-- `erigon seg step-rebase`: New tool for segment step rebasing (#17394)
-- `erigon seg info`: Segment information utility (#17563)
-- `integration trigger_fcu` tool (#17723)
-- System checks on Linux (#17286)
-- Domain statistics support tool (#17795)
-- Blob recovery tool for fetching blobs from remote beacon API (#17450)
-
 #### Caplin (Consensus Layer)
-- KZG commitment: Switched to go-eth-kzg (replacing c-kzg-4844) (#17315)
 - Get blobs support (Fusaka compatibility) (#17829)
 - Faster Data Availability recovery (#17392)
 - Better waiting heuristic for snapshot downloader (#17204)
