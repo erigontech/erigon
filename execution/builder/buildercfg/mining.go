@@ -25,6 +25,6 @@ import (
 type MiningConfig struct {
 	EnabledPOS bool
 	Etherbase  common.Address `toml:",omitempty"` // Public address for block building rewards
-	ExtraData  hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
-	GasLimit   *uint64        // Target gas limit for mined blocks.
+	ExtraData  hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the block builder
+	GasLimit   *uint64        // Target gas limit for built blocks
 }
