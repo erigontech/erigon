@@ -87,7 +87,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/module"
-	"github.com/erigontech/erigon/execution/module/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/module/chainreader"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -995,7 +995,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000), txPoolRpcClient)
+	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, 1000), txPoolRpcClient)
 	if err != nil {
 		return nil, err
 	}

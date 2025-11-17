@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/module"
-	"github.com/erigontech/erigon/execution/module/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/module/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -74,7 +74,7 @@ type EngineServer struct {
 	executionService executionproto.ExecutionClient
 	txpool           txpoolproto.TxpoolClient // needed for getBlobs
 
-	chainRW eth1_chain_reader.ChainReaderWriterEth1
+	chainRW chainreader.ChainReaderWriterEth1
 	lock    sync.Mutex
 	logger  log.Logger
 
@@ -99,7 +99,7 @@ func NewEngineServer(
 	if fcuTimeout == 0 {
 		fcuTimeout = DefaultFcuTimeout
 	}
-	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
+	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,

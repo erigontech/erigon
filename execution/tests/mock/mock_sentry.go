@@ -55,7 +55,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/module"
-	"github.com/erigontech/erigon/execution/module/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/module/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -822,7 +822,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		return nil
 	}
 
-	wr := eth1_chain_reader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
+	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
 	ctx := context.Background()
 	for i := n; i < chain.Length(); i++ {
