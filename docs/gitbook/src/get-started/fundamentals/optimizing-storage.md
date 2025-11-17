@@ -36,7 +36,8 @@ If you need to further improve performance try the following improvements step b
 1. Store the `snapshots/accessor` folder on the fast disk. This should provide a noticeable speed boost.
 2. If the speed is still not satisfactory, move the `snapshots/idx` folder to the fast disk.
 3. If performance is still an issue, consider moving the entire `snapshots/history` folder to the fast disk.
-
-By following these steps, you can optimize your Erigon 3 storage setup to achieve a good balance between performance and cost.
 {% endstep %}
 {% endstepper %}
+
+By following these steps, you can optimize your Erigon 3 storage setup to achieve a good balance between performance and cost.
+
