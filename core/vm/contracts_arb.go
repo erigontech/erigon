@@ -7,10 +7,12 @@ import (
 )
 
 var (
-	PrecompiledContractsArbitrum = make(map[common.Address]PrecompiledContract)
-	PrecompiledAddressesArbitrum []common.Address
-	PrecompiledContractsArbOS30  = make(map[common.Address]PrecompiledContract)
-	PrecompiledAddressesArbOS30  []common.Address
+	PrecompiledContractsBeforeArbOS30       = make(map[common.Address]PrecompiledContract)
+	PrecompiledAddressesBeforeArbOS30       []common.Address
+	PrecompiledContractsStartingFromArbOS30 = make(map[common.Address]PrecompiledContract)
+	PrecompiledAddressesStartingFromArbOS30 []common.Address
+	PrecompiledContractsStartingFromArbOS50 = make(map[common.Address]PrecompiledContract)
+	PrecompiledAddressesStartingFromArbOS50 []common.Address
 )
 
 var PrecompiledContractsP256Verify = map[common.Address]PrecompiledContract{
