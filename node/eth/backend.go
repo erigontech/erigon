@@ -1298,8 +1298,10 @@ func (s *Ethereum) setUpSnapDownloader(
 		return nil
 	}
 
-	if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
-		return err
+	if downloaderCfg != nil {
+		if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
+			return err
+		}
 	}
 
 	if s.config.Snapshot.DownloaderAddr != "" {

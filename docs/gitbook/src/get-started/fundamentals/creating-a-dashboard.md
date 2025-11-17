@@ -38,7 +38,7 @@ Erigon provides a simple Docker Compose setup to launch the monitoring services.
 docker compose up -d prometheus grafana
 ```
 
-Alternatively, use the built-in $$ $\text{make}$ $$ target: $$ $\text{make prometheus}$ $$
+Alternatively, use the built-in `make` target:
 
 ```sh
 make prometheus
@@ -46,7 +46,7 @@ make prometheus
 
 #### Step 4: Access Grafana Dashboard
 
-Once the containers are running, access the Grafana interface at $$ $\text{localhost:3000}$ $$.
+Once the containers are running, access the Grafana interface at `localhost:3000`.
 
 * Default credentials: `admin/admin`
 
@@ -63,7 +63,7 @@ The `erigon.json` dashboard is the recommended high-level board for most users, 
 
 #### Step 6: Memory Usage Monitoring (Important Note)
 
-Standard OS tools like `htop`$$ $\text{htop}$ $$ can be misleading for Erigon's memory usage because its database (MDBX) uses `MemoryMap`. The OS manages the OS Page Cache, which is shared and automatically freed when needed.
+Standard OS tools like `htop` can be misleading for Erigon's memory usage because its database (MDBX) uses `MemoryMap`. The OS manages the OS Page Cache, which is shared and automatically freed when needed.
 
 The dedicated panels in the `erigon.json` dashboard track accurate Go memory statistics. Erigon's application typically uses around 1GB during normal operation, while the OS Page Cache handles the bulk of data access memory efficiently.
 
@@ -71,11 +71,11 @@ The dedicated panels in the `erigon.json` dashboard track accurate Go memory sta
 
 You can customize the setup using environment variables:
 
-| **Variable**                                                        | **Description**                                                      |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `XDG_DATA_HOME`$$ $\text{XDG\_DATA\_HOME}$ $$                       | Changes default database folder location.                            |
-| $$ $\text{ERIGON\_PROMETHEUS\_CONFIG}$ $$`ERIGON_PROMETHEUS_CONFIG` | Path to a custom $$ $\text{prometheus.yml}$ $$`prometheus.yml` file. |
-| `ERIGON_GRAFANA_CONFIG`$$ $\text{ERIGON\_GRAFANA\_CONFIG}$ $$       | Path to a custom `grafana.ini`$$ $\text{grafana.ini}$ $$ file.       |
+| **Variable**                  | **Description**                            |
+| ------------------------------| -------------------------------------------|
+| `XDG_DATA_HOME`               | Changes default database folder location.  |
+| `ERIGON_PROMETHEUS_CONFIG`    | Path to a custom `prometheus.yml` file.    |
+| `ERIGON_GRAFANA_CONFIG`       | Path to a custom `grafana.ini` file.       |
 
 Example with a Custom Prometheus Configuration:
 
