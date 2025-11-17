@@ -647,9 +647,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						pe.RLock()
 						defer pe.RUnlock()
 
-						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))))
-						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
+						reader := state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
+						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
 						ibs.SetVersion(result.Version().Incarnation)
+						ibs.SetVersionMap(blockExecutor.versionMap)
+						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
 
 						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
