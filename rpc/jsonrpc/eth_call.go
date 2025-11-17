@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -64,7 +64,7 @@ var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 const estimateGasErrorRatio = 0.015
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 	if header == nil {
-		return nil, errors.New("header not found")
+		return nil, fmt.Errorf("header not found")
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
@@ -108,8 +108,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), api.ReturnDataLimit)
 	}
 
-	// If the result contains a revert reason, try to unpack and return it.
-	if len(result.Revert()) > 0 {
+	if errors.Is(result.Err, vm.ErrExecutionReverted) {
 		return nil, ethapi2.NewRevertError(result)
 	}
 
@@ -182,7 +181,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	if header == nil {
-		return 0, errors.New(fmt.Sprintf("could not find the header %s in cache or db", blockNrOrHash.String()))
+		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
 	}
 
 	blockNum := *(header.Number)
@@ -243,6 +242,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	} else {
 		// Retrieve the block to act as the gas ceiling
 		hi = header.GasLimit
+	}
+	if !chainConfig.IsArbitrum() && hi > params.MaxTxnGasLimit &&  chainConfig.IsOsaka(header.Time, 0) {
+		// Cap the maximum gas allowance according to EIP-7825 if Osaka
+		hi = params.MaxTxnGasLimit
 	}
 	// Recap the highest gas allowance with specified gascap.
 	if hi > api.GasCap {
@@ -367,7 +370,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		result, err := caller.DoCallWithNewGas(ctx, mid, engine, overrides)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
-		// assigened. Return the error directly, don't struggle any more.
+		// assigned. Return the error directly, don't struggle any more.
 		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
 			return 0, err
 		}
@@ -477,7 +480,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if acc == nil {
 		for i, k := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   uint256.NewInt(0).SetBytes(k[:]).Hex(),
+				Key:   common.BytesToHash(k[:]).Hex(),
 				Value: new(hexutil.Big),
 				Proof: nil,
 			}
@@ -511,7 +514,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	// get storage key proofs
 	for i, keyHash := range storageKeys {
-		proof.StorageProof[i].Key = uint256.NewInt(0).SetBytes(keyHash[:]).Hex()
+		proof.StorageProof[i].Key = common.BytesToHash(keyHash[:]).Hex()
 
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
@@ -834,7 +837,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Require nonce to calculate address of created contract
 		if args.Nonce == nil {
 			var nonce uint64
-			reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
+			reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
 				Address: gointerfaces.ConvertAddressToH160(*args.From),
 			}, &grpc.EmptyCallOption{})
 			if err != nil {
@@ -868,8 +871,13 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
+	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	// TODO arbitrum
 	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time, arbosVersion))
 	excl := make(map[common.Address]struct{})
+	// Add 'from', 'to', precompiles to the exclusion list
+	excl[*args.From] = struct{}{}
+	excl[to] = struct{}{}
 	for _, pc := range precompiles {
 		excl[pc] = struct{}{}
 	}
@@ -908,7 +916,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, state)
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
-		blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 		txCtx := core.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
