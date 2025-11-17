@@ -162,7 +162,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	//	}
 	//}
 
-	if dt.d.Accessors.Has(0) {
+	if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
 		reader := recsplit.NewIndexReader(item.index)
 		defer reader.Close()
 

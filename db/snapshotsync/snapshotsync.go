@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -90,16 +91,7 @@ const (
 	AlsoCaplin CaplinMode = 3
 )
 
-type DownloadRequest struct {
-	Path        string
-	TorrentHash string
-}
-
-func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
-	return DownloadRequest{Path: path, TorrentHash: torrentHash}
-}
-
-func BuildProtoRequest(downloadRequest []DownloadRequest) *downloaderproto.AddRequest {
+func BuildProtoRequest(downloadRequest []services.DownloadRequest) *downloaderproto.AddRequest {
 	req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
@@ -122,7 +114,7 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *downloaderproto.AddRe
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
 func RequestSnapshotsDownload(
 	ctx context.Context,
-	downloadRequest []DownloadRequest,
+	downloadRequest []services.DownloadRequest,
 	downloader downloaderproto.DownloaderClient,
 	logPrefix string,
 ) error {
@@ -202,8 +194,8 @@ func buildBlackListForPruning(
 }
 
 type blockReader interface {
-	Snapshots() BlockSnapshots
-	BorSnapshots() BlockSnapshots
+	Snapshots() services.BlockSnapshots
+	BorSnapshots() services.BlockSnapshots
 	IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
@@ -411,7 +403,7 @@ func SyncSnapshots(
 
 		// send all hashes to the Downloader service
 		preverifiedBlockSnapshots := snapCfg.Preverified
-		downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
+		downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
@@ -487,7 +479,7 @@ func SyncSnapshots(
 				continue
 			}
 
-			downloadRequest = append(downloadRequest, DownloadRequest{
+			downloadRequest = append(downloadRequest, services.DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
 			})
