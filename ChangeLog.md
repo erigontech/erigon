@@ -57,7 +57,6 @@ https://keepachangelog.com/en/1.1.0/
 
 ### Removed
 
-- PoW mining code removed (#17813)
 - Holesky network support removed (#17685)
 - eth/67 protocol support removed (#17318)
 - SkipAnalysis VM optimization removed (#17217)
