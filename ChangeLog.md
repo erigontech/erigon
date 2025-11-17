@@ -63,8 +63,6 @@ https://keepachangelog.com/en/1.1.0/
 - Rclone downloader removed (#17433)
 - MDBX store backend removed in favor of current implementations (#17434)
 - BadHashes legacy code removed (#17733)
-- Unmaintained Control Flow Analysis/Graph removed (#17853)
-- Unused `IterateChangedKeys` method from InvIdx (#17570)
 - Unused convertToParityTrace stub removed (#17754)
 - Unused fields and accessors from downloader (WebSeeds) (#17439)
 - Unused ticker in buildFiles (#17425)
