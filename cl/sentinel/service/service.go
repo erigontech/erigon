@@ -154,7 +154,8 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.Gos
 
 func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
-	ch, subId, err := s.gossipNotifier.addSubscriber()
+	panic("do not call this")
+	/*ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
 		return err
 	}
@@ -180,7 +181,7 @@ func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, s
 				s.logger.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
 			}
 		}
-	}
+	}*/
 }
 
 func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelproto.SubscriptionData) bool {

@@ -16,8 +16,9 @@ type TopicSubscription struct {
 }
 
 type TopicSubscriptions struct {
-	subs  map[string]*TopicSubscription
-	mutex sync.RWMutex
+	subs         map[string]*TopicSubscription
+	mutex        sync.RWMutex
+	toSubscribes map[string]time.Time // this indicates the topics that probably need to be subscribed later
 }
 
 func NewTopicSubscriptions() *TopicSubscriptions {
@@ -47,7 +48,6 @@ func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
 
 func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) error {
 	t.mutex.Lock()
-	defer t.mutex.Unlock()
 	if _, ok := t.subs[topic]; ok {
 		return errors.New("topic already exists")
 	}
@@ -57,6 +57,12 @@ func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, valida
 		validator:  validator,
 		expiration: time.Unix(0, 0),
 	}
+	if expiration, ok := t.toSubscribes[topic]; ok {
+		delete(t.toSubscribes, topic)
+		t.mutex.Unlock()
+		return t.SubscribeWithExpiry(topic, expiration)
+	}
+	t.mutex.Unlock()
 	return nil
 }
 
@@ -97,6 +103,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiration time.T
 	defer t.mutex.Unlock()
 	sub, ok := t.subs[topic]
 	if !ok {
+		t.toSubscribes[topic] = expiration
 		return errors.New("topic not found")
 	}
 	if time.Now().Before(expiration) {
