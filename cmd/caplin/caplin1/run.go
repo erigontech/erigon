@@ -360,6 +360,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	registry.RegisterGossipServices(
 		gossipManager,
+		forkChoice,
+		ethClock,
 		blockService,
 		attesterSlashingService,
 		blobService,
