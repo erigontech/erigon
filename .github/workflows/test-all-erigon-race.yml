@@ -60,9 +60,8 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v5
         with:
-          submodules: recursive
-          lfs: true
-        
+          fetch-depth: 0
+
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v6
