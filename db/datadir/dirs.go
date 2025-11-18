@@ -19,8 +19,6 @@ package datadir
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"io/fs"
 	"os"
