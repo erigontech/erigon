@@ -164,7 +164,6 @@ func (s *resubscribeSub) loop() {
 			break
 		}
 		done = s.waitForError(sub)
-		sub.Unsubscribe()
 	}
 }
 
