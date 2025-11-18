@@ -36,10 +36,10 @@ import (
 )
 
 var (
-	ErrNilBlobHashes       = errors.New("nil blob hashes array")
-	ErrMaxBlobGasUsed      = errors.New("blobs/blobgas exceeds max")
-	ErrMismatchBlobHashes  = errors.New("mismatch blob hashes")
-	ErrInvalidVersiondHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
+	ErrNilBlobHashes        = errors.New("nil blob hashes array")
+	ErrMaxBlobGasUsed       = errors.New("blobs/blobgas exceeds max")
+	ErrMismatchBlobHashes   = errors.New("mismatch blob hashes")
+	ErrInvalidVersionedHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
 )
 
 var (
@@ -151,7 +151,7 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 		if txn.Type() == types.BlobTxType {
 			for _, h := range txn.GetBlobHashes() {
 				if h[0] != kzg.BlobCommitmentVersionKZG {
-					return ErrInvalidVersiondHash
+					return ErrInvalidVersionedHash
 				}
 				actualBlobHashes = append(actualBlobHashes, h)
 			}

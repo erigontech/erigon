@@ -336,7 +336,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				LatestValidHash: &latestValidHash,
 			}, nil
 		}
-		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersiondHash) {
+		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersionedHash) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
