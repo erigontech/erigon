@@ -41,7 +41,7 @@
 * [Otterscan](get-started/fundamentals/otterscan.md)
 * [web3 Wallet](get-started/fundamentals/web3-wallet.md)
 * Interacting with Erigon
-  * [RPC Server](fundamentals/interacting-with-erigon/interacting-with-erigon/README.md)
+  * [RPC Service](fundamentals/interacting-with-erigon/interacting-with-erigon/README.md)
     * [eth](fundamentals/interacting-with-erigon/interacting-with-erigon/eth.md)
     * [erigon](fundamentals/interacting-with-erigon/interacting-with-erigon/erigon.md)
     * [engine](fundamentals/interacting-with-erigon/interacting-with-erigon/engine.md)
