@@ -443,7 +443,6 @@ func (cb *MockContractBackend) PrepareMocks() {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			var res []types.Log
-			addrStrs := make([]string, 0, len(query.Addresses))
 			for _, addr := range query.Addresses {
 				logs := cb.mockedFilterLogs[addr]
 				if len(logs) == 0 {
@@ -452,7 +451,6 @@ func (cb *MockContractBackend) PrepareMocks() {
 				}
 				res = append(res, logs[0]...)
 				cb.mockedFilterLogs[addr] = logs[1:]
-				addrStrs = append(addrStrs, addr.Hex())
 			}
 			cb.logger.Trace("--- DEBUG --- called FilterLogs")
 			return res, nil

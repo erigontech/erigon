@@ -258,11 +258,12 @@ func ExecV3(ctx context.Context,
 	var lastCommittedBlockNum uint64
 
 	if parallel {
-		if !inMemExec {
+		if !inMemExec { //nolint:staticcheck
 			// this is becuase for parallel execution the shared domain needs to
 			// be co-ordinated between exec and unwind - otherwise unwound state
 			// is not visible to parallel workers
 			// TODO return fmt.Errorf("parallel exec only supports inmem exec")
+
 		}
 
 		pe := &parallelExecutor{
