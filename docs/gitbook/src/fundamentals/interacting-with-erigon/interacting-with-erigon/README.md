@@ -4,9 +4,9 @@ description: >-
   Namespaces
 ---
 
-# Interacting with Erigon
+# RPC Server
 
-The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../modules/rpc-daemon.md), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+The Erigon RPC Server, managed by Erigon's modular [RPC daemon](../../../get-started/fundamentals/modules/rpc-daemon.md), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
 * [`eth`](eth.md): Standard Ethereum API.
 * [`erigon`](erigon.md): Erigon-specific extensions.
@@ -156,4 +156,3 @@ cast rpc debug_traceTransaction <tx_hash>
 cast rpc erigon_forks
 ```
 {% endcode %}
-
