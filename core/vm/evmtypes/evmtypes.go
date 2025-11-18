@@ -40,15 +40,16 @@ type BlockContext struct {
 	PostApplyMessage PostApplyMessageFunc
 
 	// Block information
-	Coinbase    common.Address // Provides information for COINBASE
-	GasLimit    uint64         // Provides information for GASLIMIT
-	MaxGasLimit bool           // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber uint64         // Provides information for NUMBER
-	Time        uint64         // Provides information for TIME
-	Difficulty  *big.Int       // Provides information for DIFFICULTY
-	BaseFee     *uint256.Int   // Provides information for BASEFEE
-	PrevRanDao  *common.Hash   // Provides information for PREVRANDAO
-	BlobBaseFee *uint256.Int   // Provides information for BLOBBASEFEE
+	Coinbase     common.Address // Provides information for COINBASE
+	GasLimit     uint64         // Provides information for GASLIMIT
+	MaxGasLimit  bool           // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockGasUsed uint64
+	BlockNumber  uint64       // Provides information for NUMBER
+	Time         uint64       // Provides information for TIME
+	Difficulty   *big.Int     // Provides information for DIFFICULTY
+	BaseFee      *uint256.Int // Provides information for BASEFEE
+	PrevRanDao   *common.Hash // Provides information for PREVRANDAO
+	BlobBaseFee  *uint256.Int // Provides information for BLOBBASEFEE
 
 	//Arbitrum: current OS version
 	ArbOSVersion   uint64

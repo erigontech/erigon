@@ -248,7 +248,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			},
 			ChainID:     uint256.NewInt(*tr.RandUint64()),
 			AccessList:  tr.RandAccessList(tr.RandIntInRange(1, 5)),
-			Timeboosted: tr.RandBoolean(),
+			Timeboosted: boolPtr(tr.RandBoolean()),
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
@@ -257,7 +257,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			TipCap:      uint256.NewInt(*tr.RandUint64()),
 			FeeCap:      uint256.NewInt(*tr.RandUint64()),
 			AccessList:  tr.RandAccessList(tr.RandIntInRange(1, 5)),
-			Timeboosted: tr.RandBoolean(),
+			Timeboosted: boolPtr(tr.RandBoolean()),
 		}
 	case BlobTxType:
 		r := *tr.RandUint64()

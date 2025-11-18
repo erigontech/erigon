@@ -106,8 +106,12 @@ type Transaction interface {
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 
 	// TODO remove timeboosted methods, check tx type and if it supports, make type assertion and use type-specific methods
-	IsTimeBoosted() bool
-	SetTimeboosted(val bool)
+	IsTimeBoosted() *bool
+	SetTimeboosted(val *bool)
+}
+
+type TransactionForHashMarshaller interface {
+	MarshalBinaryForHashing(w io.Writer) error
 }
 
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
@@ -352,7 +356,14 @@ func (s Transactions) Len() int { return len(s) }
 // because we assume that *Transaction will only ever contain valid txs that were either
 // constructed by decoding or via public API in this package.
 func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
-	if err := s[i].MarshalBinary(w); err != nil {
+	var err error
+	switch tm := s[i].(type) {
+	case TransactionForHashMarshaller:
+		err = tm.MarshalBinaryForHashing(w)
+	default:
+		err = s[i].MarshalBinary(w)
+	}
+	if err != nil {
 		panic(err)
 	}
 }
@@ -413,12 +424,13 @@ type Message struct {
 	SkipL1Charging    bool
 	TxRunMode         MessageRunMode // deprecated (shoudl be)
 	Tx                Transaction
+	EffectiveGas      uint64 // amount of gas effectively used by transaction (used in ArbitrumSubmitRetryableTx)
 }
 
 // Arbitrum
-func (msg *Message) SetGasPrice(f *uint256.Int) { msg.gasPrice.Set(f) }
-func (msg *Message) SetFeeCap(f *uint256.Int)   { msg.feeCap.Set(f) }
-func (msg *Message) SetTip(f *uint256.Int)      { msg.tipCap.Set(f) }
+func (m *Message) SetGasPrice(f *uint256.Int) { m.gasPrice.Set(f) }
+func (m *Message) SetFeeCap(f *uint256.Int)   { m.feeCap.Set(f) }
+func (m *Message) SetTip(f *uint256.Int)      { m.tipCap.Set(f) }
 
 type MessageRunMode uint8
 

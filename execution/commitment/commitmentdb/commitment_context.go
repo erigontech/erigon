@@ -50,6 +50,10 @@ type SharedDomainsCommitmentContext struct {
 	trace bool
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetTrace(enable bool) {
+	sdc.trace = enable
+}
+
 // Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
 // If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
