@@ -196,15 +196,17 @@ jobs:
       run: |
         find $ERIGON_TESTBED_DATA_DIR
 
-    - name: Run the datadir downgrade procedure
-      working-directory: ${{ github.workspace }}
-      run: |
-        ./build/bin/erigon seg reset-to-old-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+    # The following task is not required when downgrading from version 3.3 to 3.2.
 
-    - name: Print datadir contents after downgrade (for debugging)
-      working-directory: ${{ github.workspace }}
-      run: |
-        find $ERIGON_TESTBED_DATA_DIR
+    #- name: Run the datadir downgrade procedure
+    #  working-directory: ${{ github.workspace }}
+    #  run: |
+    #    ./build/bin/erigon seg reset-to-old-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+
+    #- name: Print datadir contents after downgrade (for debugging)
+    #  working-directory: ${{ github.workspace }}
+    #  run: |
+    #    find $ERIGON_TESTBED_DATA_DIR
 
     - name: Run previous Erigon version, wait sync and check ability to maintain sync
       id: downgrade_test_step
