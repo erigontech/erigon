@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
@@ -153,7 +155,7 @@ dbg:
 %.cmd:
 	@echo Building '$(OUTPUT)'
 	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
-	@echo "Run \"$(GOBIN)/$*\" to launch $*."
+	@echo "Run \"$(OUTPUT)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
 geth: erigon
@@ -195,32 +197,18 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-## test-short:                run short tests with a 10m timeout
-test-short:
-	@{ \
-		$(GOTEST) -short > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+test-filtered:
+	(set -o pipefail && $(GOTEST) | tee run.log | (grep -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' -e '--- PASS:' || true))
 
-## test-all:                  run all tests with a 1h timeout
-test-all:
-	@{ \
-		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+# Rather than add more special cases here, I'd suggest using GO_FLAGS and calling `make test-filtered GO_FLAGS='-cool flag' or `make test GO_FLAGS='-cool flag'`.
+test-short: override GO_FLAGS += -short -failfast
+test-short: test-filtered
 
-## test-all-race:             run all tests with the race flag
-test-all-race:
-	@{ \
-		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+test-all: override GO_FLAGS += --timeout 60m -coverprofile=coverage-test-all.out
+test-all: test-filtered
+
+test-all-race: override GO_FLAGS += --timeout 60m -race
+test-all-race: test-filtered
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:

@@ -23,8 +23,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -157,7 +158,7 @@ func BenchmarkName(b *testing.B) {
 	k := []byte{15}
 
 	b.Run("1", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			GetFromPage(k, bts, nil, false)
 		}
 	})

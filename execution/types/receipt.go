@@ -118,6 +118,7 @@ type storedReceiptRLP struct {
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
+//
 // Deprecated: create receipts using a struct literal instead.
 func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 	r := &Receipt{
