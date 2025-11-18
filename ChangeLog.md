@@ -18,7 +18,8 @@
 
 #### Consensus & Execution
 
-- Fusaka scheduling enabled on Ethereum mainnet (#17734)
+- Fusaka scheduling on Ethereum mainnet #17734 (as #17736), #17251 (as #17255), and #16949 (as #17321) are in v3.2.2
+  already.
 - EIP-7928: BlockAccessList type support (#17544)
 - EIP-7934: EstimateGas capped by MaxTxnGasLimit in Osaka (#17251)
 - EIP-7825: Gas limit enforcement in Osaka (#17251)
@@ -49,6 +50,9 @@
 
 ### Removed
 
+- PoW mining was removed in #17813, which resulted in `--chain=dev` not being able to produce new blocks. Going forward
+  we'll either sunset `--chain=dev` or switch it to mock CL (see #14753). If you need `--chain=dev`, please use Erigon
+  3.2
 - Holesky network support removed (#17685)
 - eth/67 protocol support removed (#17318)
 - SkipAnalysis VM optimization removed (#17217)
