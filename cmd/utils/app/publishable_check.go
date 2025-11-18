@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // publishable check using snapnameschema
@@ -96,8 +99,27 @@ func CheckFilesForSchema(schema state.SnapNameSchema, checkLastFileTo int64) (la
 		prevFrom, prevTo = df.From, df.To
 	}
 
-	for dataFile := range dataFiles {
+	accessors := schema.AccessorList()
+	for _, dataFile := range dataFiles {
 		// corresponding accessor exists?
+
+		if accessors.Has(statecfg.AccessorHashMap) {
+			for idxPos := uint8(0); idxPos < uint8(schema.AccessorIdxCount()); idxPos++ {
+				file, found := schema.AccessorIdxFile(version.SearchVersion, kv.RootNum(dataFile.From), kv.RootNum(dataFile.To), 0)
+				if !found {
+					return 0, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %s)", schema.DataTag(), dataFile.Name, idxPos)
+				}
+				accInfo, ok := schema.Parse(filepath.Base(file))
+				if !ok {
+					return 0, fmt.Errorf("unable to parse %s accessor idx file name %s", schema.DataTag(), file)
+				}
+
+				//TODO: I need schema to return supported version range
+				//				if accInfo.Version.GreaterOrEqual()
+
+			}
+
+		}
 
 	}
 
