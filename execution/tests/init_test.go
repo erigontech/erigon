@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
-var fileTestSem = make(chan struct{}, 512) // Unlimited parallel tests - can eat unlimited disk/ram (and fail)
+var fileTestSem = make(chan struct{}, 256) // Unlimited parallel tests - can eat unlimited disk/ram (and fail)
 
 var (
 	legacyDir  = filepath.Join(".", "legacy-tests")
