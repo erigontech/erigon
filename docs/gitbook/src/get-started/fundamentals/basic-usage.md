@@ -4,7 +4,7 @@ description: Command Line Usage and Basic Erigon Configuration
 
 # Basic Usage
 
-Erigon is primarily controlled using the command line. Depending on the method of installation you used:
+Erigon is mainly operated through the command line. The commands may vary based on your installation method.
 
 {% tabs %}
 {% tab title="Pre-Built Binaries" %}
@@ -49,7 +49,7 @@ start erigon.exe [options]
 {% endtab %}
 {% endtabs %}
 
-To stop Erigon simply press `CTRL` + `C`.
+To gracefully stop Erigon simply press `CTRL` + `C`.
 
 ## All-in-One Client
 
