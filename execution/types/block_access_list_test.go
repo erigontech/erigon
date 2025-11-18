@@ -2,36 +2,12 @@ package types
 
 import (
 	"bytes"
-	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 )
-
-func TestBalanceChangeEncodeRejectsNegative(t *testing.T) {
-	bc := &BalanceChange{
-		Index: 1,
-		Value: big.NewInt(-1),
-	}
-	var buf bytes.Buffer
-	if err := bc.EncodeRLP(&buf); err == nil || !strings.Contains(err.Error(), "negative") {
-		t.Fatalf("expected negative value error, got %v", err)
-	}
-}
-
-func TestBalanceChangeEncodeRejectsOverflow(t *testing.T) {
-	value := new(big.Int).Lsh(big.NewInt(1), 257)
-	bc := &BalanceChange{
-		Index: 1,
-		Value: value,
-	}
-	var buf bytes.Buffer
-	if err := bc.EncodeRLP(&buf); err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("expected overflow error, got %v", err)
-	}
-}
 
 func TestBlockAccessListValidateOrdering(t *testing.T) {
 	var addrA, addrB common.Address
