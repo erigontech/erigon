@@ -203,7 +203,12 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 	//panic(fmt.Sprintf("[dbg] mem info: alloc=%s, sys=%s", common.ByteCount(m.Alloc), common.ByteCount(m.Sys)))
 }
 
+var fileTestSem = make(chan struct{}, 4444) // Unlimited parallel tests - can eat unlimited disk/ram (and fail)
+
 func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest interface{}) {
+	fileTestSem <- struct{}{}
+	defer func() { <-fileTestSem }()
+
 	t.Parallel()
 	if r, _ := tm.findSkip(name); r != "" {
 		t.Skip(r)
