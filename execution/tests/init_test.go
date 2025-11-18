@@ -36,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
+var fileTestSem = make(chan struct{}, 512) // Unlimited parallel tests - can eat unlimited disk/ram (and fail)
+
 var (
 	legacyDir  = filepath.Join(".", "legacy-tests")
 	eestDir    = filepath.Join(".", "execution-spec-tests")
@@ -202,8 +204,6 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 	//dbg.ReadMemStats(&m)
 	//panic(fmt.Sprintf("[dbg] mem info: alloc=%s, sys=%s", common.ByteCount(m.Alloc), common.ByteCount(m.Sys)))
 }
-
-var fileTestSem = make(chan struct{}, 1024) // Unlimited parallel tests - can eat unlimited disk/ram (and fail)
 
 func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest interface{}) {
 	fileTestSem <- struct{}{}
