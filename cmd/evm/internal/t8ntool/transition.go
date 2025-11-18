@@ -414,7 +414,6 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		}
 	}
 
-	//nolint:govet remove after https://github.com/erigontech/erigon/issues/17942
 	commonTx := types.CommonTx{
 		Nonce:    uint64(txJson.Nonce),
 		To:       txJson.To,
@@ -426,6 +425,10 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	commonTx.V.SetFromBig(txJson.V.ToInt())
 	commonTx.R.SetFromBig(txJson.R.ToInt())
 	commonTx.S.SetFromBig(txJson.S.ToInt())
+
+	//TODO: remove after https://github.com/erigontech/erigon/issues/17942
+	_, _, _, _, _, _, _, _ = commonTx.V, commonTx.R, commonTx.S, commonTx.Data, commonTx.Value, commonTx.To, commonTx.GasLimit, commonTx.Nonce
+
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		if txJson.Type == types.LegacyTxType {
 			return &types.LegacyTx{
