@@ -19,7 +19,6 @@ linters:
     - govet
   disable:
     - testifylint
-    - staticcheck #TODO: enable me
     - errchkjson #TODO: enable me
     - makezero #TODO: enable me
     - noctx #TODO: enable me
@@ -112,7 +111,7 @@ linters:
         text: not checked
       - linters:
           - staticcheck
-        text: ST(1019|1029|5011)
+        text: ST1019|ST1029|ST5011|QF1003|SA1019|QF1008|S1021|QF1001|SA6005|S1002|QF1002|QF1012|QF1006|ST1005|SA5011
       - linters:
           - gocritic
           - gosec

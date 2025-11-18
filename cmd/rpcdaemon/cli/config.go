@@ -976,7 +976,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	return engineListener, engineSrv, engineAddr.String(), nil
 }
 
-var remoteRulesEngineNotReadyErr = errors.New("remote rules engine not ready")
+var errRemoteRulesEngineNotReady = errors.New("remote rules engine not ready")
 
 type remoteRulesEngine struct {
 	engine rules.Engine
@@ -994,7 +994,7 @@ func (e *remoteRulesEngine) Engine() rules.EngineReader {
 
 func (e *remoteRulesEngine) validateEngineReady() error {
 	if !e.HasEngine() {
-		return remoteRulesEngineNotReadyErr
+		return errRemoteRulesEngineNotReady
 	}
 
 	return nil
