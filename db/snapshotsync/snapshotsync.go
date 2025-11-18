@@ -497,39 +497,23 @@ func SyncSnapshots(
 
 		log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
 		for {
+			err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix)
+			if err == nil {
+				break
+			}
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
+			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
-			default:
+				return context.Cause(ctx)
+			case <-time.After(10 * time.Second):
 			}
-			if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
-				log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
-				time.Sleep(10 * time.Second)
-				continue
-			}
-			break
 		}
+		log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
 	}
 
-	// Check for completion immediately, then growing intervals.
-	interval := time.Second
-	for {
-		completedResp, err := snapshotDownloader.Completed(ctx, &downloaderproto.CompletedRequest{})
-		if err != nil {
-			return fmt.Errorf("waiting for snapshot download: %w", err)
-		}
-		if completedResp.GetCompleted() {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-time.After(interval):
-		}
-		interval = min(interval*2, 20*time.Second)
-	}
-	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
-	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
 }
 

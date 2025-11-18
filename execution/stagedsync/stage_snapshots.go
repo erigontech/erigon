@@ -183,6 +183,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
+	// How do we get to the real Downloader if we need? Get the stack trace.
+	//panic("here")
+
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
@@ -229,6 +232,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	); err != nil {
 		return err
 	}
+
+	// want to add remaining snapshots here?
 
 	{ // Now can open all files
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
