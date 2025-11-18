@@ -25,7 +25,7 @@ require (
 	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/log v0.17.1-0.20251112041439-b1e798401c61
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.59.2-0.20251112042917-31e7fc123520
+	github.com/anacrolix/torrent v1.59.2-0.20251118042106-78b7fb9dde98
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
