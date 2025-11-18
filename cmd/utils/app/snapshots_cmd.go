@@ -1666,8 +1666,8 @@ func doMeta(cliCtx *cli.Context) error {
 			}
 		}
 		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HR(), "keys_size", keysSize.HR(), "vals_size", valsSize.HR(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HR(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
-	} else if strings.HasSuffix(fname, ".bt") {
-		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
+	} else if before, ok := strings.CutSuffix(fname, ".bt"); ok {
+		kvFPath := before + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
 			panic(err)
