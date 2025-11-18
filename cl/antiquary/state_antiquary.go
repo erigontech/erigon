@@ -307,7 +307,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := stateAntiquaryCollector.collectEpochRandaoMix(prevEpoch, mix); err != nil {
 				return err
 			}
-			// Write active validator indicies
+			// Write active validator indices
 			if err := stateAntiquaryCollector.collectActiveIndices(
 				prevEpoch,
 				s.currentState.GetActiveValidatorsIndices(prevEpoch),
@@ -574,9 +574,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 		if s.downloader != nil {
-			// Notify bittorent to seed the new snapshots
+			// Notify bittorrent to seed the new snapshots
 			if _, err := s.downloader.Add(s.ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
-				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+				s.logger.Warn("[Antiquary] Failed to add items to bittorrent", "err", err)
 			}
 		}
 		if err := s.stateSn.OpenFolder(); err != nil {
