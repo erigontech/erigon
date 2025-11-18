@@ -460,7 +460,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		var prev *types.Receipt
 		if txTask.TxIndex > 0 {
 			prev = p.blockResult.Receipts[txTask.TxIndex-1]
-		} else {
+		} else { //nolint:staticcheck
 			// TODO get the previous reciept from the DB
 		}
 

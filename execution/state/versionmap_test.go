@@ -29,7 +29,7 @@ func TestHelperFunctions(t *testing.T) {
 	ap1 := getCommonAddress(1)
 	ap2 := getCommonAddress(2)
 
-	mvh := NewVersionMap()
+	mvh := NewVersionMap(nil)
 
 	mvh.Write(ap1, AddressPath, common.Hash{}, Version{0, 0, 0, 1}, valueFor(0, 1), true)
 	mvh.Write(ap1, AddressPath, common.Hash{}, Version{0, 0, 0, 2}, valueFor(0, 2), true)
@@ -60,7 +60,7 @@ func TestFlushMVWrite(t *testing.T) {
 	ap1 := getCommonAddress(1)
 	ap2 := getCommonAddress(2)
 
-	mvh := NewVersionMap()
+	mvh := NewVersionMap(nil)
 
 	var res ReadResult
 
@@ -129,7 +129,7 @@ func TestLowerIncarnation(t *testing.T) {
 
 	ap1 := getCommonAddress(1)
 
-	mvh := NewVersionMap()
+	mvh := NewVersionMap(nil)
 
 	mvh.Write(ap1, AddressPath, common.Hash{}, Version{0, 0, 0, 2}, valueFor(0, 2), true)
 	mvh.Read(ap1, AddressPath, common.Hash{}, 0)
@@ -143,7 +143,7 @@ func TestMarkEstimate(t *testing.T) {
 
 	ap1 := getCommonAddress(1)
 
-	mvh := NewVersionMap()
+	mvh := NewVersionMap(nil)
 
 	mvh.Write(ap1, AddressPath, common.Hash{}, Version{0, 0, 7, 2}, valueFor(7, 2), true)
 	mvh.MarkEstimate(ap1, AddressPath, common.Hash{}, 7)
@@ -158,7 +158,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	ap2 := getCommonAddress(2)
 	ap3 := getCommonAddress(3)
 
-	mvh := NewVersionMap()
+	mvh := NewVersionMap(nil)
 
 	res := mvh.Read(ap1, AddressPath, common.Hash{}, 5)
 	require.Equal(t, UnknownDep, res.depIdx)
@@ -250,7 +250,7 @@ func TestMVHashMapBasics(t *testing.T) {
 }
 
 func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
-	mvh2 := NewVersionMap()
+	mvh2 := NewVersionMap(nil)
 	ap2 := getCommonAddress(2)
 
 	randInts := []int{}
@@ -266,7 +266,7 @@ func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
 }
 
 func BenchmarkReadTimeSameLocationDifferentTxIdx(b *testing.B) {
-	mvh2 := NewVersionMap()
+	mvh2 := NewVersionMap(nil)
 	ap2 := getCommonAddress(2)
 	txIdxSlice := []int{}
 
@@ -287,7 +287,7 @@ func TestTimeComplexity(t *testing.T) {
 	t.Parallel()
 
 	// for 1000000 read and write with no dependency at different memory location
-	mvh1 := NewVersionMap()
+	mvh1 := NewVersionMap(nil)
 
 	for i := 0; i < 1000000; i++ {
 		ap1 := getCommonAddress(i)
@@ -296,7 +296,7 @@ func TestTimeComplexity(t *testing.T) {
 	}
 
 	// for 1000000 read and write with dependency at same memory location
-	mvh2 := NewVersionMap()
+	mvh2 := NewVersionMap(nil)
 	ap2 := getCommonAddress(2)
 
 	for i := 0; i < 1000000; i++ {
@@ -308,7 +308,7 @@ func TestTimeComplexity(t *testing.T) {
 func TestWriteTimeSameLocationDifferentTxnIdx(t *testing.T) {
 	t.Parallel()
 
-	mvh1 := NewVersionMap()
+	mvh1 := NewVersionMap(nil)
 	ap1 := getCommonAddress(1)
 
 	for i := 0; i < 1000000; i++ {
@@ -319,7 +319,7 @@ func TestWriteTimeSameLocationDifferentTxnIdx(t *testing.T) {
 func TestWriteTimeSameLocationSameTxnIdx(t *testing.T) {
 	t.Parallel()
 
-	mvh1 := NewVersionMap()
+	mvh1 := NewVersionMap(nil)
 	ap1 := getCommonAddress(1)
 
 	for i := 0; i < 1000000; i++ {
@@ -330,7 +330,7 @@ func TestWriteTimeSameLocationSameTxnIdx(t *testing.T) {
 func TestWriteTimeDifferentLocation(t *testing.T) {
 	t.Parallel()
 
-	mvh1 := NewVersionMap()
+	mvh1 := NewVersionMap(nil)
 
 	for i := 0; i < 1000000; i++ {
 		ap1 := getCommonAddress(i)
@@ -341,7 +341,7 @@ func TestWriteTimeDifferentLocation(t *testing.T) {
 func TestReadTimeSameLocation(t *testing.T) {
 	t.Parallel()
 
-	mvh1 := NewVersionMap()
+	mvh1 := NewVersionMap(nil)
 	ap1 := getCommonAddress(1)
 
 	mvh1.Write(ap1, AddressPath, common.Hash{}, Version{0, 0, 1, 1}, valueFor(1, 1), true)

@@ -214,8 +214,6 @@ func TestAPI(t *testing.T) {
 						panic(fmt.Sprintf("Get error: %v", err))
 					}
 
-					fmt.Println("get", key, v)
-
 					select {
 					case out <- common.Copy(v):
 					case <-ctx.Done():

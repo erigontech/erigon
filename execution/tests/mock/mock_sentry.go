@@ -58,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/execution/module/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
@@ -81,7 +80,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -287,6 +285,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
+	cfg.Prune = prune
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -722,110 +721,13 @@ func (ms *MockSentry) EnableLogs() {
 	ms.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
-func (ms *MockSentry) numberOfPoWBlocks(chain *blockgen.ChainPack) int {
-	if ms.ChainConfig.TerminalTotalDifficulty == nil {
-		return chain.Length()
-	}
-	return chain.NumberOfPoWBlocks()
-}
-
 func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
-func (ms *MockSentry) insertPoWBlocks(chain *blockgen.ChainPack) error {
-	n := ms.numberOfPoWBlocks(chain)
-	if n == 0 {
-		// No Proof-of-Work blocks
-		return nil
-	}
-	for i := 0; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(false); err != nil {
-			return err
-		}
-	}
-
-	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.Blocks[n-1],
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	if err != nil {
-		return err
-	}
-	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}) {
-		if err != nil {
-			return err
-		}
-	}
-
-	// Send all the headers
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers[0:n],
-	})
-	if err != nil {
-		return err
-	}
-	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}) {
-		if err != nil {
-			return err
-		}
-	}
-
-	// Send all the bodies
-	packet := make(eth.BlockBodiesPacket, n)
-	for i, block := range chain.Blocks[0:n] {
-		packet[i] = block.Body()
-	}
-	b, err = rlp.EncodeToBytes(&eth.BlockBodiesPacket66{
-		RequestId:         1,
-		BlockBodiesPacket: packet,
-	})
-	if err != nil {
-		return err
-	}
-	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}) {
-		if err != nil {
-			return err
-		}
-	}
-	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
-
-	if ms.TxPool != nil {
-		ms.ReceiveWg.Add(1)
-	}
-	initialCycle, firstCycle := MockInsertAsInitialCycle, false
-	hook := stageloop.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil, nil, nil)
-
-	if err = stageloop.StageLoopIteration(ms.Ctx, ms.DB, nil, nil, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
-		return err
-	}
-	// Wait to know if a new background retirement has started
-	if retirementStarted := <-ms.retirementStart; retirementStarted {
-		// If so, increment the background retirement counter and start a task to watch for its completion
-		ms.retirementWg.Add(1)
-		go func() {
-			defer ms.retirementWg.Done()
-			<-ms.retirementDone
-		}()
-	}
-	if ms.TxPool != nil {
-		ms.ReceiveWg.Wait() // Wait for TxPool notification
-	}
-	return nil
-}
 
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	n := ms.numberOfPoWBlocks(chain)
-	if n >= chain.Length() {
-		return nil
-	}
-
 	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
 	ctx := context.Background()
-	for i := n; i < chain.Length(); i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(false); err != nil {
 			return err
 		}
@@ -836,17 +738,11 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, _, lvh, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
-
+	status, _, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
 	}
-	if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
-		rawdb.WriteHeadBlockHash(tx, lvh)
-		return nil
-	}); err != nil {
-		return err
-	}
+
 	if status != executionproto.ExecutionStatus_Success {
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
@@ -855,10 +751,6 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 }
 
 func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
-
-	if err := ms.insertPoWBlocks(chain); err != nil {
-		return err
-	}
 	if err := ms.insertPoSBlocks(chain); err != nil {
 		return err
 	}
