@@ -8,8 +8,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -18,7 +18,7 @@ import (
 func chargeGas(
 	header *types.Header,
 	tx *types.AccountAbstractionTransaction,
-	gasPool *core.GasPool,
+	gasPool *protocol.GasPool,
 	ibs *state.IntraBlockState,
 	preTxCost uint64,
 ) error {
@@ -36,7 +36,7 @@ func chargeGas(
 	}
 
 	if balance.Cmp(preCharge) < 0 {
-		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), &balance, preCharge)
+		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", protocol.ErrInsufficientFunds, chargeFrom.Hex(), &balance, preCharge)
 	}
 
 	if err := ibs.SubBalance(*chargeFrom, *preCharge, 0); err != nil {
