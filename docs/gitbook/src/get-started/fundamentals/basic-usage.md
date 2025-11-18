@@ -49,6 +49,8 @@ start erigon.exe [options]
 {% endtab %}
 {% endtabs %}
 
+To stop Erigon simply press `CTRL` + `C`.
+
 ## All-in-One Client
 
 The all-in-one client is the preferred option for most users:
