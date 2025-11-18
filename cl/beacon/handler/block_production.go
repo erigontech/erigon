@@ -1072,7 +1072,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 
 				// Finish KzGProofs and blob checks
 				if blockPayload.Version() < clparams.FuluVersion {
-
+					//nolint:staticcheck until https://github.com/erigontech/erigon/issues/17943
 				}
 				if len(b.Proofs[i]) != length.Bytes48 {
 					return errors.New("proof must be 48 bytes long")

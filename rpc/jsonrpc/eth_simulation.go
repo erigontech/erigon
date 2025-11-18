@@ -533,6 +533,7 @@ func (s *simulator) simulateBlock(
 		}
 		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
 	} else {
+		//nolint:staticcheck
 		// We cannot compute the state root for historical state w/o commitment history, so we just use the zero hash (default value).
 	}
 

@@ -1133,7 +1133,7 @@ func (c *Bor) fetchAndCommitSpan(newSpanID uint64, syscall rules.SystemCall) err
 		return err
 	}
 	if !ok {
-		return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+		return fmt.Errorf("error fetching span %v", newSpanID)
 	}
 
 	// check if chain id matches with heimdall span
