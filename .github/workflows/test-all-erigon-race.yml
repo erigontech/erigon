@@ -64,11 +64,13 @@ jobs:
           set +x
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
           
-      - name: Checkout code
+      - name: "Checkout code with submodules and large files (lfs)"
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
+          submodules: recursive
+          lfs: true
 
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'
