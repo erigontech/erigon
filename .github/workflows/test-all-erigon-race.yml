@@ -65,6 +65,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Cleanup space
+        if: runner.os == 'Linux'
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v6
