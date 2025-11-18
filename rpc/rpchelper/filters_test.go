@@ -54,7 +54,7 @@ var (
 
 func newTestFilters(t *testing.T, config FiltersConfig) *Filters {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	return New(ctx, config, nil, nil, nil, func() {}, log.New())
 }
