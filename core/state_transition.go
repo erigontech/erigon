@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/arb/osver"
 	"github.com/holiman/uint256"
 
@@ -378,7 +379,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	// 	}
 	// }
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	if st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && !st.evm.ChainRules().IsArbitrum && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
 	}
 
@@ -461,13 +462,15 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
-	endTxNow, startHookUsedGas, err, returnData := st.evm.ProcessingHook.StartTxHook()
+	endTxNow, startHookUsedMultiGas, err, returnData := st.evm.ProcessingHook.StartTxHook()
+	startHookUsedSingleGas := startHookUsedMultiGas.SingleGas()
 	if endTxNow {
 		return &evmtypes.ExecutionResult{
-			GasUsed:       startHookUsedGas,
+			GasUsed:       startHookUsedSingleGas,
 			Err:           err,
 			ReturnData:    returnData,
 			ScheduledTxes: st.evm.ProcessingHook.ScheduledTxes(),
+			UsedMultiGas:  startHookUsedMultiGas,
 		}, nil
 	}
 
@@ -550,8 +553,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// set code tx
 	auths := msg.Authorizations()
 
+	var gas uint64
+	var floorGas7623 uint64
+	var overflow bool
+	var multiGas multigas.MultiGas
+	if st.evm.ProcessingHook.IsArbitrum() {
+		multiGas, floorGas7623, overflow = multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+		gas = multiGas.SingleGas()
+	} else {
+		gas, floorGas7623, overflow = fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	}
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -570,10 +582,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	st.gasRemaining -= gas
 
-	tipReceipient, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining)
+	usedMultiGas := multigas.ZeroGas()
+	usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
+
+	tipReceipient, multiGas, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining, gas)
 	if err != nil {
 		return nil, err
 	}
+
+	usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
@@ -610,8 +627,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
 		ret, *deployedContract, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	} else {
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	}
 
 	if refunds && !gasBailout {
@@ -621,11 +640,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 
 		if st.evm.ProcessingHook.IsArbitrum() {
+			var refund uint64
 			st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
 			if nonrefundable < st.gasUsed() {
 				// Apply refund counter, capped to a refund quotient
-				refund := (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
+				refund = (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
 				if refund > st.state.GetRefund() {
 					refund = st.state.GetRefund()
 				}
@@ -635,6 +655,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
 				// After EIP-7623: Data-heavy transactions pay the floor gas.
 				if st.gasUsed() < floorGas7623 {
+					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
 					prev := st.gasRemaining
 					st.gasRemaining = st.initialGas - floorGas7623
 					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
@@ -642,6 +663,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 					}
 				}
 			}
+			usedMultiGas = usedMultiGas.WithRefund(refund)
+
 		} else { // Other networks
 			gasUsed := st.gasUsed()
 			refund := min(gasUsed/refundQuotient, st.state.GetRefund())
@@ -734,6 +757,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		// Arbitrum
 		ScheduledTxes:    st.evm.ProcessingHook.ScheduledTxes(),
 		TopLevelDeployed: deployedContract,
+		UsedMultiGas:     usedMultiGas,
 	}
 
 	if burntContractAddress != nil {
