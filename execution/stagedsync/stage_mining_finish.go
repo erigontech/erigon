@@ -25,14 +25,14 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 type MiningFinishCfg struct {
 	db                    kv.RwDB
 	chainConfig           *chain.Config
-	engine                consensus.Engine
+	engine                rules.Engine
 	sealCancel            chan struct{}
 	miningState           MiningState
 	blockReader           services.FullBlockReader
@@ -42,7 +42,7 @@ type MiningFinishCfg struct {
 func StageMiningFinishCfg(
 	db kv.RwDB,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
+	engine rules.Engine,
 	miningState MiningState,
 	sealCancel chan struct{},
 	blockReader services.FullBlockReader,
@@ -84,7 +84,7 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 	// Tests may set pre-calculated nonce
 	if block.NonceU64() != 0 {
 		// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
-		if cfg.engine.Type() != chain.CliqueConsensus {
+		if cfg.engine.Type() != chain.CliqueRules {
 			cfg.miningState.MiningResultCh <- blockWithReceipts
 			return nil
 		}

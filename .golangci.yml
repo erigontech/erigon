@@ -76,6 +76,7 @@ linters:
         - preferStringWriter
         - commentedOutCode
         - preferFprint
+        - deprecatedComment
       enabled-tags:
         - performance
         - diagnostic

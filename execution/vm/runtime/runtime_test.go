@@ -41,8 +41,8 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
@@ -348,8 +348,8 @@ type dummyChain struct {
 	counter int
 }
 
-// Engine retrieves the chain's consensus engine.
-func (d *dummyChain) Engine() consensus.Engine {
+// Engine retrieves the chain's rules engine.
+func (d *dummyChain) Engine() rules.Engine {
 	return nil
 }
 
@@ -414,7 +414,7 @@ func TestBlockhash(t *testing.T) {
 	input := common.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
 	cfg := &Config{
-		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
+		GetHashFn:   protocol.GetHashFn(header, chain.GetHeader),
 		BlockNumber: new(big.Int).Set(header.Number),
 		Time:        new(big.Int),
 	}
