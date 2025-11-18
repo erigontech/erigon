@@ -414,6 +414,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		}
 	}
 
+	//nolint:govet remove after https://github.com/erigontech/erigon/issues/17942
 	commonTx := types.CommonTx{
 		Nonce:    uint64(txJson.Nonce),
 		To:       txJson.To,

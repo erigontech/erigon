@@ -1370,12 +1370,12 @@ func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, erro
 				}
 			}
 
-			for _, p := range ss.Protocols {
+			for i := range ss.Protocols {
 				dialCandidates, err := setupDiscovery(ss.p2p.DiscoveryDNS)
 				if err != nil {
 					return nil, err
 				}
-				p.DialCandidates = dialCandidates
+				ss.Protocols[i].DialCandidates = dialCandidates
 			}
 		}
 	}

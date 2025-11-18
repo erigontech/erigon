@@ -1740,6 +1740,7 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
+	_ = config.MinFeeCap
 }
 
 func sentryMux(sentries []sentryproto.SentryClient) sentryproto.SentryClient {

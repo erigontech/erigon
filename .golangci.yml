@@ -93,6 +93,7 @@ linters:
     govet:
       enable:
         - nilness
+        - unusedwrite
       disable:
         - deepequalerrors
         - fieldalignment
@@ -111,7 +112,7 @@ linters:
         text: not checked
       - linters:
           - staticcheck
-        text: SA(1019|1029|5011)
+        text: ST(1019|1029|5011)
       - linters:
           - gocritic
           - gosec
