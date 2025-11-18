@@ -15,18 +15,14 @@
 - `eth_createAccessList`: StateOverrides parameter support (#17653)
 - Support for `eth_call` with blockOverrides (#17261)
 - `trace_filter`: Block tags support (#17238)
+- `debug_traceTransaction`: Self-destruct operation validation (EIP 6780) (#17728)
 
 #### Consensus & Execution
 
-- Fusaka scheduling on Ethereum mainnet #17734 (as #17736), #17251 (as #17255), and #16949 (as #17321) are in v3.2.2
-  already.
 - EIP-7928: BlockAccessList type support (#17544)
 - EIP-7934: EstimateGas capped by MaxTxnGasLimit in Osaka (#17251)
-- EIP-7825: Gas limit enforcement in Osaka (#17251)
-- EIP-7702 transaction support (#17412)
+- EIP-7702 transaction support in `(r *Receipt) decodeTyped` (#17412)
 - Rewrite bytecode support for post-Merge blocks (#17770)
-- Self-destruct operation validation (EIP 6780) (#17728)
-- Ethereum mainnet default block gas limit to 60M (#16949)
 
 #### Caplin (Consensus Layer)
 
@@ -57,7 +53,41 @@
 - eth/67 protocol support removed (#17318)
 - SkipAnalysis VM optimization removed (#17217)
 
-**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.0...v3.3.0
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.2...v3.3.0
+
+---
+
+## [3.2.2] "Quirky Quests" – 2025-11-03
+
+v3.2.2 schedules Fusaka on Ethereum mainnet on December 3, 2025 at 09:49:11pm UTC. Thus it is a mandatory update for all Ethereum mainnet users.
+
+**New features**
+
+- Schedule Fusaka on Ethereum mainnet in #17736 by @yperbasis
+- Tool to fetch and recover blobs from a remote beacon API in #17611 by @Giulio2002 
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.1...v3.2.2
+
+---
+
+## [3.2.1] "Quirky Quests" – 2025-10-20
+
+v3.2.1 is a bugfix release recommended for all users, especially validators.
+
+**Fixes**
+
+- Fix validators producing bad blocks on Hoodi in #17487 by @mh0lt 
+- RPC: fix "insufficient funds for gas * price + value" error in traces retrieval for a specific block (Issues #16909, #17232) in #17523 by @antonis19
+- RPC: fix no changes and filter not found in eth_getFilter* (Issue #17246) in #17350 by @canepat
+- RPC: debug_traceCall fix avoid to trace sysContract (Issue #17220) in #17360 by @lupin012
+- CL: fix initial previous_version in fork_schedule (Issue #17262) in #17331 by @domiwei
+
+**Improvements**
+
+- Ethereum mainnet default block gas limit is raised to 60M in #17321 by @yperbasis
+- CL: Allow blob requests after Fusaka in #17500 by @domiwei
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.0...v3.2.1
 
 ---
 
