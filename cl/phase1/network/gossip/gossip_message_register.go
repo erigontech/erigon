@@ -2,7 +2,6 @@ package gossip
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
@@ -11,7 +10,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...conditionFunc) {
+func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...ConditionFunc) {
 	wrappedService := wrapService(service)
 	gossipSrv := GossipService{
 		Service:    wrappedService,
@@ -23,11 +22,11 @@ func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service
 	}
 }
 
-type conditionFunc func(peer.ID, *pubsub.Message, clparams.StateVersion) bool
+type ConditionFunc func(peer.ID, *pubsub.Message, clparams.StateVersion) bool
 
 type GossipService struct {
 	Service    serviceintf.Service[any]
-	conditions []conditionFunc
+	conditions []ConditionFunc
 }
 
 func (s *GossipService) SatisfiesConditions(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
@@ -65,34 +64,4 @@ func (w *serviceWrapper[T]) ProcessMessage(ctx context.Context, subnet *uint64, 
 		return w.service.ProcessMessage(ctx, subnet, typedMsg)
 	}
 	return fmt.Errorf("unexpected message type: %T", msg)
-}
-
-// WithBeginVersion returns a condition that checks if the current version is greater than or equal to the begin version
-func WithBeginVersion(beginVersion clparams.StateVersion) conditionFunc {
-	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
-		return curVersion >= beginVersion
-	}
-}
-
-// WithEndVersion returns a condition that checks if the current version is less than the end version
-func WithEndVersion(endVersion clparams.StateVersion) conditionFunc {
-	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
-		return curVersion < endVersion
-	}
-}
-
-// WithGlobalTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
-func WithGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) conditionFunc {
-	limiter := newTimeBasedRateLimiter(duration, maxRequests)
-	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
-		return limiter.tryAcquire()
-	}
-}
-
-// WithRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
-func WithRateLimiterByPeer(ratePerSecond float64, burst int) conditionFunc {
-	limiter := newTokenBucketRateLimiter(ratePerSecond, burst)
-	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
-		return limiter.acquire(pid.String())
-	}
 }
