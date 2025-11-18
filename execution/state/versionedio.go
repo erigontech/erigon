@@ -594,6 +594,7 @@ type VersionedIO struct {
 	inputs     []versionedReadSet
 	outputs    []VersionedWrites // write sets that should be checked during validation
 	outputsSet []map[common.Address]map[AccountKey]struct{}
+	accessed   []map[common.Address]struct{}
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
@@ -675,6 +676,7 @@ func NewVersionedIO(numTx int) *VersionedIO {
 		inputs:     make([]versionedReadSet, numTx+1),
 		outputs:    make([]VersionedWrites, numTx+1),
 		outputsSet: make([]map[common.Address]map[AccountKey]struct{}, numTx+1),
+		accessed:   make([]map[common.Address]struct{}, numTx+1),
 	}
 }
 
@@ -706,6 +708,27 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
 		}
 		keys[AccountKey{v.Path, v.Key}] = struct{}{}
 	}
+}
+
+func (io *VersionedIO) RecordAccesses(txVersion Version, addresses map[common.Address]struct{}) {
+	if len(addresses) == 0 {
+		return
+	}
+	if len(io.accessed) <= txVersion.TxIndex+1 {
+		io.accessed = append(io.accessed, make([]map[common.Address]struct{}, txVersion.TxIndex+2-len(io.accessed))...)
+	}
+	dest := make(map[common.Address]struct{}, len(addresses))
+	for addr := range addresses {
+		dest[addr] = struct{}{}
+	}
+	io.accessed[txVersion.TxIndex+1] = dest
+}
+
+func (io *VersionedIO) AccessedAddresses(txIndex int) map[common.Address]struct{} {
+	if len(io.accessed) <= txIndex+1 {
+		return nil
+	}
+	return io.accessed[txIndex+1]
 }
 
 type DAG struct {

@@ -97,6 +97,8 @@ type IntraBlockState struct {
 	trace          bool
 	tracingHooks   *tracing.Hooks
 	balanceInc     map[common.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	addressAccess  map[common.Address]struct{}
+	recordAccess   bool
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
@@ -126,6 +128,8 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[common.Address]*BalanceIncrease{},
+		addressAccess:     nil,
+		recordAccess:      false,
 		txIndex:           0,
 		trace:             false,
 		dep:               UnknownDep,
@@ -798,7 +802,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		}
 
 		// BAL: record coinbase/selfdestruct recipients even with 0 value
-		sdb.VersionRead(addr, BalancePath, common.Hash{}, MapRead, sdb.Version(), nil)
+		sdb.MarkAddressAccess(addr)
 		return nil
 	}
 
@@ -1387,16 +1391,13 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		}()
 	}
 
-	source := StorageRead
-	version := UnknownVersion
-
 	if sdb.versionMap == nil {
 		previous, err = sdb.getStateObject(addr)
 		if err != nil {
 			return err
 		}
 	} else {
-		readAccount, accountSource, accountVersion, err := sdb.getVersionedAccount(addr, true)
+		readAccount, _, _, err := sdb.getVersionedAccount(addr, true)
 
 		if err != nil {
 			return err
@@ -1414,8 +1415,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 
 			previous = newObject(sdb, addr, account, account)
 			previous.selfdestructed = destructed
-			source = accountSource
-			version = accountVersion
 		}
 	}
 
@@ -1446,8 +1445,8 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	}
 
 	// for newly created accounts these synthetic read/writes are used so that account
-	// creation clashes between trnascations get detected
-	sdb.VersionRead(addr, BalancePath, common.Hash{}, source, version, newObj.Balance())
+	// creation clashes between transactions get detected
+	sdb.MarkAddressAccess(addr)
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
 
 	return nil
@@ -1786,6 +1785,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.
 	}
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
+	sdb.addressAccess = make(map[common.Address]struct{})
+	sdb.recordAccess = true
 	return nil
 }
 
@@ -1826,6 +1827,34 @@ func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Ha
 	return sdb.accessList.Contains(addr, slot)
 }
 
+func (sdb *IntraBlockState) markAddressAccess(addr common.Address) {
+	if !sdb.recordAccess || sdb.addressAccess == nil {
+		return
+	}
+	sdb.addressAccess[addr] = struct{}{}
+}
+
+// AccessedAddresses returns and resets the set of addresses touched during the current transaction.
+func (sdb *IntraBlockState) AccessedAddresses() map[common.Address]struct{} {
+	if len(sdb.addressAccess) == 0 {
+		sdb.recordAccess = false
+		sdb.addressAccess = nil
+		return nil
+	}
+	out := make(map[common.Address]struct{}, len(sdb.addressAccess))
+	for addr := range sdb.addressAccess {
+		out[addr] = struct{}{}
+	}
+	sdb.recordAccess = false
+	sdb.addressAccess = nil
+	return out
+}
+
+// MarkAddressAccess exposes recording for callers like the EVM to capture touches without state reads.
+func (sdb *IntraBlockState) MarkAddressAccess(addr common.Address) {
+	sdb.markAddressAccess(addr)
+}
+
 func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
@@ -1834,6 +1863,7 @@ func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.A
 }
 
 func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath, key common.Hash, val any) {
+	sdb.markAddressAccess(addr)
 	if sdb.versionMap != nil {
 		if sdb.versionedWrites == nil {
 			sdb.versionedWrites = WriteSet{}
@@ -1856,6 +1886,7 @@ func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath
 }
 
 func (sdb *IntraBlockState) VersionRead(addr common.Address, path AccountPath, key common.Hash, source ReadSource, version Version, val any) {
+	sdb.markAddressAccess(addr)
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}

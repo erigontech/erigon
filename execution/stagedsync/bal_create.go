@@ -33,6 +33,10 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO) types.BlockAccessList {
 			account := ensureAccountState(ac, vw.Address)
 			updateAccountWrite(account, vw, accessIndex)
 		}
+
+		for addr := range txIO.AccessedAddresses(txIndex) {
+			ensureAccountState(ac, addr)
+		}
 	}
 
 	// construct BAL from map
