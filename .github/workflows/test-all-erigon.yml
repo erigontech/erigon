@@ -138,7 +138,7 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: '1.25'
 
       - name: Cache Chocolatey packages
         if: needs.source-of-changes.outputs.changed_files != 'true'
