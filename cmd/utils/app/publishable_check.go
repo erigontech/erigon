@@ -21,7 +21,7 @@ func CheckFilesForSchema(schema state.SnapNameSchema, checkLastFileTo int64) (la
 	// - starts from 0
 	// - more than 0 files
 	// - no overlaps
-	// each data file has corresponding index/bt etc.
+	// each data file has corresponding index/bt etc.1
 	// versions: between min supported version and max
 	// - lastFileTo check
 	// - sum = maxTo check (probably redundant if no gaps/overlaps)
@@ -98,7 +98,7 @@ func CheckFilesForSchema(schema state.SnapNameSchema, checkLastFileTo int64) (la
 
 	for dataFile := range dataFiles {
 		// corresponding accessor exists?
-		
+
 	}
 
 	return dataFiles[len(dataFiles)-1].To, nil

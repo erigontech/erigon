@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestOpenFolder(t *testing.T) {
@@ -518,7 +519,8 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 
 func registerEntity(dirs datadir.Dirs, name string, id ForkableId) *SnapshotConfig {
 	stepSize := uint64(10)
-	schema := NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)
+	ver := version.V1_0_standart
+	schema := NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, NewE2SnapSchemaVersion(ver, ver))
 
 	snapCfg := NewSnapshotConfig(&SnapshotCreationConfig{
 		RootNumPerStep: 10,

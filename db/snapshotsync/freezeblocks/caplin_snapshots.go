@@ -188,7 +188,7 @@ Loop:
 				return true
 			})
 			if !exists {
-				sn = snapshotsync.NewDirtySegm,ent(
+				sn = snapshotsync.NewDirtySegment(
 					snaptype.BeaconBlocks,
 					f.Version,
 					f.From, f.To,

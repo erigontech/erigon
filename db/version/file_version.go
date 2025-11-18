@@ -127,6 +127,10 @@ func (v Version) IsZero() bool {
 	return v.Major == 0 && v.Minor == 0
 }
 
+func (v Version) IsSearch() bool {
+	return v.Major == math.MaxUint64 && v.Minor == math.MaxUint64
+}
+
 func ParseVersion(v string) (Version, error) {
 	if strings.HasPrefix(v, "v") {
 		versionString := strings.Split(v, "-")[0]
