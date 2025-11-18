@@ -42,6 +42,6 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: 'v2.6.1'
+          version: 'v2.6.2'
 
       - run: make lint
