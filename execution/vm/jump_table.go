@@ -22,7 +22,7 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 type (
@@ -45,10 +45,7 @@ type operation struct {
 	// numPop tells how many stack items are required
 	numPop  int // δ in the Yellow Paper
 	numPush int // α in the Yellow Paper
-	isPush  bool
-	isSwap  bool
-	isDup   bool
-	opNum   int // only for push, swap, dup
+
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
 	string     stringer
@@ -684,8 +681,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       1,
 			string:      stPush1,
 		},
 		PUSH2: {
@@ -693,8 +688,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       2,
 			string:      makePushStringer(2, 2),
 		},
 		PUSH3: {
@@ -702,8 +695,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       3,
 			string:      makePushStringer(3, 3),
 		},
 		PUSH4: {
@@ -711,8 +702,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       4,
 			string:      makePushStringer(4, 4),
 		},
 		PUSH5: {
@@ -720,8 +709,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       5,
 			string:      makePushStringer(5, 5),
 		},
 		PUSH6: {
@@ -729,8 +716,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       6,
 			string:      makePushStringer(6, 6),
 		},
 		PUSH7: {
@@ -738,8 +723,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       7,
 			string:      makePushStringer(7, 7),
 		},
 		PUSH8: {
@@ -747,8 +730,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       8,
 			string:      makePushStringer(8, 8),
 		},
 		PUSH9: {
@@ -756,8 +737,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       9,
 			string:      makePushStringer(9, 9),
 		},
 		PUSH10: {
@@ -765,8 +744,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       10,
 			string:      makePushStringer(10, 10),
 		},
 		PUSH11: {
@@ -774,8 +751,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       11,
 			string:      makePushStringer(11, 11),
 		},
 		PUSH12: {
@@ -783,8 +758,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       12,
 			string:      makePushStringer(12, 12),
 		},
 		PUSH13: {
@@ -792,8 +765,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       13,
 			string:      makePushStringer(13, 13),
 		},
 		PUSH14: {
@@ -801,8 +772,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       14,
 			string:      makePushStringer(14, 14),
 		},
 		PUSH15: {
@@ -810,8 +779,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       15,
 			string:      makePushStringer(15, 15),
 		},
 		PUSH16: {
@@ -819,8 +786,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       16,
 			string:      makePushStringer(16, 16),
 		},
 		PUSH17: {
@@ -828,8 +793,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       17,
 			string:      makePushStringer(17, 17),
 		},
 		PUSH18: {
@@ -837,8 +800,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       18,
 			string:      makePushStringer(18, 18),
 		},
 		PUSH19: {
@@ -846,8 +807,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       19,
 			string:      makePushStringer(19, 19),
 		},
 		PUSH20: {
@@ -855,8 +814,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       20,
 			string:      makePushStringer(20, 20),
 		},
 		PUSH21: {
@@ -864,8 +821,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       21,
 			string:      makePushStringer(21, 21),
 		},
 		PUSH22: {
@@ -873,8 +828,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       22,
 			string:      makePushStringer(22, 22),
 		},
 		PUSH23: {
@@ -882,8 +835,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       23,
 			string:      makePushStringer(23, 23),
 		},
 		PUSH24: {
@@ -891,8 +842,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       24,
 			string:      makePushStringer(24, 24),
 		},
 		PUSH25: {
@@ -900,8 +849,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       25,
 			string:      makePushStringer(25, 25),
 		},
 		PUSH26: {
@@ -909,8 +856,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       26,
 			string:      makePushStringer(26, 26),
 		},
 		PUSH27: {
@@ -918,8 +863,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       27,
 			string:      makePushStringer(27, 27),
 		},
 		PUSH28: {
@@ -927,8 +870,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       28,
 			string:      makePushStringer(28, 28),
 		},
 		PUSH29: {
@@ -936,8 +877,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       29,
 			string:      makePushStringer(29, 29),
 		},
 		PUSH30: {
@@ -945,8 +884,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       30,
 			string:      makePushStringer(30, 30),
 		},
 		PUSH31: {
@@ -954,8 +891,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       31,
 			string:      makePushStringer(31, 31),
 		},
 		PUSH32: {
@@ -963,8 +898,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			isPush:      true,
-			opNum:       32,
 			string:      makePushStringer(32, 32),
 		},
 		DUP1: {
@@ -972,8 +905,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      1,
 			numPush:     2,
-			isDup:       true,
-			opNum:       1,
 			string:      makeDupStringer(1),
 		},
 		DUP2: {
@@ -981,8 +912,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     3,
-			isDup:       true,
-			opNum:       2,
 			string:      makeDupStringer(2),
 		},
 		DUP3: {
@@ -990,8 +919,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      3,
 			numPush:     4,
-			isDup:       true,
-			opNum:       3,
 			string:      makeDupStringer(3),
 		},
 		DUP4: {
@@ -999,8 +926,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      4,
 			numPush:     5,
-			isDup:       true,
-			opNum:       4,
 			string:      makeDupStringer(4),
 		},
 		DUP5: {
@@ -1008,8 +933,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      5,
 			numPush:     6,
-			isDup:       true,
-			opNum:       5,
 			string:      makeDupStringer(5),
 		},
 		DUP6: {
@@ -1017,8 +940,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      6,
 			numPush:     7,
-			isDup:       true,
-			opNum:       6,
 			string:      makeDupStringer(6),
 		},
 		DUP7: {
@@ -1026,8 +947,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      7,
 			numPush:     8,
-			isDup:       true,
-			opNum:       7,
 			string:      makeDupStringer(7),
 		},
 		DUP8: {
@@ -1035,8 +954,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      8,
 			numPush:     9,
-			isDup:       true,
-			opNum:       8,
 			string:      makeDupStringer(8),
 		},
 		DUP9: {
@@ -1044,8 +961,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      9,
 			numPush:     10,
-			isDup:       true,
-			opNum:       9,
 			string:      makeDupStringer(9),
 		},
 		DUP10: {
@@ -1053,8 +968,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      10,
 			numPush:     11,
-			isDup:       true,
-			opNum:       10,
 			string:      makeDupStringer(10),
 		},
 		DUP11: {
@@ -1062,8 +975,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      11,
 			numPush:     12,
-			isDup:       true,
-			opNum:       11,
 			string:      makeDupStringer(11),
 		},
 		DUP12: {
@@ -1071,8 +982,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      12,
 			numPush:     13,
-			isDup:       true,
-			opNum:       12,
 			string:      makeDupStringer(12),
 		},
 		DUP13: {
@@ -1080,8 +989,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      13,
 			numPush:     14,
-			isDup:       true,
-			opNum:       13,
 			string:      makeDupStringer(13),
 		},
 		DUP14: {
@@ -1089,8 +996,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      14,
 			numPush:     15,
-			isDup:       true,
-			opNum:       14,
 			string:      makeDupStringer(14),
 		},
 		DUP15: {
@@ -1098,8 +1003,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      15,
 			numPush:     16,
-			isDup:       true,
-			opNum:       15,
 			string:      makeDupStringer(15),
 		},
 		DUP16: {
@@ -1107,8 +1010,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      16,
 			numPush:     17,
-			isDup:       true,
-			opNum:       16,
 			string:      makeDupStringer(16),
 		},
 		SWAP1: {
@@ -1116,8 +1017,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     2,
-			isSwap:      true,
-			opNum:       1,
 			string:      makeSwapStringer(1),
 		},
 		SWAP2: {
@@ -1125,8 +1024,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      3,
 			numPush:     3,
-			isSwap:      true,
-			opNum:       2,
 			string:      makeSwapStringer(2),
 		},
 		SWAP3: {
@@ -1134,8 +1031,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      4,
 			numPush:     4,
-			isSwap:      true,
-			opNum:       3,
 			string:      makeSwapStringer(3),
 		},
 		SWAP4: {
@@ -1143,8 +1038,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      5,
 			numPush:     5,
-			isSwap:      true,
-			opNum:       4,
 			string:      makeSwapStringer(4),
 		},
 		SWAP5: {
@@ -1152,8 +1045,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      6,
 			numPush:     6,
-			isSwap:      true,
-			opNum:       5,
 			string:      makeSwapStringer(5),
 		},
 		SWAP6: {
@@ -1161,8 +1052,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      7,
 			numPush:     7,
-			isSwap:      true,
-			opNum:       6,
 			string:      makeSwapStringer(6),
 		},
 		SWAP7: {
@@ -1170,8 +1059,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      8,
 			numPush:     8,
-			isSwap:      true,
-			opNum:       7,
 			string:      makeSwapStringer(7),
 		},
 		SWAP8: {
@@ -1179,8 +1066,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      9,
 			numPush:     9,
-			isSwap:      true,
-			opNum:       8,
 			string:      makeSwapStringer(8),
 		},
 		SWAP9: {
@@ -1188,8 +1073,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      10,
 			numPush:     10,
-			isSwap:      true,
-			opNum:       9,
 			string:      makeSwapStringer(9),
 		},
 		SWAP10: {
@@ -1197,8 +1080,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      11,
 			numPush:     11,
-			isSwap:      true,
-			opNum:       10,
 			string:      makeSwapStringer(10),
 		},
 		SWAP11: {
@@ -1206,8 +1087,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      12,
 			numPush:     12,
-			isSwap:      true,
-			opNum:       11,
 			string:      makeSwapStringer(11),
 		},
 		SWAP12: {
@@ -1215,8 +1094,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      13,
 			numPush:     13,
-			isSwap:      true,
-			opNum:       12,
 			string:      makeSwapStringer(12),
 		},
 		SWAP13: {
@@ -1224,8 +1101,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      14,
 			numPush:     14,
-			isSwap:      true,
-			opNum:       13,
 			string:      makeSwapStringer(13),
 		},
 		SWAP14: {
@@ -1233,8 +1108,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      15,
 			numPush:     15,
-			isSwap:      true,
-			opNum:       14,
 			string:      makeSwapStringer(14),
 		},
 		SWAP15: {
@@ -1242,8 +1115,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      16,
 			numPush:     16,
-			isSwap:      true,
-			opNum:       15,
 			string:      makeSwapStringer(15),
 		},
 		SWAP16: {
@@ -1251,8 +1122,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      17,
 			numPush:     17,
-			isSwap:      true,
-			opNum:       16,
 			string:      makeSwapStringer(16),
 		},
 		LOG0: {

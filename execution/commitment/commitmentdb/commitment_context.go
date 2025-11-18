@@ -177,6 +177,11 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.
 	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
+	sdc.trace = trace
+	sdc.patriciaTrie.SetTrace(trace)
+}
+
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,

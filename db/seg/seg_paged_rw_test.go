@@ -77,13 +77,13 @@ func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
 }
 func (w *multyBytesWriter) Bytes() [][]byte { return w.buffer }
 func (w *multyBytesWriter) Reset()          { w.buffer = nil }
-func (w *multyBytesWriter) Compress() error   { return nil }
+func (w *multyBytesWriter) Compress() error { return nil }
 func (w *multyBytesWriter) Count() int      { return 0 }
 func (w *multyBytesWriter) Close()          {}
 func (w *multyBytesWriter) CompressWithCustomMetadata(countMetaField, emptyWordsCountMetaField uint64) error {
 	return nil
 }
-func (w *multyBytesWriter) FileName() string { return "" }
+func (w *multyBytesWriter) FileName() string   { return "" }
 func (w *multyBytesWriter) SetMetadata([]byte) {}
 
 func TestPage(t *testing.T) {
@@ -343,7 +343,7 @@ func BenchmarkPage(b *testing.B) {
 
 	b.Run("get", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			GetFromPage(getKey, buf.Bytes()[0], nil, false)
 		}
 	})

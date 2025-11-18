@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"path/filepath"
 	"strings"
@@ -335,6 +336,20 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 			return h.buildVi(ctx, item, ps)
 		})
 	}
+}
+
+func (h *History) Scan(toTxNum uint64) error {
+	scanResult, err := scanDirs(h.dirs)
+	if err != nil {
+		return err
+	}
+
+	if err := h.openFolder(scanResult); err != nil {
+		return err
+	}
+
+	h.reCalcVisibleFiles(toTxNum)
+	return nil
 }
 
 func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
@@ -1333,6 +1348,67 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 		return nil, err
 	}
 	return stream.UnionKV(itOnDB, itOnFiles, limit), nil
+}
+
+func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) error {
+	if len(ht.iit.files) == 0 {
+		return nil
+	}
+
+	if fromTxNum >= 0 && ht.iit.files.EndTxNum() <= uint64(fromTxNum) {
+		return nil
+	}
+
+	for _, item := range ht.iit.files {
+		if fromTxNum >= 0 && item.endTxNum <= uint64(fromTxNum) {
+			continue
+		}
+		if toTxNum >= 0 && item.startTxNum >= uint64(toTxNum) {
+			break
+		}
+
+		efGetter := ht.iit.dataReader(item.src.decompressor)
+		efGetter.Reset(0)
+
+		for efGetter.HasNext() {
+			key, _ := efGetter.Next(nil)
+			val, _ := efGetter.Next(nil) // encoded EF sequence
+
+			seq := multiencseq.ReadMultiEncSeq(item.startTxNum, val)
+			ss := seq.Iterator(0)
+
+			for ss.HasNext() {
+				txNum, _ := ss.Next()
+
+				var txNumKey [8]byte
+				binary.BigEndian.PutUint64(txNumKey[:], txNum)
+
+				viFile, ok := ht.getFile(txNum)
+				if !ok {
+					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
+				}
+
+				viReader := ht.statelessIdxReader(viFile.i)
+				vOffset, ok := viReader.Lookup2(txNumKey[:], key)
+				if !ok {
+					return fmt.Errorf("HistoryDump: failed to resolve offset in .vi %s file for key [%x]", viFile.Fullpath(), key)
+				}
+
+				vGetter := seg.NewPagedReader(
+					ht.statelessGetter(viFile.i),
+					ht.h.HistoryValuesOnCompressedPage,
+					true,
+				)
+
+				vGetter.Reset(vOffset)
+				val, _ := vGetter.Next(nil)
+
+				fmt.Fprintf(dumpTo, "key: %x, txn: %d, val: %x\n", key, txNum, val)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
