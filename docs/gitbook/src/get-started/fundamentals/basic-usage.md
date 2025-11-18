@@ -4,7 +4,12 @@ description: Command Line Usage and Basic Erigon Configuration
 
 # Basic Usage
 
-Erigon is primarily controlled using the command line, started using the `./build/bin/erigon` command and stopped by pressing `CTRL-C`.
+Erigon is primarily controlled using the command line. Depending on the method of installation you used:
+
+- **Pre-built Binaries**: start erigon from any folder in your terminal with `erigon` and add options
+- **Docker**: use the Docker syntax `docker run -it erigontech/erigon:v3.2.2` or use [Docker Compose](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node#id-2.-configure-and-launch-erigon)
+- **Build from Source**: move your terminal to the directory where you installed Erigon 
+    `cd erigon` and use the command `./build/bin/erigon` command and stopped by pressing `CTRL-C`.
 
 Using the command-line options allows for configurations, and several functionalities can be called using sub commands. To add a configuration flag to the command line simply add the argument and, optionally, its value:
 
