@@ -432,7 +432,7 @@ C:\Users\your-user\erigon.\build\bin\
 You can now start Erigon by simply using:
 
 ```powershell
-start erigon.exe [options]
+erigon.exe [options]
 ```
 
 {% hint style="warning" %}
