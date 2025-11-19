@@ -884,6 +884,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			ss := seq.Iterator(0)
 
 			var dedupVal *[]byte
+			var prevTxNum uint64
 
 			for ss.HasNext() {
 				txNum, err := ss.Next()
@@ -899,12 +900,14 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
 
 				if dedupVal != nil && bytes.Equal(*dedupVal, v) {
-					dedupKeyEFs[string(ci1.key)] = append(dedupKeyEFs[string(ci1.key)], txNum)
+					dedupKeyEFs[string(ci1.key)] = append(dedupKeyEFs[string(ci1.key)], prevTxNum)
+					prevTxNum = txNum
 					continue
 				}
 
 				dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
 				dedupVal = &dd
+				prevTxNum = txNum
 
 				if err = pagedWr.Add(k, v); err != nil {
 					return nil, nil, err
