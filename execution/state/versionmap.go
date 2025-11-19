@@ -278,6 +278,22 @@ func (vm *VersionMap) DeleteAll(addr common.Address, txIdx int) {
 	}
 }
 
+func (vm *VersionMap) ForEachTxWrite(txIdx int, fn func(addr common.Address, path AccountPath, key common.Hash, version Version, data interface{}, complete bool)) {
+	if vm == nil {
+		return
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	for addr, keys := range vm.s {
+		for accountKey, cells := range keys {
+			if cell, ok := cells.Get(txIdx); ok {
+				version := Version{TxIndex: txIdx, Incarnation: cell.incarnation}
+				fn(addr, accountKey.Path, accountKey.Key, version, cell.data, cell.flag == FlagDone)
+			}
+		}
+	}
+}
+
 type VersionValidity int
 
 func (v VersionValidity) String() string {

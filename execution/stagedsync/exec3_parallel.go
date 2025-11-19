@@ -643,15 +643,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if blockResult.BlockNum > 0 {
 					result := blockExecutor.results[len(blockExecutor.results)-1]
 
+					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
+					finalVersion := finalTask.Version()
 					stateUpdates, err := func() (state.StateUpdates, error) {
 						pe.RLock()
 						defer pe.RUnlock()
 
 						reader := state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
-						ibs.SetVersion(result.Version().Incarnation)
-						ibs.SetVersionMap(blockExecutor.versionMap)
-						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
+						postTxIndex := finalVersion.TxIndex
+						ibs.SetVersion(finalVersion.Incarnation)
+						localVersionMap := state.NewVersionMap(nil)
+						ibs.SetVersionMap(localVersionMap)
+						ibs.SetTxContext(finalVersion.BlockNum, postTxIndex)
 
 						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
@@ -685,13 +689,43 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
 						}
 
+						finalReads := ibs.VersionedReads()
+						postVersion := finalVersion
+						postVersion.TxIndex = postTxIndex
+						if finalReads != nil {
+							blockExecutor.blockIO.RecordReads(postVersion, finalReads)
+						}
+
+						finalWrites := ibs.VersionedWrites(true)
+
 						stateWriter := state.NewBufferedWriter(pe.rs, nil)
 
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
 
-						return stateWriter.WriteSet(), nil
+						stateUpdates := stateWriter.WriteSet()
+
+						if len(finalWrites) > 0 {
+							blockExecutor.blockIO.RecordWrites(postVersion, finalWrites)
+							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
+						}
+
+						finalAccesses := map[common.Address]struct{}{}
+						if finalReads != nil {
+							finalReads.Scan(func(vr *state.VersionedRead) bool {
+								finalAccesses[vr.Address] = struct{}{}
+								return true
+							})
+						}
+						for _, w := range finalWrites {
+							finalAccesses[w.Address] = struct{}{}
+						}
+						if len(finalAccesses) > 0 {
+							blockExecutor.blockIO.RecordAccesses(postVersion, finalAccesses)
+						}
+
+						return stateUpdates, nil
 					}()
 
 					if err != nil {
