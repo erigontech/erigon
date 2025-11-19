@@ -1,4 +1,4 @@
-package types
+package txn
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
 	cmath "github.com/erigontech/erigon-lib/common/math"
@@ -33,7 +35,7 @@ func getPooledBuffer(size uint64) ([]byte, *bytes.Buffer, error) {
 	if size > math.MaxInt {
 		return nil, nil, fmt.Errorf("can't get buffer of size %d", size)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	buf := types.EncodeBufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	buf.Grow(int(size))
 	b := buf.Bytes()[:int(size)]
@@ -42,8 +44,8 @@ func getPooledBuffer(size uint64) ([]byte, *bytes.Buffer, error) {
 
 // ArbTx is an Arbitrum transaction.
 type ArbTx struct {
-	BlobTxWrapper
-	inner Transaction // Consensus contents of a transaction
+	types.BlobTxWrapper
+	inner types.Transaction // Consensus contents of a transaction
 	// sidecar *BlobTxSidecar
 	time time.Time // Time first seen locally (spam avoidance)
 
@@ -57,7 +59,7 @@ type ArbTx struct {
 }
 
 // NewTx creates a new transaction.
-func NewArbTx(inner Transaction) *ArbTx {
+func NewArbTx(inner types.Transaction) *ArbTx {
 	tx := new(ArbTx)
 	tx.setDecoded(inner.Unwrap(), 0)
 	return tx
@@ -84,7 +86,7 @@ func (tx *ArbTx) encodeTyped(w *bytes.Buffer) error {
 	return tx.inner.EncodeRLP(w)
 }
 
-func (tx *ArbTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *ArbTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
 	msg, err := tx.Tx.AsMessage(s, baseFee, rules)
 	if err == nil {
 		msg.Tx = tx
@@ -112,7 +114,7 @@ func (tx *ArbTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	case kind == rlp.List:
 		// It's a legacy transaction.
-		var inner LegacyTx
+		var inner types.LegacyTx
 		err := s.Decode(&inner)
 		if err == nil {
 			tx.setDecoded(&inner, rlp.ListSize(size))
@@ -148,7 +150,7 @@ func (tx *ArbTx) DecodeRLP(s *rlp.Stream) error {
 func (tx *ArbTx) UnmarshalBinary(b []byte) error {
 	if len(b) > 0 && b[0] > 0x7f {
 		// It's a legacy transaction.
-		var data LegacyTx
+		var data types.LegacyTx
 		err := rlp.DecodeBytes(b, &data)
 		if err != nil {
 			return err
@@ -166,11 +168,11 @@ func (tx *ArbTx) UnmarshalBinary(b []byte) error {
 }
 
 // decodeTyped decodes a typed transaction from the canonical format.
-func (tx *ArbTx) decodeTyped(b []byte, arbParsing bool) (Transaction, error) {
+func (tx *ArbTx) decodeTyped(b []byte, arbParsing bool) (types.Transaction, error) {
 	if len(b) <= 1 {
 		return nil, errShortTypedTx
 	}
-	var inner Transaction
+	var inner types.Transaction
 	if arbParsing {
 		switch b[0] {
 		case ArbitrumDepositTxType:
@@ -193,14 +195,14 @@ func (tx *ArbTx) decodeTyped(b []byte, arbParsing bool) (Transaction, error) {
 	}
 	if !arbParsing {
 		switch b[0] {
-		case AccessListTxType:
-			inner = new(AccessListTx)
-		case DynamicFeeTxType:
-			inner = new(DynamicFeeTransaction)
-		case BlobTxType:
-			inner = new(BlobTx)
+		case types.AccessListTxType:
+			inner = new(types.AccessListTx)
+		case types.DynamicFeeTxType:
+			inner = new(types.DynamicFeeTransaction)
+		case types.BlobTxType:
+			inner = new(types.BlobTx)
 		default:
-			return nil, ErrTxTypeNotSupported
+			return nil, types.ErrTxTypeNotSupported
 		}
 	}
 	s := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
@@ -209,7 +211,7 @@ func (tx *ArbTx) decodeTyped(b []byte, arbParsing bool) (Transaction, error) {
 }
 
 // setDecoded sets the inner transaction and size after decoding.
-func (tx *ArbTx) setDecoded(inner Transaction, size uint64) {
+func (tx *ArbTx) setDecoded(inner types.Transaction, size uint64) {
 	tx.inner = inner
 	tx.time = time.Now()
 	if size > 0 {
@@ -220,8 +222,8 @@ func (tx *ArbTx) setDecoded(inner Transaction, size uint64) {
 // Protected says whether the transaction is replay-protected.
 func (tx *ArbTx) Protected() bool {
 	switch tx := tx.inner.(type) {
-	case *LegacyTx:
-		return !tx.V.IsZero() && isProtectedV(&tx.V)
+	case *types.LegacyTx:
+		return !tx.V.IsZero() && types.IsProtectedV(&tx.V)
 	default:
 		return true
 	}
@@ -233,7 +235,7 @@ func (tx *ArbTx) Type() uint8 {
 	//return tx.inner.txType()
 }
 
-func (tx *ArbTx) GetInner() Transaction {
+func (tx *ArbTx) GetInner() types.Transaction {
 	return tx.inner
 }
 
@@ -248,7 +250,7 @@ func (tx *ArbTx) ChainId() *big.Int {
 func (tx *ArbTx) Data() []byte { return tx.inner.GetData() }
 
 // AccessList returns the access list of the transaction.
-func (tx *ArbTx) AccessList() AccessList { return tx.inner.GetAccessList() }
+func (tx *ArbTx) AccessList() types.AccessList { return tx.inner.GetAccessList() }
 
 // Gas returns the gas limit of the transaction.
 func (tx *ArbTx) Gas() uint64 { return tx.inner.GetGasLimit() }
@@ -278,7 +280,7 @@ func (tx *ArbTx) To() *common.Address {
 // Cost returns (gas * gasPrice) + (blobGas * blobGasPrice) + value.
 func (tx *ArbTx) Cost() *big.Int {
 	total := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
-	if tx.Type() == BlobTxType {
+	if tx.Type() == types.BlobTxType {
 		total.Add(total, new(big.Int).Mul(tx.BlobGasFeeCap(), new(big.Int).SetUint64(tx.BlobGas())))
 	}
 	total.Add(total, tx.Value())
@@ -350,7 +352,7 @@ func (tx *ArbTx) EffectiveGasTipIntCmp(other *big.Int, baseFee *big.Int) int {
 
 // BlobGas returns the blob gas limit of the transaction for blob transactions, 0 otherwise.
 func (tx *ArbTx) BlobGas() uint64 {
-	if blobtx, ok := tx.inner.(*BlobTx); ok {
+	if blobtx, ok := tx.inner.(*types.BlobTx); ok {
 		return blobtx.GetBlobGas()
 	}
 	return 0
@@ -358,7 +360,7 @@ func (tx *ArbTx) BlobGas() uint64 {
 
 // BlobGasFeeCap returns the blob gas fee cap per blob gas of the transaction for blob transactions, nil otherwise.
 func (tx *ArbTx) BlobGasFeeCap() *big.Int {
-	if blobtx, ok := tx.inner.(*BlobTx); ok {
+	if blobtx, ok := tx.inner.(*types.BlobTx); ok {
 		return blobtx.GetFeeCap().ToBig()
 	}
 	return nil
@@ -366,14 +368,14 @@ func (tx *ArbTx) BlobGasFeeCap() *big.Int {
 
 // BlobHashes returns the hashes of the blob commitments for blob transactions, nil otherwise.
 func (tx *ArbTx) BlobHashes() []common.Hash {
-	if blobtx, ok := tx.inner.(*BlobTx); ok {
+	if blobtx, ok := tx.inner.(*types.BlobTx); ok {
 		return blobtx.GetBlobHashes()
 	}
 	return nil
 }
 
 // BlobTxSidecar returns the sidecar of a blob transaction, nil otherwise.
-func (tx *ArbTx) BlobTxSidecar() *BlobTxWrapper {
+func (tx *ArbTx) BlobTxSidecar() *types.BlobTxWrapper {
 	//if blobtx, ok := tx.inner.(*BlobTx); ok {
 	//	//return blobtx.Get
 	//}
@@ -445,7 +447,7 @@ func (tx *ArbTx) BlobGasFeeCapIntCmp(other *big.Int) int {
 
 // WithBlobTxSidecar returns a copy of tx with the blob sidecar added.
 // TODO figure out how to add the sidecar
-func (tx *ArbTx) WithBlobTxSidecar(sideCar *BlobTxWrapper) *ArbTx {
+func (tx *ArbTx) WithBlobTxSidecar(sideCar *types.BlobTxWrapper) *ArbTx {
 	//blobtx, ok := tx.inner.(*BlobTx)
 	//if !ok {
 	//	return tx
@@ -486,12 +488,12 @@ func (tx *ArbTx) Hash() common.Hash {
 	}
 
 	var h common.Hash
-	if tx.Type() == LegacyTxType {
-		h = rlpHash(tx.inner)
+	if tx.Type() == types.LegacyTxType {
+		h = rlp.RlpHash(tx.inner)
 	} else if tx.Type() == ArbitrumLegacyTxType {
 		h = tx.inner.(*ArbitrumLegacyTxData).HashOverride
 	} else {
-		h = prefixedRlpHash(tx.Type(), tx.inner)
+		h = types.PrefixedRlpHash(tx.Type(), tx.inner)
 	}
 	tx.hash.Store(h)
 	return h
@@ -543,10 +545,10 @@ func (tx *ArbTx) Hash() common.Hash {
 // ArbTxs implements DerivableList for transactions.
 type ArbTxs []*ArbTx
 
-func WrapArbTransactions(txs ArbTxs) Transactions {
-	txns := make([]Transaction, len(txs))
+func WrapArbTransactions(txs ArbTxs) types.Transactions {
+	txns := make([]types.Transaction, len(txs))
 	for i := 0; i < len(txs); i++ {
-		txns[i] = Transaction(txs[i])
+		txns[i] = types.Transaction(txs[i])
 	}
 	return txns
 }
@@ -564,7 +566,7 @@ func (s ArbTxs) EncodeIndex(i int, w *bytes.Buffer) {
 	// case ArbitrumLegacyTxType:
 	// arbData := tx.inner.(*ArbitrumLegacyTxData) //
 	// arbData.EncodeOnlyLegacyInto(w)
-	case ArbitrumLegacyTxType, LegacyTxType:
+	case ArbitrumLegacyTxType, types.LegacyTxType:
 		rlp.Encode(w, tx.inner)
 	default:
 		tx.encodeTyped(w)
@@ -626,31 +628,32 @@ func copyAddressPtr(a *common.Address) *common.Address {
 }
 
 // // TransactionToMessage converts a transaction into a Message.
-func TransactionToMessage(tx Transaction, s ArbitrumSigner, baseFee *big.Int, runmode MessageRunMode) (msg *Message, err error) {
+func TransactionToMessage(tx types.Transaction, s ArbitrumSigner, baseFee *big.Int, runmode types.MessageRunMode) (msg *types.Message, err error) {
 	// tx.AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules)
-	msg = &Message{
+	msg = &types.Message{
 		TxRunMode: runmode,
 		Tx:        tx,
-
-		nonce:    tx.GetNonce(),
-		gasLimit: tx.GetGasLimit(),
-		gasPrice: *tx.GetFeeCap(),
-		feeCap:   *tx.GetFeeCap(),
-		tipCap:   *tx.GetTipCap(),
-		to:       tx.GetTo(),
-		// value:             tx.GetValue(),
-		amount:            *tx.GetValue(), // TODO amount is value?
-		data:              tx.GetData(),
-		accessList:        tx.GetAccessList(),
-		SkipAccountChecks: false, // tx.SkipAccountChecks(), // TODO Arbitrum upstream this was init'd to false
-		blobHashes:        tx.GetBlobHashes(),
-		// maxFeePerBlobGas:  tx.GetBlobGasFeeCap(),
-		// BlobGasFeeCap:     tx.GetBlobGasFeeCap(), // TODO
 	}
+	msg.SetNonce(tx.GetNonce())
+	msg.SetGasLimit(tx.GetGasLimit())
+	msg.SetGasPrice(tx.GetFeeCap())
+	msg.SetFeeCap(tx.GetFeeCap())
+	msg.SetTip(tx.GetTipCap())
+	msg.SetTo(tx.GetTo())
+	msg.SetAmount(tx.GetValue())
+	msg.SetData(tx.GetData())
+	msg.SetAccessList(tx.GetAccessList())
+	msg.SetSkipAccountCheck(false)
+	msg.SetBlobHashes(tx.GetBlobHashes())
+
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
+		var gasPrice uint256.Int
+
+		gasPrice.SetFromBig(cmath.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+		msg.SetGasPrice(&gasPrice)
 	}
-	msg.from, err = s.Sender(tx)
+	sender, err := s.Sender(tx)
+	msg.SetFrom(&sender)
 	return msg, err
 }

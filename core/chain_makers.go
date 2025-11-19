@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	arbBlocks "github.com/erigontech/erigon/arb/blocks"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/kv"
@@ -435,7 +436,7 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 
 	var arbosVersion uint64
 	if chainConfig.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		arbosVersion = arbBlocks.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	}
 
 	if chainConfig.IsCancun(header.Time, arbosVersion) {

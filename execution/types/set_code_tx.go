@@ -101,8 +101,8 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = SetCodeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -172,7 +172,7 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(SetCodeTxType, []interface{}{
+	hash := PrefixedRlpHash(SetCodeTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -190,7 +190,7 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 }
 
 func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		SetCodeTxType,
 		[]interface{}{
 			chainID,
@@ -212,8 +212,8 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err
