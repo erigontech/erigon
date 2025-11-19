@@ -1829,14 +1829,14 @@ func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx,
 
 func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
-		return at.d[domain].getLatest(k, tx, metrics, start)
+		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
 	}
 
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
 	if err != nil {
 		return nil, kv.Step(0), false, err
 	}
-	if ok && step < maxStep {
+	if ok && step <= maxStep {
 		if metrics != nil {
 			metrics.UpdateDbReads(domain, start)
 		}

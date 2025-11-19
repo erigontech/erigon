@@ -237,7 +237,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
 							}
 
-							var trace bool
+							trace := dbg.TraceDomainIO && !dbg.BatchCommitments
 							if dbg.TraceBlock(applyResult.BlockNum) {
 								fmt.Println(applyResult.BlockNum, "Commitment")
 								trace = true
