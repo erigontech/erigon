@@ -111,7 +111,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 // Reproduce an issue in
 // tests/berlin/eip2930_access_list/test_tx_intrinsic_gas.py::test_tx_intrinsic_gas[fork_Paris-tx_type_2-blockchain_test_from_state_test-below_intrinsic_False-access_list_2_address_empty_keys-data_1_non_zero_byte]
 // which occurs when run via eels/consume-rlp.
-// Apparently calling reset on a HexPatriciaHashed leads to an incorrect state root.
+// Apparently calling Reset on a HexPatriciaHashed leads to an incorrect state root.
 func TestHexPatriciaHashedResetThenUpdate(t *testing.T) {
 	t.Parallel()
 
@@ -143,8 +143,8 @@ func TestHexPatriciaHashedResetThenUpdate(t *testing.T) {
 	hph.Reset()
 
 	plainKeys, updates = NewUpdateBuilder().
-		Nonce(addr1, 1).
 		Balance256(addr1, balanceB).
+		Nonce(addr1, 1).
 		Build()
 
 	WrapKeyUpdatesInto(t, upds, plainKeys, updates)
