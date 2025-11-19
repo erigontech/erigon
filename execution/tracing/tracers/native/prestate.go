@@ -80,6 +80,7 @@ type prestateTracerConfig struct {
 	DiffMode       bool `json:"diffMode"`       // If true, this tracer will return state modifications
 	DisableCode    bool `json:"disableCode"`    // If true, this tracer will not return the contract code
 	DisableStorage bool `json:"disableStorage"` // If true, this tracer will not return the contract storage
+	IncludeEmpty   bool `json:"includeEmpty"`   // If true, this tracer will return empty state objects
 }
 
 func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
@@ -89,6 +90,12 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			return nil, err
 		}
 	}
+	// Diff mode has special semantics around account creating and deletion which
+	// requires it to include empty accounts and storage.
+	if config.DiffMode && config.IncludeEmpty {
+		return nil, fmt.Errorf("cannot use diffMode with includeEmpty")
+	}
+
 	t := &prestateTracer{
 		pre:     state{},
 		post:    state{},
@@ -102,6 +109,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnTxStart: t.OnTxStart,
 			OnTxEnd:   t.OnTxEnd,
 			OnOpcode:  t.OnOpcode,
+			OnExit:    t.OnExit,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -119,6 +127,20 @@ func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 		if s := t.pre[t.to]; s != nil && !s.exists() {
 			// Exclude newly created contract.
 			delete(t.pre, t.to)
+		}
+	}
+}
+
+// ExitHook is invoked when the processing of a message ends.
+func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if reverted {
+		// clear the created or deleted address beacuse the tx is reverted; and so avoid to notify wrong state change
+		for addr := range t.created {
+			delete(t.created, addr)
+		}
+
+		for addr := range t.deleted {
+			delete(t.deleted, addr)
 		}
 	}
 }
@@ -207,10 +229,25 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 }
 
 func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
-	if !t.config.DiffMode {
+	if err != nil {
 		return
 	}
+	if t.config.DiffMode {
+		t.processDiffState()
+	}
+	// Remove accounts that were empty prior to execution. Unless
+	// user requested to include empty accounts.
+	if t.config.IncludeEmpty {
+		return
+	}
+	for addr := range t.pre {
+		if s := t.pre[addr]; s != nil && !s.exists() {
+			delete(t.pre, addr)
+		}
+	}
+}
 
+func (t *prestateTracer) processDiffState() {
 	for addr, state := range t.pre {
 		// The deleted account's state is pruned from `post` but kept in `pre`
 		if _, ok := t.deleted[addr]; ok {
@@ -279,13 +316,6 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		} else {
 			// if state is not modified, then no need to include into the pre state
 			delete(t.pre, addr)
-		}
-	}
-	// the new created contracts' prestate were empty, so delete them
-	for a := range t.created {
-		// the created contract maybe exists in statedb before the creating tx
-		if s := t.pre[a]; s != nil && !s.exists() {
-			delete(t.pre, a)
 		}
 	}
 }

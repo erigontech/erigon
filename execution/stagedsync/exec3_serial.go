@@ -19,8 +19,8 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
@@ -92,7 +92,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
-		blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			getHashFnMutex.Lock()
 			defer getHashFnMutex.Unlock()
 			return se.getHeader(ctx, hash, number)
@@ -147,7 +147,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return b.HeaderNoCopy(), rwTx, nil
 		}
 
-		if !dbg.BatchCommitments || shouldGenerateChangesets {
+		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
@@ -160,10 +160,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 
 			computeCommitmentDuration += time.Since(start)
-			se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-			if !se.inMemExec {
-				if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
-					return nil, rwTx, err
+			if shouldGenerateChangesets {
+				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
+				if !se.inMemExec {
+					if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
+						return nil, rwTx, err
+					}
 				}
 			}
 			se.doms.SetChangesetAccumulator(nil)
@@ -369,12 +371,12 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
-	var gasPool *core.GasPool
+	var gasPool *protocol.GasPool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
-			gasPool = core.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
+			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
 		}
 
 		txTask.ResetGasPool(gasPool)
@@ -405,7 +407,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					ret, err := core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
+					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
 					if err != nil {
 						return nil, err
 					}
@@ -435,7 +437,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := protocol.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
