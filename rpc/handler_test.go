@@ -101,7 +101,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			cb := &callback{
 				fn:          reflect.ValueOf(dummyFunc),
 				rcvr:        reflect.Value{},
-				argTypes:    []reflect.Type{reflect.TypeOf(arg1)},
+				argTypes:    []reflect.Type{reflect.TypeFor[int]()},
 				hasCtx:      false,
 				errPos:      0,
 				isSubscribe: false,
