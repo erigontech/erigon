@@ -364,7 +364,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 
 func (s *Sentinel) Stop() {
 	s.listener.Close()
-	s.subManager.Close()
+	//s.subManager.Close()
 	s.p2p.Host().Close()
 }
 
