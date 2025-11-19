@@ -1043,7 +1043,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
-		return nil // Exec finished
 	}
 }
 

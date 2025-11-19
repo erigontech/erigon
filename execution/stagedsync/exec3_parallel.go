@@ -521,11 +521,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if pe.applyTx == nil {
-				temporalDb, ok := pe.cfg.db.(kv.TemporalRwDB)
-				if !ok {
-					return errors.New("pe.cfg.db is not a temporal db")
-				}
-				pe.applyTx, err = temporalDb.BeginTemporalRo(ctx) //nolint
+				pe.applyTx, err = pe.cfg.db.BeginTemporalRo(ctx) //nolint
 
 				if err != nil {
 					return err

@@ -136,11 +136,7 @@ func ExecV3(ctx context.Context,
 		applyTx = rwTx
 	} else {
 		var err error
-		temporalDb, ok := cfg.db.(kv.TemporalRwDB)
-		if !ok {
-			return errors.New("cfg.db is not a temporal db")
-		}
-		applyTx, err = temporalDb.BeginTemporalRw(ctx) //nolint
+		applyTx, err = cfg.db.BeginTemporalRw(ctx) //nolint
 		if err != nil {
 			return err
 		}
