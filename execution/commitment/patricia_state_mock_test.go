@@ -142,7 +142,7 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 		return nil, nil
 	}
 	if pos != len(exBytes) {
-		ms.t.Fatalf("GetStorage key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
+		ms.t.Fatalf("GetStorage key [%x] leftover bytes in [%x], consumed %x", plainKey, exBytes, pos)
 		return nil, nil
 	}
 	if ex.Flags&BalanceUpdate != 0 {
@@ -237,9 +237,13 @@ func NewUpdateBuilder() *UpdateBuilder {
 }
 
 func (ub *UpdateBuilder) Balance(addr string, balance uint64) *UpdateBuilder {
+	return ub.Balance256(addr, uint256.NewInt(balance))
+}
+
+func (ub *UpdateBuilder) Balance256(addr string, balance *uint256.Int) *UpdateBuilder {
 	sk := string(decodeHex(addr))
 	delete(ub.deletes, sk)
-	ub.balances[sk] = uint256.NewInt(balance)
+	ub.balances[sk] = balance
 	ub.keyset[sk] = struct{}{}
 	return ub
 }

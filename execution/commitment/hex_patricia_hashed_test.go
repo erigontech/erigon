@@ -27,9 +27,11 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -104,6 +106,82 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Logf("rootHash %x\n", thirdRootHash)
 	require.NoError(t, err)
 	require.NotEqual(t, secondRootHash, thirdRootHash)
+}
+
+// Reproduce an issue in
+// tests/berlin/eip2930_access_list/test_tx_intrinsic_gas.py::test_tx_intrinsic_gas[fork_Paris-tx_type_2-blockchain_test_from_state_test-below_intrinsic_False-access_list_2_address_empty_keys-data_1_non_zero_byte]
+// which occurs when run via eels/consume-rlp.
+// Apparently calling reset on a HexPatriciaHashed leads to an incorrect state root.
+func TestHexPatriciaHashedResetThenUpdate(t *testing.T) {
+	t.Parallel()
+
+	addr1 := "03ad78f3d4f2a13b2f91630a611799049ef819a1"
+	addr2 := "65e12864ab44e436ef786dc6e90a060d5c7b1212"
+	balanceA := uint256.MustFromHex("0x3635c9adc5dea00000")
+	balanceB := uint256.MustFromHex("0x3635c9adc5de9d3cc8")
+	codeHash := crypto.Keccak256Hash(common.FromHex("0x6001600101600055"))
+
+	ctx := context.Background()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(length.Addr, ms)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance256(addr1, balanceA).
+		Nonce(addr2, 1).
+		CodeHash(addr2, common.Bytes2Hex(codeHash[:])).
+		Build()
+
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	firstRootHash, err := hph.Process(ctx, upds, "", nil)
+	require.NoError(t, err)
+	t.Logf("firstRootHash %x\n", firstRootHash)
+
+	hph.Reset()
+
+	plainKeys, updates = NewUpdateBuilder().
+		Nonce(addr1, 1).
+		Balance256(addr1, balanceB).
+		Build()
+
+	WrapKeyUpdatesInto(t, upds, plainKeys, updates)
+
+	err = ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	secondRootHash, err := hph.Process(ctx, upds, "", nil)
+	require.NoError(t, err)
+	t.Logf("secondRootHash %x\n", secondRootHash)
+	assert.NotEqual(t, firstRootHash, secondRootHash)
+
+	upds.Close()
+
+	// Now calculate the final state from scratch in one go (all updates combined).
+	ms = NewMockState(t)
+	hph = NewHexPatriciaHashed(length.Addr, ms)
+	plainKeys, updates = NewUpdateBuilder().
+		Balance256(addr1, balanceB).
+		Nonce(addr1, 1).
+		Nonce(addr2, 1).
+		CodeHash(addr2, common.Bytes2Hex(codeHash[:])).
+		Build()
+
+	upds = WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	err = ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	thirdRootHash, err := hph.Process(ctx, upds, "", nil)
+	require.NoError(t, err)
+	t.Logf("thirdRootHash %x\n", thirdRootHash)
+
+	// We should get the same root as when splitting the updates in two
+	// with hph.Reset() in between.
+	assert.Equal(t, secondRootHash, thirdRootHash)
 }
 
 func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
