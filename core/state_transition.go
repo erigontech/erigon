@@ -561,9 +561,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		multiGas, floorGas7623, overflow = multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
 		gas = multiGas.SingleGas()
 	} else {
+		// Check clauses 4-5, subtract intrinsic gas if everything is correct
 		gas, floorGas7623, overflow = fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
 	}
-	// Check clauses 4-5, subtract intrinsic gas if everything is correct
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -640,12 +640,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 
 		if st.evm.ProcessingHook.IsArbitrum() {
-			var refund uint64
 			st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
 			if nonrefundable < st.gasUsed() {
 				// Apply refund counter, capped to a refund quotient
-				refund = (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
+				refund := (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
 				if refund > st.state.GetRefund() {
 					refund = st.state.GetRefund()
 				}

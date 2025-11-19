@@ -404,7 +404,7 @@ func IntrinsicMultiGas(data []byte, accessListLen, storageKeysLen uint64, isCont
 		}
 	}
 
-	var gas MultiGas
+	gas := ZeroGas()
 	// Set the starting gas for the raw transaction
 	if isContractCreation && isEIP2 {
 		gas.SaturatingIncrementInto(ResourceKindComputation, params.TxGasContractCreation)
