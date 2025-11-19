@@ -47,7 +47,7 @@ This path offers the simplest validator configuration by using Erigon's embedded
       --port: 30304 \
       --p2p.allowed-ports: 30310, 30311, 30312, 30313, 30314, 30315, 30316
     ```
-3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](fundamentals/interacting-with-erigon/) or a health check.
+3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../fundamentals/interacting-with-erigon/interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
    * To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](fundamentals/staking/caplin.md) for additional configuration recommendations..
@@ -70,7 +70,7 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
       --port: 30304 \
       --p2p.allowed-ports: 30310, 30311, 30312, 30313, 30314, 30315, 30316
     ```
-3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](fundamentals/interacting-with-erigon/) or a health check.
+3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../fundamentals/interacting-with-erigon/interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, **shut down** both Geth and Erigon. **Keep the external CL client running.**
 5. **Reconfiguration and Restart**: Restart Erigon, ensuring it uses the **original Engine API port and JWT secret** that your old EL client used. See [here](fundamentals/staking/external-consensus-client-as-validator.md) for details.
 6. **Decommission Old Setup**: Verify Erigon and your external CL client are proposing and attesting blocks correctly. If confirmed, safely remove Geth and its data.
