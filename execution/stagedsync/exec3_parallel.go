@@ -682,7 +682,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						if err != nil {
-							return state.StateUpdates{}, fmt.Errorf("can't finalize block: %w", err)
+							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
 						}
 
 						stateWriter := state.NewBufferedWriter(pe.rs, nil)

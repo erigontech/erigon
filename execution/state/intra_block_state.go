@@ -1391,13 +1391,16 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		}()
 	}
 
+	source := StorageRead
+	version := UnknownVersion
+
 	if sdb.versionMap == nil {
 		previous, err = sdb.getStateObject(addr)
 		if err != nil {
 			return err
 		}
 	} else {
-		readAccount, _, _, err := sdb.getVersionedAccount(addr, true)
+		readAccount, accountSource, accountVersion, err := sdb.getVersionedAccount(addr, true)
 
 		if err != nil {
 			return err
@@ -1415,6 +1418,8 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 
 			previous = newObject(sdb, addr, account, account)
 			previous.selfdestructed = destructed
+			source = accountSource
+			version = accountVersion
 		}
 	}
 
@@ -1444,6 +1449,9 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		newObj.selfdestructed = false
 	}
 
+	// for newly created accounts these synthetic read/writes are used so that account
+	// creation clashes between trnascations get detected
+	sdb.VersionRead(addr, BalancePath, common.Hash{}, source, version, newObj.Balance())
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
 	return nil
 }
