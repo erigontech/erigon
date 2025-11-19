@@ -1,4 +1,4 @@
-package types
+package txn
 
 import (
 	"bytes"
@@ -13,9 +13,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/arb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 )
 
@@ -46,6 +46,17 @@ type FallbackClient interface {
 	CallContext(ctx context.Context, result interface{}, method string, args ...interface{}) error
 }
 
+// Transaction types.
+const (
+	ArbitrumDepositTxType         byte = 0x64
+	ArbitrumUnsignedTxType        byte = 0x65
+	ArbitrumContractTxType        byte = 0x66
+	ArbitrumRetryTxType           byte = 0x68
+	ArbitrumSubmitRetryableTxType byte = 0x69
+	ArbitrumInternalTxType        byte = 0x6A
+	ArbitrumLegacyTxType          byte = 0x78
+)
+
 var bigZero = big.NewInt(0)
 var uintZero = uint256.NewInt(0)
 
@@ -58,6 +69,16 @@ var skipAccountChecks = [...]bool{
 	ArbitrumUnsignedTxType:        false,
 }
 
+func init() {
+	types.RegisterTransaction(ArbitrumDepositTxType, createArbitrumDespoitTxn)
+	types.RegisterTransaction(ArbitrumRetryTxType, createArbitrumRetryTx)
+	types.RegisterTransaction(ArbitrumSubmitRetryableTxType, createArbitrumSubmitRetryableTx)
+	types.RegisterTransaction(ArbitrumInternalTxType, createArbitrumInternalTx)
+	types.RegisterTransaction(ArbitrumContractTxType, createArbitrumContractTx)
+	types.RegisterTransaction(ArbitrumUnsignedTxType, createArbitrumUnsignedTx)
+	types.RegisterTransaction(ArbitrumLegacyTxType, createArbitrumLegacyTx)
+}
+
 // func (tx *LegacyTx) skipAccountChecks() bool                  { return false }
 // func (tx *AccessListTx) skipAccountChecks() bool              { return false }
 // func (tx *DynamicFeeTransaction) skipAccountChecks() bool     { return false }
@@ -68,8 +89,12 @@ var skipAccountChecks = [...]bool{
 // func (tx *ArbitrumDepositTx) skipAccountChecks() bool         { return true }
 // func (tx *ArbitrumInternalTx) skipAccountChecks() bool        { return true }
 
+func createArbitrumUnsignedTx() types.Transaction {
+	return &ArbitrumUnsignedTx{}
+}
+
 type ArbitrumUnsignedTx struct {
-	arb.NoTimeBoosted
+	NoTimeBoosted
 	ChainId *big.Int
 	From    common.Address
 
@@ -81,7 +106,7 @@ type ArbitrumUnsignedTx struct {
 	Data      []byte          // contract invocation input data
 }
 
-func (tx *ArbitrumUnsignedTx) copy() Transaction {
+func (tx *ArbitrumUnsignedTx) copy() types.Transaction {
 	cpy := &ArbitrumUnsignedTx{
 		ChainId:   new(big.Int),
 		Nonce:     tx.Nonce,
@@ -108,20 +133,20 @@ func (tx *ArbitrumUnsignedTx) copy() Transaction {
 	return cpy
 }
 
-func (tx *ArbitrumUnsignedTx) Type() byte                         { return ArbitrumUnsignedTxType }
-func (tx *ArbitrumUnsignedTx) GetChainID() *uint256.Int           { return uint256.MustFromBig(tx.ChainId) }
-func (tx *ArbitrumUnsignedTx) GetNonce() uint64                   { return tx.Nonce }
-func (tx *ArbitrumUnsignedTx) GetPrice() *uint256.Int             { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumUnsignedTx) GetTipCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
-func (tx *ArbitrumUnsignedTx) GetGasLimit() uint64                { return tx.Gas }
-func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64                 { return 0 }
-func (tx *ArbitrumUnsignedTx) GetValue() *uint256.Int             { return uint256.MustFromBig(tx.Value) }
-func (tx *ArbitrumUnsignedTx) GetTo() *common.Address             { return tx.To }
-func (tx *ArbitrumUnsignedTx) GetData() []byte                    { return tx.Data }
-func (tx *ArbitrumUnsignedTx) GetAccessList() AccessList          { return nil }
-func (tx *ArbitrumUnsignedTx) GetFeeCap() *uint256.Int            { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumUnsignedTx) GetAuthorizations() []Authorization { return nil }
+func (tx *ArbitrumUnsignedTx) Type() byte                               { return ArbitrumUnsignedTxType }
+func (tx *ArbitrumUnsignedTx) GetChainID() *uint256.Int                 { return uint256.MustFromBig(tx.ChainId) }
+func (tx *ArbitrumUnsignedTx) GetNonce() uint64                         { return tx.Nonce }
+func (tx *ArbitrumUnsignedTx) GetPrice() *uint256.Int                   { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumUnsignedTx) GetTipCap() *uint256.Int                  { return uintZero }
+func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash             { return []common.Hash{} }
+func (tx *ArbitrumUnsignedTx) GetGasLimit() uint64                      { return tx.Gas }
+func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64                       { return 0 }
+func (tx *ArbitrumUnsignedTx) GetValue() *uint256.Int                   { return uint256.MustFromBig(tx.Value) }
+func (tx *ArbitrumUnsignedTx) GetTo() *common.Address                   { return tx.To }
+func (tx *ArbitrumUnsignedTx) GetData() []byte                          { return tx.Data }
+func (tx *ArbitrumUnsignedTx) GetAccessList() types.AccessList          { return nil }
+func (tx *ArbitrumUnsignedTx) GetFeeCap() *uint256.Int                  { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumUnsignedTx) GetAuthorizations() []types.Authorization { return nil }
 
 func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
@@ -131,38 +156,33 @@ func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 	return res.Set(baseFee)
 }
 
-func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	msg := &Message{
-		gasPrice:   *tx.GetPrice(),
-		tipCap:     *tx.GetTipCap(),
-		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGasLimit(),
-		nonce:      tx.GetNonce(),
-		accessList: tx.GetAccessList(),
-		from:       tx.From,
-		to:         tx.GetTo(),
-		data:       tx.GetData(),
-		amount:     *tx.GetValue(),
-		checkNonce: !skipAccountChecks[tx.Type()],
-
-		// TxRunMode: MessageRunMode, // must be set separately?
+func (tx *ArbitrumUnsignedTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
+	msg := &types.Message{
 		Tx: tx,
 	}
-	// if baseFee != nil {
-	// 	msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
-	// }
+	msg.SetGasPrice(tx.GetPrice())
+	msg.SetTip(tx.GetTipCap())
+	msg.SetFeeCap(tx.GetFeeCap())
+	msg.SetGasLimit(tx.GetGasLimit())
+	msg.SetNonce(tx.GetNonce())
+	msg.SetAccessList(tx.GetAccessList())
+	msg.SetFrom(&tx.From)
+	msg.SetTo(tx.GetTo())
+	msg.SetData(tx.GetData())
+	msg.SetAmount(tx.GetValue())
+	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
 
 	return msg, nil
 }
 
-func (tx *ArbitrumUnsignedTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *ArbitrumUnsignedTx) WithSignature(signer types.Signer, sig []byte) (types.Transaction, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
 func (tx *ArbitrumUnsignedTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
 		tx.ChainId,
 		tx.From,
 		tx.Nonce,
@@ -311,8 +331,8 @@ func (tx *ArbitrumUnsignedTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -403,8 +423,8 @@ func (tx *ArbitrumUnsignedTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumUnsignedTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumUnsignedTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -416,12 +436,12 @@ func (tx *ArbitrumUnsignedTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumUnsignedTx) Sender(signer Signer) (common.Address, error) {
+func (tx *ArbitrumUnsignedTx) Sender(signer types.Signer) (common.Address, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (tx *ArbitrumUnsignedTx) cachedSender() (common.Address, bool) {
+func (tx *ArbitrumUnsignedTx) CachedSender() (common.Address, bool) {
 	return tx.From, true
 }
 
@@ -437,7 +457,7 @@ func (tx *ArbitrumUnsignedTx) IsContractDeploy() bool {
 	return tx.To == nil
 }
 
-func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
+func (tx *ArbitrumUnsignedTx) Unwrap() types.Transaction {
 	//TODO implement me
 	panic("implement me")
 }
@@ -459,8 +479,12 @@ func (tx *ArbitrumUnsignedTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	return dst.Set(baseFee)
 //}
 
+func createArbitrumContractTx() types.Transaction {
+	return &ArbitrumContractTx{}
+}
+
 type ArbitrumContractTx struct {
-	arb.NoTimeBoosted
+	NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
 	From      common.Address
@@ -498,20 +522,20 @@ func (tx *ArbitrumContractTx) copy() *ArbitrumContractTx {
 	}
 	return cpy
 }
-func (tx *ArbitrumContractTx) Type() byte                         { return ArbitrumContractTxType }
-func (tx *ArbitrumContractTx) GetChainID() *uint256.Int           { return uint256.MustFromBig(tx.ChainId) }
-func (tx *ArbitrumContractTx) GetNonce() uint64                   { return 0 }
-func (tx *ArbitrumContractTx) GetPrice() *uint256.Int             { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumContractTx) GetTipCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumContractTx) GetFeeCap() *uint256.Int            { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumContractTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
-func (tx *ArbitrumContractTx) GetGasLimit() uint64                { return tx.Gas }
-func (tx *ArbitrumContractTx) GetBlobGas() uint64                 { return 0 }
-func (tx *ArbitrumContractTx) GetData() []byte                    { return tx.Data }
-func (tx *ArbitrumContractTx) GetValue() *uint256.Int             { return uint256.MustFromBig(tx.Value) }
-func (tx *ArbitrumContractTx) GetTo() *common.Address             { return tx.To }
-func (tx *ArbitrumContractTx) GetAccessList() AccessList          { return nil }
-func (tx *ArbitrumContractTx) GetAuthorizations() []Authorization { return nil }
+func (tx *ArbitrumContractTx) Type() byte                               { return ArbitrumContractTxType }
+func (tx *ArbitrumContractTx) GetChainID() *uint256.Int                 { return uint256.MustFromBig(tx.ChainId) }
+func (tx *ArbitrumContractTx) GetNonce() uint64                         { return 0 }
+func (tx *ArbitrumContractTx) GetPrice() *uint256.Int                   { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumContractTx) GetTipCap() *uint256.Int                  { return uintZero }
+func (tx *ArbitrumContractTx) GetFeeCap() *uint256.Int                  { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumContractTx) GetBlobHashes() []common.Hash             { return []common.Hash{} }
+func (tx *ArbitrumContractTx) GetGasLimit() uint64                      { return tx.Gas }
+func (tx *ArbitrumContractTx) GetBlobGas() uint64                       { return 0 }
+func (tx *ArbitrumContractTx) GetData() []byte                          { return tx.Data }
+func (tx *ArbitrumContractTx) GetValue() *uint256.Int                   { return uint256.MustFromBig(tx.Value) }
+func (tx *ArbitrumContractTx) GetTo() *common.Address                   { return tx.To }
+func (tx *ArbitrumContractTx) GetAccessList() types.AccessList          { return nil }
+func (tx *ArbitrumContractTx) GetAuthorizations() []types.Authorization { return nil }
 
 func (tx *ArbitrumContractTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
@@ -524,36 +548,41 @@ func (tx *ArbitrumContractTx) RawSignatureValues() (*uint256.Int, *uint256.Int, 
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	msg := &Message{
-		gasPrice:   *tx.GetPrice(),
-		tipCap:     *tx.GetTipCap(),
-		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGasLimit(),
-		nonce:      tx.GetNonce(),
-		accessList: tx.GetAccessList(),
-		from:       tx.From,
-		to:         tx.GetTo(),
-		data:       tx.GetData(),
-		amount:     *tx.GetValue(),
-		checkNonce: !skipAccountChecks[tx.Type()],
-
+func (tx *ArbitrumContractTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
+	msg := &types.Message{
 		Tx: tx,
 	}
+	msg.SetGasPrice(tx.GetPrice())
+	msg.SetTip(tx.GetTipCap())
+	msg.SetFeeCap(tx.GetFeeCap())
+	msg.SetGasLimit(tx.GetGasLimit())
+	msg.SetNonce(tx.GetNonce())
+	msg.SetAccessList(tx.GetAccessList())
+	msg.SetFrom(&tx.From)
+	msg.SetTo(tx.GetTo())
+	msg.SetData(tx.GetData())
+	msg.SetAmount(tx.GetValue())
+	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
+
+	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
+		var gasPrice uint256.Int
+
+		gasPrice.SetFromBig(cmath.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+		msg.SetGasPrice(&gasPrice)
 	}
 	return msg, nil
+
 }
 
-func (tx *ArbitrumContractTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *ArbitrumContractTx) WithSignature(signer types.Signer, sig []byte) (types.Transaction, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
 func (tx *ArbitrumContractTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumContractTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumContractTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
 		tx.From,
@@ -707,8 +736,8 @@ func (tx *ArbitrumContractTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -803,8 +832,8 @@ func (tx *ArbitrumContractTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumContractTx) MarshalBinary(w io.Writer) error {
 	payloadSize, gasLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumContractTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -816,11 +845,11 @@ func (tx *ArbitrumContractTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumContractTx) Sender(signer Signer) (common.Address, error) {
+func (tx *ArbitrumContractTx) Sender(signer types.Signer) (common.Address, error) {
 	panic("implement me")
 }
 
-func (tx *ArbitrumContractTx) cachedSender() (common.Address, bool) {
+func (tx *ArbitrumContractTx) CachedSender() (common.Address, bool) {
 	return tx.From, true
 }
 
@@ -836,7 +865,7 @@ func (tx *ArbitrumContractTx) IsContractDeploy() bool {
 	return tx.To == nil
 }
 
-func (tx *ArbitrumContractTx) Unwrap() Transaction {
+func (tx *ArbitrumContractTx) Unwrap() types.Transaction {
 	return tx
 }
 
@@ -868,6 +897,10 @@ func (tx *ArbitrumContractTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	}
 //	return dst.Set(baseFee)
 //}
+
+func createArbitrumRetryTx() types.Transaction {
+	return &ArbitrumRetryTx{}
+}
 
 type ArbitrumRetryTx struct {
 	ChainId             *big.Int
@@ -922,20 +955,20 @@ func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
 	return cpy
 }
 
-func (tx *ArbitrumRetryTx) Type() byte                         { return ArbitrumRetryTxType }
-func (tx *ArbitrumRetryTx) GetChainID() *uint256.Int           { return uint256.MustFromBig(tx.ChainId) }
-func (tx *ArbitrumRetryTx) GetNonce() uint64                   { return tx.Nonce }
-func (tx *ArbitrumRetryTx) GetPrice() *uint256.Int             { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumRetryTx) GetTipCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumRetryTx) GetFeeCap() *uint256.Int            { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumRetryTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
-func (tx *ArbitrumRetryTx) GetGasLimit() uint64                { return tx.Gas }
-func (tx *ArbitrumRetryTx) GetBlobGas() uint64                 { return 0 }
-func (tx *ArbitrumRetryTx) GetData() []byte                    { return tx.Data }
-func (tx *ArbitrumRetryTx) GetValue() *uint256.Int             { return uint256.MustFromBig(tx.Value) }
-func (tx *ArbitrumRetryTx) GetTo() *common.Address             { return tx.To }
-func (tx *ArbitrumRetryTx) GetAccessList() AccessList          { return nil }
-func (tx *ArbitrumRetryTx) GetAuthorizations() []Authorization { return nil }
+func (tx *ArbitrumRetryTx) Type() byte                               { return ArbitrumRetryTxType }
+func (tx *ArbitrumRetryTx) GetChainID() *uint256.Int                 { return uint256.MustFromBig(tx.ChainId) }
+func (tx *ArbitrumRetryTx) GetNonce() uint64                         { return tx.Nonce }
+func (tx *ArbitrumRetryTx) GetPrice() *uint256.Int                   { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumRetryTx) GetTipCap() *uint256.Int                  { return uintZero }
+func (tx *ArbitrumRetryTx) GetFeeCap() *uint256.Int                  { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumRetryTx) GetBlobHashes() []common.Hash             { return []common.Hash{} }
+func (tx *ArbitrumRetryTx) GetGasLimit() uint64                      { return tx.Gas }
+func (tx *ArbitrumRetryTx) GetBlobGas() uint64                       { return 0 }
+func (tx *ArbitrumRetryTx) GetData() []byte                          { return tx.Data }
+func (tx *ArbitrumRetryTx) GetValue() *uint256.Int                   { return uint256.MustFromBig(tx.Value) }
+func (tx *ArbitrumRetryTx) GetTo() *common.Address                   { return tx.To }
+func (tx *ArbitrumRetryTx) GetAccessList() types.AccessList          { return nil }
+func (tx *ArbitrumRetryTx) GetAuthorizations() []types.Authorization { return nil }
 
 func (tx *ArbitrumRetryTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
@@ -948,36 +981,40 @@ func (tx *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *ui
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	msg := &Message{
-		gasPrice:   *tx.GetPrice(),
-		tipCap:     *tx.GetTipCap(),
-		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGasLimit(),
-		nonce:      tx.GetNonce(),
-		accessList: tx.GetAccessList(),
-		from:       tx.From,
-		to:         tx.GetTo(),
-		data:       tx.GetData(),
-		amount:     *tx.GetValue(),
-		checkNonce: !skipAccountChecks[tx.Type()],
-
+func (tx *ArbitrumRetryTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
+	msg := &types.Message{
 		Tx: tx,
 	}
+	msg.SetGasPrice(tx.GetPrice())
+	msg.SetTip(tx.GetTipCap())
+	msg.SetFeeCap(tx.GetFeeCap())
+	msg.SetGasLimit(tx.GetGasLimit())
+	msg.SetNonce(tx.GetNonce())
+	msg.SetAccessList(tx.GetAccessList())
+	msg.SetFrom(&tx.From)
+	msg.SetTo(tx.GetTo())
+	msg.SetData(tx.GetData())
+	msg.SetAmount(tx.GetValue())
+	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
+
+	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
+		var gasPrice uint256.Int
+
+		gasPrice.SetFromBig(cmath.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+		msg.SetGasPrice(&gasPrice)
 	}
 	return msg, nil
 }
 
-func (tx *ArbitrumRetryTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *ArbitrumRetryTx) WithSignature(signer types.Signer, sig []byte) (types.Transaction, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
 func (tx *ArbitrumRetryTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumRetryTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumRetryTxType, []interface{}{
 		tx.ChainId,
 		tx.Nonce,
 		tx.From,
@@ -1183,8 +1220,8 @@ func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -1310,8 +1347,8 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumRetryTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -1323,12 +1360,12 @@ func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumRetryTx) Sender(signer Signer) (common.Address, error) {
+func (tx *ArbitrumRetryTx) Sender(signer types.Signer) (common.Address, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (tx *ArbitrumRetryTx) cachedSender() (common.Address, bool) {
+func (tx *ArbitrumRetryTx) CachedSender() (common.Address, bool) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -1345,7 +1382,7 @@ func (tx *ArbitrumRetryTx) IsContractDeploy() bool {
 	return tx.To == nil
 }
 
-func (tx *ArbitrumRetryTx) Unwrap() Transaction {
+func (tx *ArbitrumRetryTx) Unwrap() types.Transaction {
 	return tx
 }
 
@@ -1383,8 +1420,12 @@ func (tx *ArbitrumRetryTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	return dst.Set(baseFee)
 //}
 
+func createArbitrumSubmitRetryableTx() types.Transaction {
+	return &ArbitrumSubmitRetryableTx{}
+}
+
 type ArbitrumSubmitRetryableTx struct {
-	arb.NoTimeBoosted
+	NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
 	From      common.Address
@@ -1445,16 +1486,16 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 	return cpy
 }
 
-func (tx *ArbitrumSubmitRetryableTx) Type() byte                         { return ArbitrumSubmitRetryableTxType }
-func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
-func (tx *ArbitrumSubmitRetryableTx) GetGasLimit() uint64                { return tx.Gas }
-func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64                 { return 0 }
-func (tx *ArbitrumSubmitRetryableTx) GetNonce() uint64                   { return 0 }
-func (tx *ArbitrumSubmitRetryableTx) GetTipCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumSubmitRetryableTx) GetValue() *uint256.Int             { return uintZero }
-func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address             { return &ArbRetryableTxAddress }
-func (tx *ArbitrumSubmitRetryableTx) GetAccessList() AccessList          { return nil }
-func (tx *ArbitrumSubmitRetryableTx) GetAuthorizations() []Authorization { return nil }
+func (tx *ArbitrumSubmitRetryableTx) Type() byte                               { return ArbitrumSubmitRetryableTxType }
+func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash             { return []common.Hash{} }
+func (tx *ArbitrumSubmitRetryableTx) GetGasLimit() uint64                      { return tx.Gas }
+func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64                       { return 0 }
+func (tx *ArbitrumSubmitRetryableTx) GetNonce() uint64                         { return 0 }
+func (tx *ArbitrumSubmitRetryableTx) GetTipCap() *uint256.Int                  { return uintZero }
+func (tx *ArbitrumSubmitRetryableTx) GetValue() *uint256.Int                   { return uintZero }
+func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address                   { return &ArbRetryableTxAddress }
+func (tx *ArbitrumSubmitRetryableTx) GetAccessList() types.AccessList          { return nil }
+func (tx *ArbitrumSubmitRetryableTx) GetAuthorizations() []types.Authorization { return nil }
 func (tx *ArbitrumSubmitRetryableTx) GetChainID() *uint256.Int {
 	return uint256.MustFromBig(tx.ChainId)
 }
@@ -1650,25 +1691,22 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	return nil
 }
 
-func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	msg := &Message{
-		gasPrice:   *tx.GetPrice(),
-		tipCap:     *tx.GetTipCap(),
-		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGasLimit(),
-		nonce:      tx.GetNonce(),
-		accessList: tx.GetAccessList(),
-		from:       tx.From,
-		to:         tx.GetTo(),
-		data:       tx.GetData(),
-		amount:     *tx.GetValue(),
-		checkNonce: !skipAccountChecks[tx.Type()],
-
+func (tx *ArbitrumSubmitRetryableTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
+	msg := &types.Message{
 		Tx: tx,
 	}
-	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
-	}
+	msg.SetGasPrice(tx.GetPrice())
+	msg.SetTip(tx.GetTipCap())
+	msg.SetFeeCap(tx.GetFeeCap())
+	msg.SetGasLimit(tx.GetGasLimit())
+	msg.SetNonce(tx.GetNonce())
+	msg.SetAccessList(tx.GetAccessList())
+	msg.SetFrom(&tx.From)
+	msg.SetTo(tx.GetTo())
+	msg.SetData(tx.GetData())
+	msg.SetAmount(tx.GetValue())
+	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
+
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
 	// }
@@ -1689,13 +1727,13 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 	return msg, nil
 }
 
-func (tx *ArbitrumSubmitRetryableTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *ArbitrumSubmitRetryableTx) WithSignature(signer types.Signer, sig []byte) (types.Transaction, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Hash() common.Hash {
-	return prefixedRlpHash(ArbitrumSubmitRetryableTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumSubmitRetryableTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
 		tx.From,
@@ -1733,8 +1771,8 @@ func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 
 	// envelope
 
@@ -1873,8 +1911,8 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 	payloadSize, gasLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumSubmitRetryableTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -1886,11 +1924,11 @@ func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumSubmitRetryableTx) Sender(signer Signer) (common.Address, error) {
+func (tx *ArbitrumSubmitRetryableTx) Sender(signer types.Signer) (common.Address, error) {
 	panic("cannot sign ArbitrumSubmitRetryableTx")
 }
 
-func (tx *ArbitrumSubmitRetryableTx) cachedSender() (common.Address, bool) {
+func (tx *ArbitrumSubmitRetryableTx) CachedSender() (common.Address, bool) {
 	return tx.From, true
 }
 
@@ -1906,7 +1944,7 @@ func (tx *ArbitrumSubmitRetryableTx) IsContractDeploy() bool {
 	return tx.RetryTo == nil
 }
 
-func (tx *ArbitrumSubmitRetryableTx) Unwrap() Transaction {
+func (tx *ArbitrumSubmitRetryableTx) Unwrap() types.Transaction {
 	return tx
 }
 
@@ -1935,8 +1973,12 @@ func (tx *ArbitrumSubmitRetryableTx) decode(input []byte) error {
 //	return dst.Set(baseFee)
 //}
 
+func createArbitrumDespoitTxn() types.Transaction {
+	return &ArbitrumDepositTx{}
+}
+
 type ArbitrumDepositTx struct {
-	arb.NoTimeBoosted
+	NoTimeBoosted
 	ChainId     *big.Int
 	L1RequestId common.Hash
 	From        common.Address
@@ -1961,45 +2003,42 @@ func (d *ArbitrumDepositTx) copy() *ArbitrumDepositTx {
 	return tx
 }
 
-func (tx *ArbitrumDepositTx) Type() byte                         { return ArbitrumDepositTxType }
-func (tx *ArbitrumDepositTx) GetChainID() *uint256.Int           { return uint256.MustFromBig(tx.ChainId) }
-func (tx *ArbitrumDepositTx) GetNonce() uint64                   { return 0 }
-func (tx *ArbitrumDepositTx) GetPrice() *uint256.Int             { return uintZero }
-func (tx *ArbitrumDepositTx) GetTipCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumDepositTx) GetFeeCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumDepositTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
-func (tx *ArbitrumDepositTx) GetGasLimit() uint64                { return 0 }
-func (tx *ArbitrumDepositTx) GetBlobGas() uint64                 { return 0 }
-func (tx *ArbitrumDepositTx) GetData() []byte                    { return nil }
-func (tx *ArbitrumDepositTx) GetValue() *uint256.Int             { return uint256.MustFromBig(tx.Value) }
-func (tx *ArbitrumDepositTx) GetTo() *common.Address             { return &tx.To }
-func (tx *ArbitrumDepositTx) GetAccessList() AccessList          { return nil }
-func (tx *ArbitrumDepositTx) GetAuthorizations() []Authorization { return nil }
+func (tx *ArbitrumDepositTx) Type() byte                               { return ArbitrumDepositTxType }
+func (tx *ArbitrumDepositTx) GetChainID() *uint256.Int                 { return uint256.MustFromBig(tx.ChainId) }
+func (tx *ArbitrumDepositTx) GetNonce() uint64                         { return 0 }
+func (tx *ArbitrumDepositTx) GetPrice() *uint256.Int                   { return uintZero }
+func (tx *ArbitrumDepositTx) GetTipCap() *uint256.Int                  { return uintZero }
+func (tx *ArbitrumDepositTx) GetFeeCap() *uint256.Int                  { return uintZero }
+func (tx *ArbitrumDepositTx) GetBlobHashes() []common.Hash             { return []common.Hash{} }
+func (tx *ArbitrumDepositTx) GetGasLimit() uint64                      { return 0 }
+func (tx *ArbitrumDepositTx) GetBlobGas() uint64                       { return 0 }
+func (tx *ArbitrumDepositTx) GetData() []byte                          { return nil }
+func (tx *ArbitrumDepositTx) GetValue() *uint256.Int                   { return uint256.MustFromBig(tx.Value) }
+func (tx *ArbitrumDepositTx) GetTo() *common.Address                   { return &tx.To }
+func (tx *ArbitrumDepositTx) GetAccessList() types.AccessList          { return nil }
+func (tx *ArbitrumDepositTx) GetAuthorizations() []types.Authorization { return nil }
 
 func (tx *ArbitrumDepositTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int { return uintZero }
 func (tx *ArbitrumDepositTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	msg := &Message{
-		gasPrice:   *tx.GetPrice(),
-		tipCap:     *tx.GetTipCap(),
-		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGasLimit(),
-		nonce:      tx.GetNonce(),
-		accessList: tx.GetAccessList(),
-		from:       tx.From,
-		to:         tx.GetTo(),
-		data:       tx.GetData(),
-		amount:     *tx.GetValue(),
-		checkNonce: !skipAccountChecks[tx.Type()],
-
+func (tx *ArbitrumDepositTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
+	msg := &types.Message{
 		Tx: tx,
 	}
-	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
-	}
+	msg.SetGasPrice(tx.GetPrice())
+	msg.SetTip(tx.GetTipCap())
+	msg.SetFeeCap(tx.GetFeeCap())
+	msg.SetGasLimit(tx.GetGasLimit())
+	msg.SetNonce(tx.GetNonce())
+	msg.SetAccessList(tx.GetAccessList())
+	msg.SetFrom(&tx.From)
+	msg.SetTo(tx.GetTo())
+	msg.SetData(tx.GetData())
+	msg.SetAmount(tx.GetValue())
+	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
+
 	// if msg.feeCap.IsZero() {
 	// 	msg.feeCap.Set(uint256.NewInt(0x5f5e100))
 	// }
@@ -2023,14 +2062,14 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 	return msg, nil
 }
 
-func (d *ArbitrumDepositTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (d *ArbitrumDepositTx) WithSignature(signer types.Signer, sig []byte) (types.Transaction, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
 func (d *ArbitrumDepositTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumDepositTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumDepositTxType, []interface{}{
 		d.ChainId,
 		d.L1RequestId,
 		d.From,
@@ -2060,8 +2099,8 @@ func (d *ArbitrumDepositTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
@@ -2208,8 +2247,8 @@ func (tx *ArbitrumDepositTx) DecodeRLP(s *rlp.Stream) error {
 
 func (d *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 	payloadSize := d.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumDepositTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -2221,11 +2260,11 @@ func (d *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (d *ArbitrumDepositTx) Sender(signer Signer) (common.Address, error) {
+func (d *ArbitrumDepositTx) Sender(signer types.Signer) (common.Address, error) {
 	panic("implement me")
 }
 
-func (d *ArbitrumDepositTx) cachedSender() (common.Address, bool) {
+func (d *ArbitrumDepositTx) CachedSender() (common.Address, bool) {
 	return d.From, true
 }
 
@@ -2241,7 +2280,7 @@ func (d *ArbitrumDepositTx) IsContractDeploy() bool {
 	return false
 }
 
-func (d *ArbitrumDepositTx) Unwrap() Transaction {
+func (d *ArbitrumDepositTx) Unwrap() types.Transaction {
 	return d
 }
 func (d *ArbitrumDepositTx) encode(b *bytes.Buffer) error {
@@ -2255,8 +2294,12 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 //	return dst.Set(bigZero)
 //}
 
+func createArbitrumInternalTx() types.Transaction {
+	return &ArbitrumInternalTx{}
+}
+
 type ArbitrumInternalTx struct {
-	arb.NoTimeBoosted
+	NoTimeBoosted
 	ChainId *uint256.Int
 	Data    []byte
 }
@@ -2269,45 +2312,42 @@ func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	return cpy
 }
 
-func (tx *ArbitrumInternalTx) Type() byte                         { return ArbitrumInternalTxType }
-func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int           { return tx.ChainId }
-func (tx *ArbitrumInternalTx) GetNonce() uint64                   { return 0 }
-func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int             { return uintZero }
-func (tx *ArbitrumInternalTx) GetTipCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumInternalTx) GetFeeCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumInternalTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
-func (tx *ArbitrumInternalTx) GetGasLimit() uint64                { return 0 }
-func (tx *ArbitrumInternalTx) GetBlobGas() uint64                 { return 0 } // todo
-func (tx *ArbitrumInternalTx) GetData() []byte                    { return tx.Data }
-func (tx *ArbitrumInternalTx) GetValue() *uint256.Int             { return uintZero }
-func (tx *ArbitrumInternalTx) GetTo() *common.Address             { return &ArbosAddress }
-func (tx *ArbitrumInternalTx) GetAccessList() AccessList          { return nil }
-func (tx *ArbitrumInternalTx) GetAuthorizations() []Authorization { return nil }
+func (tx *ArbitrumInternalTx) Type() byte                               { return ArbitrumInternalTxType }
+func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int                 { return tx.ChainId }
+func (tx *ArbitrumInternalTx) GetNonce() uint64                         { return 0 }
+func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int                   { return uintZero }
+func (tx *ArbitrumInternalTx) GetTipCap() *uint256.Int                  { return uintZero }
+func (tx *ArbitrumInternalTx) GetFeeCap() *uint256.Int                  { return uintZero }
+func (tx *ArbitrumInternalTx) GetBlobHashes() []common.Hash             { return []common.Hash{} }
+func (tx *ArbitrumInternalTx) GetGasLimit() uint64                      { return 0 }
+func (tx *ArbitrumInternalTx) GetBlobGas() uint64                       { return 0 } // todo
+func (tx *ArbitrumInternalTx) GetData() []byte                          { return tx.Data }
+func (tx *ArbitrumInternalTx) GetValue() *uint256.Int                   { return uintZero }
+func (tx *ArbitrumInternalTx) GetTo() *common.Address                   { return &ArbosAddress }
+func (tx *ArbitrumInternalTx) GetAccessList() types.AccessList          { return nil }
+func (tx *ArbitrumInternalTx) GetAuthorizations() []types.Authorization { return nil }
 
 func (tx *ArbitrumInternalTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int { return uintZero }
 func (tx *ArbitrumInternalTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	msg := &Message{
-		gasPrice:   *tx.GetPrice(),
-		tipCap:     *tx.GetTipCap(),
-		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGasLimit(),
-		nonce:      tx.GetNonce(),
-		accessList: tx.GetAccessList(),
-		from:       ArbosAddress,
-		to:         tx.GetTo(),
-		data:       tx.GetData(),
-		amount:     *tx.GetValue(),
-		checkNonce: !skipAccountChecks[tx.Type()],
-		Tx:         tx,
+func (tx *ArbitrumInternalTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
+	msg := &types.Message{
+		Tx: tx,
 	}
+	msg.SetGasPrice(tx.GetPrice())
+	msg.SetTip(tx.GetTipCap())
+	msg.SetFeeCap(tx.GetFeeCap())
+	msg.SetGasLimit(tx.GetGasLimit())
+	msg.SetNonce(tx.GetNonce())
+	msg.SetAccessList(tx.GetAccessList())
+	msg.SetFrom(&ArbosAddress)
+	msg.SetTo(tx.GetTo())
+	msg.SetData(tx.GetData())
+	msg.SetAmount(tx.GetValue())
+	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
 
-	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
-	}
 	// if msg.feeCap.IsZero() {
 	// 	msg.gasLimit = baseFee.Uint64()
 	// 	msg.feeCap.Set(uint256.NewInt(0x5f5e100))
@@ -2328,14 +2368,14 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	return msg, nil
 }
 
-func (tx *ArbitrumInternalTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *ArbitrumInternalTx) WithSignature(signer types.Signer, sig []byte) (types.Transaction, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
 func (tx *ArbitrumInternalTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumInternalTxType, []interface{}{
+	return types.PrefixedRlpHash(ArbitrumInternalTxType, []interface{}{
 		tx.ChainId,
 		tx.Data,
 	})
@@ -2393,8 +2433,8 @@ func (tx *ArbitrumInternalTx) EncodeRLP(w io.Writer) error {
 	payloadSize := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -2432,8 +2472,8 @@ func (tx *ArbitrumInternalTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumInternalTx) MarshalBinary(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumInternalTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -2445,11 +2485,11 @@ func (tx *ArbitrumInternalTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumInternalTx) Sender(signer Signer) (common.Address, error) {
+func (tx *ArbitrumInternalTx) Sender(signer types.Signer) (common.Address, error) {
 	panic("not supported in ArbitrumInternalTx")
 }
 
-func (tx *ArbitrumInternalTx) cachedSender() (common.Address, bool) {
+func (tx *ArbitrumInternalTx) CachedSender() (common.Address, bool) {
 	return ArbosAddress, true
 }
 
@@ -2464,7 +2504,7 @@ func (tx *ArbitrumInternalTx) IsContractDeploy() bool {
 	return false
 }
 
-func (tx *ArbitrumInternalTx) Unwrap() Transaction {
+func (tx *ArbitrumInternalTx) Unwrap() types.Transaction {
 	return tx
 }
 
@@ -2478,49 +2518,3 @@ func (t *ArbitrumInternalTx) decode(input []byte) error {
 //func (tx *ArbitrumInternalTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)
 //}
-
-type HeaderInfo struct {
-	SendRoot           common.Hash
-	SendCount          uint64
-	L1BlockNumber      uint64
-	ArbOSFormatVersion uint64
-}
-
-func (info HeaderInfo) extra() []byte {
-	return info.SendRoot[:]
-}
-
-func (info HeaderInfo) mixDigest() [32]byte {
-	mixDigest := common.Hash{}
-	binary.BigEndian.PutUint64(mixDigest[:8], info.SendCount)
-	binary.BigEndian.PutUint64(mixDigest[8:16], info.L1BlockNumber)
-	binary.BigEndian.PutUint64(mixDigest[16:24], info.ArbOSFormatVersion)
-	return mixDigest
-}
-
-func (info HeaderInfo) UpdateHeaderWithInfo(header *Header) {
-	header.MixDigest = info.mixDigest()
-	header.Extra = info.extra()
-}
-
-func DeserializeHeaderExtraInformation(header *Header) HeaderInfo {
-	if header == nil || header.BaseFee == nil || header.BaseFee.Sign() == 0 || len(header.Extra) != 32 || header.Difficulty.Cmp(common.Big1) != 0 {
-		// imported blocks have no base fee
-		// The genesis block doesn't have an ArbOS encoded extra field
-		return HeaderInfo{}
-	}
-	extra := HeaderInfo{}
-	copy(extra.SendRoot[:], header.Extra)
-	extra.SendCount = binary.BigEndian.Uint64(header.MixDigest[:8])
-	extra.L1BlockNumber = binary.BigEndian.Uint64(header.MixDigest[8:16])
-	extra.ArbOSFormatVersion = binary.BigEndian.Uint64(header.MixDigest[16:24])
-	return extra
-}
-
-func GetArbOSVersion(header *Header, chain *chain.Config) uint64 {
-	if !chain.IsArbitrum() {
-		return 0
-	}
-	extraInfo := DeserializeHeaderExtraInformation(header)
-	return extraInfo.ArbOSFormatVersion
-}

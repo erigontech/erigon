@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/arb/txn"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/holiman/uint256"
 
@@ -184,7 +185,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(env.Coinbase)
 	t.lookupAccount(params.HistoryStorageAddress)
 	if env.ChainConfig.IsArbitrum() {
-		t.lookupAccount(types.ArbosStateAddress)
+		t.lookupAccount(txn.ArbosStateAddress)
 	}
 
 	// Add accounts with authorizations to the prestate before they get applied.

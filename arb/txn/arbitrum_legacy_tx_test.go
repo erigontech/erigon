@@ -1,4 +1,4 @@
-package types
+package txn
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -13,8 +14,8 @@ import (
 func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 	to := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7")
 	senderOverride := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	legacyTx := &LegacyTx{
-		CommonTx: CommonTx{
+	legacyTx := &types.LegacyTx{
+		CommonTx: types.CommonTx{
 			Nonce:    42,
 			GasLimit: 50000,
 			To:       &to,
@@ -44,7 +45,7 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 		require.Equal(t, ArbitrumLegacyTxType, encodedBytes[0])
 
 		decodedTx := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
 		err = decodedTx.DecodeRLP(stream)
@@ -73,7 +74,7 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
 
 		decodedTx := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 		err = decodedTx.DecodeRLP(stream)
 		require.NoError(t, err)
@@ -107,7 +108,7 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 		require.NoError(t, err)
 
 		decodedTx := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 		encodedBytes := buf.Bytes()
 		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
@@ -137,7 +138,7 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 		require.NoError(t, err)
 
 		decodedTx := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 		encodedBytes := buf.Bytes()
 		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
@@ -152,8 +153,8 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 
 func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 	t.Run("Contract creation transaction", func(t *testing.T) {
-		legacyTx := &LegacyTx{
-			CommonTx: CommonTx{
+		legacyTx := &types.LegacyTx{
+			CommonTx: types.CommonTx{
 				Nonce:    1,
 				GasLimit: 1000000,
 				To:       nil, // Contract creation
@@ -179,7 +180,7 @@ func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 		require.NoError(t, err)
 
 		decodedTx := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 		encodedBytes := buf.Bytes()
 		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
@@ -195,8 +196,8 @@ func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 		maxUint256.SetAllOne()
 
 		to := common.HexToAddress("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
-		legacyTx := &LegacyTx{
-			CommonTx: CommonTx{
+		legacyTx := &types.LegacyTx{
+			CommonTx: types.CommonTx{
 				Nonce:    ^uint64(0),
 				GasLimit: ^uint64(0),
 				To:       &to,
@@ -222,7 +223,7 @@ func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 		require.NoError(t, err)
 
 		decodedTx := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 		encodedBytes := buf.Bytes()
 		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
@@ -239,8 +240,8 @@ func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 
 func TestArbitrumLegacyTxData_TypeByteHandling(t *testing.T) {
 	to := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7")
-	legacyTx := &LegacyTx{
-		CommonTx: CommonTx{
+	legacyTx := &types.LegacyTx{
+		CommonTx: types.CommonTx{
 			Nonce:    100,
 			GasLimit: 21000,
 			To:       &to,
@@ -271,7 +272,7 @@ func TestArbitrumLegacyTxData_TypeByteHandling(t *testing.T) {
 		require.Equal(t, ArbitrumLegacyTxType, encoded[0])
 
 		decoded := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 		stream := rlp.NewStream(bytes.NewReader(encoded[1:]), uint64(len(encoded)-1))
 		err = decoded.DecodeRLP(stream)
@@ -293,7 +294,7 @@ func TestArbitrumLegacyTxData_TypeByteHandling(t *testing.T) {
 
 		// Decode skipping type byte
 		decoded := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 		stream := rlp.NewStream(bytes.NewReader(encoded[1:]), uint64(len(encoded)-1))
 		err = decoded.DecodeRLP(stream)
@@ -311,8 +312,8 @@ func TestArbitrumLegacyTxData_TypeByteHandling(t *testing.T) {
 func TestArbitrumLegacyTxData_ArbTxIntegration(t *testing.T) {
 	to := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7")
 
-	legacyTx := &LegacyTx{
-		CommonTx: CommonTx{
+	legacyTx := &types.LegacyTx{
+		CommonTx: types.CommonTx{
 			Nonce:    10,
 			GasLimit: 21000,
 			To:       &to,
@@ -364,8 +365,8 @@ func TestArbitrumLegacyTxData_ArbTxIntegration(t *testing.T) {
 
 func TestArbitrumLegacyTxData_TypeBasedDecodingPattern(t *testing.T) {
 	to := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7")
-	legacyTx := &LegacyTx{
-		CommonTx: CommonTx{
+	legacyTx := &types.LegacyTx{
+		CommonTx: types.CommonTx{
 			Nonce:    42,
 			GasLimit: 50000,
 			To:       &to,
@@ -396,11 +397,11 @@ func TestArbitrumLegacyTxData_TypeBasedDecodingPattern(t *testing.T) {
 	txType := encoded[0]
 	require.Equal(t, ArbitrumLegacyTxType, txType)
 
-	var decodedTx Transaction
+	var decodedTx types.Transaction
 	switch txType {
 	case ArbitrumLegacyTxType:
 		decodedTx = &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
+			LegacyTx: &types.LegacyTx{},
 		}
 	default:
 		t.Fatalf("Unknown transaction type: 0x%x", txType)
