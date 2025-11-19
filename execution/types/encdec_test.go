@@ -146,26 +146,26 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 		}
 
 		switch field.Type() {
-		case reflect.TypeOf(common.Hash{}):
+		case reflect.TypeFor[common.Hash]():
 			field.Set(reflect.ValueOf(tr.RandHash()))
-		case reflect.TypeOf(&common.Hash{}):
+		case reflect.TypeFor[*common.Hash]():
 			randHash := tr.RandHash()
 			field.Set(reflect.ValueOf(&randHash))
-		case reflect.TypeOf(common.Address{}):
+		case reflect.TypeFor[common.Address]():
 			field.Set(reflect.ValueOf(tr.RandAddress()))
-		case reflect.TypeOf(Bloom{}):
+		case reflect.TypeFor[Bloom]():
 			field.Set(reflect.ValueOf(tr.RandBloom()))
-		case reflect.TypeOf(BlockNonce{}):
+		case reflect.TypeFor[BlockNonce]():
 			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
-		case reflect.TypeOf(&big.Int{}):
+		case reflect.TypeFor[*big.Int]():
 			field.Set(reflect.ValueOf(tr.RandBig()))
-		case reflect.TypeOf(uint64(0)):
+		case reflect.TypeFor[uint64]():
 			field.Set(reflect.ValueOf(*tr.RandUint64()))
-		case reflect.TypeOf(&emptyUint64):
+		case reflect.TypeFor[*uint64]():
 			field.Set(reflect.ValueOf(tr.RandUint64()))
-		case reflect.TypeOf([]byte{}):
+		case reflect.TypeFor[[]byte]():
 			field.Set(reflect.ValueOf(tr.RandBytes(tr.RandIntInRange(128, 1024))))
-		case reflect.TypeOf(false):
+		case reflect.TypeFor[bool]():
 			field.Set(reflect.ValueOf(tr.RandBoolean()))
 		default:
 			panic(fmt.Sprintf("don't know how to generate rand value for Header field type %v - please add handler", field.Type()))
