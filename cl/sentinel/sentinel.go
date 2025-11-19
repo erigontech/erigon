@@ -332,10 +332,6 @@ func (s *Sentinel) ReqRespHandler() http.Handler {
 	return s.httpApi
 }
 
-func (s *Sentinel) RecvGossip() <-chan *GossipMessage {
-	return s.subManager.Recv()
-}
-
 func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	if s.started {
 		s.logger.Warn("[Sentinel] already running")

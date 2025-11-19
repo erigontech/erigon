@@ -19,7 +19,6 @@ package sentinel
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -140,83 +139,8 @@ func NewGossipManager(
 	return g
 }
 
-func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
-	for i := uint64(0); i < maxBlobs; i++ {
-		ret = append(ret, GossipTopic{
-			Name:     gossip.TopicNameBlobSidecar(i),
-			CodecStr: SSZSnappyCodec,
-		})
-	}
-	return
-}
-
 func (s *GossipManager) Recv() <-chan *GossipMessage {
 	return s.ch
-}
-
-func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
-	var sub *GossipSubscription
-	s.subscriptions.Range(func(topic, value interface{}) bool {
-		topicStr := topic.(string)
-		// take out third part of the topic by splitting on "/"
-		// reference: /eth2/d31f6191/beacon_attestation_45/ssz_snappy
-		parts := strings.Split(topicStr, "/")
-		if len(parts) < 4 {
-			return true
-		}
-		if parts[3] == match {
-			sub = value.(*GossipSubscription)
-			return false
-		}
-		return true
-	})
-	return sub
-}
-
-func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
-	s.subscriptions.Store(topic, sub)
-}
-
-func (s *GossipManager) unsubscribe(topic string) {
-	sub, ok := s.subscriptions.LoadAndDelete(topic)
-	if !ok || sub == nil {
-		return
-	}
-	sub.(*GossipSubscription).Close()
-}
-
-func (s *Sentinel) forkWatcher() {
-	prevDigest, err := s.ethClock.CurrentForkDigest()
-	if err != nil {
-		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
-		return
-	}
-	iterationInterval := time.NewTicker(30 * time.Millisecond)
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case <-iterationInterval.C:
-			digest, err := s.ethClock.CurrentForkDigest()
-			if err != nil {
-				log.Error("[Gossip] Failed to calculate fork choice", "err", err)
-				return
-			}
-			if prevDigest != digest {
-				// unsubscribe and resubscribe to all topics
-				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
-					sub := value.(*GossipSubscription)
-					s.subManager.unsubscribe(key.(string))
-					_, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
-					if err != nil {
-						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
-					}
-					return true
-				})
-				prevDigest = digest
-			}
-		}
-	}
 }
 
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
