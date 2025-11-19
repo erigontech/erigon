@@ -642,9 +642,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if st.evm.ProcessingHook.IsArbitrum() {
 			st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
+			var refund uint64
 			if nonrefundable < st.gasUsed() {
 				// Apply refund counter, capped to a refund quotient
-				refund := (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
+				refund = (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
 				if refund > st.state.GetRefund() {
 					refund = st.state.GetRefund()
 				}
