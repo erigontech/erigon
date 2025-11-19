@@ -1444,11 +1444,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		newObj.selfdestructed = false
 	}
 
-	// for newly created accounts these synthetic read/writes are used so that account
-	// creation clashes between transactions get detected
-	sdb.MarkAddressAccess(addr)
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
-
 	return nil
 }
 

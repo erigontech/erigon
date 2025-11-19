@@ -562,12 +562,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
 		}
 
-		result.AccessedAddresses = ibs.AccessedAddresses()
-
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
 		}
 
+		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}
