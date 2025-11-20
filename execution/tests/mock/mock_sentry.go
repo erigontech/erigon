@@ -117,7 +117,7 @@ type MockSentry struct {
 	StreamWg             sync.WaitGroup
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
-	Eth1ExecutionService *module.EthereumExecutionModule
+	Eth1ExecutionService *execmodule.EthereumExecutionModule
 	retirementStart      chan bool
 	retirementDone       chan struct{}
 	retirementWg         sync.WaitGroup
