@@ -10,8 +10,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/math"
-	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -160,6 +160,9 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s types.Signer, baseFee *big.Int, rules 
 	msg := &types.Message{
 		Tx: tx,
 	}
+	// if baseFee != nil {
+	// 	msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+	// }
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
 	msg.SetFeeCap(tx.GetFeeCap())
@@ -568,7 +571,7 @@ func (tx *ArbitrumContractTx) AsMessage(s types.Signer, baseFee *big.Int, rules 
 	if baseFee != nil {
 		var gasPrice uint256.Int
 
-		gasPrice.SetFromBig(cmath.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+		gasPrice.SetFromBig(math.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
 		msg.SetGasPrice(&gasPrice)
 	}
 	return msg, nil
@@ -915,42 +918,43 @@ type ArbitrumRetryTx struct {
 	RefundTo            common.Address
 	MaxRefund           *big.Int // the maximum refund sent to RefundTo (the rest goes to From)
 	SubmissionFeeRefund *big.Int // the submission fee to refund if successful (capped by MaxRefund)
-	Timeboosted         bool
+	Timeboosted         *bool
 }
 
-func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
+func (t *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
 	cpy := &ArbitrumRetryTx{
 		ChainId:             new(big.Int),
-		Nonce:               tx.Nonce,
+		Nonce:               t.Nonce,
 		GasFeeCap:           new(big.Int),
-		Gas:                 tx.Gas,
-		From:                tx.From,
+		Gas:                 t.Gas,
+		From:                t.From,
 		To:                  nil,
 		Value:               new(big.Int),
-		Data:                common.CopyBytes(tx.Data),
-		TicketId:            tx.TicketId,
-		RefundTo:            tx.RefundTo,
+		Data:                common.CopyBytes(t.Data),
+		TicketId:            t.TicketId,
+		RefundTo:            t.RefundTo,
 		MaxRefund:           new(big.Int),
 		SubmissionFeeRefund: new(big.Int),
+		Timeboosted:         t.Timeboosted,
 	}
-	if tx.ChainId != nil {
-		cpy.ChainId.Set(tx.ChainId)
+	if t.ChainId != nil {
+		cpy.ChainId.Set(t.ChainId)
 	}
-	if tx.GasFeeCap != nil {
-		cpy.GasFeeCap.Set(tx.GasFeeCap)
+	if t.GasFeeCap != nil {
+		cpy.GasFeeCap.Set(t.GasFeeCap)
 	}
-	if tx.To != nil {
-		tmp := *tx.To
+	if t.To != nil {
+		tmp := *t.To
 		cpy.To = &tmp
 	}
-	if tx.Value != nil {
-		cpy.Value.Set(tx.Value)
+	if t.Value != nil {
+		cpy.Value.Set(t.Value)
 	}
-	if tx.MaxRefund != nil {
-		cpy.MaxRefund.Set(tx.MaxRefund)
+	if t.MaxRefund != nil {
+		cpy.MaxRefund.Set(t.MaxRefund)
 	}
-	if tx.SubmissionFeeRefund != nil {
-		cpy.SubmissionFeeRefund.Set(tx.SubmissionFeeRefund)
+	if t.SubmissionFeeRefund != nil {
+		cpy.SubmissionFeeRefund.Set(t.SubmissionFeeRefund)
 	}
 	return cpy
 }
@@ -970,14 +974,14 @@ func (tx *ArbitrumRetryTx) GetTo() *common.Address                   { return tx
 func (tx *ArbitrumRetryTx) GetAccessList() types.AccessList          { return nil }
 func (tx *ArbitrumRetryTx) GetAuthorizations() []types.Authorization { return nil }
 
-func (tx *ArbitrumRetryTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (t *ArbitrumRetryTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
-		return tx.GetPrice()
+		return t.GetPrice()
 	}
 	res := uint256.NewInt(0)
 	return res.Set(baseFee)
 }
-func (tx *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+func (t *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
 
@@ -1001,7 +1005,7 @@ func (tx *ArbitrumRetryTx) AsMessage(s types.Signer, baseFee *big.Int, rules *ch
 	if baseFee != nil {
 		var gasPrice uint256.Int
 
-		gasPrice.SetFromBig(cmath.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+		gasPrice.SetFromBig(math.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
 		msg.SetGasPrice(&gasPrice)
 	}
 	return msg, nil
@@ -1030,35 +1034,35 @@ func (tx *ArbitrumRetryTx) Hash() common.Hash {
 	})
 }
 
-func (tx *ArbitrumRetryTx) SigningHash(chainID *big.Int) common.Hash {
+func (t *ArbitrumRetryTx) SigningHash(chainID *big.Int) common.Hash {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (tx *ArbitrumRetryTx) Protected() bool {
+func (t *ArbitrumRetryTx) Protected() bool {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+func (t *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int, hashingOnly bool) error {
 	// Write the RLP list prefix.
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
 	// ChainId (big.Int)
-	if err := rlp.EncodeBigInt(tx.ChainId, w, b); err != nil {
+	if err := rlp.EncodeBigInt(t.ChainId, w, b); err != nil {
 		return err
 	}
 
 	// Nonce (uint64)
-	if tx.Nonce > 0 && tx.Nonce < 128 {
-		b[0] = byte(tx.Nonce)
+	if t.Nonce > 0 && t.Nonce < 128 {
+		b[0] = byte(t.Nonce)
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
 	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
+		binary.BigEndian.PutUint64(b[1:], t.Nonce)
 		b[8-nonceLen] = 128 + byte(nonceLen)
 		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
 			return err
@@ -1070,22 +1074,22 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.From[:]); err != nil {
+	if _, err := w.Write(t.From[:]); err != nil {
 		return err
 	}
 
 	// GasFeeCap (big.Int)
-	if err := rlp.EncodeBigInt(tx.GasFeeCap, w, b); err != nil {
+	if err := rlp.EncodeBigInt(t.GasFeeCap, w, b); err != nil {
 		return err
 	}
 
 	// Gas (uint64)
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	if err := rlp.EncodeInt(t.Gas, w, b); err != nil {
 		return err
 	}
 
 	// To (optional common.Address, 20 bytes if non-nil)
-	if tx.To == nil {
+	if t.To == nil {
 		b[0] = 128
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
@@ -1095,18 +1099,18 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
-		if _, err := w.Write((*tx.To)[:]); err != nil {
+		if _, err := w.Write((*t.To)[:]); err != nil {
 			return err
 		}
 	}
 
 	// Value (big.Int)
-	if err := rlp.EncodeBigInt(tx.Value, w, b); err != nil {
+	if err := rlp.EncodeBigInt(t.Value, w, b); err != nil {
 		return err
 	}
 
 	// Data ([]byte)
-	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(t.Data, w, b); err != nil {
 		return err
 	}
 
@@ -1115,7 +1119,7 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.TicketId[:]); err != nil {
+	if _, err := w.Write(t.TicketId[:]); err != nil {
 		return err
 	}
 
@@ -1124,23 +1128,22 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.RefundTo[:]); err != nil {
+	if _, err := w.Write(t.RefundTo[:]); err != nil {
 		return err
 	}
 
 	// MaxRefund (big.Int)
-	if err := rlp.EncodeBigInt(tx.MaxRefund, w, b); err != nil {
+	if err := rlp.EncodeBigInt(t.MaxRefund, w, b); err != nil {
 		return err
 	}
 
 	// SubmissionFeeRefund (big.Int)
-	if err := rlp.EncodeBigInt(tx.SubmissionFeeRefund, w, b); err != nil {
+	if err := rlp.EncodeBigInt(t.SubmissionFeeRefund, w, b); err != nil {
 		return err
 	}
 
-	if tx.Timeboosted {
-		//encode Timeboosted
-		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+	if t.Timeboosted != nil && !hashingOnly {
+		if err := rlp.EncodeBool(*t.Timeboosted, w, b); err != nil {
 			return err
 		}
 	}
@@ -1148,14 +1151,14 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 	return nil
 }
 
-func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
+func (t *ArbitrumRetryTx) payloadSize(hashingOnly bool) (payloadSize int, nonceLen, gasLen int) {
 	// ChainId (big.Int)
 	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(tx.ChainId)
+	payloadSize += rlp.BigIntLenExcludingHead(t.ChainId)
 
 	// Nonce (uint64)
 	payloadSize++ // header
-	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
+	nonceLen = rlp.IntLenExcludingHead(t.Nonce)
 	payloadSize += nonceLen
 
 	// From (common.Address, 20 bytes)
@@ -1164,25 +1167,25 @@ func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int)
 
 	// GasFeeCap (big.Int)
 	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(tx.GasFeeCap)
+	payloadSize += rlp.BigIntLenExcludingHead(t.GasFeeCap)
 
 	// Gas (uint64)
 	payloadSize++ // header
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp.IntLenExcludingHead(t.Gas)
 	payloadSize += gasLen
 
 	// To (optional common.Address, 20 bytes if non-nil)
 	payloadSize++ // header
-	if tx.To != nil {
+	if t.To != nil {
 		payloadSize += 20
 	}
 
 	// Value (big.Int)
 	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(tx.Value)
+	payloadSize += rlp.BigIntLenExcludingHead(t.Value)
 
 	// Data ([]byte) — rlp.StringLen returns the full encoded length (header + data)
-	payloadSize += rlp.StringLen(tx.Data)
+	payloadSize += rlp.StringLen(t.Data)
 
 	// TicketId (common.Hash, 32 bytes)
 	payloadSize++ // header
@@ -1194,13 +1197,13 @@ func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int)
 
 	// MaxRefund (big.Int)
 	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(tx.MaxRefund)
+	payloadSize += rlp.BigIntLenExcludingHead(t.MaxRefund)
 
 	// SubmissionFeeRefund (big.Int)
 	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(tx.SubmissionFeeRefund)
+	payloadSize += rlp.BigIntLenExcludingHead(t.SubmissionFeeRefund)
 
-	if tx.Timeboosted {
+	if t.Timeboosted != nil && !hashingOnly {
 		// Timeboosted (bool)
 		payloadSize++
 		payloadSize += rlp.BoolLen()
@@ -1209,14 +1212,14 @@ func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int)
 	return payloadSize, nonceLen, gasLen
 }
 
-func (tx *ArbitrumRetryTx) EncodingSize() int {
-	payloadSize, _, _ := tx.payloadSize()
+func (t *ArbitrumRetryTx) EncodingSize() int {
+	payloadSize, _, _ := t.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
-	payloadSize, nonceLen, gasLen := tx.payloadSize()
+func (t *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
+	payloadSize, nonceLen, gasLen := t.payloadSize(false)
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
@@ -1232,13 +1235,13 @@ func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+	if err := t.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, false); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
+func (t *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	// Begin list decoding.
 	if _, err := s.List(); err != nil {
 		return err
@@ -1251,10 +1254,10 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read ChainId: %w", err)
 	}
-	tx.ChainId = new(big.Int).SetBytes(b)
+	t.ChainId = new(big.Int).SetBytes(b)
 
 	// Decode Nonce (uint64)
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if t.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
 
@@ -1265,16 +1268,16 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for From: %d", len(b))
 	}
-	copy(tx.From[:], b)
+	copy(t.From[:], b)
 
 	// Decode GasFeeCap (*big.Int)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read GasFeeCap: %w", err)
 	}
-	tx.GasFeeCap = new(big.Int).SetBytes(b)
+	t.GasFeeCap = new(big.Int).SetBytes(b)
 
 	// Decode Gas (uint64)
-	if tx.Gas, err = s.Uint(); err != nil {
+	if t.Gas, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Gas: %w", err)
 	}
 
@@ -1286,18 +1289,18 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 		if len(b) != 20 {
 			return fmt.Errorf("wrong size for To: %d", len(b))
 		}
-		tx.To = new(common.Address)
-		copy(tx.To[:], b)
+		t.To = new(common.Address)
+		copy(t.To[:], b)
 	}
 
 	// Decode Value (*big.Int)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	tx.Value = new(big.Int).SetBytes(b)
+	t.Value = new(big.Int).SetBytes(b)
 
 	// Decode Data ([]byte)
-	if tx.Data, err = s.Bytes(); err != nil {
+	if t.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
 
@@ -1308,7 +1311,7 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for TicketId: %d", len(b))
 	}
-	copy(tx.TicketId[:], b)
+	copy(t.TicketId[:], b)
 
 	// Decode RefundTo (common.Address, 20 bytes)
 	if b, err = s.Bytes(); err != nil {
@@ -1317,36 +1320,32 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for RefundTo: %d", len(b))
 	}
-	copy(tx.RefundTo[:], b)
+	copy(t.RefundTo[:], b)
 
 	// Decode MaxRefund (*big.Int)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read MaxRefund: %w", err)
 	}
-	tx.MaxRefund = new(big.Int).SetBytes(b)
+	t.MaxRefund = new(big.Int).SetBytes(b)
 
 	// Decode SubmissionFeeRefund (*big.Int)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read SubmissionFeeRefund: %w", err)
 	}
-	tx.SubmissionFeeRefund = new(big.Int).SetBytes(b)
+	t.SubmissionFeeRefund = new(big.Int).SetBytes(b)
 
 	if s.MoreDataInList() {
 		boolVal, err := s.Bool()
 		if err != nil {
 			return err
 		}
-		tx.Timeboosted = boolVal
-		// After reading the optional field, ensure list end.
-		return s.ListEnd()
+		t.Timeboosted = &boolVal
 	}
-	// List already completed, set default.
-	tx.Timeboosted = false
 	return s.ListEnd()
 }
 
 func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	payloadSize, nonceLen, gasLen := tx.payloadSize(false)
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
 	// encode TxType
@@ -1354,7 +1353,22 @@ func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *ArbitrumRetryTx) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize, nonceLen, gasLen := t.payloadSize(true)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumRetryTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := t.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, true); err != nil {
 		return err
 	}
 	return nil
@@ -1370,28 +1384,28 @@ func (tx *ArbitrumRetryTx) CachedSender() (common.Address, bool) {
 	panic("implement me")
 }
 
-func (tx *ArbitrumRetryTx) GetSender() (common.Address, bool) {
-	return tx.From, true
+func (t *ArbitrumRetryTx) GetSender() (common.Address, bool) {
+	return t.From, true
 }
 
-func (tx *ArbitrumRetryTx) SetSender(address common.Address) {
-	tx.From = address
+func (t *ArbitrumRetryTx) SetSender(address common.Address) {
+	t.From = address
 }
 
-func (tx *ArbitrumRetryTx) IsContractDeploy() bool {
-	return tx.To == nil
+func (t *ArbitrumRetryTx) IsContractDeploy() bool {
+	return t.To == nil
 }
 
 func (tx *ArbitrumRetryTx) Unwrap() types.Transaction {
 	return tx
 }
 
-func (t *ArbitrumRetryTx) IsTimeBoosted() bool {
+func (t *ArbitrumRetryTx) IsTimeBoosted() *bool {
 	return t.Timeboosted
 }
 
-func (tx *ArbitrumRetryTx) SetTimeboosted(val bool) {
-	tx.Timeboosted = val
+func (t *ArbitrumRetryTx) SetTimeboosted(val *bool) {
+	t.Timeboosted = val
 }
 
 // func (tx *ArbitrumRetryTx) chainID() *big.Int            { return tx.ChainId }
@@ -1404,14 +1418,14 @@ func (tx *ArbitrumRetryTx) SetTimeboosted(val bool) {
 // func (tx *ArbitrumRetryTx) value() *big.Int              { return tx.Value }
 // func (tx *ArbitrumRetryTx) nonce() uint64                { return tx.Nonce }
 // func (tx *ArbitrumRetryTx) to() *common.Address          { return tx.To }
-func (tx *ArbitrumRetryTx) encode(b *bytes.Buffer) error {
-	return rlp.Encode(b, tx)
+func (t *ArbitrumRetryTx) encode(b *bytes.Buffer) error {
+	return rlp.Encode(b, t)
 }
-func (tx *ArbitrumRetryTx) decode(input []byte) error {
-	return rlp.DecodeBytes(input, tx)
+func (t *ArbitrumRetryTx) decode(input []byte) error {
+	return rlp.DecodeBytes(input, t)
 }
 
-func (tx *ArbitrumRetryTx) setSignatureValues(chainID, v, r, s *big.Int) {}
+func (t *ArbitrumRetryTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 
 //func (tx *ArbitrumRetryTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	if baseFee == nil {
@@ -1433,7 +1447,7 @@ type ArbitrumSubmitRetryableTx struct {
 
 	DepositValue     *big.Int
 	GasFeeCap        *big.Int        // wei per gas
-	Gas              uint64          // gas limit
+	Gas              uint64          // gas limit for the retryable tx, actual gas spending is EffectiveGasUsed
 	RetryTo          *common.Address `rlp:"nil"` // nil means contract creation
 	RetryValue       *big.Int        // wei amount
 	Beneficiary      common.Address
@@ -1549,14 +1563,14 @@ func (tx *ArbitrumSubmitRetryableTx) RawSignatureValues() (*uint256.Int, *uint25
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumSubmitRetryableTx) payloadSize() (payloadSize int, gasLen int) {
+func (tx *ArbitrumSubmitRetryableTx) payloadSize(hashingOnly bool) (payloadSize int, gasLen int) {
 	size := 0
 	size++
 	size += rlp.BigIntLenExcludingHead(tx.ChainId)
 	size++
-	size += 32
+	size += length.Hash
 	size++
-	size += 20
+	size += length.Addr
 	size++
 	size += rlp.BigIntLenExcludingHead(tx.L1BaseFee)
 	size++
@@ -1568,25 +1582,29 @@ func (tx *ArbitrumSubmitRetryableTx) payloadSize() (payloadSize int, gasLen int)
 	size += gasLen
 	size++
 	if tx.RetryTo != nil {
-		size += 20
+		size += length.Addr
 	}
 	size++
 	size += rlp.BigIntLenExcludingHead(tx.RetryValue)
 	size++
-	size += 20
+	size += length.Addr
 	size++
 	size += rlp.BigIntLenExcludingHead(tx.MaxSubmissionFee)
 	size++
-	size += 20
+	size += length.Addr
 	size += rlp.StringLen(tx.RetryData)
 
+	if hashingOnly {
+		return size, gasLen
+	}
+	// effective gas used is only included in non-hashing RLP encodings
 	size++
 	size += rlp.IntLenExcludingHead(tx.EffectiveGasUsed)
 
 	return size, gasLen
 }
 
-func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloadSize, gasLen int) error {
+func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloadSize int, hashingOnly bool) error {
 	// Write the RLP list prefix.
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -1598,7 +1616,7 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	}
 
 	// RequestId (common.Hash, 32 bytes)
-	b[0] = 128 + 32
+	b[0] = 128 + length.Hash
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -1607,7 +1625,7 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	}
 
 	// From (common.Address, 20 bytes)
-	b[0] = 128 + 20
+	b[0] = 128 + length.Addr
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -1615,22 +1633,15 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 		return err
 	}
 
-	// L1BaseFee (big.Int)
 	if err := rlp.EncodeBigInt(tx.L1BaseFee, w, b); err != nil {
 		return err
 	}
-
-	// DepositValue (big.Int)
 	if err := rlp.EncodeBigInt(tx.DepositValue, w, b); err != nil {
 		return err
 	}
-
-	// GasFeeCap (big.Int)
 	if err := rlp.EncodeBigInt(tx.GasFeeCap, w, b); err != nil {
 		return err
 	}
-
-	// Gas (uint64)
 	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
 		return err
 	}
@@ -1642,7 +1653,7 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 			return err
 		}
 	} else {
-		b[0] = 128 + 20
+		b[0] = 128 + length.Addr
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
@@ -1650,50 +1661,50 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 			return err
 		}
 	}
-
-	// RetryValue (big.Int)
 	if err := rlp.EncodeBigInt(tx.RetryValue, w, b); err != nil {
 		return err
 	}
-
 	// Beneficiary (common.Address, 20 bytes)
-	b[0] = 128 + 20
+	b[0] = 128 + length.Addr
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
 	if _, err := w.Write(tx.Beneficiary[:]); err != nil {
 		return err
 	}
-
-	// MaxSubmissionFee (big.Int)
 	if err := rlp.EncodeBigInt(tx.MaxSubmissionFee, w, b); err != nil {
 		return err
 	}
 
 	// FeeRefundAddr (common.Address, 20 bytes)
-	b[0] = 128 + 20
+	b[0] = 128 + length.Addr
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
 	if _, err := w.Write(tx.FeeRefundAddr[:]); err != nil {
 		return err
 	}
-
-	// RetryData ([]byte)
 	if err := rlp.EncodeString(tx.RetryData, w, b); err != nil {
 		return err
 	}
 
+	if bytes.Equal(tx.Hash().Bytes()[:], TxHashhh[:]) {
+		fmt.Printf("marshal %x hashingOnly=%t tx: %+v\n", TxHashhh, hashingOnly, tx)
+	}
+
+	if hashingOnly {
+		return nil
+	}
 	if err := rlp.EncodeInt(tx.EffectiveGasUsed, w, b); err != nil {
 		return err
 	}
-
 	return nil
 }
 
 func (tx *ArbitrumSubmitRetryableTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
 	msg := &types.Message{
-		Tx: tx,
+		Tx:           tx,
+		EffectiveGas: tx.EffectiveGasUsed,
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -1706,7 +1717,9 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s types.Signer, baseFee *big.Int,
 	msg.SetData(tx.GetData())
 	msg.SetAmount(tx.GetValue())
 	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
-
+	if baseFee != nil {
+		msg.GasPrice().SetFromBig(math.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+	}
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
 	// }
@@ -1761,20 +1774,20 @@ func (tx *ArbitrumSubmitRetryableTx) Protected() bool {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) EncodingSize() int {
-	payloadSize, _ := tx.payloadSize()
+	payloadSize, _ := tx.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
-	payloadSize, gasLen := tx.payloadSize()
+	hashingOnly := false
+
+	payloadSize, _ := tx.payloadSize(hashingOnly)
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
-
-	// envelope
 
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -1785,7 +1798,7 @@ func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, hashingOnly); err != nil {
 		return err
 	}
 	return nil
@@ -1909,8 +1922,11 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
+var TxHashhh = common.HexToHash("0xae75e367d4b38d413a9cc3c0ff825453913e95db0f4089fbfdccae2e77e9cf1c")
+
 func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
-	payloadSize, gasLen := tx.payloadSize()
+	hashingOnly := false
+	payloadSize, _ := tx.payloadSize(hashingOnly)
 	b := types.NewEncodingBuf()
 	defer types.PooledBuf.Put(b)
 	// encode TxType
@@ -1918,7 +1934,24 @@ func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, hashingOnly); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *ArbitrumSubmitRetryableTx) MarshalBinaryForHashing(w io.Writer) error {
+	hashingOnly := true
+
+	payloadSize, _ := tx.payloadSize(hashingOnly)
+	b := types.NewEncodingBuf()
+	defer types.PooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumSubmitRetryableTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, hashingOnly); err != nil {
 		return err
 	}
 	return nil
@@ -1986,21 +2019,21 @@ type ArbitrumDepositTx struct {
 	Value       *big.Int
 }
 
-func (d *ArbitrumDepositTx) copy() *ArbitrumDepositTx {
-	tx := &ArbitrumDepositTx{
+func (tx *ArbitrumDepositTx) copy() *ArbitrumDepositTx {
+	dtx := &ArbitrumDepositTx{
 		ChainId:     new(big.Int),
-		L1RequestId: d.L1RequestId,
-		From:        d.From,
-		To:          d.To,
+		L1RequestId: tx.L1RequestId,
+		From:        tx.From,
+		To:          tx.To,
 		Value:       new(big.Int),
 	}
-	if d.ChainId != nil {
-		tx.ChainId.Set(d.ChainId)
+	if dtx.ChainId != nil {
+		dtx.ChainId.Set(tx.ChainId)
 	}
-	if d.Value != nil {
-		tx.Value.Set(d.Value)
+	if dtx.Value != nil {
+		dtx.Value.Set(tx.Value)
 	}
-	return tx
+	return dtx
 }
 
 func (tx *ArbitrumDepositTx) Type() byte                               { return ArbitrumDepositTxType }
@@ -2038,6 +2071,9 @@ func (tx *ArbitrumDepositTx) AsMessage(s types.Signer, baseFee *big.Int, rules *
 	msg.SetData(tx.GetData())
 	msg.SetAmount(tx.GetValue())
 	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
+	if baseFee != nil {
+		msg.GasPrice().SetFromBig(math.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+	}
 
 	// if msg.feeCap.IsZero() {
 	// 	msg.feeCap.Set(uint256.NewInt(0x5f5e100))
@@ -2062,6 +2098,14 @@ func (tx *ArbitrumDepositTx) AsMessage(s types.Signer, baseFee *big.Int, rules *
 	return msg, nil
 }
 
+func (tx *ArbitrumDepositTx) SigningHash(chainID *big.Int) common.Hash {
+	//TODO implement me
+	panic("implement me")
+}
+func (tx *ArbitrumDepositTx) Protected() bool {
+	//TODO implement me
+	panic("implement me")
+}
 func (d *ArbitrumDepositTx) WithSignature(signer types.Signer, sig []byte) (types.Transaction, error) {
 	//TODO implement me
 	panic("implement me")
@@ -2078,24 +2122,14 @@ func (d *ArbitrumDepositTx) Hash() common.Hash {
 	})
 }
 
-func (d *ArbitrumDepositTx) SigningHash(chainID *big.Int) common.Hash {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (d *ArbitrumDepositTx) Protected() bool {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (d *ArbitrumDepositTx) EncodingSize() int {
-	payloadSize := d.payloadSize()
+func (tx *ArbitrumDepositTx) EncodingSize() int {
+	payloadSize := tx.payloadSize()
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (d *ArbitrumDepositTx) EncodeRLP(w io.Writer) error {
-	payloadSize := d.payloadSize()
+func (tx *ArbitrumDepositTx) EncodeRLP(w io.Writer) error {
+	payloadSize := tx.payloadSize()
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
@@ -2112,7 +2146,7 @@ func (d *ArbitrumDepositTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := d.encodePayload(w, b[:], payloadSize); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
 	return nil
@@ -2302,7 +2336,14 @@ type ArbitrumInternalTx struct {
 	NoTimeBoosted
 	ChainId *uint256.Int
 	Data    []byte
+
+	//arb.NoTimeBoosted
 }
+
+func (t *ArbitrumInternalTx) IsTimeBoosted() *bool {
+	return nil
+}
+func (t *ArbitrumInternalTx) SetTimeboosted(b *bool) {}
 
 func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	cpy := &ArbitrumInternalTx{
@@ -2325,6 +2366,16 @@ func (tx *ArbitrumInternalTx) GetData() []byte                          { return
 func (tx *ArbitrumInternalTx) GetValue() *uint256.Int                   { return uintZero }
 func (tx *ArbitrumInternalTx) GetTo() *common.Address                   { return &ArbosAddress }
 func (tx *ArbitrumInternalTx) GetAccessList() types.AccessList          { return nil }
+func (tx *ArbitrumInternalTx) cachedSender() (common.Address, bool)     { return ArbosAddress, true }
+func (tx *ArbitrumInternalTx) GetSender() (common.Address, bool)        { return ArbosAddress, true }
+func (tx *ArbitrumInternalTx) IsContractDeploy() bool                   { return false }
+func (tx *ArbitrumInternalTx) Unwrap() types.Transaction                { return tx }
+func (tx *ArbitrumInternalTx) SigningHash(chainID *big.Int) common.Hash { panic("implement me") }
+func (tx *ArbitrumInternalTx) Protected() bool                          { panic("implement me") }
+func (tx *ArbitrumInternalTx) SetSender(address common.Address)         {} // not supported in ArbitrumInternalTx
+func (tx *ArbitrumInternalTx) Sender(signer types.Signer) (common.Address, error) {
+	panic("not supported")
+}
 func (tx *ArbitrumInternalTx) GetAuthorizations() []types.Authorization { return nil }
 
 func (tx *ArbitrumInternalTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int { return uintZero }
@@ -2348,6 +2399,9 @@ func (tx *ArbitrumInternalTx) AsMessage(s types.Signer, baseFee *big.Int, rules 
 	msg.SetAmount(tx.GetValue())
 	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
 
+	if baseFee != nil {
+		msg.GasPrice().SetFromBig(math.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+	}
 	// if msg.feeCap.IsZero() {
 	// 	msg.gasLimit = baseFee.Uint64()
 	// 	msg.feeCap.Set(uint256.NewInt(0x5f5e100))
@@ -2381,32 +2435,19 @@ func (tx *ArbitrumInternalTx) Hash() common.Hash {
 	})
 }
 
-func (tx *ArbitrumInternalTx) SigningHash(chainID *big.Int) common.Hash {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (tx *ArbitrumInternalTx) Protected() bool {
-	//TODO implement me
-	panic("implement me")
-}
-
 func (tx *ArbitrumInternalTx) EncodingSize() int {
 	payloadSize := tx.payloadSize()
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (tx *ArbitrumInternalTx) payloadSize() int {
-	size := 0
-
+func (tx *ArbitrumInternalTx) payloadSize() (size int) {
 	// ChainId: add 1 byte for header and the length of ChainId (excluding header)
 	size++
 	size += rlp.Uint256LenExcludingHead(tx.ChainId)
 
 	// Data: rlp.StringLen returns the full encoded length (header + payload)
 	size += rlp.StringLen(tx.Data)
-
 	return size
 }
 
@@ -2485,27 +2526,8 @@ func (tx *ArbitrumInternalTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumInternalTx) Sender(signer types.Signer) (common.Address, error) {
-	panic("not supported in ArbitrumInternalTx")
-}
-
 func (tx *ArbitrumInternalTx) CachedSender() (common.Address, bool) {
 	return ArbosAddress, true
-}
-
-func (tx *ArbitrumInternalTx) GetSender() (common.Address, bool) {
-	return ArbosAddress, true
-}
-
-// not supported in ArbitrumInternalTx
-func (tx *ArbitrumInternalTx) SetSender(address common.Address) {}
-
-func (tx *ArbitrumInternalTx) IsContractDeploy() bool {
-	return false
-}
-
-func (tx *ArbitrumInternalTx) Unwrap() types.Transaction {
-	return tx
 }
 
 func (t *ArbitrumInternalTx) encode(b *bytes.Buffer) error {
