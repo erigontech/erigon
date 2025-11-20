@@ -24,16 +24,16 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 type Reader struct {
@@ -97,11 +97,14 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 			state.SystemAddress,
 			&r.stateClientAddress,
 			0, u256.Num0,
-			core.SysCallGasLimit,
+			protocol.SysCallGasLimit,
 			u256.Num0,
 			nil, nil,
-			event, nil, false,
-			true,
+			event, nil,
+			false, // checkNonce
+			false, // checkTransaction
+			false, // checkGas
+			true,  // isFree
 			nil,
 		)
 
@@ -130,11 +133,14 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 			state.SystemAddress,
 			&r.stateClientAddress,
 			0, u256.Num0,
-			core.SysCallGasLimit,
+			protocol.SysCallGasLimit,
 			u256.Num0,
 			nil, nil,
-			event, nil, false,
-			true,
+			event, nil,
+			false, // checkNonce
+			false, // checkTransaction
+			false, // checkGas
+			true,  // isFree
 			nil,
 		)
 
@@ -223,11 +229,14 @@ func messageFromData(to common.Address, data []byte) *types.Message {
 		state.SystemAddress,
 		&to,
 		0, u256.Num0,
-		core.SysCallGasLimit,
+		protocol.SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true,
+		data, nil,
+		false, // checkNonce
+		false, // checkTransaction
+		false, // checkGas
+		true,  // isFree
 		nil,
 	)
 
@@ -250,6 +259,8 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			event,
 			nil,   // accessList
 			false, // checkNonce
+			false, // checkTransaction
+			false, // checkGas
 			true,  // isFree
 			nil,   // maxFeePerBlobGas
 		)

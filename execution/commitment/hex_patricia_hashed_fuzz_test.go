@@ -27,7 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // go test -trimpath -v -fuzz=Fuzz_ProcessUpdate -fuzztime=300s ./erigon/execution/commitment
@@ -64,13 +64,13 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		require.NoError(t, err)
 
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, nil, nil)
-		rootHashDirect, err := hph.Process(ctx, upds, "")
+		rootHashDirect, err := hph.Process(ctx, upds, "", nil)
 		require.NoError(t, err)
 		require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
 		upds.Close()
 
 		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, nil, nil)
-		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "")
+		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "", nil)
 		require.NoError(t, err)
 		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
 		require.Equal(t, rootHashDirect, rootHashUpdate, "storage-based and update-based rootHash mismatch")
@@ -127,7 +127,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 				updateSeed.Read(aux[:sz])
 
 				copy(updates[k].Storage[:], aux[:sz])
-				updates[k].StorageLen = sz
+				updates[k].StorageLen = int8(sz)
 			}
 
 			plainKeys[k] = make([]byte, kl)
@@ -148,7 +148,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			require.NoError(t, err)
 
 			updsDirect := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-			rootHashDirect, err := hph.Process(ctx, updsDirect, "")
+			rootHashDirect, err := hph.Process(ctx, updsDirect, "", nil)
 			updsDirect.Close()
 			require.NoError(t, err)
 			require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
@@ -157,7 +157,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			require.NoError(t, err)
 
 			upds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-			rootHashAnother, err := hphAnother.Process(ctx, upds, "")
+			rootHashAnother, err := hphAnother.Process(ctx, upds, "", nil)
 			upds.Close()
 			require.NoError(t, err)
 			require.Len(t, rootHashAnother, length.Hash, "invalid root hash length")
@@ -214,7 +214,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer upds.Close()
 
-		rootHash, err := hph.Process(ctx, upds, "")
+		rootHash, err := hph.Process(ctx, upds, "", nil)
 		require.NoError(t, err)
 		require.Lenf(t, rootHash, length.Hash, "invalid root hash length")
 	})

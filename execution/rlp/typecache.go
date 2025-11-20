@@ -21,6 +21,7 @@ package rlp
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"sync"
@@ -111,9 +112,7 @@ func (c *typeCache) generate(typ reflect.Type, tags tags) *typeinfo {
 
 	// Copy cur to next.
 	c.next = make(map[typekey]*typeinfo, len(cur)+1)
-	for k, v := range cur {
-		c.next[k] = v
-	}
+	maps.Copy(c.next, cur)
 
 	// Generate.
 	info := c.infoWhileGenerating(typ, tags)
@@ -206,7 +205,7 @@ func (e structTagError) Error() string {
 func parseStructTag(typ reflect.Type, fi, lastPublic int) (tags, error) {
 	f := typ.Field(fi)
 	var ts tags
-	for _, t := range strings.Split(f.Tag.Get("rlp"), ",") {
+	for t := range strings.SplitSeq(f.Tag.Get("rlp"), ",") {
 		switch t = strings.TrimSpace(t); t {
 		case "":
 		case "-":

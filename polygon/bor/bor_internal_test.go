@@ -26,8 +26,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -60,7 +60,7 @@ func (m mockSpanReader) Producers(context.Context, uint64) (*heimdall.ValidatorS
 
 func TestCommitStatesIndore(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	cr := consensus.NewMockChainReader(ctrl)
+	cr := rules.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
 	bor := New(polychain.BorDevnet.Config, nil, nil, nil, nil, br, nil)
@@ -89,8 +89,10 @@ func TestCommitStatesIndore(t *testing.T) {
 				nil,
 				nil,
 				nil,
-				false,
-				false,
+				false, // checkNonce
+				false, // checkTransaction
+				false, // checkGas
+				false, // isFree
 				nil,
 			),
 		}, nil,

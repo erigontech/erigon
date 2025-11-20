@@ -24,16 +24,16 @@ import (
 	"runtime"
 	"runtime/debug"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -55,7 +55,7 @@ type PrivateDebugAPI interface {
 	TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
-	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage bool) (state.IteratorDump, error)
+	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start interface{}, maxResults int, nocode, nostorage bool, incompletes *bool) (state.IteratorDump, error)
 	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
 	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
@@ -112,7 +112,50 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
-func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage bool) (state.IteratorDump, error) {
+// To ensure compatibility, we've temporarily added support for the start parameter in two formats:
+// - string (e.g., "0x..."), which is used by Geth and other APIs (i.e debug_storageRangeAt).
+// - []byte, which was used in Erigon.
+// Deprecation of []byte format: The []byte format is now deprecated and will be removed in a future release.
+//
+// New optional parameter incompletes: This parameter has been added for compatibility with Geth. It is currently not supported when set to true(as its functionality is specific to the Geth protocol).
+func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start interface{}, maxResults int, excludeCode, excludeStorage bool, optional_incompletes *bool) (state.IteratorDump, error) {
+	var startBytes []byte
+
+	switch v := start.(type) {
+	case string:
+		var err error
+		startBytes, err = hexutil.Decode(v)
+		if err != nil {
+			return state.IteratorDump{}, fmt.Errorf("invalid hex string for start parameter: %v", err)
+		}
+
+	case []byte:
+		startBytes = v
+
+	case []interface{}:
+		for _, val := range v {
+			if b, ok := val.(float64); ok {
+				startBytes = append(startBytes, byte(b))
+			} else {
+				return state.IteratorDump{}, fmt.Errorf("invalid byte value in array: %T", val)
+			}
+		}
+	default:
+		return state.IteratorDump{}, fmt.Errorf("invalid type for start parameter: %T", v)
+	}
+
+	var incompletes bool
+
+	if optional_incompletes == nil {
+		incompletes = false
+	} else {
+		incompletes = *optional_incompletes
+	}
+
+	if incompletes == true {
+		return state.IteratorDump{}, fmt.Errorf("not supported incompletes = true")
+	}
+
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -161,7 +204,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 	}
 
 	dumper := state.NewDumper(tx, api._blockReader.TxnumReader(ctx), blockNumber)
-	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
+	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startBytes), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -200,16 +243,16 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	endNum := startNum + 1 // allows for single param calls
 	if endNumber != nil {
 		// forces negative numbers to fail (too large) but allows zero
-		endNum = uint64(endNumber.Int64()) + 1
+		endNum = uint64(endNumber.Int64()) // [startNum,endNum) from user
 	}
 
 	// is endNum too big?
-	if endNum > latestBlock {
+	if endNum > latestBlock+1 { // [startNum,endNum)
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
 
-	if startNum > endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	if startNum >= endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 	//[from, to)
 	startTxNum, err := api._txNumReader.Min(tx, startNum)
@@ -264,16 +307,14 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 
 	if endHash != nil {
 		var err error
-		endNum, err = api.headerNumberByHash(ctx, tx, *endHash)
+		endNum, err = api.headerNumberByHash(ctx, tx, *endHash) // [startNum,endNum) from user
 		if err != nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
-		endNum = endNum + 1
-
 	}
 
-	if startNum > endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	if startNum >= endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
 	//[from, to)
@@ -367,7 +408,7 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 		return nil, err
 	}
 	if header == nil {
-		return nil, errors.New("header not found")
+		return nil, nil
 	}
 	return rlp.EncodeToBytes(header)
 }
@@ -388,7 +429,7 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 		return nil, err
 	}
 	if block == nil {
-		return nil, errors.New("block not found")
+		return nil, nil
 	}
 	return rlp.EncodeToBytes(block)
 }
@@ -455,7 +496,8 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interfa
 
 	blocks, err := rawdb.GetLatestBadBlocks(tx)
 	if err != nil || len(blocks) == 0 {
-		return nil, err
+		// Return empty array if no bad blocks found to align with other clients and spec
+		return []map[string]interface{}{}, err
 	}
 
 	results := make([]map[string]interface{}, 0, len(blocks))

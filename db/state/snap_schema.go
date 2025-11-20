@@ -20,10 +20,11 @@ import (
 // ii) existence filter: kvei
 // iii) bt index: btree index; e.g. .bt
 
-// snapshot name schema holder and parser
-// each entity holds one schema.
+// "snapshot files" name schema holder and parser
+// each entity has one schema.
 type SnapNameSchema interface {
 	DataTag() string
+	IndexTags() []string
 	AccessorList() statecfg.Accessors
 	Parse(filename string) (f *SnapInfo, ok bool)
 
@@ -99,6 +100,10 @@ func NewE2SnapSchemaWithStep(dirs datadir.Dirs, dataFileTag string, indexFileTag
 
 func (s *E2SnapSchema) DataTag() string {
 	return s.dataFileTag
+}
+
+func (s *E2SnapSchema) IndexTags() []string {
+	return s.indexFileTags
 }
 
 func (a *E2SnapSchema) AccessorList() statecfg.Accessors {
@@ -194,7 +199,6 @@ func (s *E2SnapSchema) DataFileCompression() seg.FileCompression {
 }
 
 // E3 Schema
-
 type E3SnapSchema struct {
 	stepSize uint64
 
@@ -213,6 +217,35 @@ type E3SnapSchema struct {
 
 type E3SnapSchemaBuilder struct {
 	e *E3SnapSchema
+}
+
+func SnapSchemaFromDomainCfg(cfg statecfg.DomainCfg, dirs datadir.Dirs, stepSize uint64) (domain, history, ii *E3SnapSchema) {
+	domainb := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression)
+	accessors := cfg.Accessors
+	if accessors.Has(statecfg.AccessorBTree) {
+		domainb.BtIndex()
+	}
+	if accessors.Has(statecfg.AccessorExistence) {
+		domainb.Existence()
+	}
+	if accessors.Has(statecfg.AccessorHashMap) {
+		domainb.Accessor(dirs.SnapDomain)
+	}
+	domain = domainb.Build()
+
+	if cfg.Hist.HistoryDisabled {
+		return
+	}
+
+	history = NewE3SnapSchemaBuilder(cfg.Hist.Accessors, stepSize).
+		Data(dirs.SnapHistory, cfg.Name.String(), DataExtensionV, cfg.Hist.Compression).
+		Accessor(dirs.SnapAccessors).Build()
+	ii = NewE3SnapSchemaBuilder(cfg.Hist.IiCfg.Accessors, stepSize).
+		Data(dirs.SnapIdx, cfg.Name.String(), DataExtensionEf, cfg.Hist.IiCfg.Compression).
+		Accessor(dirs.SnapAccessors).Build()
+
+	return
 }
 
 func NewE3SnapSchemaBuilder(accessors statecfg.Accessors, stepSize uint64) *E3SnapSchemaBuilder {
@@ -386,6 +419,10 @@ func (s *E3SnapSchema) DataTag() string {
 	return s.dataFileTag
 }
 
+func (s *E3SnapSchema) IndexTags() []string {
+	return []string{s.dataFileTag}
+}
+
 func (s *E3SnapSchema) AccessorList() statecfg.Accessors {
 	return s.accessors
 }
@@ -421,4 +458,60 @@ func (s *E3SnapSchema) FileExtensions() (extensions []string) {
 	}
 
 	return
+}
+
+// these are v + vi or bt/kvei residing in same folder `snapshots/forkables`
+func NewForkableSnapSchema(cfg statecfg.ForkableCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize)
+	b.Data(dirs.SnapForkable, cfg.Name, DataExtensionV, cfg.Compression)
+	if cfg.Accessors&statecfg.AccessorBTree != 0 {
+		b.BtIndex()
+	}
+	if cfg.Accessors&statecfg.AccessorHashMap != 0 {
+		b.Accessor(dirs.SnapForkable)
+	}
+	if cfg.Accessors&statecfg.AccessorExistence != 0 {
+		b.Existence()
+	}
+
+	return b.Build()
+}
+
+func NewDomainSnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression)
+
+	if cfg.Accessors.Has(statecfg.AccessorBTree) {
+		b.BtIndex()
+	}
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		// kvi in same folder
+		b.Accessor(dirs.SnapDomain)
+	}
+	if cfg.Accessors.Has(statecfg.AccessorExistence) {
+		b.Existence()
+	}
+
+	return b.Build()
+}
+
+func NewHistorySnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapHistory, cfg.Name.String(), DataExtensionV, cfg.Compression)
+
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		b.Accessor(dirs.SnapAccessors)
+	}
+
+	return b.Build()
+}
+
+func NewIISnapSchema(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
+	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapIdx, cfg.Name.String(), DataExtensionEf, cfg.Compression)
+	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
+		b.Accessor(dirs.SnapAccessors)
+	}
+
+	return b.Build()
 }

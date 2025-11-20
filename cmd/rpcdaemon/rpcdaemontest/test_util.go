@@ -30,25 +30,25 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
-	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 )
 
 type testAddresses struct {
@@ -80,7 +80,7 @@ func makeTestAddresses() testAddresses {
 	}
 }
 
-func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.ChainPack) {
+func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*blockgen.ChainPack) {
 	addresses := makeTestAddresses()
 	var (
 		key      = addresses.key
@@ -105,7 +105,7 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
 	// Generate empty chain to have some orphaned blocks for tests
-	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
+	orphanedChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -123,19 +123,19 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.
 		t.Fatal(err)
 	}
 
-	return m, chain, []*core.ChainPack{orphanedChain}
+	return m, chain, []*blockgen.ChainPack{orphanedChain}
 }
 
-var chainInstance *core.ChainPack
+var chainInstance *blockgen.ChainPack
 
 func getChainInstance(
 	addresses *testAddresses,
 	config *chain.Config,
 	parent *types.Block,
-	engine consensus.Engine,
+	engine rules.Engine,
 	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
-) (*core.ChainPack, error) {
+) (*blockgen.ChainPack, error) {
 	var err error
 	if chainInstance == nil {
 		chainInstance, err = generateChain(addresses, config, parent, engine, db, contractBackend)
@@ -147,10 +147,10 @@ func generateChain(
 	addresses *testAddresses,
 	config *chain.Config,
 	parent *types.Block,
-	engine consensus.Engine,
+	engine rules.Engine,
 	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
-) (*core.ChainPack, error) {
+) (*blockgen.ChainPack, error) {
 	var (
 		key      = addresses.key
 		key1     = addresses.key1
@@ -170,8 +170,8 @@ func generateChain(
 	var poly *contracts.Poly
 	var tokenContract *contracts.Token
 
-	// We generate the blocks without plain state because it's not supported in core.GenerateChain
-	return core.GenerateChain(config, parent, engine, db, 11, func(i int, block *core.BlockGen) {
+	// We generate the blocks without plain state because it's not supported in blockgen.GenerateChain
+	return blockgen.GenerateChain(config, parent, engine, db, 11, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -309,10 +309,10 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	remoteproto.RegisterETHBACKENDServer(server, privateapi2.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
+	remoteproto.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
 		m.BlockReader, nil, log.New(), builder.NewLatestBlockBuiltStore(), nil))
 	txpoolproto.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
-	txpoolproto.RegisterMiningServer(server, privateapi2.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
+	txpoolproto.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {
@@ -431,7 +431,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 		}
 	)
 	m := mock.MockWithGenesis(t, gspec, key, false)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
@@ -530,7 +530,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 		},
 	}
 	m := mock.MockWithGenesis(t, gspec, key, false)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,

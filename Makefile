@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
@@ -5,6 +7,7 @@ GOBIN := $(CURDIR)/$(GOBINREL)
 GOARCH ?= $(shell go env GOHOSTARCH)
 UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
+DOCKER_BINARIES ?= "erigon"
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
@@ -21,11 +24,11 @@ DOCKER_TAG ?= erigontech/erigon:latest
 # Pipe error below to /dev/null since Makefile structure kind of expects
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
-CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
+#CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
+#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
 #CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
-CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
+#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
 
 CGO_CFLAGS += -D__BLST_PORTABLE__
@@ -46,9 +49,15 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
+CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
+ifeq ($(CGO_CXXFLAGS),)
+	CGO_CXXFLAGS += -g
+	CGO_CXXFLAGS += -O2
+endif
+
 BUILD_TAGS =
 
-ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
+ifneq ($(shell "$(CURDIR)/node/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
@@ -68,7 +77,25 @@ GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLA
 GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
 DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
 GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
-GOTEST = $(GO_BUILD_ENV) GODEBUG=cgocheck=0 GOTRACEBACK=1 GOEXPERIMENT=synctest $(GO) test $(GO_FLAGS) ./...
+GOTEST = $(GO_BUILD_ENV) CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GODEBUG=cgocheck=0 GOTRACEBACK=1 GOEXPERIMENT=synctest $(GO) test $(GO_FLAGS) ./...
+
+GOINSTALL = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go install -trimpath
+
+OS = $(shell uname -s)
+ARCH = $(shell uname -m)
+
+ifeq ($(OS),Darwin)
+PROTOC_OS := osx
+ifeq ($(ARCH),arm64)
+ARCH = aarch_64
+endif
+endif
+ifeq ($(OS),Linux)
+PROTOC_OS = linux
+endif
+
+PROTOC_INCLUDE = build/include/google
+PROTO_PATH = node/interfaces
 
 default: all
 
@@ -97,6 +124,7 @@ docker:
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
+		--build-arg BINARIES="${DOCKER_BINARIES}" \
 		${DOCKER_FLAGS} \
 		.
 
@@ -127,7 +155,7 @@ dbg:
 %.cmd:
 	@echo Building '$(OUTPUT)'
 	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
-	@echo "Run \"$(GOBIN)/$*\" to launch $*."
+	@echo "Run \"$(OUTPUT)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
 geth: erigon
@@ -169,44 +197,18 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-lib-short:
-	@cd erigon-lib && $(MAKE) test-short
+test-filtered:
+	(set -o pipefail && $(GOTEST) | tee run.log | (grep -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' -e '--- PASS:' || true))
 
-test-erigon-lib-all:
-	@cd erigon-lib && $(MAKE) test-all
+# Rather than add more special cases here, I'd suggest using GO_FLAGS and calling `make test-filtered GO_FLAGS='-cool flag' or `make test GO_FLAGS='-cool flag'`.
+test-short: override GO_FLAGS += -short -failfast
+test-short: test-filtered
 
-test-erigon-lib-all-race:
-	@cd erigon-lib && $(MAKE) test-all-race
+test-all: override GO_FLAGS += --timeout 60m -coverprofile=coverage-test-all.out
+test-all: test-filtered
 
-test-erigon-ext:
-	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
-
-## test-short:                run short tests with a 10m timeout
-test-short: test-erigon-lib-short
-	@{ \
-		$(GOTEST) -short > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
-
-## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all
-	@{ \
-		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
-
-## test-all-race:             run all tests with the race flag
-test-all-race: test-erigon-lib-all-race
-	@{ \
-		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+test-all-race: override GO_FLAGS += --timeout 60m -race
+test-all-race: test-filtered
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:
@@ -246,9 +248,9 @@ endef
 
 hive-local:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
-	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
+	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/hive-local-$(SHORT_COMMIT)" && mkdir "temp/hive-local-$(SHORT_COMMIT)"
-	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && \
 	$(if $(filter Darwin,$(UNAME)), \
@@ -266,11 +268,13 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
+EEST_VERSION = v5.3.0
+
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 	$(if $(filter Darwin,$(UNAME)), \
 		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
@@ -280,7 +284,7 @@ eest-hive:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz)
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
@@ -313,28 +317,54 @@ kurtosis-cleanup:
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
-	@cd erigon-lib && $(MAKE) lint-deps
+	@./tools/golangci_lint.sh --install-deps
 
 ## lintci:                            run golangci-lint linters
 lintci:
-	@cd erigon-lib && $(MAKE) lintci
-	@./erigon-lib/tools/golangci_lint.sh
+	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
 ## lint:                              run all linters
-lint:
-	@cd erigon-lib && $(MAKE) lint
-	@./erigon-lib/tools/golangci_lint.sh
-	@./erigon-lib/tools/mod_tidy_check.sh
+lint: 
+	@./tools/golangci_lint.sh
+	@./tools/mod_tidy_check.sh
 
 ## tidy:                              `go mod tidy`
 tidy:
-	cd erigon-lib && go mod tidy
 	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache
 	rm -fr build/*
+
+$(GOBINREL):
+	mkdir -p "$(GOBIN)"
+
+$(GOBINREL)/protoc: | $(GOBINREL)
+	$(eval PROTOC_TMP := $(shell mktemp -d))
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v33.1/protoc-33.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	cd "$(PROTOC_TMP)" && unzip protoc.zip
+	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
+	mkdir -p "$(PROTOC_INCLUDE)"
+	cp -R "$(PROTOC_TMP)/include/google/" "$(PROTOC_INCLUDE)"
+	rm -rf "$(PROTOC_TMP)"
+
+# 'protoc-gen-go' tool generates proto messages
+$(GOBINREL)/protoc-gen-go: | $(GOBINREL)
+	$(GOINSTALL) google.golang.org/protobuf/cmd/protoc-gen-go
+
+# 'protoc-gen-go-grpc' tool generates grpc services
+$(GOBINREL)/protoc-gen-go-grpc: | $(GOBINREL)
+	$(GOINSTALL) google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+$(PROTO_PATH):
+	git submodule update --init $@
+
+protoc-all: $(GOBINREL)/protoc $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
+
+protoc-clean:
+	rm -f "$(GOBIN)/protoc"*
+	rm -rf "$(PROTOC_INCLUDE)"
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
@@ -350,15 +380,16 @@ devtools:
 
 ## mocks:                             generate test mocks
 mocks:
-	@cd erigon-lib && $(MAKE) mocks
 	rm -f $(GOBIN)/mockgen
+	$(GOINSTALL) go.uber.org/mock/mockgen@latest
 	$(GOBUILD) -o "$(GOBIN)/mockgen" go.uber.org/mock/mockgen
-	grep -r -l --exclude-dir="erigon-lib" --exclude-dir="tests" --exclude-dir="*$(GOBINREL)*" "^// Code generated by MockGen. DO NOT EDIT.$$" . | xargs rm -r
+	grep -r -l --exclude-dir="execution/tests" --exclude-dir="*$(GOBINREL)*" "^// Code generated by MockGen. DO NOT EDIT.$$" . | xargs rm -r
 	PATH="$(GOBIN):$(PATH)" go generate -run "mockgen" ./...
 
 ## solc:                              generate all solidity contracts
 solc:
-	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
+	PATH="$(GOBIN):$(PATH)" go generate -run "solc" -skip "txnprovider/shutter" ./...
+	@cd txnprovider/shutter && $(MAKE) solc
 
 ## abigen:                            generate abis using abigen
 abigen:
@@ -375,8 +406,36 @@ graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
 ## grpc:                              generate grpc and protobuf code
-grpc:
-	@cd erigon-lib && $(MAKE) grpc
+grpc: protoc-all $(PROTO_PATH)
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=node/gointerfaces -I=$(PROTOC_INCLUDE) \
+		--go_opt=Mtypes/types.proto=./typesproto \
+		types/types.proto
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=node/gointerfaces --go-grpc_out=node/gointerfaces -I=$(PROTOC_INCLUDE) \
+		--go_opt=Mtypes/types.proto=github.com/erigontech/erigon/node/gointerfaces/typesproto \
+		--go-grpc_opt=Mtypes/types.proto=github.com/erigontech/erigon/node/gointerfaces/typesproto \
+		--go_opt=Mp2psentry/sentry.proto=./sentryproto \
+		--go-grpc_opt=Mp2psentry/sentry.proto=./sentryproto \
+		--go_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
+		--go-grpc_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
+		--go_opt=Mremote/kv.proto=./remoteproto \
+		--go-grpc_opt=Mremote/kv.proto=./remoteproto \
+		--go_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go-grpc_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go_opt=Mremote/bor.proto=./remoteproto \
+		--go-grpc_opt=Mremote/bor.proto=./remoteproto \
+		--go_opt=Mdownloader/downloader.proto=./downloaderproto \
+		--go-grpc_opt=Mdownloader/downloader.proto=./downloaderproto \
+		--go_opt=Mexecution/execution.proto=./executionproto \
+		--go-grpc_opt=Mexecution/execution.proto=./executionproto \
+		--go_opt=Mtxpool/txpool.proto=./txpoolproto \
+		--go-grpc_opt=Mtxpool/txpool.proto=./txpoolproto \
+		--go_opt=Mtxpool/mining.proto=./txpoolproto \
+		--go-grpc_opt=Mtxpool/mining.proto=./txpoolproto \
+		p2psentry/sentry.proto p2psentinel/sentinel.proto \
+		remote/bor.proto remote/kv.proto remote/ethbackend.proto \
+		downloader/downloader.proto execution/execution.proto \
+		txpool/txpool.proto txpool/mining.proto
+
 	@cd txnprovider/shutter && $(MAKE) proto
 
 ## stringer:                          generate stringer code
@@ -386,12 +445,11 @@ stringer:
 
 ## gen:                               generate all auto-generated code in the codebase
 gen: mocks solc abigen gencodec graphql grpc stringer
-	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
-	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
-	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/tests/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/state/contracts/
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
@@ -415,7 +473,7 @@ DIST ?= $(CURDIR)/build/dist
 .PHONY: install
 install:
 	mkdir -p "$(DIST)"
-	cp -f "$$($(CURDIR)/turbo/silkworm/silkworm_lib_path.sh)" "$(DIST)"
+	cp -f "$$($(CURDIR)/node/silkworm/silkworm_lib_path.sh)" "$(DIST)"
 	cp -f "$(GOBIN)/"* "$(DIST)"
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"
@@ -450,11 +508,6 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
 	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
-
-## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
-.PHONY: automated-tests
-automated-tests:
-	./tests/automated-testing/run.sh
 
 ## help:                              print commands help
 help	:	Makefile

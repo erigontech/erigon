@@ -21,69 +21,33 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"time"
 
-	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
-
-type BlockOverrides struct {
-	BlockNumber *hexutil.Uint64
-	Coinbase    *common.Address
-	Timestamp   *hexutil.Uint64
-	GasLimit    *hexutil.Uint
-	Difficulty  *hexutil.Uint
-	BaseFee     *uint256.Int
-	BlockHash   *map[uint64]common.Hash
-}
 
 type Bundle struct {
 	Transactions  []ethapi.CallArgs
-	BlockOverride BlockOverrides
+	BlockOverride transactions.BlockOverrides
 }
 
 type StateContext struct {
 	BlockNumber      rpc.BlockNumberOrHash
 	TransactionIndex *int
-}
-
-func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOverrides, overrideBlockHash map[uint64]common.Hash) {
-	if blockOverride.BlockNumber != nil {
-		blockCtx.BlockNumber = uint64(*blockOverride.BlockNumber)
-	}
-	if blockOverride.BaseFee != nil {
-		blockCtx.BaseFee = blockOverride.BaseFee
-	}
-	if blockOverride.Coinbase != nil {
-		blockCtx.Coinbase = *blockOverride.Coinbase
-	}
-	if blockOverride.Difficulty != nil {
-		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*blockOverride.Difficulty))
-	}
-	if blockOverride.Timestamp != nil {
-		blockCtx.Time = uint64(*blockOverride.Timestamp)
-	}
-	if blockOverride.GasLimit != nil {
-		blockCtx.GasLimit = uint64(*blockOverride.GasLimit)
-	}
-	if blockOverride.BlockHash != nil {
-		for blockNum, hash := range *blockOverride.BlockHash {
-			overrideBlockHash[blockNum] = hash
-		}
-	}
 }
 
 func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
@@ -171,7 +135,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return hash, err
 	}
 
-	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
+	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
@@ -206,17 +170,17 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
 		st.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
 		}
-		txCtx = core.NewEVMTxContext(msg)
+		txCtx = protocol.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
 		// Execute the transaction message
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +210,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.BlockNumber = uint64(*bundle.BlockOverride.BlockNumber)
 		}
 		if bundle.BlockOverride.BaseFee != nil {
-			blockCtx.BaseFee = bundle.BlockOverride.BaseFee
+			blockCtx.BaseFee = *bundle.BlockOverride.BaseFee
 		}
 		if bundle.BlockOverride.Coinbase != nil {
 			blockCtx.Coinbase = *bundle.BlockOverride.Coinbase
@@ -261,22 +225,20 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
 		}
 		if bundle.BlockOverride.BlockHash != nil {
-			for blockNum, hash := range *bundle.BlockOverride.BlockHash {
-				overrideBlockHash[blockNum] = hash
-			}
+			maps.Copy(overrideBlockHash, *bundle.BlockOverride.BlockHash)
 		}
 		results := []map[string]interface{}{}
 		for _, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
-			msg, err := txn.ToMessage(api.GasCap, blockCtx.BaseFee)
+			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)
 			if err != nil {
 				return nil, err
 			}
-			txCtx = core.NewEVMTxContext(msg)
+			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
-			result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
+			result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 			if err != nil {
 				return nil, err
 			}

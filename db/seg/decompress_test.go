@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -29,9 +28,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common/dir"
+
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func prepareLoremDict(t *testing.T) *Decompressor {
@@ -727,7 +728,7 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 			if g.MatchCmp(expected) != 0 {
 				g.Reset(pos)
 				word, _ := g.Next(nil)
-				if bytes.Compare(expected, word) != 0 {
+				if !bytes.Equal(expected, word) {
 					fmt.Printf("1 expected: %v, acutal %v\n", expected, word)
 				}
 				t.Fatalf("expected match: %v\n got: %v\n", expected, word)
@@ -743,7 +744,7 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 			if g.MatchCmp(nil) != 0 {
 				g.Reset(pos)
 				word, _ := g.Next(nil)
-				if bytes.Compare(expected, word) != 0 {
+				if !bytes.Equal(expected, word) {
 					fmt.Printf("2 expected: %v, acutal %v\n", expected, word)
 				}
 				t.Fatalf("expected match: %v\n got: %v\n", expected, word)

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/fs"
 	"iter"
+	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -37,14 +38,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/puzpuzpuz/xsync/v4"
+
+	"github.com/c2h5oh/datasize"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
-
-	"github.com/c2h5oh/datasize"
-	"github.com/puzpuzpuz/xsync/v4"
 
 	"github.com/anacrolix/chansync"
 	g "github.com/anacrolix/generics"
@@ -57,10 +58,10 @@ import (
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/anacrolix/torrent/webseed"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
@@ -166,7 +167,8 @@ func (me *AggStats) AllTorrentsComplete() bool {
 }
 
 type requestHandler struct {
-	http.RoundTripper
+	// Separated this rather than embedded it to ensure our wrapper RoundTrip is called.
+	rt         http.RoundTripper
 	downloader *Downloader
 }
 
@@ -176,9 +178,7 @@ var cloudflareHeaders = http.Header{
 
 func insertCloudflareHeaders(req *http.Request) {
 	// Note this is clobbering the headers.
-	for key, value := range cloudflareHeaders {
-		req.Header[key] = value
-	}
+	maps.Copy(req.Header, cloudflareHeaders)
 }
 
 type roundTripperFunc func(req *http.Request) (*http.Response, error)
@@ -211,7 +211,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	insertCloudflareHeaders(req)
 
 	webseedTripCount.Add(1)
-	resp, err = r.RoundTripper.RoundTrip(req)
+	resp, err = r.rt.RoundTrip(req)
 	if err != nil {
 		return
 	}
@@ -327,7 +327,7 @@ func configureHttp2(t *http.Transport) {
 func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
 	requestHandler := &requestHandler{}
 	{
-		requestHandler.RoundTripper = makeTransport()
+		requestHandler.rt = makeTransport()
 		cfg.ClientConfig.WebTransport = requestHandler
 		// requestHandler.downloader is set later.
 	}
@@ -663,7 +663,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			noMetadata = append(noMetadata, t.Name())
 			continue
 		}
-		stats.FilesTotal += len(t.Files())
 
 		torrentName := t.Name()
 		torrentComplete := t.Complete().Bool()
@@ -810,7 +809,9 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 func (d *Downloader) VerifyData(
 	ctx context.Context,
 	whiteList []string,
+	failFast bool,
 ) error {
+
 	var totalBytes int64
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
@@ -838,6 +839,45 @@ func (d *Downloader) VerifyData(
 		verifiedBytes  atomic.Int64
 		completedFiles atomic.Uint64
 	)
+
+	if failFast {
+		var completedBytes atomic.Uint64
+		g, ctx := errgroup.WithContext(ctx)
+
+		{
+			logEvery := time.NewTicker(10 * time.Second)
+			defer logEvery.Stop()
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-logEvery.C:
+						d.logger.Info("[snapshots] Verify",
+							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
+							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
+							"sz_gb", downloadercfg.DefaultPieceSize*completedBytes.Load()/1024/1024/1024,
+						)
+					}
+				}
+			}()
+		}
+
+		// torrent lib internally limiting amount of hashers per file
+		// set limit here just to make load predictable, not to control Disk/CPU consumption
+		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+		for _, t := range toVerify {
+			g.Go(func() error {
+				defer completedFiles.Add(1)
+				return VerifyFileFailFast(ctx, t, d.SnapDir(), &completedBytes)
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	{
 		logEvery := time.NewTicker(20 * time.Second)

@@ -31,17 +31,17 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/concurrent"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // Filters holds the state for managing subscriptions to various Ethereum events.
@@ -162,7 +162,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 						return
 					default:
 					}
-					if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) || grpcutil.ErrIs(err, txpool2.ErrPoolDisabled) {
+					if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) || grpcutil.ErrIs(err, txpool.ErrPoolDisabled) {
 						time.Sleep(3 * time.Second)
 						continue
 					}
@@ -515,6 +515,22 @@ func (ff *Filters) loadLogsRequester() any {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	return ff.logsRequestor.Load()
+}
+
+func (ff *Filters) HasSubscription(id LogsSubID) bool {
+	return ff.logsSubs.hasLogsFilter(id)
+}
+
+// HasHeadsSubscription returns true if a heads (new block headers) subscription exists for the given ID.
+func (ff *Filters) HasHeadsSubscription(id HeadsSubID) bool {
+	_, ok := ff.headsSubs.Get(id)
+	return ok
+}
+
+// HasPendingTxsSubscription returns true if a pending transactions subscription exists for the given ID.
+func (ff *Filters) HasPendingTxsSubscription(id PendingTxsSubID) bool {
+	_, ok := ff.pendingTxsSubs.Get(id)
+	return ok
 }
 
 // UnsubscribeLogs unsubscribes from logs using the given subscription ID.

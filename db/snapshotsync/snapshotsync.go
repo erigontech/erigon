@@ -27,18 +27,18 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 var GreatOtterBanner = `
@@ -91,16 +91,7 @@ const (
 	AlsoCaplin CaplinMode = 3
 )
 
-type DownloadRequest struct {
-	Path        string
-	TorrentHash string
-}
-
-func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
-	return DownloadRequest{Path: path, TorrentHash: torrentHash}
-}
-
-func BuildProtoRequest(downloadRequest []DownloadRequest) *downloaderproto.AddRequest {
+func BuildProtoRequest(downloadRequest []services.DownloadRequest) *downloaderproto.AddRequest {
 	req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
@@ -123,7 +114,7 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *downloaderproto.AddRe
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
 func RequestSnapshotsDownload(
 	ctx context.Context,
-	downloadRequest []DownloadRequest,
+	downloadRequest []services.DownloadRequest,
 	downloader downloaderproto.DownloaderClient,
 	logPrefix string,
 ) error {
@@ -203,8 +194,8 @@ func buildBlackListForPruning(
 }
 
 type blockReader interface {
-	Snapshots() BlockSnapshots
-	BorSnapshots() BlockSnapshots
+	Snapshots() services.BlockSnapshots
+	BorSnapshots() services.BlockSnapshots
 	IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
@@ -218,6 +209,7 @@ func getMinimumBlocksToDownload(
 	blockReader blockReader,
 	maxStateStep uint64,
 	historyPruneTo uint64,
+	stepSize uint64,
 ) (minBlockToDownload uint64, minStateStepToDownload uint64, err error) {
 	started := time.Now()
 	var iterations int64
@@ -230,7 +222,7 @@ func getMinimumBlocksToDownload(
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
 	minStateStepToDownload = uint64(math.MaxUint32)
-	stateTxNum := maxStateStep * config3.DefaultStepSize
+	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
 			if ctx.Err() != nil {
@@ -239,8 +231,8 @@ func getMinimumBlocksToDownload(
 		}
 		iterations++
 		if blockNum == historyPruneTo {
-			minStateStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
-			if baseTxNum < (config3.DefaultStepSize - 1) {
+			minStateStepToDownload = (baseTxNum - (stepSize - 1)) / stepSize
+			if baseTxNum < (stepSize - 1) {
 				minStateStepToDownload = 0
 			}
 		}
@@ -309,7 +301,7 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 }
 
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
-func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem) bool {
+func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
@@ -328,7 +320,7 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 		log.Crit("Failed to get minimum transaction number", "err", err)
 		return false
 	}
-	minStep := minTxNum / config3.DefaultStepSize
+	minStep := minTxNum / stepSize
 	return s.From < minStep
 }
 
@@ -356,6 +348,7 @@ func SyncSnapshots(
 	cc *chain.Config,
 	snapshotDownloader downloaderproto.DownloaderClient,
 	syncCfg ethconfig.Sync,
+	stepSize uint64,
 ) error {
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
@@ -368,6 +361,35 @@ func SyncSnapshots(
 			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
 		}
 	} else {
+		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
+		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
+		if !headerchain && toBlock > 0 {
+			toTxNum, err := blockReader.TxnumReader(ctx).Min(tx, syncCfg.SnapshotDownloadToBlock)
+			if err != nil {
+				return err
+			}
+			toStep = toTxNum / stepSize
+			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
+			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
+			// so that we can correctly calculate toTxNum above (now we should delete these)
+			var toDeleteSeg, toDeleteDownloader []string
+			for _, f := range blockReader.FrozenFiles() {
+				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
+				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
+					continue
+				}
+				toDeleteSeg = append(toDeleteSeg, f)
+				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
+			}
+			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
+			if _, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader}); err != nil {
+				return err
+			}
+			if err = blockReader.Snapshots().Delete(toDeleteSeg...); err != nil {
+				return err
+			}
+		}
+
 		txNumsReader := blockReader.TxnumReader(ctx)
 
 		// This clause belongs in another function.
@@ -381,7 +403,7 @@ func SyncSnapshots(
 
 		// send all hashes to the Downloader service
 		preverifiedBlockSnapshots := snapCfg.Preverified
-		downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
+		downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
@@ -391,7 +413,7 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
-			minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune)
+			minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune, stepSize)
 			if err != nil {
 				return err
 			}
@@ -399,29 +421,6 @@ func SyncSnapshots(
 			blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
-			}
-		}
-
-		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
-		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
-		if !headerchain && toBlock > 0 {
-			toTxNum, err := txNumsReader.Min(tx, syncCfg.SnapshotDownloadToBlock)
-			if err != nil {
-				return err
-			}
-			toStep = toTxNum / uint64(config3.DefaultStepSize)
-			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
-			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
-			// so that we can correctly calculate toTxNum above (now we should delete these)
-			for _, f := range blockReader.FrozenFiles() {
-				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
-				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
-					continue
-				}
-				log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "file", fileInfo.Name(), "toBlock", toBlock)
-				if err := blockReader.Snapshots().Delete(fileInfo.Name()); err != nil {
-					return err
-				}
 			}
 		}
 
@@ -468,7 +467,7 @@ func SyncSnapshots(
 				strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
 				strings.Contains(p.Name, kv.LogTopicIdx.String())
 
-			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
+			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p, stepSize) {
 				continue
 			}
 
@@ -480,7 +479,7 @@ func SyncSnapshots(
 				continue
 			}
 
-			downloadRequest = append(downloadRequest, DownloadRequest{
+			downloadRequest = append(downloadRequest, services.DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
 			})

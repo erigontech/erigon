@@ -21,8 +21,8 @@ import (
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var (
@@ -40,8 +40,7 @@ var (
 	integrityFast, integritySlow bool
 	file                         string
 	HeimdallURL                  string
-	txtrace                      bool // Whether to trace the execution (should only be used together with `block`)
-	unwindTypes                  []string
+	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
 	chain                        string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                string
 
@@ -51,6 +50,8 @@ var (
 
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
+
+	integStepSize uint64 // name prefixed to avoid conflict with another existing stepSize flag
 )
 
 func must(err error) {
@@ -67,11 +68,8 @@ func withMining(cmd *cobra.Command) {
 	cmd.Flags().Bool("mine", false, "Enable mining")
 	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")
 	cmd.Flags().Uint64("miner.gaslimit", ethconfig.DefaultBlockGasLimit, "Target gas limit for mined blocks")
-	cmd.Flags().Int64("miner.gasprice", ethconfig.Defaults.Miner.GasPrice.Int64(), "Target gas price for mined blocks")
 	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
 	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")
-	cmd.Flags().Duration("miner.recommit", ethconfig.Defaults.Miner.Recommit, "Time interval to recreate the block being mined")
-	cmd.Flags().Bool("miner.noverify", false, "Disable remote sealing verification")
 }
 
 func withFile(cmd *cobra.Command) {
@@ -126,22 +124,17 @@ func withDataDir2(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
-	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enable internal database logs. Very high verbosity levels may require recompiling the database. The default value is 2, which means warnings are shown.")
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+	cmd.Flags().Uint64Var(&integStepSize, utils.ErigonDBStepSizeFlag.Name, utils.ErigonDBStepSizeFlag.Value, utils.ErigonDBStepSizeFlag.Usage)
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, "datadir", "", "data directory for temporary ELT files")
-	must(cmd.MarkFlagRequired("datadir"))
-	must(cmd.MarkFlagDirname("datadir"))
+	withDataDir2(cmd)
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
-
-	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
-
-	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withConcurrentCommitment(cmd *cobra.Command) {
@@ -188,10 +181,6 @@ func withStartTx(cmd *cobra.Command) {
 
 func withOutputCsvFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
-}
-
-func withUnwindTypes(cmd *cobra.Command) {
-	cmd.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "types to unwind for polygon sync")
 }
 
 func withChaosMonkey(cmd *cobra.Command) {

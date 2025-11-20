@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -82,7 +82,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 
 // GetAuthor retrieves the author a block.
 func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error) {
-	// init consensus engine
+	// init rules engine
 	borEngine, err := api.bor()
 
 	if err != nil {

@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 const (
@@ -129,7 +129,7 @@ func (c *Cell) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hexutil.Bytes(c[:]))
 }
 
-var cellType = reflect.TypeOf(Cell{})
+var cellType = reflect.TypeFor[Cell]()
 
 func (c *Cell) UnmarshalJSON(in []byte) error {
 	return hexutil.UnmarshalFixedJSON(cellType, in, c[:])

@@ -3,13 +3,16 @@ package commitment
 import (
 	"encoding/csv"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/length"
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 )
 
 /*
@@ -17,12 +20,14 @@ ERIGON_COMMITMENT_TRACE - file path prefix to write commitment metrics
 */
 func init() {
 	metricsFile = dbg.EnvString("ERIGON_COMMITMENT_TRACE", "")
-	collectCommitmentMetrics = metricsFile != ""
+	collectCommitmentMetrics = true
+	writeCommitmentMetrics = metricsFile != ""
 }
 
 var (
 	metricsFile              string
 	collectCommitmentMetrics bool
+	writeCommitmentMetrics   bool
 )
 
 type CsvMetrics interface {
@@ -46,20 +51,76 @@ type Metrics struct {
 	spentProcessing time.Duration
 }
 
+type MetricValues struct {
+	mu              *sync.RWMutex
+	Accounts        map[string]*AccountStats
+	Updates         uint64
+	AddressKeys     uint64
+	StorageKeys     uint64
+	LoadBranch      uint64
+	LoadAccount     uint64
+	LoadStorage     uint64
+	UpdateBranch    uint64
+	LoadDepths      [10]uint64
+	Unfolds         uint64
+	SpentUnfolding  time.Duration
+	SpentFolding    time.Duration
+	SpentProcessing time.Duration
+}
+
+func (m MetricValues) RLock() {
+	if m.mu != nil {
+		m.mu.RLock()
+	}
+}
+
+func (m MetricValues) RUnlock() {
+	if m.mu != nil {
+		m.mu.RUnlock()
+	}
+}
+
 func NewMetrics() *Metrics {
 	return &Metrics{
 		Accounts: NewAccounts(),
 	}
 }
 
+func (m *Metrics) AsValues() MetricValues {
+	return MetricValues{
+		mu:              &m.Accounts.m,
+		Accounts:        m.Accounts.AccountStats,
+		Updates:         m.updates.Load(),
+		AddressKeys:     m.addressKeys.Load(),
+		StorageKeys:     m.storageKeys.Load(),
+		LoadBranch:      m.loadBranch.Load(),
+		LoadAccount:     m.loadAccount.Load(),
+		LoadStorage:     m.loadStorage.Load(),
+		UpdateBranch:    m.updateBranch.Load(),
+		LoadDepths:      m.loadDepths,
+		Unfolds:         m.unfolds.Load(),
+		SpentUnfolding:  m.spentUnfolding,
+		SpentFolding:    m.spentFolding,
+		SpentProcessing: m.spentProcessing,
+	}
+}
+
 func (m *Metrics) WriteToCSV() {
-	if collectCommitmentMetrics {
-		if err := writeMetricsToCSV(m, metricsFile+"_process.csv"); err != nil {
-			panic(err)
-		}
-		if err := writeMetricsToCSV(m.Accounts, metricsFile+"_accounts.csv"); err != nil {
-			panic(err)
-		}
+	if err := writeMetricsToCSV(m, metricsFile+"_process.csv"); err != nil {
+		panic(err)
+	}
+	if err := writeMetricsToCSV(m.Accounts, metricsFile+"_accounts.csv"); err != nil {
+		panic(err)
+	}
+}
+
+func (m *Metrics) logMetrics() []any {
+	return []any{
+		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
+		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
+		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
+		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
+		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
 	}
 }
 
@@ -127,7 +188,7 @@ func (m *Metrics) Reset() {
 }
 
 func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
-	if !collectCommitmentMetrics {
+	if !writeCommitmentMetrics {
 		return
 	}
 	ends := make([]uint64, 0, len(endTxNumStats))
@@ -239,25 +300,24 @@ type AccountStats struct {
 }
 
 type AccountMetrics struct {
-	//m sync.Mutex
+	m sync.RWMutex
 	// will be separate value for each key in parallel processing
 	AccountStats map[string]*AccountStats
 }
 
 func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
-	//am.m.Lock()
-	//defer am.m.Unlock()
-
 	var addr string
 	if len(plainKey) > 0 {
 		addr = toStringZeroCopy(plainKey[:min(length.Addr, len(plainKey))])
 	}
+	am.m.Lock()
+	defer am.m.Unlock()
 	as, ok := am.AccountStats[addr]
 	if !ok {
 		as = &AccountStats{}
+		am.AccountStats[addr] = as
 	}
 	fn(as)
-	am.AccountStats[addr] = as
 }
 
 func (am *AccountMetrics) Headers() []string {
@@ -275,10 +335,9 @@ func (am *AccountMetrics) Headers() []string {
 }
 
 func (am *AccountMetrics) Values() [][]string {
-	//am.m.Lock()
-	//defer am.m.Unlock()
-
-	values := make([][]string, len(am.AccountStats)+1, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
+	am.m.Lock()
+	defer am.m.Unlock()
+	values := make([][]string, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
 	vi := 1
 	for addr, stat := range am.AccountStats {
 		values[vi] = []string{
@@ -298,13 +357,13 @@ func (am *AccountMetrics) Values() [][]string {
 }
 
 func (am *AccountMetrics) Reset() {
-	//am.m.Lock()
-	//defer am.m.Unlock()
+	am.m.Lock()
+	defer am.m.Unlock()
 	am.AccountStats = make(map[string]*AccountStats)
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) error {
-	if !collectCommitmentMetrics {
+	if !writeCommitmentMetrics {
 		return nil
 	}
 	// Open the file in append mode or create if it doesn't exist

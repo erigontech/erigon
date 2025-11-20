@@ -32,8 +32,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestServerRegisterName(t *testing.T) {
@@ -89,7 +89,7 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 	defer clientConn.Close()
 	go server.ServeCodec(NewCodec(serverConn), 0)
 	readbuf := bufio.NewReader(clientConn)
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case len(line) == 0 || strings.HasPrefix(line, "//"):

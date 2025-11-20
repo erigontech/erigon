@@ -30,11 +30,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/common/dbg"
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 )
@@ -914,6 +914,7 @@ func Defrag() error {
 		return err
 	}
 	fmt.Println("------------------- 15 -------------------")
+	//nolint
 	if err := defragSteps("vis15", oneBucketCfg,
 		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change1(tx) },
@@ -931,6 +932,7 @@ func Defrag() error {
 	readerErrorCh := make(chan error)
 
 	fmt.Println("------------------- 16 -------------------")
+	//nolint
 	if err := defragSteps("vis16", oneBucketCfg,
 		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change1(tx) },

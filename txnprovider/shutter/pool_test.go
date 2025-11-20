@@ -38,15 +38,15 @@ import (
 	"google.golang.org/grpc"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/synctest"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/synctest"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -443,7 +443,6 @@ func (cb *MockContractBackend) PrepareMocks() {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			var res []types.Log
-			addrStrs := make([]string, 0, len(query.Addresses))
 			for _, addr := range query.Addresses {
 				logs := cb.mockedFilterLogs[addr]
 				if len(logs) == 0 {
@@ -452,7 +451,6 @@ func (cb *MockContractBackend) PrepareMocks() {
 				}
 				res = append(res, logs[0]...)
 				cb.mockedFilterLogs[addr] = logs[1:]
-				addrStrs = append(addrStrs, addr.Hex())
 			}
 			cb.logger.Trace("--- DEBUG --- called FilterLogs")
 			return res, nil

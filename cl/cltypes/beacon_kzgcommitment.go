@@ -22,15 +22,15 @@ import (
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 var (
-	blobT = reflect.TypeOf(Blob{})
+	blobT = reflect.TypeFor[Blob]()
 
 	_ ssz2.SizedObjectSSZ = (*Blob)(nil)
 	_ ssz2.SizedObjectSSZ = (*KZGProof)(nil)

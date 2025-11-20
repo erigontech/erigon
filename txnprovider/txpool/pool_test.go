@@ -29,25 +29,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/testutil"
+	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -271,7 +271,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         200_000,
 			tipcap:         200_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth:   &AuthAndNonce{addrB.String(), 3},
+			replacedAuth:   &AuthAndNonce{addrB, 3},
 		},
 		{
 			title:          "B sends to replace own setcode txn with non setcode txn, with higher tipcap",
@@ -282,7 +282,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         300_000,
 			tipcap:         300_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth:   &AuthAndNonce{addrA.String(), 3},
+			replacedAuth:   &AuthAndNonce{addrA, 3},
 		},
 		{
 			title:          "B sends to replace non setcode txn, with setcode txn (A's auth) with higher tipcap",
@@ -314,7 +314,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Prague"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Prague"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
 	require.NotEqual(t, pool, nil)
 
@@ -367,7 +367,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 				Nonce:  c.senderNonce,
 			}
 			if c.authority != nil {
-				txnSlot1.AuthAndNonces = []AuthAndNonce{{c.authority.String(), c.authNonce}}
+				txnSlot1.AuthAndNonces = []AuthAndNonce{{*c.authority, c.authNonce}}
 				txnSlot1.Type = SetCodeTxnType
 			}
 			txnSlot1.IDHash[0] = uint8(idHash)
@@ -377,7 +377,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, []txpoolcfg.DiscardReason{c.expectedReason}, reasons)
 			if c.authority != nil && c.expectedReason == txpoolcfg.Success {
-				_, ok := pool.auths[AuthAndNonce{c.authority.String(), c.authNonce}]
+				_, ok := pool.auths[AuthAndNonce{*c.authority, c.authNonce}]
 				assert.True(t, ok)
 			}
 			if c.replacedAuth != nil {
@@ -915,9 +915,9 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			cfg := txpoolcfg.DefaultConfig
 
-			chainConfig := testutil.Forks["Paris"]
+			chainConfig := testforks.Forks["Paris"]
 			if test.isShanghai {
-				chainConfig = testutil.Forks["Shanghai"]
+				chainConfig = testforks.Forks["Shanghai"]
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -925,7 +925,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			tx, err := coreDB.BeginTemporalRw(ctx)
 			defer tx.Rollback()
 			asrt.NoError(err)
-			sd, err := state.NewSharedDomains(tx, logger)
+			sd, err := execctx.NewSharedDomains(tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
@@ -1039,7 +1039,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, testutil.Forks["Prague"])
+	copier.Copy(&chainConfig, testforks.Forks["Prague"])
 	chainConfig.ChainID = maxUint256.ToBig()
 	cache := kvcache.NewDummy()
 	logger := log.New()
@@ -1049,7 +1049,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginTemporalRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
-	sd, err := state.NewSharedDomains(tx.(kv.TemporalTx), logger)
+	sd, err := execctx.NewSharedDomains(tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -1067,7 +1067,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 		Gas:           500000,
 		SenderID:      0,
 		Type:          SetCodeTxnType,
-		AuthAndNonces: []AuthAndNonce{{nonce: 0, authority: common.Address{}.String()}},
+		AuthAndNonces: []AuthAndNonce{{nonce: 0, authority: common.Address{}}},
 	}
 
 	txns := TxnSlots{
@@ -1093,7 +1093,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 
 	require.NotEqual(pool, nil)
@@ -1277,7 +1277,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Shanghai"], nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Shanghai"], nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(txnPool, nil)
 
@@ -1388,7 +1388,7 @@ func TestBlobSlots(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -1471,7 +1471,7 @@ func TestGetBlobsV1(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	pool.blockGasLimit.Store(30000000)
@@ -1535,10 +1535,7 @@ func TestGetBlobsV1(t *testing.T) {
 	proofs := make([]goethkzg.KZGProof, 0, len(blobBundles))
 	for _, bb := range blobBundles {
 		blobs = append(blobs, bb.Blob)
-		for _, p := range bb.Proofs {
-			proofs = append(proofs, p)
-		}
-
+		proofs = append(proofs, bb.Proofs...)
 	}
 	require.Equal(len(proofs), len(blobHashes))
 	assert.Equal(blobTxn.BlobBundles[0].Blob, blobs[0])

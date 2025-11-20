@@ -116,7 +116,7 @@ jobs:
       - name: Upload outputs_kurtosis.json as artifact
         if: always() && steps.parse_kurtosis_output.outputs.success == 'true'
         id: upload_outputs_kurtosis_json
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: outputs_kurtosis.json
           path: outputs_kurtosis.json
@@ -223,7 +223,7 @@ jobs:
       - name: Upload latency PNG images as artifacts
         if: always() && steps.create_hdr_plots.outputs.processed == 'true'
         id: upload_latency_plots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: tx-pool-latency-plots
           path: tx_pool_latency_analysis_*.png
@@ -232,7 +232,7 @@ jobs:
       - name: Upload throughput PNG images as artifacts
         if: always() && steps.create_throughput_plots.outputs.processed == 'true'
         id: upload_throughput_plots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: tx-pool-throughput-plots
           path: tx_pool_throughput_analysis_*.png
@@ -388,7 +388,7 @@ jobs:
           fi
 
       - name: Clean test results
-        uses: gacts/run-and-post-run@v1.4.2
+        uses: gacts/run-and-post-run@v1.4.3
         if: always()
         with:
           post: |
