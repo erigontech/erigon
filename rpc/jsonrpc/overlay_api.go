@@ -295,7 +295,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 			defer pend.Done()
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
-				log.Error("Error", "error", err.Error())
+				log.Error("Error", "error", err)
 				return
 			}
 			defer tx.Rollback()
