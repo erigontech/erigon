@@ -14,7 +14,7 @@ require (
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
-	github.com/99designs/gqlgen v0.17.78
+	github.com/99designs/gqlgen v0.17.83
 	github.com/FastFilter/xorfilter v0.2.1
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.12.0
@@ -111,7 +111,7 @@ require (
 	github.com/ugorji/go/codec v1.2.13
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/valyala/fastjson v1.6.4
-	github.com/vektah/gqlparser/v2 v2.5.30
+	github.com/vektah/gqlparser/v2 v2.5.31
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.27.0
