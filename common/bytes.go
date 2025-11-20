@@ -49,11 +49,15 @@ func MBToGB(b uint64) (float64, int) {
 var Copy = bytes.Clone
 
 func Append(data ...[]byte) []byte {
-	s := new(bytes.Buffer)
+	var totalLen int
 	for _, d := range data {
-		s.Write(d)
+		totalLen += len(d)
 	}
-	return s.Bytes()
+	result := make([]byte, 0, totalLen)
+	for _, d := range data {
+		result = append(result, d...)
+	}
+	return result
 }
 
 func EnsureEnoughSize(in []byte, size int) []byte {
