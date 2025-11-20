@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package module
+package execmodule
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/execution/module/moduleutil"
+	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
