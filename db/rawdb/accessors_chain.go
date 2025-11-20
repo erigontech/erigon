@@ -472,13 +472,12 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 // Write transactions into DB and use txnID as first identifier
 func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, baseTxnID types.BaseTxnID) error {
 	rawTxs := make([][]byte, len(txs))
-	buf := bytes.NewBuffer(nil)
 	for i, txn := range txs {
-		buf.Reset()
-		if err := rlp.Encode(buf, txn); err != nil {
+		raw, err := rlp.EncodeToBytes(txn)
+		if err != nil {
 			return fmt.Errorf("broken txn rlp: %w", err)
 		}
-		rawTxs[i] = common.Copy(buf.Bytes())
+		rawTxs[i] = raw
 	}
 	return WriteRawTransactions(rwTx, rawTxs, baseTxnID)
 }
