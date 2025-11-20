@@ -128,7 +128,6 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 		skipSet[field] = struct{}{}
 	}
 
-	emptyUint64 := uint64(0)
 	h := &Header{}
 	// note unexported fields are skipped in reflection auto-assign as they are not assignable
 	h.mutable = tr.RandBoolean()
