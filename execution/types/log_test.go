@@ -241,9 +241,9 @@ func TestFilterLogsTopics(t *testing.T) {
 			t.Errorf("Fail %s, got %v want %v", name, ares, v.want)
 		}
 		old_res := testFLExtractAddress(v.input.Filter(map[common.Address]struct{}{}, v.filter, 0))
-        if !reflect.DeepEqual(old_res, v.want) {
-            t.Errorf("Fail Old %s, got %v want %v", name, old_res, v.want)
-        }
+		if !reflect.DeepEqual(old_res, v.want) {
+			t.Errorf("Fail Old %s, got %v want %v", name, old_res, v.want)
+		}
 	}
 }
 
