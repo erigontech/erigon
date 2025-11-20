@@ -302,7 +302,7 @@ func writeBytes(val reflect.Value, w *encBuffer) error {
 	return nil
 }
 
-var byteType = reflect.TypeOf(byte(0))
+var byteType = reflect.TypeFor[byte]()
 
 func makeByteArrayWriter(typ reflect.Type) writer {
 	length := typ.Len()
