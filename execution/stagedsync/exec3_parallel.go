@@ -200,20 +200,18 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						// TODO --- BAL Implementation integration point ---
-						//  At this stage applyResult.TxIO contains the reads and writes for all of the completed
-						// transactions in the block.  The state.VersionedRead, and state.VersionedWrite objects contain
-						// version information contains details the data read & writes and the associated transactions
-						//
-						// It should be possible to iterate this list and construct the blocks BAL here
-						//
-						// For more details on how to iterate this list look at:
-						//
-						// dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
-						//
-						// which iterates the list and prints it contents
-						//
-						CreateBAL(applyResult.BlockNum, applyResult.TxIO)
+						bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO)
+						log.Info("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "validate", bal.Validate())
+
+						if pe.cfg.chainConfig.IsGlamsterdam(applyResult.BlockTime) {
+							headerBALHash := *lastHeader.BlockAccessListHash
+							if headerBALHash != b.BlockAccessList().Hash() {
+								return fmt.Errorf("block %d: invalid block access list, hash mistmatch: got %s expected %s", applyResult.BlockNum, headerBALHash, b.BlockAccessList().Hash())
+							}
+							if headerBALHash != bal.Hash() {
+								return fmt.Errorf("block %d: block access list mismatch: got %s expected %s", applyResult.BlockNum, headerBALHash, bal.Hash())
+							}
+						}
 
 						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
