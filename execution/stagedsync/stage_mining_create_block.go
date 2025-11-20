@@ -35,9 +35,8 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -365,7 +364,7 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coi
 		return
 	}
 	for _, u := range nonCanonicalBlocks {
-		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
+		if builder.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
 			localUncles[u.Hash()] = u
 		} else {
 			remoteUncles[u.Hash()] = u
