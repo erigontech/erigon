@@ -97,7 +97,6 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				return nil
 			}
 
-			var arg1 int
 			cb := &callback{
 				fn:          reflect.ValueOf(dummyFunc),
 				rcvr:        reflect.Value{},
