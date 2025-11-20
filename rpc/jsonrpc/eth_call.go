@@ -243,7 +243,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// Retrieve the block to act as the gas ceiling
 		hi = header.GasLimit
 	}
-	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) {
+	if hi > params.MaxTxnGasLimit && !chainConfig.IsArbitrum() && chainConfig.IsOsaka(header.Time, 0) {
 		// Cap the maximum gas allowance according to EIP-7825 if Osaka
 		hi = params.MaxTxnGasLimit
 	}
