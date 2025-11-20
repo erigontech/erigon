@@ -506,7 +506,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}
 
-	if dbg.AssertEnabled {
+	// When assertions are enabled, receipts are *always* computed (i.e. receipt cache V2 is skipped)
+	// Hence, we need commitment history to correctly compute the `root` field for pre-Byzantium receipts
+	if dbg.AssertEnabled && (commitmentHistory || cfg.IsByzantium(blockNum)) {
 		computedReceiptsRoot := types.DeriveSha(receipts)
 		blockReceiptsRoot := block.Header().ReceiptHash
 		if computedReceiptsRoot != blockReceiptsRoot {
