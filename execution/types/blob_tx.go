@@ -48,7 +48,7 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 	return params.GasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
-func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:            stx.Nonce,
 		gasLimit:         stx.GasLimit,
@@ -67,10 +67,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		return nil, errors.New("BlobTx transactions require Cancun")
 	}
 	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return nil, errors.New("gasPrice higher than 2^256-1")
-		}
+		msg.gasPrice.Set(baseFee)
 	}
 	msg.gasPrice.Add(&msg.gasPrice, stx.TipCap)
 	if msg.gasPrice.Gt(stx.FeeCap) {

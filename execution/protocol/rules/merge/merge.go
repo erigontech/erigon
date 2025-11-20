@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -41,7 +40,7 @@ import (
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
 var (
-	ProofOfStakeDifficulty = common.Big0        // PoS block's difficulty is always 0
+	ProofOfStakeDifficulty = common.Num0        // PoS block's difficulty is always 0
 	ProofOfStakeNonce      = types.BlockNonce{} // PoS block's have all-zero nonces
 )
 
@@ -248,7 +247,7 @@ func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
+func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *uint256.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
 		return nil
@@ -293,7 +292,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 	}
 
 	// Verify that the block number is parent's +1
-	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
+	if diff, overflow := new(uint256.Int).SubOverflow(&header.Number, &parent.Number); overflow || diff.CmpUint64(1) != 0 {
 		return rules.ErrInvalidNumber
 	}
 

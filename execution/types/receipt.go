@@ -28,6 +28,8 @@ import (
 	"math/big"
 	"slices"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -71,9 +73,9 @@ type Receipt struct {
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        common.Hash `json:"blockHash,omitempty"`
-	BlockNumber      *big.Int    `json:"blockNumber,omitempty"`
-	TransactionIndex uint        `json:"transactionIndex"`
+	BlockHash        common.Hash  `json:"blockHash,omitempty"`
+	BlockNumber      *uint256.Int `json:"blockNumber,omitempty"`
+	TransactionIndex uint         `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
 }

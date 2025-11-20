@@ -31,8 +31,6 @@ type handle func(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName strin
 var handlers = map[string]handle{
 	"uint64":              uintHandle,
 	"*uint64":             uintPtrHandle,
-	"big.Int":             bigIntHandle,
-	"*big.Int":            bigIntPtrHandle,
 	"uint256.Int":         uint256Handle,
 	"*uint256.Int":        uint256PtrHandle,
 	"types.BlockNonce":    blockNonceHandle,

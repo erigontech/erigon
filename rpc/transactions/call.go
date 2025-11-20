@@ -47,7 +47,7 @@ type BlockOverrides struct {
 	Coinbase    *common.Address         `json:"feeRecipient"`
 	Timestamp   *hexutil.Uint64         `json:"time"`
 	GasLimit    *hexutil.Uint           `json:"gasLimit"`
-	Difficulty  *hexutil.Uint           `json:"difficulty"`
+	Difficulty  *hexutil.Uint64         `json:"difficulty"`
 	BaseFee     *uint256.Int            `json:"baseFeePerGas"`
 	BlobBaseFee *hexutil.Big            `json:"blobBaseFee"`
 	BlockHash   *map[uint64]common.Hash `json:"blockHash"`
@@ -61,10 +61,10 @@ type BlockHashOverrides map[uint64]common.Hash
 func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
 	h := types.CopyHeader(header)
 	if o.BlockNumber != nil {
-		h.Number = new(big.Int).SetUint64(uint64(*o.BlockNumber))
+		h.Number.SetUint64(uint64(*o.BlockNumber))
 	}
 	if o.Difficulty != nil {
-		h.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
+		h.Difficulty.SetUint64(uint64(*o.Difficulty))
 	}
 	if o.Timestamp != nil {
 		h.Time = o.Timestamp.Uint64()
@@ -76,7 +76,7 @@ func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
 		h.Coinbase = *o.Coinbase
 	}
 	if o.BaseFee != nil {
-		h.BaseFee = o.BaseFee.ToBig()
+		h.BaseFee = o.BaseFee
 	}
 	if o.PrevRandao != nil {
 		h.MixDigest = *o.PrevRandao

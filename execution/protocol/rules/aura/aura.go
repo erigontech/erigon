@@ -550,7 +550,7 @@ func (c *AuRa) verifyFamily(chain rules.ChainHeaderReader, e *NonTransactionalEp
 	*/
 	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
 		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
-		if header.Difficulty.Cmp(expectedDifficulty.ToBig()) != 0 {
+		if header.Difficulty.Cmp(expectedDifficulty) != 0 {
 			return fmt.Errorf("invlid difficulty: expect=%s, found=%s\n", expectedDifficulty, header.Difficulty)
 		}
 	}
@@ -991,10 +991,10 @@ func (c *AuRa) epochSet(chain rules.ChainHeaderReader, e *NonTransactionalEpochR
 	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
-func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) *big.Int {
+func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) *uint256.Int {
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
-	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
+	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen))
 }
 
 // calculateScore - analog of PoW difficulty:

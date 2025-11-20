@@ -26,14 +26,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"reflect"
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/common/log/v3"
-
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 //lint:ignore ST1012 EOL is not an error.
@@ -204,7 +203,6 @@ func addErrorContext(err error, ctx string) error {
 
 var (
 	decoderInterface = reflect.TypeOf(new(Decoder)).Elem()
-	bigInt           = reflect.TypeOf(big.Int{})
 	uint256Int       = reflect.TypeOf(uint256.Int{})
 )
 
@@ -213,10 +211,6 @@ func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {
 	switch {
 	case typ == rawValueType:
 		return decodeRawValue, nil
-	case typ.AssignableTo(reflect.PtrTo(bigInt)):
-		return decodeBigInt, nil
-	case typ.AssignableTo(bigInt):
-		return decodeBigIntNoPtr, nil
 	case typ.AssignableTo(reflect.PtrTo(uint256Int)):
 		return decodeUint256, nil
 	case typ.AssignableTo(uint256Int):
@@ -288,26 +282,6 @@ func decodeString(s *Stream, val reflect.Value) error {
 		return wrapStreamError(err, val.Type())
 	}
 	val.SetString(string(b))
-	return nil
-}
-
-func decodeBigIntNoPtr(s *Stream, val reflect.Value) error {
-	return decodeBigInt(s, val.Addr())
-}
-
-func decodeBigInt(s *Stream, val reflect.Value) error {
-	b, err := s.bigIntBytes()
-	if err != nil {
-		return wrapStreamError(err, val.Type())
-	}
-
-	// Set the integer bytes.
-	i := val.Interface().(*big.Int)
-	if i == nil {
-		i = new(big.Int)
-		val.Set(reflect.ValueOf(i))
-	}
-	i.SetBytes(b)
 	return nil
 }
 
