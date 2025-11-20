@@ -890,7 +890,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	checkStr := cliCtx.String("check")
 	var requestedChecks []integrity.Check
 	if len(checkStr) > 0 {
-		for _, split := range strings.Split(checkStr, ",") {
+		for split := range strings.SplitSeq(checkStr, ",") {
 			requestedChecks = append(requestedChecks, integrity.Check(split))
 		}
 
