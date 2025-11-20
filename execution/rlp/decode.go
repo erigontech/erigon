@@ -385,10 +385,7 @@ func decodeSliceElems(s *Stream, val reflect.Value, elemdec decoder) error {
 	for ; ; i++ {
 		// grow slice if necessary
 		if i >= val.Cap() {
-			newcap := val.Cap() + val.Cap()/2
-			if newcap < 4 {
-				newcap = 4
-			}
+			newcap := max(val.Cap()+val.Cap()/2, 4)
 			newv := reflect.MakeSlice(val.Type(), val.Len(), newcap)
 			reflect.Copy(newv, val)
 			val.Set(newv)
@@ -840,6 +837,10 @@ func (s *Stream) uint(maxbits int) (uint64, error) {
 	}
 }
 
+// Deprecated: Uint256Bytes generates unecessary garbage by
+// returning a heap buffer which is immediately converted
+// into an array and disguared.  Use Uint256() instead
+// which processed the buffer internally so it doesnt leak
 func (s *Stream) Uint256Bytes() ([]byte, error) {
 	b, err := s.bigIntBytes()
 	if err != nil {
@@ -849,6 +850,52 @@ func (s *Stream) Uint256Bytes() ([]byte, error) {
 		return nil, errUintOverflow
 	}
 	return b, nil
+}
+
+func (s *Stream) Uint256() (i uint256.Int, err error) {
+	var buffer []byte
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return i, err
+	case kind == List:
+		return i, ErrExpectedString
+	case kind == Byte:
+		buffer = s.uintbuf[:1]
+		buffer[0] = s.byteval
+		s.kind = -1 // re-arm Kind
+	case size == 0:
+		// Avoid zero-length read.
+		s.kind = -1
+	case size > 32:
+		return i, ErrElemTooLarge
+	case size <= uint64(len(s.uintbuf)):
+		// For integers smaller than s.uintbuf, allocating a buffer
+		// can be avoided.
+		buffer = s.uintbuf[:size]
+		if err := s.readFull(buffer); err != nil {
+			return i, err
+		}
+		// Reject inputs where single byte encoding should have been used.
+		if size == 1 && buffer[0] < 128 {
+			return i, ErrCanonSize
+		}
+	default:
+		// For large integers, a temporary buffer is needed.
+		buffer = make([]byte, size)
+		if err := s.readFull(buffer); err != nil {
+			return i, err
+		}
+	}
+
+	// Reject leading zero bytes.
+	if len(buffer) > 0 && buffer[0] == 0 {
+		return i, ErrCanonInt
+	}
+
+	i.SetBytes(buffer)
+
+	return i, nil
 }
 
 func (s *Stream) bigIntBytes() ([]byte, error) {

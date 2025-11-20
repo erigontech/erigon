@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -97,11 +97,12 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 			state.SystemAddress,
 			&r.stateClientAddress,
 			0, u256.Num0,
-			core.SysCallGasLimit,
+			protocol.SysCallGasLimit,
 			u256.Num0,
 			nil, nil,
 			event, nil,
 			false, // checkNonce
+			false, // checkTransaction
 			false, // checkGas
 			true,  // isFree
 			nil,
@@ -132,11 +133,12 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 			state.SystemAddress,
 			&r.stateClientAddress,
 			0, u256.Num0,
-			core.SysCallGasLimit,
+			protocol.SysCallGasLimit,
 			u256.Num0,
 			nil, nil,
 			event, nil,
 			false, // checkNonce
+			false, // checkTransaction
 			false, // checkGas
 			true,  // isFree
 			nil,
@@ -227,11 +229,12 @@ func messageFromData(to common.Address, data []byte) *types.Message {
 		state.SystemAddress,
 		&to,
 		0, u256.Num0,
-		core.SysCallGasLimit,
+		protocol.SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
 		data, nil,
 		false, // checkNonce
+		false, // checkTransaction
 		false, // checkGas
 		true,  // isFree
 		nil,
@@ -256,6 +259,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			event,
 			nil,   // accessList
 			false, // checkNonce
+			false, // checkTransaction
 			false, // checkGas
 			true,  // isFree
 			nil,   // maxFeePerBlobGas

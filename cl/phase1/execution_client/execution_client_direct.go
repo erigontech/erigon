@@ -32,7 +32,9 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
@@ -40,11 +42,13 @@ const reorgTooDeepDepth = 3
 
 type ExecutionClientDirect struct {
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
+	txpool  txpoolproto.TxpoolClient
 }
 
-func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1) (*ExecutionClientDirect, error) {
+func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient) (*ExecutionClientDirect, error) {
 	return &ExecutionClientDirect{
 		chainRW: chainRW,
+		txpool:  txpool,
 	}, nil
 }
 
@@ -78,7 +82,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startInsertBlockAndWait := time.Now()
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, nil)); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}
@@ -192,4 +196,27 @@ func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []
 func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
 	_, hasGap := cc.chainRW.FrozenBlocks(ctx)
 	return hasGap
+}
+
+func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+	if cc.txpool == nil {
+		return nil, nil
+	}
+
+	req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(versionedHashes))}
+	for i, h := range versionedHashes {
+		req.BlobHashes[i] = gointerfaces.ConvertHashToH256(h)
+	}
+	resp, err := cc.txpool.GetBlobs(ctx, req)
+	if err != nil {
+		return nil, nil
+	}
+	blobsWithProof := resp.BlobsWithProofs
+	blobs = make([][]byte, len(blobsWithProof))
+	proofs = make([][][]byte, len(blobsWithProof))
+	for i, bwp := range blobsWithProof {
+		blobs[i] = bwp.Blob
+		proofs[i] = bwp.Proofs
+	}
+	return blobs, proofs
 }

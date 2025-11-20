@@ -206,7 +206,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
-			account:  &so.address,
+			account:  so.address,
 			key:      key,
 			prevalue: so.fakeStorage[key],
 		})
@@ -218,7 +218,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 	var commited bool
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, _, _, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
+	prev, _, _, _ = versionedRead(so.db, so.address, StoragePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -236,7 +236,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
-		account:     &so.address,
+		account:     so.address,
 		key:         key,
 		prevalue:    prev,
 		wasCommited: commited,
@@ -318,7 +318,7 @@ func (so *stateObject) printTrie() {
 
 func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
-		account:     &so.address,
+		account:     so.address,
 		prev:        so.data.Balance,
 		wasCommited: wasCommited,
 	})
@@ -380,7 +380,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte, wasCommited bo
 		return err
 	}
 	so.db.journal.append(codeChange{
-		account:     &so.address,
+		account:     so.address,
 		prevhash:    so.data.CodeHash,
 		prevcode:    prevcode,
 		wasCommited: wasCommited,
@@ -400,7 +400,7 @@ func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 
 func (so *stateObject) SetNonce(nonce uint64, wasCommited bool) {
 	so.db.journal.append(nonceChange{
-		account:     &so.address,
+		account:     so.address,
 		prev:        so.data.Nonce,
 		wasCommited: wasCommited,
 	})

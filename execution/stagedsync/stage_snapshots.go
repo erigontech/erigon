@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -31,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -50,8 +47,8 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/node/silkworm"
 )
 
 type SnapshotsCfg struct {
@@ -326,7 +323,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
-func firstNonGenesisCheck(tx kv.RwTx, snapshots snapshotsync.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
@@ -407,7 +404,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			minBlockNumber,
 			s.ForwardProgress,
 			log.LvlDebug,
-			func(downloadRequest []snapshotsync.DownloadRequest) error {
+			func(downloadRequest []services.DownloadRequest) error {
 				if noDl {
 					return nil
 				}
@@ -519,97 +516,4 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		filesDeleted = true
 	}
 	return filesDeleted, nil
-}
-
-type dirEntry struct {
-	name string
-}
-
-type snapInfo struct {
-	snaptype.FileInfo
-}
-
-func (i *snapInfo) Version() snaptype.Version {
-	return i.FileInfo.Version
-}
-
-func (i *snapInfo) From() uint64 {
-	return i.FileInfo.From
-}
-
-func (i *snapInfo) To() uint64 {
-	return i.FileInfo.To
-}
-
-func (i *snapInfo) Type() snaptype.Type {
-	return i.FileInfo.Type
-}
-
-func (e dirEntry) Name() string {
-	return e.name
-}
-
-func (e dirEntry) IsDir() bool {
-	return false
-}
-
-func (e dirEntry) Type() fs.FileMode {
-	return e.Mode()
-}
-
-func (e dirEntry) Size() int64 {
-	return -1
-}
-
-func (e dirEntry) Mode() fs.FileMode {
-	return fs.ModeIrregular
-}
-
-func (e dirEntry) ModTime() time.Time {
-	return time.Time{}
-}
-
-func (e dirEntry) Sys() any {
-	if info, _, ok := snaptype.ParseFileName("", e.name); ok {
-		return &snapInfo{info}
-	}
-
-	return nil
-}
-
-func (e dirEntry) Info() (fs.FileInfo, error) {
-	return e, nil
-}
-
-var checkKnownSizes = false
-
-func expandHomeDir(dirpath string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return dirpath
-	}
-	prefix := fmt.Sprintf("~%c", os.PathSeparator)
-	if strings.HasPrefix(dirpath, prefix) {
-		return filepath.Join(home, dirpath[len(prefix):])
-	} else if dirpath == "~" {
-		return home
-	}
-	return dirpath
-}
-
-func isLocalFs(ctx context.Context, rclient *downloader.RCloneClient, fs string) bool {
-
-	remotes, _ := rclient.ListRemotes(ctx)
-
-	if remote, _, ok := strings.Cut(fs, ":"); ok {
-		for _, r := range remotes {
-			if remote == r {
-				return false
-			}
-		}
-
-		return filepath.VolumeName(fs) == remote
-	}
-
-	return true
 }

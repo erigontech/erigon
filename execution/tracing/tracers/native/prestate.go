@@ -70,8 +70,8 @@ type prestateTracer struct {
 	to        common.Address
 	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
-	interrupt uint32 // Atomic flag to signal execution interruption
-	reason    error  // Textual reason for the interruption
+	interrupt atomic.Bool // Atomic flag to signal execution interruption
+	reason    error       // Textual reason for the interruption
 	created   map[common.Address]bool
 	deleted   map[common.Address]bool
 }
@@ -80,6 +80,7 @@ type prestateTracerConfig struct {
 	DiffMode       bool `json:"diffMode"`       // If true, this tracer will return state modifications
 	DisableCode    bool `json:"disableCode"`    // If true, this tracer will not return the contract code
 	DisableStorage bool `json:"disableStorage"` // If true, this tracer will not return the contract storage
+	IncludeEmpty   bool `json:"includeEmpty"`   // If true, this tracer will return empty state objects
 }
 
 func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
@@ -89,6 +90,12 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			return nil, err
 		}
 	}
+	// Diff mode has special semantics around account creating and deletion which
+	// requires it to include empty accounts and storage.
+	if config.DiffMode && config.IncludeEmpty {
+		return nil, fmt.Errorf("cannot use diffMode with includeEmpty")
+	}
+
 	t := &prestateTracer{
 		pre:     state{},
 		post:    state{},
@@ -102,6 +109,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnTxStart: t.OnTxStart,
 			OnTxEnd:   t.OnTxEnd,
 			OnOpcode:  t.OnOpcode,
+			OnExit:    t.OnExit,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -123,6 +131,20 @@ func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	}
 }
 
+// ExitHook is invoked when the processing of a message ends.
+func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if reverted {
+		// clear the created or deleted address beacuse the tx is reverted; and so avoid to notify wrong state change
+		for addr := range t.created {
+			delete(t.created, addr)
+		}
+
+		for addr := range t.deleted {
+			delete(t.deleted, addr)
+		}
+	}
+}
+
 // OnOpcode implements the EVMLogger interface to trace a single step of VM execution.
 func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	op := vm.OpCode(opcode)
@@ -137,8 +159,17 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		addr := common.Address(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
 		if op == vm.SELFDESTRUCT {
-			t.deleted[caller] = true
+			if t.env.ChainConfig.IsCancun(t.env.Time) {
+				// EIP-6780: Post Dancum/Cancun only delete if created in same transaction
+				if t.created[caller] {
+					t.deleted[caller] = true
+				}
+			} else {
+				// EIP-6780: Pre Dancum/Cancun only delete if created in same transaction
+				t.deleted[caller] = true
+			}
 		}
+
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
 		addr := common.Address(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
@@ -198,10 +229,25 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 }
 
 func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
-	if !t.config.DiffMode {
+	if err != nil {
 		return
 	}
+	if t.config.DiffMode {
+		t.processDiffState()
+	}
+	// Remove accounts that were empty prior to execution. Unless
+	// user requested to include empty accounts.
+	if t.config.IncludeEmpty {
+		return
+	}
+	for addr := range t.pre {
+		if s := t.pre[addr]; s != nil && !s.exists() {
+			delete(t.pre, addr)
+		}
+	}
+}
 
+func (t *prestateTracer) processDiffState() {
 	for addr, state := range t.pre {
 		// The deleted account's state is pruned from `post` but kept in `pre`
 		if _, ok := t.deleted[addr]; ok {
@@ -226,6 +272,21 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 			if !bytes.Equal(newCode, t.pre[addr].Code) {
 				modified = true
 				postAccount.Code = newCode
+			}
+
+			newCodeHash := common.Hash{}
+			if len(newCode) > 0 {
+				newCodeHash = crypto.Keccak256Hash(newCode)
+			}
+
+			prevCodeHash := common.Hash{}
+			if t.pre[addr].CodeHash != nil {
+				prevCodeHash = *t.pre[addr].CodeHash
+			}
+
+			if newCodeHash != prevCodeHash {
+				modified = true
+				postAccount.CodeHash = &newCodeHash
 			}
 		}
 
@@ -257,13 +318,6 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 			delete(t.pre, addr)
 		}
 	}
-	// the new created contracts' prestate were empty, so delete them
-	for a := range t.created {
-		// the created contract maybe exists in statedb before the creating tx
-		if s := t.pre[a]; s != nil && !s.exists() {
-			delete(t.pre, a)
-		}
-	}
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
@@ -288,7 +342,7 @@ func (t *prestateTracer) GetResult() (json.RawMessage, error) {
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *prestateTracer) Stop(err error) {
 	t.reason = err
-	atomic.StoreUint32(&t.interrupt, 1)
+	t.interrupt.Store(true)
 }
 
 // lookupAccount fetches details of an account and adds it to the prestate

@@ -40,16 +40,17 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/node/silkworm"
 )
 
 const (
@@ -70,7 +71,7 @@ type ExecuteBlockCfg struct {
 	prune         prune.Mode
 	chainConfig   *chain.Config
 	notifications *shards.Notifications
-	engine        consensus.Engine
+	engine        rules.Engine
 	vmConfig      *vm.Config
 	badBlockHalt  bool
 	stateStream   bool
@@ -93,7 +94,7 @@ func StageExecuteBlocksCfg(
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
+	engine rules.Engine,
 	vmConfig *vm.Config,
 	notifications *shards.Notifications,
 	stateStream bool,
@@ -132,7 +133,7 @@ func StageExecuteBlocksCfg(
 
 // ================ Erigon3 ================
 
-func ExecBlockV3(s *StageState, u Unwinder, doms *state.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
+func ExecBlockV3(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
 
 	prevStageProgress, err := stageProgress(rwTx, cfg.db, stages.Senders)
@@ -156,11 +157,11 @@ func ExecBlockV3(s *StageState, u Unwinder, doms *state.SharedDomains, rwTx kv.T
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func unwindExec3(u *UnwindState, s *StageState, doms *state.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
 
 	if doms == nil {
-		doms, err = state.NewSharedDomains(rwTx, logger)
+		doms, err = execctx.NewSharedDomains(rwTx, logger)
 		if err != nil {
 			return err
 		}
@@ -214,7 +215,7 @@ var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 const trace bool = true
 
 func unwindExec3State(ctx context.Context,
-	sd *state.SharedDomains, tx kv.TemporalRwTx,
+	sd *execctx.SharedDomains, tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
@@ -334,7 +335,7 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 
 // ================ Erigon3 End ================
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *state.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
@@ -344,7 +345,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *state.SharedDomain
 	return nil
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, doms *state.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
@@ -390,7 +391,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *state.SharedDomai
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, doms *state.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.notifications.Accumulator
@@ -437,7 +438,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := 250 * time.Millisecond
+	quickPruneTimeout := 500 * time.Millisecond
 
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb

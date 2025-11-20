@@ -44,9 +44,9 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	chain2 "github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -228,7 +228,7 @@ func (ot *opcodeTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, 
 	ot.depth = 0
 }
 
-func (ot *opcodeTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *opcodeTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	ot.depth = depth
 	ot.captureStartOrEnter(from, to, to == common.Address{}, input)
 }
@@ -577,7 +577,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			lsp := len(chanSegPrefix)
 			lsd := len(chanSegDump)
 			if lsp > 0 || lsd > 0 {
-				panic(fmt.Sprintf("Bblock channels not empty at the end: sp=%d sd=%d", lsp, lsd))
+				panic(fmt.Sprintf("Bblock channels not empty at the end: sp=%d execctx=%d", lsp, lsd))
 			}
 		}()
 	}
@@ -639,7 +639,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 			if saveBblocks {
 				sd := bblockDump{t.TxHash, &t.TxnAddr, t.CodeHash, &t.Bblocks, &t.OpcodeFault, &t.Fault, t.Create, t.CodeSize}
-				//fsegEnc.Encode(sd)
+				//fsegEnc.Encode(execctx)
 				chanBblocksIsBlocking = len(chanSegDump) == cap(chanSegDump)-1
 				chanSegDump <- sd
 			}
@@ -727,21 +727,21 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	return nil
 }
 
-func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
+func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
 	chainConfig *chain2.Config, getHeader func(hash common.Hash, number uint64) (*types.Header, error), block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
+	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	gasUsed := new(uint64)
 	usedBlobGas := new(uint64)
 	var receipts types.Receipts
-	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
+	protocol.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	blockNum := block.NumberU64()
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), engine, nil, chainConfig)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, nil, chainConfig)
 	rules := blockContext.Rules(chainConfig)
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
+		receipt, _, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)
 		}
@@ -752,7 +752,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	}
 
 	if !vmConfig.ReadOnly {
-		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		// Finalize the block, applying any rules engine specific extras (e.g. block rewards)
 		tx := block.Transactions()
 		if _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, tx, block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil, logger); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)

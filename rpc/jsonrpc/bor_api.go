@@ -22,7 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -65,7 +65,7 @@ func NewBorAPI(base *BaseAPI, db kv.TemporalRoDB, spanProducersReader spanProduc
 func (api *BorImpl) bor() (*bor.Bor, error) {
 	type lazy interface {
 		HasEngine() bool
-		Engine() consensus.EngineReader
+		Engine() rules.EngineReader
 	}
 
 	switch engine := api.engine().(type) {
@@ -79,5 +79,5 @@ func (api *BorImpl) bor() (*bor.Bor, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("unknown or invalid consensus engine: %T", api.engine())
+	return nil, fmt.Errorf("unknown or invalid rules engine: %T", api.engine())
 }

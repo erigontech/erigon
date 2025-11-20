@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/shards"
 )
 
 // If there are no waypoints from Heimdall (including in our local database), we won't be able to rely on the last received waypoint

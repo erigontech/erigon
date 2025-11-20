@@ -222,6 +222,15 @@ func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error 
 	return nil
 }
 
+func MakeMaskedWithExtReplace(path string, newExt string) string {
+	fName, err := ReplaceVersionWithMask(path)
+	if err != nil {
+		return ""
+	}
+
+	return strings.ReplaceAll(fName, filepath.Ext(path), newExt)
+}
+
 func ReplaceVersionWithMask(path string) (string, error) {
 	_, fName := filepath.Split(path)
 

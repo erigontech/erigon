@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
@@ -22,11 +24,11 @@ DOCKER_TAG ?= erigontech/erigon:latest
 # Pipe error below to /dev/null since Makefile structure kind of expects
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
-CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
+#CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
+#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
 #CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
-CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
+#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
 
 CGO_CFLAGS += -D__BLST_PORTABLE__
@@ -55,7 +57,7 @@ endif
 
 BUILD_TAGS =
 
-ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
+ifneq ($(shell "$(CURDIR)/node/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
@@ -153,7 +155,7 @@ dbg:
 %.cmd:
 	@echo Building '$(OUTPUT)'
 	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
-	@echo "Run \"$(GOBIN)/$*\" to launch $*."
+	@echo "Run \"$(OUTPUT)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
 geth: erigon
@@ -195,35 +197,18 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-ext:
-	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
+test-filtered:
+	(set -o pipefail && $(GOTEST) | tee run.log | (grep -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' -e '--- PASS:' || true))
 
-## test-short:                run short tests with a 10m timeout
-test-short:
-	@{ \
-		$(GOTEST) -short > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+# Rather than add more special cases here, I'd suggest using GO_FLAGS and calling `make test-filtered GO_FLAGS='-cool flag' or `make test GO_FLAGS='-cool flag'`.
+test-short: override GO_FLAGS += -short -failfast
+test-short: test-filtered
 
-## test-all:                  run all tests with a 1h timeout
-test-all:
-	@{ \
-		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+test-all: override GO_FLAGS += --timeout 60m -coverprofile=coverage-test-all.out
+test-all: test-filtered
 
-## test-all-race:             run all tests with the race flag
-test-all-race:
-	@{ \
-		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+test-all-race: override GO_FLAGS += --timeout 60m -race
+test-all-race: test-filtered
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:
@@ -263,7 +248,7 @@ endef
 
 hive-local:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
-	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
+	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/hive-local-$(SHORT_COMMIT)" && mkdir "temp/hive-local-$(SHORT_COMMIT)"
 	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
@@ -283,6 +268,8 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
+EEST_VERSION = v5.3.0
+
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
@@ -297,7 +284,7 @@ eest-hive:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz)
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
@@ -355,7 +342,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v32.0/protoc-32.0-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v33.1/protoc-33.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -457,8 +444,7 @@ stringer:
 	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
 
 ## gen:                               generate all auto-generated code in the codebase
-gen:
-	mocks solc abigen gencodec graphql grpc stringer
+gen: mocks solc abigen gencodec graphql grpc stringer
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
@@ -487,7 +473,7 @@ DIST ?= $(CURDIR)/build/dist
 .PHONY: install
 install:
 	mkdir -p "$(DIST)"
-	cp -f "$$($(CURDIR)/turbo/silkworm/silkworm_lib_path.sh)" "$(DIST)"
+	cp -f "$$($(CURDIR)/node/silkworm/silkworm_lib_path.sh)" "$(DIST)"
 	cp -f "$(GOBIN)/"* "$(DIST)"
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"

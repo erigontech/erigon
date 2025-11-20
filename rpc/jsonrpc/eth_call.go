@@ -35,11 +35,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
@@ -61,7 +61,7 @@ var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 const estimateGasErrorRatio = 0.015
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -96,7 +96,8 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	if err != nil {
 		return nil, err
 	}
-	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, blockOverrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
+
+	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, stateOverrides, blockOverrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +137,7 @@ func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.Block
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
-func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Uint64, error) {
+func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Uint64, error) {
 	var args ethapi2.CallArgs
 	// if we actually get CallArgs here, we use them
 	if argsOrNil != nil {
@@ -257,7 +258,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, overrides, blockOverrides, header, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, header, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
 	if err != nil {
 		return 0, err
 	}
@@ -277,7 +278,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("getCodeSize failed")
 		}
 		if args.To != nil && codeSize == 0 {
-			result, err := caller.DoCallWithNewGas(ctx, params.TxGas, engine, overrides)
+			result, err := caller.DoCallWithNewGas(ctx, params.TxGas, engine)
 			if err == nil && result != nil && !result.Failed() {
 				return hexutil.Uint64(params.TxGas), nil
 			}
@@ -286,7 +287,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// We first execute the transaction at the highest allowable gas limit, since if this fails we
 	// can return error immediately.
-	result, err := caller.DoCallWithNewGas(ctx, hi, engine, overrides)
+	result, err := caller.DoCallWithNewGas(ctx, hi, engine)
 	if err != nil || result == nil {
 		return 0, err
 	}
@@ -313,7 +314,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// binary search.
 	optimisticGasLimit := (result.GasUsed + params.CallStipend) * 64 / 63
 	if optimisticGasLimit < hi {
-		result, err := caller.DoCallWithNewGas(ctx, optimisticGasLimit, engine, overrides)
+		result, err := caller.DoCallWithNewGas(ctx, optimisticGasLimit, engine)
 		if err != nil || result == nil {
 			return 0, err
 		}
@@ -330,14 +331,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			break
 		}
 		mid := (hi + lo) / 2
-		result, err := caller.DoCallWithNewGas(ctx, mid, engine, overrides)
+		result, err := caller.DoCallWithNewGas(ctx, mid, engine)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more.
-		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
+		if err != nil && !errors.Is(err, protocol.ErrIntrinsicGas) {
 			return 0, err
 		}
-		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() {
+		if errors.Is(err, protocol.ErrIntrinsicGas) || result.Failed() {
 			lo = mid
 		} else {
 			hi = mid
@@ -402,7 +403,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +427,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, state.PrunedError
 		}
 
-		sdCtx.SetLimitReadAsOfTxNum(lastTxnInBlock, false)
+		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
 		//domains.SetTrace(true)
 		if err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
@@ -438,9 +439,12 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, _, err := sdCtx.Witness(ctx, nil, header.Root[:], "eth_getProof")
+	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof")
 	if err != nil {
 		return nil, err
+	}
+	if !bytes.Equal(calculatedAccountProofRoot, header.Root[:]) {
+		return nil, fmt.Errorf("root hash mismatch in account proof trie calculatedAccountProofRoot(%x)!=expectedRoot(%x)", calculatedAccountProofRoot, header.Root[:])
 	}
 
 	// set initial response fields
@@ -467,8 +471,12 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			proof.StorageProof[i] = accounts.StorProofResult{
 				Key:   getKey(storageKey),
 				Value: new(hexutil.Big),
-				Proof: nil,
+				Proof: []hexutil.Bytes{},
 			}
+		}
+		err = trie.VerifyAccountProof(header.Root, proof)
+		if err != nil {
+			return nil, err
 		}
 		return proof, nil
 	}
@@ -485,10 +493,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
 		}
 
-		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-		proofTrie, _, err = sdCtx.Witness(ctx, nil, header.Root[:], "eth_getProof")
+		// generate the trie for proofs, this works by loading the merkle paths to the touched key
+		var storageProofRoot []byte
+		proofTrie, storageProofRoot, err = sdCtx.Witness(ctx, nil, "eth_getProof")
 		if err != nil {
 			return nil, err
+		}
+		if !bytes.Equal(storageProofRoot, header.Root[:]) {
+			return nil, fmt.Errorf("root hash mismatch in storage proof trie storageProofRoot(%x)!=expectedRoot(%x)", storageProofRoot, header.Root[:])
 		}
 	}
 
@@ -502,7 +514,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		proof.StorageProof[i].Key = getKey(storageKey)
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
-			proof.StorageProof[i].Proof = nil
+			proof.StorageProof[i].Proof = []hexutil.Bytes{}
 			proof.StorageProof[i].Value = new(hexutil.Big)
 			continue
 		}
@@ -556,7 +568,7 @@ func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrH
 	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
 }
 
-func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) error {
+func verifyExecResult(execResult *protocol.EphemeralExecResult, block *types.Block) error {
 	actualTxRoot := execResult.TxRoot.Bytes()
 	expectedTxRoot := block.TxHash().Bytes()
 	if !bytes.Equal(actualTxRoot, expectedTxRoot) {
@@ -642,9 +654,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		regenerateHash = true
 	}
 
-	engine, ok := api.engine().(consensus.Engine)
+	engine, ok := api.engine().(rules.Engine)
 	if !ok {
-		return nil, errors.New("engine is not consensus.Engine")
+		return nil, errors.New("engine is not rules.Engine")
 	}
 
 	roTx2, err := db.BeginRo(ctx)
@@ -673,14 +685,14 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
-	domains, err := dbstate.NewSharedDomains(txBatch2, log.New())
+	domains, err := execctx.NewSharedDomains(txBatch2, log.New())
 	if err != nil {
 		return nil, err
 	}
 	sdCtx := domains.GetCommitmentContext()
 
 	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
-	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
+	_, err = protocol.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -695,7 +707,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
-	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, prevHeader.Root[:], "computeWitness")
+	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, "computeWitness")
 	if err != nil {
 		return nil, err
 	}
@@ -771,7 +783,7 @@ type accessListResult struct {
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
-func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error) {
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error) {
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
@@ -867,6 +879,13 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	for {
 		state := state.New(stateReader)
+		// Override the fields of specified contracts before execution.
+		if stateOverrides != nil {
+			if err := stateOverrides.Override(state); err != nil {
+				return nil, err
+			}
+		}
+
 		// Retrieve the current access list to expand
 		accessList := prevTracer.AccessList()
 		log.Trace("Creating access list", "input", accessList)
@@ -894,11 +913,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, state)
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
-		txCtx := core.NewEVMTxContext(msg)
+		txCtx := protocol.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
-		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, err
 		}

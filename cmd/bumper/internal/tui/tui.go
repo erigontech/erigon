@@ -2,11 +2,12 @@ package tui
 
 import (
 	"errors"
-	"github.com/erigontech/erigon/db/version"
 	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -114,10 +115,7 @@ func (m *model) rebuildRight() {
 	if len(m.cats) == 0 {
 		return
 	}
-	i := m.left.Cursor()
-	if i < 0 {
-		i = 0
-	}
+	i := max(m.left.Cursor(), 0)
 	if i >= len(m.cats) {
 		i = len(m.cats) - 1
 	}
@@ -131,7 +129,7 @@ func (m *model) rebuildRight() {
 		for k := range g {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		for _, k := range keys {
 			list = append(list, it{part, k})
 		}

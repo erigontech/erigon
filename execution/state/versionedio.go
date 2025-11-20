@@ -182,16 +182,13 @@ func valueString(path AccountPath, value any) string {
 	case BalancePath:
 		num := value.(uint256.Int)
 		return (&num).String()
-	case StatePath:
+	case StoragePath:
 		num := value.(uint256.Int)
 		return fmt.Sprintf("%x", &num)
 	case NoncePath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
-		l := len(value.([]byte))
-		if l > 40 {
-			l = 40
-		}
+		l := min(len(value.([]byte)), 40)
 		return hex.EncodeToString(value.([]byte)[0:l])
 	}
 
@@ -288,7 +285,7 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (
 }
 
 func (vr versionedStateReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: key}]; ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: StoragePath, Key: key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
 		return val, true, nil
 	}
@@ -303,7 +300,7 @@ func (vr versionedStateReader) ReadAccountStorage(address common.Address, key co
 func (vr versionedStateReader) HasStorage(address common.Address) (bool, error) {
 	if r, ok := vr.reads[address]; ok {
 		for k := range r {
-			if k.Path == StatePath {
+			if k.Path == StoragePath {
 				return true, nil
 			}
 		}

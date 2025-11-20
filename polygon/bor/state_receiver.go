@@ -18,13 +18,13 @@ package bor
 
 import (
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
 //go:generate mockgen -typed=true -destination=./state_receiver_mock.go -package=bor . StateReceiver
 type StateReceiver interface {
-	CommitState(event rlp.RawValue, syscall consensus.SystemCall) error
+	CommitState(event rlp.RawValue, syscall rules.SystemCall) error
 }
 
 type ChainStateReceiver struct {
@@ -37,7 +37,7 @@ func NewStateReceiver(contractAddress common.Address) *ChainStateReceiver {
 	}
 }
 
-func (gc *ChainStateReceiver) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
+func (gc *ChainStateReceiver) CommitState(event rlp.RawValue, syscall rules.SystemCall) error {
 	_, err := syscall(gc.contractAddress, event)
 	return err
 }

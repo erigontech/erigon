@@ -2,6 +2,12 @@ name: QA - RPC Integration Tests Latest
 
 on:
   workflow_dispatch:     # Run manually
+    inputs:
+      force_dump_response:
+        description: 'Force dump results even if they match (by default only if actual != expected)'
+        type: boolean
+        required: false
+        default: false
   push:
     branches:
       - main
@@ -103,10 +109,16 @@ jobs:
           TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
+          DUMP_RESPONSE=""
+          if [[ "${{ inputs.force_dump_response }}" == "true" ]]; then
+            DUMP_RESPONSE="always-dump-response"
+            echo "Force response dump is enabled"
+          fi
+
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh
-          
+
           set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh ${{ runner.workspace }} $TEST_RESULT_DIR $REFERENCE_SYSTEM_HOST_ADDRESS 
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh ${{ runner.workspace }} $TEST_RESULT_DIR $REFERENCE_SYSTEM_HOST_ADDRESS $DUMP_RESPONSE
           test_exit_status=$? # Capture test runner script exit status
           set -e # Re-enable exit on error after test run
 
@@ -151,7 +163,7 @@ jobs:
 
       - name: Upload test results
         if: steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-results
           path: |

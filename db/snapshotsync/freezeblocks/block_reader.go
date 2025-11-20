@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -135,13 +136,13 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-func (r *RemoteBlockReader) Snapshots() snapshotsync.BlockSnapshots    { panic("not implemented") }
-func (r *RemoteBlockReader) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
-func (r *RemoteBlockReader) AllTypes() []snaptype.Type                 { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                      { panic("not supported") }
-func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64         { panic("not supported") }
-func (r *RemoteBlockReader) FrozenFiles() (list []string)              { panic("not supported") }
-func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { panic("not supported") }
+func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
+func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
+func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
+func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64     { panic("not supported") }
+func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
+func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)
@@ -373,7 +374,7 @@ type BlockReader struct {
 
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 
-func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots) *BlockReader {
+func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn}
@@ -386,8 +387,8 @@ func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshot
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
 	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
 }
-func (r *BlockReader) Snapshots() snapshotsync.BlockSnapshots { return r.sn }
-func (r *BlockReader) BorSnapshots() snapshotsync.BlockSnapshots {
+func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }
+func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
 	if r.borSn != nil {
 		return r.borSn
 	}
@@ -504,7 +505,7 @@ func (r *BlockReader) FrozenFiles() []string {
 	if r.borSn != nil {
 		files = append(files, r.borSn.Files()...)
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
@@ -939,7 +940,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
+	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, b.BlockAccessList)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))

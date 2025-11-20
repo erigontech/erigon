@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -40,7 +40,7 @@ type Config struct {
 	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Consensus ConsensusName `json:"consensus,omitempty"` // aura, ethash or clique
+	Rules RulesName `json:"consensus,omitempty"` // aura, ethash or clique
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -70,10 +70,11 @@ type Config struct {
 	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime   *big.Int `json:"cancunTime,omitempty"`
-	PragueTime   *big.Int `json:"pragueTime,omitempty"`
-	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
+	ShanghaiTime    *big.Int `json:"shanghaiTime,omitempty"`
+	CancunTime      *big.Int `json:"cancunTime,omitempty"`
+	PragueTime      *big.Int `json:"pragueTime,omitempty"`
+	OsakaTime       *big.Int `json:"osakaTime,omitempty"`
+	GlamsterdamTime *big.Int `json:"glamsterdamTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -98,7 +99,7 @@ type Config struct {
 
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
-	// Various consensus engines
+	// Various rules engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
@@ -113,7 +114,7 @@ type Config struct {
 var (
 	TestChainConfig = &Config{
 		ChainID:               big.NewInt(1337),
-		Consensus:             EtHashConsensus,
+		Rules:                 EtHashRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -128,7 +129,7 @@ var (
 
 	TestChainAuraConfig = &Config{
 		ChainID:               big.NewInt(1),
-		Consensus:             AuRaConsensus,
+		Rules:                 AuRaRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -146,7 +147,7 @@ var (
 	// and accepted by the Ethereum core developers into the main net protocol.
 	AllProtocolChanges = &Config{
 		ChainID:                       big.NewInt(1337),
-		Consensus:                     EtHashConsensus,
+		Rules:                         EtHashRules,
 		HomesteadBlock:                big.NewInt(0),
 		TangerineWhistleBlock:         big.NewInt(0),
 		SpuriousDragonBlock:           big.NewInt(0),
@@ -164,6 +165,7 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
+		GlamsterdamTime:               big.NewInt(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
@@ -336,6 +338,11 @@ func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
 }
 
+// IsGlamsterdam returns whether time is either equal to the Glamsterdam fork time or greater.
+func (c *Config) IsGlamsterdam(time uint64) bool {
+	return isForked(c.GlamsterdamTime, time)
+}
+
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
@@ -365,16 +372,13 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
 		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
-			0: {},
+			0: nil,
 		}
 		if c.CancunTime != nil {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
 		}
 		if c.PragueTime != nil {
 			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
-		}
-		if c.OsakaTime != nil {
-			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
 		}
 
 		// Override with supplied values
@@ -416,7 +420,10 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Max
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.Max
+	}
+	return 0
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
@@ -424,11 +431,17 @@ func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
 }
 
 func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Target
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.Target
+	}
+	return 0
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
-	return c.GetBlobConfig(time).BaseFeeUpdateFraction
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.BaseFeeUpdateFraction
+	}
+	return 0
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
@@ -446,22 +459,6 @@ func (c *Config) SecondsPerSlot() uint64 {
 		return 5 // Gnosis
 	}
 	return 12 // Ethereum
-}
-
-func (c *Config) SlotsPerEpoch() uint64 {
-	if c.Bor != nil {
-		// Polygon does not have slots, this is such that block range is updated ~5 minutes similar to Ethereum
-		return 192
-	}
-	if c.Aura != nil {
-		return 16 // Gnosis
-	}
-	return 32 // Ethereum
-}
-
-// EpochDuration returns the duration of one epoch in seconds
-func (c *Config) EpochDuration() time.Duration {
-	return time.Duration(c.SecondsPerSlot()*c.SlotsPerEpoch()) * time.Second
 }
 
 func (c *Config) SystemContracts(time uint64) map[string]common.Address {
@@ -652,21 +649,21 @@ func (err *ConfigCompatError) Error() string {
 	return fmt.Sprintf("mismatching %s in database (have %d, want %d, rewindto %d)", err.What, err.StoredConfig, err.NewConfig, err.RewindTo)
 }
 
-// EthashConfig is the consensus engine configs for proof-of-work based sealing.
+// EthashConfig is the rules engine configs for proof-of-work based sealing.
 type EthashConfig struct{}
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *EthashConfig) String() string {
 	return "ethash"
 }
 
-// CliqueConfig is the consensus engine configs for proof-of-authority based sealing.
+// CliqueConfig is the rules engine configs for proof-of-authority based sealing.
 type CliqueConfig struct {
 	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
 	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
 }
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *CliqueConfig) String() string {
 	return "clique"
 }
@@ -701,7 +698,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka                                 bool
+	IsPrague, IsOsaka, IsGlamsterdam                  bool
 	IsAura                                            bool
 }
 

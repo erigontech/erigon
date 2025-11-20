@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -119,6 +119,71 @@ func TestDecodeEmptyTypedTx(t *testing.T) {
 	_, err := DecodeTransaction(input)
 	if !errors.Is(err, rlp.EOL) {
 		t.Fatal("wrong error:", err)
+	}
+}
+
+func TestDecodeRLPTransactionRejectsTrailingBytes(t *testing.T) {
+	t.Parallel()
+	input := []byte{248, 99, 128, 2, 1, 148, 9, 94, 123, 174, 166, 166, 199, 196, 194, 223, 235, 151, 126, 250, 195, 38, 175, 85, 45, 135, 128, 134, 97, 98, 99, 100, 101, 102, 37, 160, 142, 183, 96, 239, 234, 152, 124, 9, 98, 209, 245, 242, 175, 209, 122, 221, 51, 54, 23, 237, 233, 142, 83, 7, 50, 17, 119, 99, 15, 34, 57, 125, 160, 21, 141, 44, 195, 195, 220, 247, 64, 91, 79, 6, 37, 93, 226, 96, 69, 227, 240, 8, 168, 169, 112, 118, 124, 14, 250, 73, 19, 190, 7, 104, 57, 1}
+
+	stream := rlp.NewStream(bytes.NewReader(input), uint64(len(input)))
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeRLPTransaction, got %v", err)
+	}
+
+	if _, err := DecodeTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeTransaction, got %v", err)
+	}
+
+	if _, err := DecodeWrappedTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeWrappedTransaction, got %v", err)
+	}
+}
+
+func TestDecodeRLPTransactionRejectsTrailingBytesTyped(t *testing.T) {
+	t.Parallel()
+	encoded, err := rlp.EncodeToBytes(signedDynFeeTx)
+	if err != nil {
+		t.Fatalf("failed to encode typed tx: %v", err)
+	}
+	input := append(append([]byte{}, encoded...), 0x01)
+
+	stream := rlp.NewStream(bytes.NewReader(input), uint64(len(input)))
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeRLPTransaction, got %v", err)
+	}
+
+	if _, err := DecodeTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeTransaction, got %v", err)
+	}
+
+	if _, err := DecodeWrappedTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeWrappedTransaction, got %v", err)
+	}
+}
+
+func TestDecodeRLPTransactionInsideListAllowsIteration(t *testing.T) {
+	t.Parallel()
+	txBytes, err := rlp.EncodeToBytes(rightvrsTx)
+	if err != nil {
+		t.Fatalf("encode tx: %v", err)
+	}
+	listBytes, err := rlp.EncodeToBytes([]rlp.RawValue{txBytes, txBytes})
+	if err != nil {
+		t.Fatalf("encode tx list: %v", err)
+	}
+	stream := rlp.NewStream(bytes.NewReader(listBytes), uint64(len(listBytes)))
+	if _, err := stream.List(); err != nil {
+		t.Fatalf("list header: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); err != nil {
+		t.Fatalf("first tx decode failed: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); err != nil {
+		t.Fatalf("second tx decode failed: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, rlp.EOL) {
+		t.Fatalf("expected EOL after list, got %v", err)
 	}
 }
 
@@ -600,7 +665,7 @@ func newRandBlobTx() *BlobTx {
 			To:       randAddr(),
 			Value:    uint256.NewInt(rand.Uint64()),
 			Data:     randData(),
-			V:        *uint256.NewInt(0),
+			V:        uint256.Int{},
 			R:        *uint256.NewInt(rand.Uint64()),
 			S:        *uint256.NewInt(rand.Uint64()),
 		},

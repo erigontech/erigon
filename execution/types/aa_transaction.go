@@ -12,8 +12,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -222,10 +222,10 @@ func (tx *AccountAbstractionTransaction) RawSignatureValues() (*uint256.Int, *ui
 
 func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListLen, authorizationsLen int) {
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
+	payloadSize += rlp.Uint256LenExcludingHead(*tx.ChainID)
 
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.NonceKey)
+	payloadSize += rlp.Uint256LenExcludingHead(*tx.NonceKey)
 
 	payloadSize++
 	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
@@ -254,13 +254,13 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	payloadSize += rlp.StringLen(tx.ExecutionData)
 
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.BuilderFee)
+	payloadSize += rlp.Uint256LenExcludingHead(*tx.BuilderFee)
 
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.Tip)
+	payloadSize += rlp.Uint256LenExcludingHead(*tx.Tip)
 
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.FeeCap)
+	payloadSize += rlp.Uint256LenExcludingHead(*tx.FeeCap)
 
 	payloadSize++
 	payloadSize += rlp.IntLenExcludingHead(tx.ValidationGasLimit)
@@ -317,11 +317,11 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeUint256(tx.NonceKey, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.NonceKey, w, b); err != nil {
 		return err
 	}
 
@@ -357,15 +357,15 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeUint256(tx.BuilderFee, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.BuilderFee, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeUint256(tx.Tip, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Tip, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.FeeCap, w, b); err != nil {
 		return err
 	}
 

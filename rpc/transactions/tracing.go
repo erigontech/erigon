@@ -1,0 +1,249 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package transactions
+
+import (
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpchelper"
+)
+
+type BlockGetter interface {
+	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
+	GetBlockByHash(hash common.Hash) (*types.Block, error)
+	// GetBlock retrieves a block from the database by hash and number,
+	// caching it if found.
+	GetBlock(hash common.Hash, number uint64) *types.Block
+}
+
+// ComputeBlockContext returns the execution environment of a certain block.
+func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
+	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
+	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
+	if err != nil {
+		return nil, evmtypes.BlockContext{}, nil, nil, nil, err
+	}
+
+	// Create the parent state database
+	statedb := state.New(reader)
+
+	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
+		return headerReader.HeaderByNumber(ctx, dbtx, n)
+	}
+
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, nil, cfg)
+	rules := blockContext.Rules(cfg)
+
+	// Recompute transactions up to the target index.
+	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)
+
+	return statedb, blockContext, reader, rules, signer, err
+}
+
+// ComputeTxContext returns the execution environment of a certain transaction.
+func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (protocol.Message, evmtypes.TxContext, error) {
+	txn := block.Transactions()[txIndex]
+	statedb.SetTxContext(block.NumberU64(), txIndex)
+	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
+	txContext := protocol.NewEVMTxContext(msg)
+	return msg, txContext, nil
+}
+
+// TraceTx configures a new tracer according to the provided configuration, and
+// executes the given message in the provided environment. The return value will
+// be tracer dependent.
+func TraceTx(
+	ctx context.Context,
+	engine rules.EngineReader,
+	tx types.Transaction,
+	message protocol.Message,
+	blockCtx evmtypes.BlockContext,
+	txCtx evmtypes.TxContext,
+	blockHash common.Hash,
+	txnIndex int,
+	ibs *state.IntraBlockState,
+	config *tracersConfig.TraceConfig,
+	chainConfig *chain.Config,
+	stream jsonstream.Stream,
+	callTimeout time.Duration,
+) (gasUsed uint64, err error) {
+	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockHash, txnIndex, stream, callTimeout)
+	if err != nil {
+		stream.WriteNil()
+		return 0, err
+	}
+
+	defer cancel()
+
+	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
+		gp := new(protocol.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
+		if tracer != nil && tracer.OnTxStart != nil {
+			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
+		}
+		result, err := protocol.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
+		if err != nil {
+			if tracer != nil && tracer.OnTxEnd != nil {
+				tracer.OnTxEnd(nil, err)
+			}
+
+			return result, err
+		} else {
+			if tracer != nil && tracer.OnTxEnd != nil {
+				tracer.OnTxEnd(&types.Receipt{GasUsed: result.GasUsed}, nil)
+			}
+		}
+
+		gasUsed = result.GasUsed
+		return result, err
+	}
+
+	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
+	return gasUsed, err
+}
+
+func AssembleTracer(
+	ctx context.Context,
+	config *tracersConfig.TraceConfig,
+	txHash common.Hash,
+	blockHash common.Hash,
+	txnIndex int,
+	stream jsonstream.Stream,
+	callTimeout time.Duration,
+) (*tracers.Tracer, bool, context.CancelFunc, error) {
+	// Assemble the structured logger or the JavaScript tracer
+	switch {
+	case config != nil && config.Tracer != nil:
+		// Define a meaningful timeout of a single transaction trace
+		timeout := callTimeout
+		if config.Timeout != nil {
+			var err error
+			timeout, err = time.ParseDuration(*config.Timeout)
+			if err != nil {
+				return nil, false, func() {}, err
+			}
+		}
+
+		// Construct the JavaScript tracer to execute with
+		cfg := json.RawMessage("{}")
+		if config.TracerConfig != nil {
+			cfg = *config.TracerConfig
+		}
+		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash}, cfg)
+		if err != nil {
+			return nil, false, func() {}, err
+		}
+
+		// Handle timeouts and RPC cancellations
+		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+		go func() {
+			<-deadlineCtx.Done()
+			tracer.Stop(errors.New("execution timeout"))
+		}()
+
+		return tracer, false, cancel, nil
+	case config == nil:
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, cancel, nil
+	default:
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, cancel, nil
+	}
+}
+
+func ExecuteTraceTx(
+	blockCtx evmtypes.BlockContext,
+	txCtx evmtypes.TxContext,
+	ibs *state.IntraBlockState,
+	config *tracersConfig.TraceConfig,
+	chainConfig *chain.Config,
+	stream jsonstream.Stream,
+	tracer *tracers.Tracer,
+	streaming bool,
+	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
+) error {
+	// Set the tracer hooks to the intra-block state before execute, so the OnLog hook may be set correctly.
+	ibs.SetHooks(tracer.Hooks)
+	// Run the transaction with tracing enabled.
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
+	var refunds = true
+	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
+		refunds = false
+	}
+
+	result, err := execCb(evm, refunds)
+	if err != nil {
+		if !streaming {
+			stream.WriteNil()
+		}
+		return fmt.Errorf("tracing failed: %w", err)
+	}
+
+	// Depending on the tracer type, format and return the output
+	if streaming {
+		stream.WriteArrayEnd()
+		stream.WriteMore()
+		stream.WriteObjectField("gas")
+		stream.WriteUint64(result.GasUsed)
+		stream.WriteMore()
+		stream.WriteObjectField("failed")
+		stream.WriteBool(result.Failed())
+		stream.WriteMore()
+		// If the result contains a revert reason, return it.
+		returnVal := hex.EncodeToString(result.Return())
+		if len(result.Revert()) > 0 {
+			returnVal = hex.EncodeToString(result.Revert())
+		}
+		stream.WriteObjectField("returnValue")
+		stream.WriteString("0x" + returnVal)
+		stream.WriteObjectEnd()
+	} else {
+		r, err := tracer.GetResult()
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+
+		_, err = stream.Write(r)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+	}
+
+	return nil
+}
