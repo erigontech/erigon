@@ -1085,9 +1085,9 @@ var (
 		Value: false,
 	}
 	KeepExecutionProofsFlag = cli.BoolFlag{
-		Name:    "prune.experimental.include-commitment-history",
+		Name:    "prune.include-commitment-history",
 		Usage:   "Enables blazing fast eth_getProof for executed block",
-		Aliases: []string{"experimental.commitment-history"},
+		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
 
 	// ErigonDB geometry settings
