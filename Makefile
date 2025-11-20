@@ -3,7 +3,7 @@ SHELL := /bin/bash
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
-GOBIN := $(CURDIR)/$(GOBINREL)
+export GOBIN := $(CURDIR)/$(GOBINREL)
 GOARCH ?= $(shell go env GOHOSTARCH)
 UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
@@ -342,7 +342,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v32.0/protoc-32.0-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v33.1/protoc-33.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -444,8 +444,7 @@ stringer:
 	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
 
 ## gen:                               generate all auto-generated code in the codebase
-gen:
-	mocks solc abigen gencodec graphql grpc stringer
+gen: mocks solc abigen gencodec graphql grpc stringer
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
