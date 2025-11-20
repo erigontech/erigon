@@ -444,8 +444,7 @@ stringer:
 	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
 
 ## gen:                               generate all auto-generated code in the codebase
-gen:
-	mocks solc abigen gencodec graphql grpc stringer
+gen: gencodec graphql grpc stringer
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
