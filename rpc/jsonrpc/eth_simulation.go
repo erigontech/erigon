@@ -460,6 +460,7 @@ func (s *simulator) simulateBlock(
 	if s.traceTransfers {
 		// Transfers must be recorded as if they were logs: use a tracer that records all logs and ether transfers
 		vmConfig.Tracer = tracer.Hooks()
+		intraBlockState.SetHooks(vmConfig.Tracer)
 	}
 
 	// Apply pre-transaction state modifications before block execution.
