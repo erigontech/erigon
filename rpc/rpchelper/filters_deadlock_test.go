@@ -39,7 +39,7 @@ func TestFiltersDeadlock(t *testing.T) {
 		id LogsSubID
 		ch <-chan *types.Log
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	for i := 0; i < subCount; i++ {
 		n := &sub{}
