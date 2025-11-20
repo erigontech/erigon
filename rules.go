@@ -21,12 +21,7 @@ package gorules
 // to apply changes in this file, please do: ./build/bin/golangci-lint cache clean
 import (
 	"github.com/quasilyte/go-ruleguard/dsl"
-	//quasilyterules "github.com/quasilyte/ruleguard-rules-test"
 )
-
-func init() {
-	//dsl.ImportRules("qrules", quasilyterules.Bundle)
-}
 
 func txDeferRollback(m dsl.Matcher) {
 	// Common pattern for long-living transactions:
