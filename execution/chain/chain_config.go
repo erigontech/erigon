@@ -358,7 +358,10 @@ func (c *Config) IsPrague(time uint64, currentArbosVersion uint64) bool {
 }
 
 // IsOsaka returns whether time is either equal to the Osaka fork time or greater.
-func (c *Config) IsOsaka(time uint64) bool {
+func (c *Config) IsOsaka(time uint64, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= osver.ArbosVersion_50
+	}
 	return isForked(c.OsakaTime, time)
 }
 
@@ -450,7 +453,7 @@ func (c *Config) GetBlobGasPriceUpdateFraction(time uint64, currentArbosVer uint
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
-	if c.IsOsaka(time) {
+	if !c.IsArbitrum() && c.IsOsaka(time, 0) {
 		return params.MaxRlpBlockSize
 	}
 	return math.MaxInt
