@@ -1,4 +1,4 @@
-package arb
+package txn
 
 type NoTimeBoosted bool
 

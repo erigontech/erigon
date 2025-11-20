@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/blocks"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -188,7 +189,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	var rs types.FlatRequests
 	var arbosVersion uint64
 	if config.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		arbosVersion = arbBlocks.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	}
 	if config.IsPrague(header.Time, arbosVersion) && !skipReceiptsEval {
 		rs = make(types.FlatRequests, 0)
@@ -244,7 +245,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	}
 	var arbosVersion uint64
 	if config.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		arbosVersion = arbBlocks.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	}
 	if config.IsPrague(header.Time, arbosVersion) {
 		header.RequestsHash = outRequests.Hash()
@@ -315,7 +316,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 
 	var arbosVersion uint64
 	if chain.Config().IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		arbosVersion = arbBlocks.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	}
 
 	// Verify existence / non-existence of withdrawalsHash
@@ -383,7 +384,7 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 
 	var arbosVersion uint64
 	if config.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		arbosVersion = arbBlocks.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	}
 
 	if chain.Config().IsCancun(header.Time, arbosVersion) {

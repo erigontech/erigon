@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/arb/txn"
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
@@ -361,7 +362,7 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 }
 
 func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumLegacyTxData{LegacyTx: &types.LegacyTx{CommonTx: *commonTx}}
+	tx := &txn.ArbitrumLegacyTxData{LegacyTx: &types.LegacyTx{CommonTx: *commonTx}}
 
 	if gasPriceHex, ok := rawTx["gasPrice"].(string); ok {
 		tx.GasPrice = uint256.MustFromHex(gasPriceHex)
@@ -392,7 +393,7 @@ func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interfa
 }
 
 func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumSubmitRetryableTx{}
+	tx := &txn.ArbitrumSubmitRetryableTx{}
 
 	// Chain ID: required field (hex string)
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -462,7 +463,7 @@ func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{})
 }
 
 func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumRetryTx{}
+	tx := &txn.ArbitrumRetryTx{}
 
 	// ChainId (expected as a hex string, e.g., "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -526,7 +527,7 @@ func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{})
 // makeArbitrumContractTx builds an ArbitrumContractTx from the common transaction fields
 // and the raw JSON transaction data.
 func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumContractTx{}
+	tx := &txn.ArbitrumContractTx{}
 
 	// ChainId (expected as a hex string, e.g. "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -570,7 +571,7 @@ func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface
 }
 
 func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumUnsignedTx{GasFeeCap: big.NewInt(0)}
+	tx := &txn.ArbitrumUnsignedTx{GasFeeCap: big.NewInt(0)}
 
 	// ChainId: expected as a hex string (e.g., "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -612,7 +613,7 @@ func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface
 }
 
 func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumDepositTx{}
+	tx := &txn.ArbitrumDepositTx{}
 
 	// ChainId: expected as a hex string (e.g., "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -943,7 +944,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				} else {
 					return fmt.Errorf("missing chainId in ArbitrumInternalTxType at index %d", idx)
 				}
-				tx = &types.ArbitrumInternalTx{
+				tx = &txn.ArbitrumInternalTx{
 					Data:    commonTx.Data,
 					ChainId: chainID,
 				}
@@ -1003,9 +1004,9 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				if receipt.Timeboosted != nil {
 					tx.SetTimeboosted(receipt.Timeboosted)
 				}
-				if tx.Type() == types.ArbitrumSubmitRetryableTxType {
+				if tx.Type() == txn.ArbitrumSubmitRetryableTxType {
 					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
-						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
+						if srtx, ok := tx.(*txn.ArbitrumSubmitRetryableTx); ok {
 							srtx.EffectiveGasUsed = egu.Uint64()
 							tx = srtx
 						}

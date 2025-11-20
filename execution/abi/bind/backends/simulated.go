@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
+	arbBlocks "github.com/erigontech/erigon/arb/blocks"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -168,7 +169,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
 
-	arbOsVersion := types.GetArbOSVersion(b.pendingHeader, b.m.ChainConfig)
+	arbOsVersion := arbBlocks.GetArbOSVersion(b.pendingHeader, b.m.ChainConfig)
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock(b.pendingHeader.Time, arbOsVersion))
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	arbBlocks "github.com/erigontech/erigon/arb/blocks"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -495,11 +496,11 @@ Loop:
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-
+		// TODO add check on arbitrum at all
 		var arbosv uint64
 		signer := *types.LatestSignerForChainID(chainConfig.ChainID)
 		if chainConfig.IsArbitrum() {
-			arbosv = types.GetArbOSVersion(header, chainConfig)
+			arbosv = arbBlocks.GetArbOSVersion(header, chainConfig)
 			signer = *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
 		}
 

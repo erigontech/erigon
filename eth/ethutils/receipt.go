@@ -24,6 +24,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/blocks"
+	arbtxn "github.com/erigontech/erigon/arb/txn"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/types"
@@ -50,7 +52,7 @@ func MarshalReceipt(
 
 	var from common.Address
 	if signed {
-		signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId))
+		signer := arbtxn.NewArbitrumSigner(*types.LatestSignerForChainID(chainId))
 		from, _ = signer.Sender(txn)
 	}
 
@@ -126,10 +128,10 @@ func MarshalReceipt(
 
 		if chainConfig.IsArbitrumNitro(header.Number) {
 			fields["effectiveGasPrice"] = hexutil.Uint64(header.BaseFee.Uint64())
-			fields["l1BlockNumber"] = hexutil.Uint64(types.DeserializeHeaderExtraInformation(header).L1BlockNumber)
+			fields["l1BlockNumber"] = hexutil.Uint64(arbBlocks.DeserializeHeaderExtraInformation(header).L1BlockNumber)
 			fields["timeboosted"] = txn.IsTimeBoosted()
 		} else {
-			arbTx, ok := txn.(*types.ArbitrumLegacyTxData)
+			arbTx, ok := txn.(*arbtxn.ArbitrumLegacyTxData)
 			if !ok {
 				log.Error("Expected transaction to contain arbitrum data", "txHash", txn.Hash())
 			} else {
@@ -139,7 +141,7 @@ func MarshalReceipt(
 		}
 
 		// For ArbitrumSubmitRetryableTx we have to take the effective gas used from txn itself and correct cumulativeGasUsed
-		if arbitrumTx, ok := txn.(*types.ArbitrumSubmitRetryableTx); ok {
+		if arbitrumTx, ok := txn.(*arbtxn.ArbitrumSubmitRetryableTx); ok {
 			// Find the cumulative gas used by subtracting the gas used from receipt
 			cumulativeGasUSed := receipt.CumulativeGasUsed - receipt.GasUsed
 			fields["effectiveGasPrice"] = hexutil.Uint64(cumulativeGasUSed + arbitrumTx.EffectiveGasUsed)

@@ -214,8 +214,8 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -229,8 +229,8 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 
 func (tx *AccessListTx) MarshalBinaryForHashing(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(true)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -321,8 +321,8 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -495,7 +495,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccessListTxType, []interface{}{
+	hash := PrefixedRlpHash(AccessListTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
@@ -511,7 +511,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 }
 
 func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		AccessListTxType,
 		[]interface{}{
 			chainID,
@@ -535,7 +535,7 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cachedSender() (sender common.Address, ok bool) {
+func (tx *AccessListTx) CachedSender() (sender common.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false

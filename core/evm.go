@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
+	arbBlocks "github.com/erigontech/erigon/arb/blocks"
 	"github.com/erigontech/erigon/arb/osver"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/chain"
@@ -90,7 +91,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	}
 
 	// assert if network is ARB0 to change pervrandao
-	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	arbOsVersion := arbBlocks.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	if arbOsVersion > osver.ArbosVersion_0 {
 		difficultyHash := common.BigToHash(header.Difficulty)
 		prevRandDao = &difficultyHash
