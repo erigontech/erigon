@@ -409,16 +409,10 @@ Set-ExecutionPolicy Bypass -Scope CurrentUser -Force
 
 This change allows script execution, but use caution to avoid security risks. Remember to only make these adjustments if you trust the scripts you intend to run. Unauthorized changes can impact system security. For more info read [Set-Execution Policy](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-executionpolicy?view=powershell-7.3) documentation.
 
-Now you can compile Erigon and/or any of its component:
+Now you can compile Erigon and its components:
 
 ```powershell
-.\wmake.ps1 [-target] <targetname>
-```
-
-For example, to build the Erigon executable write:
-
-```powershell
-.\wmake.ps1 erigon
+.\wmake.ps1
 ```
 
 <figure><img src="../../.gitbook/assets/image (11).png" alt=""><figcaption></figcaption></figure>
@@ -438,7 +432,7 @@ C:\Users\your-user\erigon.\build\bin\
 You can now start Erigon by simply using:
 
 ```powershell
-start erigon.exe [options]
+erigon.exe [options]
 ```
 
 {% hint style="warning" %}
