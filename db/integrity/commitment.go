@@ -624,9 +624,20 @@ func checkCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 		return 0, err
 	}
 	defer it.Close()
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
 	var total uint64
 	var integrityErr error
 	for it.HasNext() {
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-logTicker.C:
+			rate := float64(total) / time.Since(start).Seconds()
+			logger.Info("checking commitment hist vals progress", "at", total, "keys/s", rate, "v", fileName)
+		default:
+			// no-op
+		}
 		k, v, err := it.Next()
 		if err != nil {
 			return 0, err
