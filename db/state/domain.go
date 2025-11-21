@@ -327,8 +327,6 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
-func (d *Domain) Tables() []string { return append(d.History.Tables(), d.ValuesTable) }
-
 func (d *Domain) Close() {
 	if d == nil {
 		return
@@ -1944,8 +1942,11 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
-func (dt *DomainRoTx) Tables() (res []string) {
-	return []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+func (dt *DomainRoTx) Tables(tx kv.Tx) (res []string) {
+	res = []string{dt.d.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	// dt.ht.h.ValuesTable
+	res = append(res, dt.ht.ValuesTables(tx)...)
+	return
 }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {

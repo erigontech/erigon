@@ -190,7 +190,6 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 }
 func (db *DB) Debug() kv.TemporalDebugDB                             { return kv.TemporalDebugDB(db) }
 func (db *DB) NewMemBatch(ioMetrics interface{}) kv.TemporalMemBatch { panic("not implemented") }
-func (db *DB) DomainTables(domain ...kv.Domain) []string             { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string   { panic("not implemented") }
 func (db *DB) ForkableTables(domain ...kv.ForkableId) []string       { panic("not implemented") }
 func (db *DB) ReloadFiles() error                                    { panic("not implemented") }
@@ -252,6 +251,7 @@ func (tx *tx) AllForkableIds() (ids []kv.ForkableId)           { panic("not impl
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step     { panic("not implemented") }
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
+func (tx *tx) DomainTables(domain ...kv.Domain) []string       { panic("not implemented") }
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }

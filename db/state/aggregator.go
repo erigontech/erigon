@@ -915,12 +915,6 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
-func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
-	for _, name := range names {
-		tables = append(tables, a.d[name].Tables()...)
-	}
-	return tables
-}
 func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles) {
 	for _, domain := range domains {
 		files = append(files, at.d[domain].Files()...)
@@ -1849,6 +1843,14 @@ func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, ma
 	if domain == kv.CommitmentDomain && found {
 		v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	}
+	return
+}
+
+func (at *AggregatorRoTx) DomainTables(tx kv.Tx, names ...kv.Domain) (tables []string) {
+	for _, name := range names {
+		tables = append(tables, at.d[name].Tables(tx)...)
+	}
+
 	return
 }
 

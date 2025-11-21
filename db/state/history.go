@@ -167,8 +167,20 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 func (h *History) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(h.dirtyFiles, fNames)
 }
+func (h *History) ValuesTables(tx kv.Tx) (htables []string) {
+	all, err := tx.ListTables()
+	if err != nil {
+		panic(err)
+	}
 
-func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.ValuesTable) }
+	for _, th := range all {
+		if strings.HasPrefix(th, h.ValuesTable) {
+			htables = append(htables, th)
+		}
+	}
+
+	return
+}
 
 func (h *History) Close() {
 	if h == nil {
@@ -352,6 +364,10 @@ func (h *History) Scan(toTxNum uint64) error {
 	return nil
 }
 
+func (h *History) historyValsTable(step uint64) string {
+	return fmt.Sprintf("%s_%d", h.ValuesTable, step)
+}
+
 func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
@@ -416,6 +432,7 @@ type historyBufferedWriter struct {
 	historyKey       []byte
 	discard          bool
 	historyValsTable string
+	sharded          bool
 
 	// not large:
 	//   keys: txNum -> key1+key2
@@ -445,6 +462,7 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
+		sharded:          ht.h.Sharded,
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
@@ -466,8 +484,25 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if !w.sharded {
+		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+	} else {
+		// sharded variant
+		var stepLoader func(k, v []byte) (uint64, error)
+		if w.largeValues {
+			stepLoader = func(k, v []byte) (uint64, error) {
+				return binary.BigEndian.Uint64(k[len(k)-8:]), nil
+			}
+		} else {
+			stepLoader = func(k, v []byte) (uint64, error) {
+				return binary.BigEndian.Uint64(v[:8]), nil
+			}
+		}
+		if err := w.historyVals.ShardedLoad(tx, w.historyValsTable, stepLoader, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	w.close()
 	return nil
@@ -567,16 +602,17 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 	}
 
+	valsTbl := h.historyValsTable(uint64(step))
 	var c kv.Cursor
 	var cd kv.CursorDupSort
 	if h.HistoryLargeValues {
-		c, err = roTx.Cursor(h.ValuesTable)
+		c, err = roTx.Cursor(valsTbl)
 		if err != nil {
 			return HistoryCollation{}, err
 		}
 		defer c.Close()
 	} else {
-		cd, err = roTx.CursorDupSort(h.ValuesTable)
+		cd, err = roTx.CursorDupSort(valsTbl)
 		if err != nil {
 			return HistoryCollation{}, err
 		}
@@ -862,20 +898,30 @@ func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader     { return 
 func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter { return ht.h.dataWriter(f) }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
-	k, err := kv.FirstKey(tx, h.ValuesTable)
-	if err != nil {
-		return false, err
+	var k []byte
+	var err error
+	if h.Sharded {
+		tables := h.ValuesTables(tx)
+		for _, tbl := range tables {
+			k, err = kv.FirstKey(tx, tbl)
+			if err != nil {
+				return false, err
+			}
+			if k != nil {
+				return false, nil
+			}
+		}
+	} else {
+		k, err = kv.FirstKey(tx, h.ValuesTable)
+		if err != nil {
+			return false, err
+		}
 	}
 	k2, err := kv.FirstKey(tx, h.KeysTable)
 	if err != nil {
 		return false, err
 	}
 	return k == nil && k2 == nil, nil
-}
-
-type HistoryRecord struct {
-	TxNum uint64
-	Value []byte
 }
 
 type HistoryRoTx struct {
@@ -1001,64 +1047,78 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (
-		seek     = make([]byte, 8, 256)
-		valsCDup kv.RwCursorDupSort
-		valsC    kv.RwCursor
-		err      error
+		seek       = make([]byte, 8, 256)
+		valsCDup   kv.RwCursorDupSort
+		valsC      kv.RwCursor
+		err        error
+		pruneValue func(k, txnm []byte) error
+		pruned     int
 	)
 
-	if !ht.h.HistoryLargeValues {
-		valsCDup, err = rwTx.RwCursorDupSort(ht.h.ValuesTable)
-		if err != nil {
-			return nil, err
+	if ht.h.Sharded {
+		pruneValue = nil
+		// TODO: implement sharded history pruning
+		// can delete table or can delete parts as well (like unwind or snapshots disabled)...
+		if txFrom%ht.stepSize == 0 && txTo%ht.stepSize == 0 {
 		}
-		defer valsCDup.Close()
 	} else {
-		valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
-		if err != nil {
-			return nil, err
+
+		if !ht.h.HistoryLargeValues {
+			valsCDup, err = rwTx.RwCursorDupSort(ht.h.ValuesTable)
+			if err != nil {
+				return nil, err
+			}
+			defer valsCDup.Close()
+		} else {
+			valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
+			if err != nil {
+				return nil, err
+			}
+			defer valsC.Close()
 		}
-		defer valsC.Close()
+
+		pruneValue = func(k, txnm []byte) error {
+			txNum := binary.BigEndian.Uint64(txnm)
+			if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
+				return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
+			}
+
+			if ht.h.HistoryLargeValues {
+				seek = append(bytes.Clone(k), txnm...)
+				if err := valsC.Delete(seek); err != nil {
+					return err
+				}
+			} else {
+				vv, err := valsCDup.SeekBothRange(k, txnm)
+				if err != nil {
+					return err
+				}
+				if len(vv) < 8 {
+					return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.FilenameBase, len(vv))
+				}
+				if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
+					return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
+				}
+				if err = valsCDup.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+
+			pruned++
+			return nil
+		}
+
+		if !forced && ht.h.SnapshotsDisabled {
+			forced = true // or index.CanPrune will return false cuz no snapshots made
+		}
 	}
 
-	var pruned int
-	pruneValue := func(k, txnm []byte) error {
-		txNum := binary.BigEndian.Uint64(txnm)
-		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
-			return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
-		}
-
-		if ht.h.HistoryLargeValues {
-			seek = append(bytes.Clone(k), txnm...)
-			if err := valsC.Delete(seek); err != nil {
-				return err
-			}
-		} else {
-			vv, err := valsCDup.SeekBothRange(k, txnm)
-			if err != nil {
-				return err
-			}
-			if len(vv) < 8 {
-				return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.FilenameBase, len(vv))
-			}
-			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
-				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
-			}
-			if err = valsCDup.DeleteCurrent(); err != nil {
-				return err
-			}
-		}
-
-		pruned++
-		return nil
+	stat, err := ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
+	if err != nil {
+		return stat, err
 	}
 	mxPruneSizeHistory.AddInt(pruned)
-
-	if !forced && ht.h.SnapshotsDisabled {
-		forced = true // or index.CanPrune will return false cuz no snapshots made
-	}
-
-	return ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
+	return stat, nil
 }
 
 func (ht *HistoryRoTx) Close() {

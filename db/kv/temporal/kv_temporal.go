@@ -632,8 +632,12 @@ func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 
-func (db *DB) DomainTables(domain ...kv.Domain) []string {
-	return db.stateFiles.DomainTables(domain...)
+func (tx *Tx) DomainTables(domain ...kv.Domain) []string {
+	return tx.aggtx.DomainTables(tx.Tx, domain...)
+}
+
+func (tx *RwTx) DomainTables(domain ...kv.Domain) []string {
+	return tx.aggtx.DomainTables(tx.RwTx, domain...)
 }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)

@@ -56,6 +56,7 @@ type HistCfg struct {
 	HistoryLargeValues bool
 	SnapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	HistoryDisabled    bool // skip all write operations to this History (even in DB)
+	Sharded            bool
 
 	HistoryValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 

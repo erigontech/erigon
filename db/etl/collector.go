@@ -257,6 +257,131 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	return nil
 }
 
+func (c *Collector) ShardedLoad(db kv.RwTx, toBucketSchema string, stepGetter func(k, v []byte) (uint64, error), loadFunc LoadFunc, args TransformArgs) error {
+	if c.buf == nil && c.allocator != nil {
+		c.buf = c.allocator.Get()
+	}
+	defer c.Close()
+	args.BufferType = c.bufType
+
+	if !c.allFlushed {
+		if e := c.flushBuffer(true); e != nil {
+			return e
+		}
+	}
+
+	if toBucketSchema == "" {
+		return fmt.Errorf("ShardedLoad: toBucketSchema is empty")
+	}
+	bucketFn := func(step uint64) string { return fmt.Sprintf("%s_%d", toBucketSchema, step) }
+	cursorMap := make(map[uint64]kv.RwCursor)
+	cursorFn := func(step uint64) (cursor kv.RwCursor, lastKey []byte, bucketName string, err error) {
+		bucketName = bucketFn(step)
+		if cursor, ok := cursorMap[step]; ok {
+			lastKey, _, err = cursor.Last()
+			if err != nil {
+				return nil, nil, bucketName, err
+			}
+
+			return cursor, lastKey, bucketName, nil
+		}
+
+		bucket := bucketFn(step)
+		cursor, err = db.RwCursor(bucket)
+		if err != nil {
+			return nil, nil, bucketName, err
+		}
+		cursorMap[step] = cursor
+		lastKey, _, err = cursor.Last()
+		if err != nil {
+			return nil, nil, bucketName, err
+		}
+
+		return cursor, lastKey, bucketName, nil
+	}
+
+	defer func() {
+		for _, cursor := range cursorMap {
+			cursor.Close()
+		}
+	}()
+
+	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
+
+	var canUseAppend bool
+	isDupSort := kv.ChaindataTablesCfg[toBucketSchema].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[toBucketSchema].AutoDupSortKeysConversion
+
+	i := 0
+	loadNextFunc := func(_, k, v []byte) error {
+		step, err := stepGetter(k, v)
+		if err != nil {
+			return fmt.Errorf("ShardedLoad: stepGetter failed: %w", err)
+		}
+		cursor, lastKey, bucket, err := cursorFn(step)
+		if err != nil {
+			return fmt.Errorf("ShardedLoad: cursorFn failed: %w", err)
+		}
+		if i == 0 {
+			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
+			canUseAppend = haveSortingGuaranties && isEndOfBucket
+		}
+		i++
+
+		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
+			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility
+			(c.bufType == SortableOldestAppearedBuffer && len(v) == 0)
+		if isNil && !args.EmptyVals {
+			if canUseAppend {
+				return nil // nothing to delete after end of bucket
+			}
+			if err := cursor.Delete(k); err != nil {
+				return err
+			}
+			return nil
+		}
+		if len(v) == 0 && args.EmptyVals {
+			v = []byte{} // Append empty value
+		}
+		if canUseAppend {
+			if isDupSort {
+				if err := cursor.(kv.RwCursorDupSort).AppendDup(k, v); err != nil {
+					return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, %w", c.logPrefix, bucket, k, err)
+				}
+			} else {
+				if err := cursor.Append(k, v); err != nil {
+					return fmt.Errorf("%s: bucket: %s, append: k=%x, v=%x, %w", c.logPrefix, bucket, k, v, err)
+				}
+			}
+
+			return nil
+		}
+		if err := cursor.Put(k, v); err != nil {
+			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
+		}
+		return nil
+	}
+
+	currentTableMap := make(map[uint64]*currentTableReader)
+	simpleLoad := func(k, v []byte) error {
+		step, err := stepGetter(k, v)
+		if err != nil {
+			return fmt.Errorf("ShardedLoad: stepGetter failed: %w", err)
+		}
+		currentTable, ok := currentTableMap[step]
+		if !ok {
+			bucket := bucketFn(step)
+			currentTable = &currentTableReader{db, bucket}
+			currentTableMap[step] = currentTable
+		}
+		return loadFunc(k, v, currentTable, loadNextFunc)
+	}
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
+		return fmt.Errorf("loadIntoTable %s: %w", toBucketSchema, err)
+	}
+	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
+	return nil
+}
+
 func (c *Collector) Close() {
 	if c.buf != nil { //idempotency
 		if c.allocator != nil {

@@ -450,10 +450,10 @@ type TemporalDebugTx interface {
 	AllForkableIds() []ForkableId
 
 	NewMemBatch(ioMetrics interface{}) TemporalMemBatch
+	DomainTables(names ...Domain) []string
 }
 
 type TemporalDebugDB interface {
-	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
 	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
