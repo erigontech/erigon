@@ -71,7 +71,7 @@ func NewGossipManager(
 		ethClock:           ethClock,
 		registeredServices: []GossipService{},
 		stats:              &gossipMessageStats{},
-		subscriptions:      NewTopicSubscriptions(),
+		subscriptions:      NewTopicSubscriptions(p2p),
 		subscribeAll:       subscribeAll,
 		activeIndicies:     activeIndicies,
 	}
@@ -363,7 +363,11 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 		return err
 	}
 	topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
-	return g.subscriptions.SubscribeWithExpiry(topic, expiry)
+	if err := g.subscriptions.SubscribeWithExpiry(topic, expiry); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) error {
