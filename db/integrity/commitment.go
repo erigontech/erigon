@@ -651,6 +651,10 @@ func checkCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 			if err != nil {
 				return 0, err
 			}
+			if txNum < maxTxNum {
+				logger.Info("skipping commitment state as it is for partial block", "blockNum", blockNum, "txNum", txNum, "maxTxNum", maxTxNum, "v", fileName)
+				continue
+			}
 			if txNum != maxTxNum {
 				err = fmt.Errorf("commitment state txNum mismatch for block %d in %s: %d != %d", blockNum, fileName, txNum, maxTxNum)
 				if failFast {
