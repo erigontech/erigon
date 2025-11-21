@@ -15,7 +15,10 @@ import (
 const repeats = 10
 
 func RunBenchmark(ctx context.Context, c *rpcclient.Client, name string) (BenchOutput, error) {
-	const benchFile = "benchdata.toml"
+	benchFile := "benchdata.toml"
+	if os.Getenv("BENCH_DATA_FILE") != "" {
+		benchFile = os.Getenv("BENCH_DATA_FILE")
+	}
 	content, err := os.ReadFile(benchFile)
 	if err != nil {
 		return BenchOutput{}, fmt.Errorf("read %s: %w", benchFile, err)
