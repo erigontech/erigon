@@ -2,6 +2,7 @@ package multigas
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -23,6 +24,13 @@ const (
 	ResourceKindWasmComputation
 	NumResourceKind
 )
+
+func CheckResourceKind(id uint8) (ResourceKind, error) {
+	if id <= uint8(ResourceKindUnknown) || id >= uint8(NumResourceKind) {
+		return ResourceKindUnknown, fmt.Errorf("invalid resource id: %v", id)
+	}
+	return ResourceKind(id), nil
+}
 
 // MultiGas tracks gas usage across multiple resource kinds, while also
 // maintaining a single-dimensional total gas sum and refund amount.
