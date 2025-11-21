@@ -20,7 +20,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	merkletree "github.com/erigontech/erigon/cl/merkle_tree"
@@ -60,7 +59,7 @@ func (ip *IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
 }
 
 func (ip *IdentityPreimage) Clone() clonable.Clonable {
-	clone := IdentityPreimage(slices.Clone(ip[:]))
+	clone := *ip
 	return &clone
 }
 

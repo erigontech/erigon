@@ -203,7 +203,7 @@ func addErrorContext(err error, ctx string) error {
 
 var (
 	decoderInterface = reflect.TypeOf(new(Decoder)).Elem()
-	uint256Int       = reflect.TypeOf(uint256.Int{})
+	uint256Int       = reflect.TypeFor[uint256.Int]()
 )
 
 func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {

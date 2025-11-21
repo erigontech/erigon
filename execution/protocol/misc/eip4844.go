@@ -22,12 +22,23 @@ package misc
 import (
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+)
+
+var (
+	ErrNilBlobHashes        = errors.New("nil blob hashes array")
+	ErrMaxBlobGasUsed       = errors.New("blobs/blobgas exceeds max")
+	ErrMismatchBlobHashes   = errors.New("mismatch blob hashes")
+	ErrInvalidVersionedHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
 )
 
 var (
@@ -128,4 +139,29 @@ func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint
 
 func GetBlobGasUsed(numBlobs int) uint64 {
 	return uint64(numBlobs) * params.GasPerBlob
+}
+
+func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []common.Hash, transactions *[]types.Transaction) error {
+	if expectedBlobHashes == nil {
+		return ErrNilBlobHashes
+	}
+	actualBlobHashes := []common.Hash{}
+	for _, txn := range *transactions {
+		if txn.Type() == types.BlobTxType {
+			for _, h := range txn.GetBlobHashes() {
+				if h[0] != kzg.BlobCommitmentVersionKZG {
+					return ErrInvalidVersionedHash
+				}
+				actualBlobHashes = append(actualBlobHashes, h)
+			}
+		}
+	}
+	if len(actualBlobHashes) > int(maxBlobsPerBlock) {
+		log.Debug("error max blob gas used", "blobGasUsed", blobGasUsed, "maxBlobsGas", maxBlobsGas, "actualBlobHashes", len(actualBlobHashes), "maxBlobsPerBlock", maxBlobsPerBlock)
+		return ErrMaxBlobGasUsed
+	}
+	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
+		return ErrMismatchBlobHashes
+	}
+	return nil
 }
