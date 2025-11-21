@@ -3,6 +3,7 @@ package version
 import (
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -49,6 +50,7 @@ var ErrVersionIsNotSupported error = errors.New("this version is not supported")
 
 var (
 	ZeroVersion            = Version{}
+	SearchVersion          = Version{math.MaxUint64, math.MaxUint64}
 	V1_0          Version  = Version{1, 0}
 	V1_1          Version  = Version{1, 1}
 	V1_2          Version  = Version{1, 2}
@@ -123,6 +125,10 @@ func (v Version) Downgrade() Version {
 
 func (v Version) IsZero() bool {
 	return v.Major == 0 && v.Minor == 0
+}
+
+func (v Version) IsSearch() bool {
+	return v.Major == math.MaxUint64 && v.Minor == math.MaxUint64
 }
 
 func ParseVersion(v string) (Version, error) {
