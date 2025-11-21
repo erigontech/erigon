@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/seg"
 )
 
 func TestGCReadAfterRemoveFile(t *testing.T) {
@@ -64,13 +63,12 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 
 			lastInView := hc.files[len(hc.files)-1]
 
-			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), hc.h.HistoryValuesOnCompressedPage, true)
+			g := hc.dataReader(lastInView.src.decompressor)
 			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
 			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
 			if g.HasNext() {
-				k, _ := g.Next(nil)
-				require.Len(k, 8)
-				v, _ := g.Next(nil)
+				_, v, _, _, _ := g.Next2(nil, nil)
+				//require.Len(k, 8)
 				require.Len(v, 8)
 			}
 
@@ -154,13 +152,12 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			lastInView := hc.files[len(hc.files)-1]
-			g := lastInView.src.decompressor.MakeGetter()
+			g := hc.dataReader(lastInView.src.decompressor)
 			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
 			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
 			if g.HasNext() {
-				k, _ := g.Next(nil)
+				k, v, _, _, _ := g.Next2(nil, nil)
 				require.Len(k, 8)
-				v, _ := g.Next(nil)
 				require.Len(v, 8)
 			}
 

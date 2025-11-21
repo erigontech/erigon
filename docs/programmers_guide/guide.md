@@ -8,7 +8,8 @@ On a high level, Ethereum state is a collection of accounts. An account can be e
 
 ### Content of an account
 
-Type `Account` [execution/types/accounts/account.go](../../execution/types/accounts/account.go) lists the main components of an
+Type `Account` [execution/types/accounts/account.go](../../execution/types/accounts/account.go) lists the main
+components of an
 account's content (not identifier):
 
 1. Nonce
@@ -44,8 +45,10 @@ Binary 32-byte (256-bit) string.
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts
 cannot have storage, therefore root makes sense only for smart contract accounts. For non-contract accounts, the root
 field is assumed to be equal to the Merkle root of an empty tree, which is hard-coded in the variable `EmptyRoot` in
-[execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go). For contract accounts, the root is computed using member function `Hash`
-of type `Trie` [execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go), once the storage of the contract has been organised into
+[execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go). For contract accounts, the root is computed using member
+function `Hash`
+of type `Trie` [execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go), once the storage of the contract has been
+organised into
 the tree by calling member functions
 `Update` and `Delete` on the same type.
 
@@ -132,10 +135,12 @@ of the type `hasher` [execution/commitment/trie/hasher.go](../../execution/commi
 
 Hashes of the elements within a prefix group are combined into so-called "branch nodes". They correspond to the
 types `duoNode` (for prefix groups with exactly two elements) and `fullNode` in the
-file [execution/commitment/trie/node.go](../../execution/commitment/trie/node.go). To produce the hash of a branch node, one represents it as an array
+file [execution/commitment/trie/node.go](../../execution/commitment/trie/node.go). To produce the hash of a branch node, one represents it as
+an array
 of 17 elements (17-th element is for the attached leaf, if exists). The positions in the array that do not have
 corresponding elements in the prefix group are filled with empty strings. This is shown in the member
-function `hashChildren` of the type `hasher` [execution/commitment/trie/hasher.go](../../execution/commitment/trie/hasher.go), under the `*duoNode`
+function `hashChildren` of the type `hasher` [execution/commitment/trie/hasher.go](../../execution/commitment/trie/hasher.go), under the
+`*duoNode`
 and
 `*fullNode` cases.
 
@@ -529,7 +534,8 @@ account (SELFDESTRUCT). Naive storage deletion may take several minutes - depend
 will not process any incoming block that time. To protect against this attack:
 PlainState, HashedState and IntermediateTrieHash buckets have "incarnations". Account entity has field "Incarnation" -
 just a digit which increasing each SELFDESTRUCT or CREATE2 opcodes. Storage key formed by:
-`{account_key}{incarnation}{storage_hash}`. And [execution/commitment/trie/trie_root.go](../../execution/commitment/trie/trie_root.go) has logic -
+`{account_key}{incarnation}{storage_hash}`. And [execution/commitment/trie/trie_root.go](../../execution/commitment/trie/trie_root.go) has
+logic -
 every time when Account visited - we save it to `accAddrHashWithInc` variable and skip any Storage or
 IntermediateTrieHashes with another incarnation.
 

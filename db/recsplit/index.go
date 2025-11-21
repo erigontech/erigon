@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
 	"math"
 	"math/bits"
 	"os"
@@ -31,6 +30,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/c2h5oh/datasize"
 
