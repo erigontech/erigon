@@ -1754,6 +1754,5 @@ func (e *engineAPISwitcher) SetConsuming(consuming bool) {
 	if e.backend.engineBackendRPC == nil {
 		return
 	}
-
 	e.backend.engineBackendRPC.SetConsuming(consuming)
 }
