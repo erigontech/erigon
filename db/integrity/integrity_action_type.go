@@ -33,12 +33,13 @@ const (
 	CommitmentRoot     Check = "CommitmentRoot"
 	CommitmentKvi      Check = "CommitmentKvi"
 	CommitmentKvDeref  Check = "CommitmentKvDeref"
+	CommitmentHistVal  Check = "CommitmentHistVal"
 )
 
 var AllChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents,
 	BorSpans, BorCheckpoints, RCacheNoDups, Publishable,
-	CommitmentRoot, CommitmentKvi, CommitmentKvDeref,
+	CommitmentRoot, CommitmentKvi, CommitmentKvDeref, CommitmentHistVal,
 }
 
 var NonDefaultChecks = []Check{}

@@ -981,6 +981,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.CheckCommitmentKvDeref(ctx, db, failFast, logger); err != nil {
 				return err
 			}
+		case integrity.CommitmentHistVal:
+			if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
