@@ -24,7 +24,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/go-bitfield"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -163,6 +162,7 @@ func (s *Sentinel) connectToBootnodes() error {
 	return nil
 }
 
+/*
 func (s *Sentinel) setupENR(
 	node *enode.LocalNode,
 ) (*enode.LocalNode, error) {
@@ -206,7 +206,7 @@ func (s *Sentinel) updateENR(node *enode.LocalNode) {
 		node.Set(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, forkId))
 		log.Info("[Sentinel] Updated fork id and nfd")
 	}
-}
+}*/
 
 func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 	go func() {

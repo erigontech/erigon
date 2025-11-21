@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/common/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -21,13 +23,15 @@ type TopicSubscription struct {
 }
 
 type TopicSubscriptions struct {
+	p2p          *p2p.P2Pmanager
 	subs         map[string]*TopicSubscription
 	mutex        sync.RWMutex
 	toSubscribes map[string]time.Time // this indicates the topics that probably need to be subscribed later
 }
 
-func NewTopicSubscriptions() *TopicSubscriptions {
+func NewTopicSubscriptions(p2p *p2p.P2Pmanager) *TopicSubscriptions {
 	s := &TopicSubscriptions{
+		p2p:          p2p,
 		subs:         make(map[string]*TopicSubscription),
 		mutex:        sync.RWMutex{},
 		toSubscribes: make(map[string]time.Time),
@@ -127,6 +131,14 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 		sub.sub = s
 	}
 	sub.expiry = expiry
+
+	// update ENR on subscription
+	name := extractTopicName(topic)
+	if gossip.IsTopicBeaconAttestation(name) {
+		t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), true)
+	} else if gossip.IsTopicSyncCommittee(name) {
+		t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), true)
+	}
 	return nil
 }
 
@@ -138,6 +150,13 @@ func (t *TopicSubscriptions) expireCheck() {
 			if time.Now().After(sub.expiry) && sub.sub != nil {
 				sub.sub.Cancel()
 				sub.sub = nil
+				topic := sub.topic.String()
+				name := extractTopicName(topic)
+				if gossip.IsTopicBeaconAttestation(name) {
+					t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), false)
+				} else if gossip.IsTopicSyncCommittee(name) {
+					t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
+				}
 			}
 		}
 		t.mutex.Unlock()

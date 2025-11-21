@@ -18,9 +18,7 @@ package sentinel
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
-	"net"
 	"net/http"
 	"os/signal"
 	"strings"
@@ -106,6 +104,7 @@ type Sentinel struct {
 	metadataLock sync.Mutex
 }
 
+/*
 func (s *Sentinel) createLocalNode(
 	privKey *ecdsa.PrivateKey,
 	ipAddr net.IP,
@@ -128,16 +127,17 @@ func (s *Sentinel) createLocalNode(
 
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
-	s.setupENR(localNode)
-	go s.updateENR(localNode)
+	//s.setupENR(localNode)
+	//go s.updateENR(localNode)
 
 	return localNode, nil
-}
+}*/
 
 func (s *Sentinel) SetStatus(status *cltypes.Status) {
 	s.handshaker.SetStatus(status)
 }
 
+/*
 func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	var (
 		ipAddr  = s.cfg.IpAddr
@@ -190,7 +190,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
 
 	return net, err
-}
+}*/
 
 // This is just one of the examples from the libp2p repository.
 func New(
@@ -336,11 +336,23 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	if s.started {
 		s.logger.Warn("[Sentinel] already running")
 	}
-	var err error
-	s.listener, err = s.createListener()
+	//var err error
+	/*s.listener, err = s.createListener()
 	if err != nil {
 		return nil, fmt.Errorf("failed creating sentinel listener err=%w", err)
-	}
+	}*/
+	s.listener = s.p2p.UDPv5Listener()
+
+	handlers.NewConsensusHandlers(
+		s.ctx,
+		s.blockReader,
+		s.indiciesDB,
+		s.p2p.Host(),
+		s.peers,
+		s.cfg.NetworkConfig,
+		s.p2p.UDPv5Listener().LocalNode(),
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
+
 	if err := s.connectToBootnodes(); err != nil {
 		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
@@ -353,7 +365,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		},
 	})
 	s.subManager = NewGossipManager(s.ctx)
-	s.subManager.Start(s.ctx)
+	//s.subManager.Start(s.ctx)
 
 	go s.listenForPeers()
 	//go s.forkWatcher()
@@ -363,7 +375,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 }
 
 func (s *Sentinel) Stop() {
-	s.listener.Close()
+	//s.listener.Close()
 	//s.subManager.Close()
 	s.p2p.Host().Close()
 }

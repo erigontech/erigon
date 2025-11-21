@@ -18,7 +18,6 @@ package sentinel
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,8 +26,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -193,6 +190,7 @@ func (g *GossipManager) Close() {
 	})
 }
 
+/*
 func (g *GossipManager) Start(ctx context.Context) {
 	go func() {
 		checkingInterval := time.NewTicker(time.Second)
@@ -222,7 +220,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 			}
 		}
 	}()
-}
+}*/
 
 // GossipSubscription abstracts a gossip subscription to write decoded structs.
 type GossipSubscription struct {
@@ -246,6 +244,7 @@ type GossipSubscription struct {
 	lock      sync.Mutex
 }
 
+/*
 func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 	sub.lock.Lock()
 	defer sub.lock.Unlock()
@@ -274,7 +273,7 @@ func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 		log.Debug("[Gossip] Subscribed to topic", "topic", sub.sub.Topic())
 	}
 
-}
+}*/
 
 func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
 	if expiry.After(sub.expiration.Load().(time.Time)) {
@@ -315,7 +314,7 @@ type GossipMessage struct {
 
 // this is a helper to begin running the gossip subscription.
 // function should not be used outside of the constructor for gossip subscription
-func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topicName string) {
+/*func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topicName string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("[Sentinel Gossip] Message Handler Crashed", "err", r)
@@ -349,10 +348,11 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			}
 		}
 	}
-}
+}*/
 
 func (g *GossipSubscription) Publish(data []byte) error {
-	if len(g.topic.ListPeers()) < 2 {
+	panic("do not call this")
+	/*if len(g.topic.ListPeers()) < 2 {
 		log.Trace("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
 		go func() {
 			if err := g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1))); err != nil {
@@ -369,5 +369,5 @@ func (g *GossipSubscription) Publish(data []byte) error {
 	if err != nil {
 		return errors.New("failed to publish to topic due to lack of routing capacity (topic too small)")
 	}
-	return nil
+	return nil*/
 }
