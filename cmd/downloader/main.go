@@ -179,7 +179,7 @@ func withChainFlag(cmd *cobra.Command) {
 }
 func withFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&filePath, "file", "", "")
-	if err := cmd.MarkFlagFilename(utils.DataDirFlag.Name); err != nil {
+	if err := cmd.MarkFlagFilename("file"); err != nil {
 		panic(err)
 	}
 }
