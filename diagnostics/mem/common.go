@@ -38,7 +38,7 @@ type VirtualMemStat struct {
 
 // Fields converts VirtualMemStat to slice
 func (m VirtualMemStat) Fields() []interface{} {
-	typ := reflect.TypeOf(m.MemoryMapsStat)
+	typ := reflect.TypeFor[process.MemoryMapsStat]()
 	val := reflect.ValueOf(m.MemoryMapsStat)
 
 	var s []interface{}

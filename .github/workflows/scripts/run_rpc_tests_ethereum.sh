@@ -23,9 +23,6 @@ DISABLED_TEST_LIST=(
   erigon_nodeInfo/test_1.json
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
-  eth_getProof/test_04.json
-  eth_getProof/test_08.json
-  eth_getProof/test_09.json
   eth_getTransactionByHash/test_02.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
@@ -38,10 +35,18 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
+  # START - these tests require commitment history in historical RPC test runner
+  eth_getProof/test_21.json
+  eth_getProof/test_22.json
+  eth_getProof/test_23.json
+  eth_getProof/test_24.json
+  eth_getProof/test_25.json
+  eth_getProof/test_26.json
+  # END - these tests require commitment history in historical RPC test runner
 )
 
 # Transform the array into a comma-separated string
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.97.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.104.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

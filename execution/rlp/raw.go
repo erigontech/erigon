@@ -29,7 +29,7 @@ import (
 // not verify whether the content of RawValues is valid RLP.
 type RawValue []byte
 
-var rawValueType = reflect.TypeOf(RawValue{})
+var rawValueType = reflect.TypeFor[RawValue]()
 
 // ListSize returns the encoded size of an RLP list with the given
 // content size.

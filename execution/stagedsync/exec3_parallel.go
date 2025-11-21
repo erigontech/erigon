@@ -26,13 +26,13 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec/calltracer"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/shards"
@@ -200,10 +200,23 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
+						// TODO --- BAL Implementation integration point ---
+						//  At this stage applyResult.TxIO contains the reads and writes for all of the completed
+						// transactions in the block.  The state.VersionedRead, and state.VersionedWrite objects contain
+						// version information contains details the data read & writes and the associated transactions
+						//
+						// It should be possible to iterate this list and construct the blocks BAL here
+						//
+						// For more details on how to iterate this list look at:
+						//
+						// dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
+						//
+						// which iterates the list and prints it contents
+						//
+						if err := protocol.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
-							return fmt.Errorf("%w, block=%d, %v", consensus.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
+							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
 						if !pe.isMining && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
@@ -223,6 +236,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if !dbg.DiscardCommitment() {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 							applyResult.Exhausted != nil ||
+							pe.cfg.syncCfg.KeepExecutionProofs ||
 							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 
 							resetExecGauges(ctx)
@@ -312,10 +326,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							resetCommitmentGauges(ctx)
 
-							pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
-							if !pe.inMemExec {
-								if err := changeset.WriteDiffSet(rwTx, applyResult.BlockNum, applyResult.BlockHash, changeSet); err != nil {
-									return err
+							if shouldGenerateChangesets {
+								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
+								if !pe.inMemExec {
+									if err := changeset.WriteDiffSet(rwTx, applyResult.BlockNum, applyResult.BlockHash, changeSet); err != nil {
+										return err
+									}
 								}
 							}
 							pe.domains().SetChangesetAccumulator(nil)
@@ -643,7 +659,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						syscall := func(contract common.Address, data []byte) ([]byte, error) {
-							ret, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 							if err != nil {
 								return nil, err
 							}
@@ -740,7 +756,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.applyResults, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.profile, execRequest.exhausted)
 			}
 		}
 
@@ -756,12 +772,21 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execTasks.pushPending(i)
 		executor.validateTasks.pushPending(i)
 
-		if len(t.Dependencies()) > 0 {
+		switch {
+		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
 				executor.execTasks.addDependency(depTxIndex+1, i)
 			}
 			executor.execTasks.clearPending(i)
-		} else {
+		case len(execRequest.accessList) != 0:
+			// if we have an access list we can assume that all
+			// writes are already in the shared memory map so
+			// we can go ahead and schedule all tx jobs
+			// optimistically without needing to worry about
+			// clashes, this should signifigatly improve tx
+			// concurrency
+			break
+		default:
 			sender, err := t.TxSender()
 			if err != nil {
 				return err
@@ -934,7 +959,7 @@ type execResult struct {
 	stateUpdates *state.StateUpdates
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
+func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -1064,12 +1089,12 @@ func (ev *taskVersion) Trace() bool {
 }
 
 func (ev *taskVersion) Execute(evm *vm.EVM,
-	engine consensus.Engine,
+	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
-	chainReader consensus.ChainReader,
+	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
 	calcFees bool) (result *exec.TxResult) {
 
@@ -1087,8 +1112,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	if ibs.HadInvalidRead() || result.Err != nil {
-		if err, ok := result.Err.(core.ErrExecAbortError); !ok {
-			result.Err = core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+		if err, ok := result.Err.(protocol.ErrExecAbortError); !ok {
+			result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 		}
 	}
 
@@ -1146,7 +1171,8 @@ func (d *blockDuration) Add(i time.Duration) {
 type execRequest struct {
 	blockNum     uint64
 	blockHash    common.Hash
-	gasPool      *core.GasPool
+	gasPool      *protocol.GasPool
+	accessList   types.BlockAccessList
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
@@ -1202,7 +1228,7 @@ type blockExecutor struct {
 	// cummulative gas for this block
 	gasUsed     uint64
 	blobGasUsed uint64
-	gasPool     *core.GasPool
+	gasPool     *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -1217,7 +1243,7 @@ type blockExecutor struct {
 	exhausted   *ErrLoopExhausted
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
 		blockHash:    blockHash,
@@ -1227,7 +1253,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool,
 		estimateDeps: map[int][]int{},
 		preValidated: map[int]bool{},
 		blockIO:      &state.VersionedIO{},
-		versionMap:   state.NewVersionMap(),
+		versionMap:   state.NewVersionMap(accessList),
 		profile:      profile,
 		applyResults: applyResults,
 		gasPool:      gasPool,
@@ -1245,7 +1271,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{res, nil}
 	if res.Err != nil {
-		if execErr, ok := res.Err.(core.ErrExecAbortError); ok {
+		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
 			if execErr.OriginError != nil && be.skipCheck[tx] {
 				// If the transaction failed when we know it should not fail, this means the transaction itself is
 				// bad (e.g. wrong nonce), and we should exit the execution immediately

@@ -21,13 +21,13 @@ package vm
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -69,7 +69,7 @@ func ActivateableEips() []string {
 	for k := range activators {
 		nums = append(nums, strconv.Itoa(k))
 	}
-	sort.Strings(nums)
+	slices.Sort(nums)
 	return nums
 }
 

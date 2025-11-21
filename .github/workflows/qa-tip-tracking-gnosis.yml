@@ -1,9 +1,11 @@
 name: QA - Tip tracking & migration (Gnosis)
 
 on:
+  schedule:
+    - cron: '0 1 * * 0'  # Run on Sunday at 01:00 AM UTC
   push:
     branches:
-      - 'release/3.1'
+      - 'release/3.*'
   workflow_dispatch: # Run manually
     inputs:
       explicit_upgrade:
@@ -21,7 +23,7 @@ jobs:
     runs-on: [self-hosted, qa, Gnosis, tip-tracking]
     timeout-minutes: 1200
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version-3.0/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version-3.2/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours

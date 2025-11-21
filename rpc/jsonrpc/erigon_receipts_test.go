@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
@@ -180,7 +180,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 
 	signer := types.LatestSignerForChainID(nil)
 	// Create a chain generator with some simple transactions (blatantly stolen from @fjl/chain_markets_test)
-	generator := func(i int, block *core.BlockGen) {
+	generator := func(i int, block *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, the test bank sends account #1 some ether.
@@ -238,13 +238,13 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
-func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *mock.MockSentry {
 	m := mock.MockWithGenesis(t, &types.Genesis{
 		Config: chain.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)
 	if blocks > 0 {
-		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
+		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
 		err := m.InsertChain(chain)
 		require.NoError(t, err)
 	}

@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/protocol"
+	consensus "github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
@@ -137,7 +137,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			// Configure a blockchain with the given prestate
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 			context := evmtypes.BlockContext{
-				CanTransfer: core.CanTransfer,
+				CanTransfer: protocol.CanTransfer,
 				Transfer:    consensus.Transfer,
 				Coinbase:    test.Context.Miner,
 				BlockNumber: uint64(test.Context.Number),
@@ -166,10 +166,10 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
-			txContext := core.NewEVMTxContext(msg)
+			txContext := protocol.NewEVMTxContext(msg)
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
 			tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-			vmRet, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */, nil /* engine */)
+			vmRet, err := protocol.ApplyMessage(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */, nil /* engine */)
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
@@ -255,7 +255,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		GasPrice: *tx.GetEffectiveGasTip(baseFee),
 	}
 	context := evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
+		CanTransfer: protocol.CanTransfer,
 		Transfer:    consensus.Transfer,
 		Coinbase:    test.Context.Miner,
 		BlockNumber: uint64(test.Context.Number),
@@ -278,7 +278,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		}
 		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
 		snap := statedb.Snapshot()
-		st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+		st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 		if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 			b.Fatalf("failed to execute transaction: %v", err)
 		}
@@ -315,7 +315,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
+		CanTransfer: protocol.CanTransfer,
 		Transfer:    consensus.Transfer,
 		Coinbase:    common.Address{},
 		BlockNumber: 8000000,
@@ -357,7 +357,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 	vmRet, err := st.TransitionDb(true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)

@@ -39,8 +39,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -135,7 +135,7 @@ type BaseAPI struct {
 	_blockReader services.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
 	_txnReader   services.TxnReader
-	_engine      consensus.EngineReader
+	_engine      rules.EngineReader
 
 	bridgeReader bridgeReader
 
@@ -145,7 +145,7 @@ type BaseAPI struct {
 	borReceiptGenerator *receipts.BorGenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
 	var (
 		blocksLRUSize = 128 // ~32Mb
 	)
@@ -179,14 +179,8 @@ func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, e
 	return cfg, err
 }
 
-func (api *BaseAPI) engine() consensus.EngineReader {
+func (api *BaseAPI) engine() rules.EngineReader {
 	return api._engine
-}
-
-// nolint:unused
-func (api *BaseAPI) genesis(ctx context.Context, tx kv.Tx) (*types.Block, error) {
-	_, genesis, err := api.chainConfigWithGenesis(ctx, tx)
-	return genesis, err
 }
 
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {

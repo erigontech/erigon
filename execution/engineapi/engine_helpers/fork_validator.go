@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -303,7 +303,7 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	headersChain = append(headersChain, header)
 	bodiesChain = append(bodiesChain, body)
 	if err := fv.validatePayload(sd, tx, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
-		if errors.Is(err, consensus.ErrInvalidBlock) {
+		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
 		} else {
 			criticalError = fmt.Errorf("validateAndStorePayload: %w", err)

@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
@@ -271,7 +271,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         200_000,
 			tipcap:         200_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth:   &AuthAndNonce{addrB.String(), 3},
+			replacedAuth:   &AuthAndNonce{addrB, 3},
 		},
 		{
 			title:          "B sends to replace own setcode txn with non setcode txn, with higher tipcap",
@@ -282,7 +282,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         300_000,
 			tipcap:         300_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth:   &AuthAndNonce{addrA.String(), 3},
+			replacedAuth:   &AuthAndNonce{addrA, 3},
 		},
 		{
 			title:          "B sends to replace non setcode txn, with setcode txn (A's auth) with higher tipcap",
@@ -367,7 +367,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 				Nonce:  c.senderNonce,
 			}
 			if c.authority != nil {
-				txnSlot1.AuthAndNonces = []AuthAndNonce{{c.authority.String(), c.authNonce}}
+				txnSlot1.AuthAndNonces = []AuthAndNonce{{*c.authority, c.authNonce}}
 				txnSlot1.Type = SetCodeTxnType
 			}
 			txnSlot1.IDHash[0] = uint8(idHash)
@@ -377,7 +377,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, []txpoolcfg.DiscardReason{c.expectedReason}, reasons)
 			if c.authority != nil && c.expectedReason == txpoolcfg.Success {
-				_, ok := pool.auths[AuthAndNonce{c.authority.String(), c.authNonce}]
+				_, ok := pool.auths[AuthAndNonce{*c.authority, c.authNonce}]
 				assert.True(t, ok)
 			}
 			if c.replacedAuth != nil {
@@ -1067,7 +1067,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 		Gas:           500000,
 		SenderID:      0,
 		Type:          SetCodeTxnType,
-		AuthAndNonces: []AuthAndNonce{{nonce: 0, authority: common.Address{}.String()}},
+		AuthAndNonces: []AuthAndNonce{{nonce: 0, authority: common.Address{}}},
 	}
 
 	txns := TxnSlots{
@@ -1535,10 +1535,7 @@ func TestGetBlobsV1(t *testing.T) {
 	proofs := make([]goethkzg.KZGProof, 0, len(blobBundles))
 	for _, bb := range blobBundles {
 		blobs = append(blobs, bb.Blob)
-		for _, p := range bb.Proofs {
-			proofs = append(proofs, p)
-		}
-
+		proofs = append(proofs, bb.Proofs...)
 	}
 	require.Equal(len(proofs), len(blobHashes))
 	assert.Equal(blobTxn.BlobBundles[0].Blob, blobs[0])

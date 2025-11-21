@@ -58,8 +58,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -1071,8 +1071,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 				}
 
 				// Finish KzGProofs and blob checks
-				if blockPayload.Version() < clparams.FuluVersion {
-
+				if blockPayload.Version() < clparams.FuluVersion { //nolint:staticcheck until https://github.com/erigontech/erigon/issues/17943
 				}
 				if len(b.Proofs[i]) != length.Bytes48 {
 					return errors.New("proof must be 48 bytes long")
