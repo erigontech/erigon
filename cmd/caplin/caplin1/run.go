@@ -284,13 +284,20 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 	p2p, err := p2p.NewP2Pmanager(ctx, &p2p.P2PConfig{
+		IpAddr:     config.CaplinDiscoveryAddr,
+		Port:       int(config.CaplinDiscoveryPort),
+		TCPPort:    uint(config.CaplinDiscoveryTCPPort),
+		EnableUPnP: config.EnableUPnP,
+		//MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
+		//MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
+		//AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
-		IpAddr:        config.CaplinDiscoveryAddr,
-		Port:          int(config.CaplinDiscoveryPort),
-		TCPPort:       uint(config.CaplinDiscoveryTCPPort),
-		EnableUPnP:    config.EnableUPnP,
-	})
+		TmpDir:        dirs.Tmp,
+		//EnableBlocks:                 true,
+		//ActiveIndicies: uint64(len(activeIndicies)),
+		MaxPeerCount: config.MaxPeerCount,
+	}, logger)
 	if err != nil {
 		return err
 	}
