@@ -134,7 +134,7 @@ func (s *Merge) Prepare(chain rules.ChainHeaderReader, header *types.Header, sta
 	if !reached {
 		return s.eth1Engine.Prepare(chain, header, state)
 	}
-	header.Difficulty = ProofOfStakeDifficulty
+	header.Difficulty = *ProofOfStakeDifficulty
 	header.Nonce = ProofOfStakeNonce
 	return nil
 }

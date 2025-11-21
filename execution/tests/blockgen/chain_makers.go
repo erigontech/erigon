@@ -86,8 +86,8 @@ func (b *BlockGen) SetNonce(nonce types.BlockNonce) {
 // SetDifficulty sets the difficulty field of the generated block. This method is
 // useful for Clique tests where the difficulty does not depend on time. For the
 // ethash tests, please use OffsetTime, which implicitly recalculates the diff.
-func (b *BlockGen) SetDifficulty(diff *big.Int) {
-	b.header.Difficulty = diff
+func (b *BlockGen) SetDifficulty(diff uint64) {
+	b.header.Difficulty.SetUint64(diff)
 }
 
 // AddTx adds a transaction to the generated block. If no coinbase has

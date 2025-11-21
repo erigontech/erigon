@@ -238,17 +238,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 	blockTxs := block.Transactions()
 	plainTxs := make([]types.Transaction, len(blockTxs))
 	copy(plainTxs, blockTxs)
-	var baseFee *uint256.Int
-	if block.BaseFee() == nil {
-		baseFee = nil
-	} else {
-		baseFee, overflow = uint256.FromBig(block.BaseFee())
-		if overflow {
-			err := errors.New("overflow in getBlockPrices, gasprice.go: baseFee > 2^256-1")
-			oracle.log.Error("getBlockPrices", "err", err)
-			return err
-		}
-	}
+	baseFee := block.BaseFee()
 	txs := newTransactionsByGasPrice(plainTxs, baseFee, oracle.log)
 	heap.Init(&txs)
 

@@ -5,7 +5,8 @@ package types
 import (
 	"encoding/json"
 	"errors"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -26,7 +27,7 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 		ContractAddress   common.Address `json:"contractAddress"`
 		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
 		BlockHash         common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *hexutil.Big   `json:"blockNumber,omitempty"`
+		BlockNumber       *uint256.Int   `json:"blockNumber,omitempty"`
 		TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
 	}
 	var enc Receipt
@@ -40,7 +41,7 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	enc.ContractAddress = r.ContractAddress
 	enc.GasUsed = hexutil.Uint64(r.GasUsed)
 	enc.BlockHash = r.BlockHash
-	enc.BlockNumber = (*hexutil.Big)(r.BlockNumber)
+	enc.BlockNumber = r.BlockNumber
 	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
 	return json.Marshal(&enc)
 }
@@ -58,7 +59,7 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		ContractAddress   *common.Address `json:"contractAddress"`
 		GasUsed           *hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
 		BlockHash         *common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *hexutil.Big    `json:"blockNumber,omitempty"`
+		BlockNumber       *uint256.Int    `json:"blockNumber,omitempty"`
 		TransactionIndex  *hexutil.Uint   `json:"transactionIndex"`
 	}
 	var dec Receipt
@@ -101,7 +102,7 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		r.BlockHash = *dec.BlockHash
 	}
 	if dec.BlockNumber != nil {
-		r.BlockNumber = (*big.Int)(dec.BlockNumber)
+		r.BlockNumber = dec.BlockNumber
 	}
 	if dec.TransactionIndex != nil {
 		r.TransactionIndex = uint(*dec.TransactionIndex)
