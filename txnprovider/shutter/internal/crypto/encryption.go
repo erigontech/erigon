@@ -114,12 +114,10 @@ func fp12Exp(base *blst.Fp12, exp *big.Int) *blst.Fp12 {
 }
 
 func computeC3(blocks []Block, sigma Block) []Block {
-	encryptedBlocks := []Block{}
-	numBlocks := len(blocks)
-	for i := 0; i < numBlocks; i++ {
+	encryptedBlocks := make([]Block, len(blocks))
+	for i := range blocks {
 		key := computeBlockKey(sigma, uint64(i))
-		encryptedBlock := XORBlocks(key, blocks[i])
-		encryptedBlocks = append(encryptedBlocks, encryptedBlock)
+		encryptedBlocks[i] = XORBlocks(key, blocks[i])
 	}
 	return encryptedBlocks
 }
@@ -171,12 +169,10 @@ func (m *EncryptedMessage) Sigma(epochSecretKey *EpochSecretKey) Block {
 }
 
 func DecryptBlocks(encryptedBlocks []Block, sigma Block) []Block {
-	numBlocks := len(encryptedBlocks)
-	decryptedBlocks := []Block{}
-	for i := 0; i < numBlocks; i++ {
+	decryptedBlocks := make([]Block, len(encryptedBlocks))
+	for i := range encryptedBlocks {
 		key := computeBlockKey(sigma, uint64(i))
-		decryptedBlock := XORBlocks(encryptedBlocks[i], key)
-		decryptedBlocks = append(decryptedBlocks, decryptedBlock)
+		decryptedBlocks[i] = XORBlocks(encryptedBlocks[i], key)
 	}
 	return decryptedBlocks
 }
@@ -188,12 +184,11 @@ func PadMessage(m []byte) []Block {
 	padding := bytes.Repeat([]byte{byte(paddingLength)}, paddingLength)
 	m = append(m, padding...)
 
-	blocks := []Block{}
+
 	numBlocks := len(m) / BlockSize
+	blocks := make([]Block, numBlocks)
 	for i := 0; i < numBlocks; i++ {
-		var block Block
-		copy(block[:], m[i*BlockSize:(i+1)*BlockSize])
-		blocks = append(blocks, block)
+		copy(blocks[i][:], m[i*BlockSize:(i+1)*BlockSize])
 	}
 	return blocks
 }
