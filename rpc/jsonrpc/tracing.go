@@ -215,7 +215,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			refunds = false
 		}
 
-		if refunds == true && block.GasUsed() != gasUsed {
+		if refunds && block.GasUsed() != gasUsed {
 			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), gasUsed, blockNumber))
 		}
 	}
@@ -386,12 +386,6 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	ibs := state.New(stateReader)
 
-	if config != nil && config.StateOverrides != nil {
-		if err := config.StateOverrides.Override(ibs); err != nil {
-			return fmt.Errorf("override state: %v", err)
-		}
-	}
-
 	var baseFee *uint256.Int
 	if header.BaseFee != nil {
 		var overflow bool
@@ -424,6 +418,12 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	if config != nil && config.StateOverrides != nil {
+		if err := config.StateOverrides.OverrideAndCommit(ibs, blockCtx.Rules(chainConfig)); err != nil {
+			return fmt.Errorf("override state: %v", err)
+		}
+	}
+
 	if config != nil && config.BlockOverrides != nil {
 		err := config.BlockOverrides.Override(&blockCtx)
 		if err != nil {

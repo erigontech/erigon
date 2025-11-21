@@ -31,11 +31,13 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
     Use the Erigon CLI command to verify that your registration was successful:
 
-    {% code overflow="wrap" %}
+    \{% code overflow="wrap" %\}
+
     ```bash
     erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>
     ```
-    {% endcode %}
+
+    \{% endcode %\}
 
     * `--chain` valid values are `gnosis` or `chiado`
     * `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
@@ -43,12 +45,13 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
     for example:
 
-    {% code overflow="wrap" %}
+    \{% code overflow="wrap" %\}
+
     ```bash
     erigon shutter-validator-reg-check --chain gnosis --el-url http://localhost:8545 --validator-info-file /path/validatorInfo.json
     ```
-    {% endcode %}
-4.  **Run Erigon with Shutter Support**
+
+    \{% endcode %\}4. **Run Erigon with Shutter Support**
 
     Start Erigon as usual, but add the `--shutter` flag to enable Shutterized Validator mode:
 
@@ -66,7 +69,7 @@ Bootstrap nodes are used to help new nodes discover other nodes in the network. 
 
 ## Reference Documentation
 
-* [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit)
 * [Shutter Validator Registration](https://github.com/shutter-network/shutter-validator-registration)
 * [Shutter Specs](https://github.com/gnosischain/specs/tree/master/shutter)
 * [System Overview Dashboard](https://explorer.shutter.network/system-overview)
+* [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit)

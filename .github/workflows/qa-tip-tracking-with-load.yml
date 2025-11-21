@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  mainnet-tip-tracking-test:
+  mainnet-tip-tracking-with-load-test:
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     timeout-minutes: 300 # 5 hours
     env:
@@ -221,6 +221,13 @@ jobs:
       with:
         name: profiling-data
         path: ${{ github.workspace }}/profiling-data*
+
+    - name: Upload FD Leak Analysis
+      if: always()
+      uses: actions/upload-artifact@v5
+      with:
+        name: fd-leak-analysis
+        path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
     - name: Delete Erigon Testbed Data Directory
       if: ${{ always() }}

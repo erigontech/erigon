@@ -37,8 +37,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -460,6 +460,7 @@ func (s *simulator) simulateBlock(
 	if s.traceTransfers {
 		// Transfers must be recorded as if they were logs: use a tracer that records all logs and ether transfers
 		vmConfig.Tracer = tracer.Hooks()
+		intraBlockState.SetHooks(vmConfig.Tracer)
 	}
 
 	// Apply pre-transaction state modifications before block execution.
@@ -533,6 +534,7 @@ func (s *simulator) simulateBlock(
 		}
 		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
 	} else {
+		//nolint:staticcheck
 		// We cannot compute the state root for historical state w/o commitment history, so we just use the zero hash (default value).
 	}
 

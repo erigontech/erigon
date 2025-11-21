@@ -725,10 +725,6 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
-	if wordLen < 0 {
-		log.Error("invalid wordLen", "filename", g.fName, "pos", savePos, "buf len", len(buf))
-		return nil, 0
-	}
 	if wordLen == 0 {
 		if g.dataBit > 0 {
 			g.dataP++

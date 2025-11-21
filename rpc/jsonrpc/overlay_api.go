@@ -45,7 +45,7 @@ import (
 )
 
 type OverlayAPI interface {
-	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides) ([]*types.Log, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error)
 	CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error)
 }
 
@@ -250,7 +250,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	return nil, nil
 }
 
-func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error) {
 	timeout := api.OverlayGetLogsTimeout
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -295,7 +295,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 			defer pend.Done()
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
-				log.Error("Error", "error", err.Error())
+				log.Error("Error", "error", err)
 				return
 			}
 			defer tx.Rollback()

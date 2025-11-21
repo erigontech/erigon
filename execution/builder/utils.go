@@ -14,24 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package ethutils
+package builder
 
 import (
-	"errors"
-	"reflect"
-
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
-)
-
-var (
-	ErrNilBlobHashes       = errors.New("nil blob hashes array")
-	ErrMaxBlobGasUsed      = errors.New("blobs/blobgas exceeds max")
-	ErrMismatchBlobHashes  = errors.New("mismatch blob hashes")
-	ErrInvalidVersiondHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
 )
 
 // IsLocalBlock checks whether the specified block is mined
@@ -57,29 +46,4 @@ func IsLocalBlock(engine rules.Engine, etherbase common.Address, txPoolLocals []
 		}
 	}
 	return false
-}
-
-func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []common.Hash, transactions *[]types.Transaction) error {
-	if expectedBlobHashes == nil {
-		return ErrNilBlobHashes
-	}
-	actualBlobHashes := []common.Hash{}
-	for _, txn := range *transactions {
-		if txn.Type() == types.BlobTxType {
-			for _, h := range txn.GetBlobHashes() {
-				if h[0] != kzg.BlobCommitmentVersionKZG {
-					return ErrInvalidVersiondHash
-				}
-				actualBlobHashes = append(actualBlobHashes, h)
-			}
-		}
-	}
-	if len(actualBlobHashes) > int(maxBlobsPerBlock) {
-		log.Debug("error max blob gas used", "blobGasUsed", blobGasUsed, "maxBlobsGas", maxBlobsGas, "actualBlobHashes", len(actualBlobHashes), "maxBlobsPerBlock", maxBlobsPerBlock)
-		return ErrMaxBlobGasUsed
-	}
-	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
-		return ErrMismatchBlobHashes
-	}
-	return nil
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/vm"
@@ -31,17 +32,17 @@ import (
 
 type StateOverrides map[common.Address]Account
 
-func (so *StateOverrides) Override(state *state.IntraBlockState) error {
+func (so *StateOverrides) Override(ibs *state.IntraBlockState) error {
 	for addr, account := range *so {
 		// Override account nonce.
 		if account.Nonce != nil {
-			if err := state.SetNonce(addr, uint64(*account.Nonce)); err != nil {
+			if err := ibs.SetNonce(addr, uint64(*account.Nonce)); err != nil {
 				return err
 			}
 		}
 		// Override account (contract) code.
 		if account.Code != nil {
-			if err := state.SetCode(addr, *account.Code); err != nil {
+			if err := ibs.SetCode(addr, *account.Code); err != nil {
 				return err
 			}
 		}
@@ -51,7 +52,7 @@ func (so *StateOverrides) Override(state *state.IntraBlockState) error {
 			if overflow {
 				return errors.New("account.Balance higher than 2^256-1")
 			}
-			if err := state.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
+			if err := ibs.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
 				return err
 			}
 		}
@@ -65,7 +66,7 @@ func (so *StateOverrides) Override(state *state.IntraBlockState) error {
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
 				intState[key] = *intValue
 			}
-			if err := state.SetStorage(addr, intState); err != nil {
+			if err := ibs.SetStorage(addr, intState); err != nil {
 				return err
 			}
 		}
@@ -73,7 +74,7 @@ func (so *StateOverrides) Override(state *state.IntraBlockState) error {
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
-				if err := state.SetState(addr, key, *intValue); err != nil {
+				if err := ibs.SetState(addr, key, *intValue); err != nil {
 					return err
 				}
 			}
@@ -81,6 +82,14 @@ func (so *StateOverrides) Override(state *state.IntraBlockState) error {
 	}
 
 	return nil
+}
+
+func (so *StateOverrides) OverrideAndCommit(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	err := so.Override(ibs)
+	if err != nil {
+		return err
+	}
+	return ibs.CommitBlock(rules, state.NewNoopWriter())
 }
 
 func (so *StateOverrides) OverrideWithPrecompiles(state *state.IntraBlockState, precompiles vm.PrecompiledContracts) error {

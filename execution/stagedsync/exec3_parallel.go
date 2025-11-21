@@ -27,12 +27,12 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/shards"
@@ -200,6 +200,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
+						// TODO --- BAL Implementation integration point ---
+						//  At this stage applyResult.TxIO contains the reads and writes for all of the completed
+						// transactions in the block.  The state.VersionedRead, and state.VersionedWrite objects contain
+						// version information contains details the data read & writes and the associated transactions
+						//
+						// It should be possible to iterate this list and construct the blocks BAL here
+						//
+						// For more details on how to iterate this list look at:
+						//
+						// dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
+						//
+						// which iterates the list and prints it contents
+						//
 						if err := protocol.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
@@ -743,7 +756,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.applyResults, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.profile, execRequest.exhausted)
 			}
 		}
 
@@ -759,12 +772,21 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execTasks.pushPending(i)
 		executor.validateTasks.pushPending(i)
 
-		if len(t.Dependencies()) > 0 {
+		switch {
+		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
 				executor.execTasks.addDependency(depTxIndex+1, i)
 			}
 			executor.execTasks.clearPending(i)
-		} else {
+		case len(execRequest.accessList) != 0:
+			// if we have an access list we can assume that all
+			// writes are already in the shared memory map so
+			// we can go ahead and schedule all tx jobs
+			// optimistically without needing to worry about
+			// clashes, this should signifigatly improve tx
+			// concurrency
+			break
+		default:
 			sender, err := t.TxSender()
 			if err != nil {
 				return err
@@ -1150,6 +1172,7 @@ type execRequest struct {
 	blockNum     uint64
 	blockHash    common.Hash
 	gasPool      *protocol.GasPool
+	accessList   types.BlockAccessList
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
@@ -1220,7 +1243,7 @@ type blockExecutor struct {
 	exhausted   *ErrLoopExhausted
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
 		blockHash:    blockHash,
@@ -1230,7 +1253,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		estimateDeps: map[int][]int{},
 		preValidated: map[int]bool{},
 		blockIO:      &state.VersionedIO{},
-		versionMap:   state.NewVersionMap(),
+		versionMap:   state.NewVersionMap(accessList),
 		profile:      profile,
 		applyResults: applyResults,
 		gasPool:      gasPool,
