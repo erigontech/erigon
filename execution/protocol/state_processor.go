@@ -20,7 +20,7 @@
 package protocol
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -86,7 +86,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	if !cfg.NoReceipts {
 		// by the txn
-		receipt = MakeReceipt(header.Number, header.Hash(), msg, txn, *gasUsed, result, ibs, evm)
+		receipt = MakeReceipt(&header.Number, header.Hash(), msg, txn, *gasUsed, result, ibs, evm)
 	}
 
 	return receipt, result.ReturnData, err
@@ -122,7 +122,7 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 }
 
 func MakeReceipt(
-	blockNumber *big.Int,
+	blockNumber *uint256.Int,
 	blockHash common.Hash,
 	msg *types.Message,
 	txn types.Transaction,

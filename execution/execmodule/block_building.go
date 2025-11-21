@@ -143,8 +143,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	block := blockWithReceipts.Block
 	header := block.Header()
 
-	baseFee := new(uint256.Int)
-	baseFee.SetFromBig(header.BaseFee)
+	baseFee := header.BaseFee
 
 	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
 	if err != nil {

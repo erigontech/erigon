@@ -281,7 +281,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 	if daoBlock := cfg.chainConfig.DAOForkBlock; daoBlock != nil {
 		// Check whether the block is among the fork extra-override range
 		limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
-		if header.Number.Cmp(daoBlock) >= 0 && header.Number.Cmp(limit) < 0 {
+		if header.Number.CmpBig(daoBlock) >= 0 && header.Number.CmpBig(limit) < 0 {
 			header.Extra = common.Copy(misc.DAOForkBlockExtra)
 		}
 	}

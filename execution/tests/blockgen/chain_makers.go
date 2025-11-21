@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -153,8 +155,8 @@ func (b *BlockGen) AddUncheckedTx(tx types.Transaction) {
 }
 
 // Number returns the block number of the block being generated.
-func (b *BlockGen) Number() *big.Int {
-	return new(big.Int).Set(b.header.Number)
+func (b *BlockGen) Number() *uint256.Int {
+	return new(uint256.Int).Set(&b.header.Number)
 }
 
 // AddUncheckedReceipt forcefully adds a receipts to the block without a
@@ -211,7 +213,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		panic("block time out of range")
 	}
 	chainreader := &FakeChainReader{Cfg: b.config}
-	b.header.Difficulty = b.engine.CalcDifficulty(
+	b.header.Difficulty = *b.engine.CalcDifficulty(
 		chainreader,
 		b.header.Time,
 		parent.Time(),
@@ -344,7 +346,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
-			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
+			if b.header.Number.CmpBig(daoBlock) >= 0 && b.header.Number.CmpBig(limit) < 0 {
 				b.header.Extra = common.CopyBytes(misc.DAOForkBlockExtra)
 			}
 		}
@@ -412,7 +414,7 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 
 	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
 	header.Coinbase = parent.Coinbase()
-	header.Difficulty = engine.CalcDifficulty(chain, time,
+	header.Difficulty = *engine.CalcDifficulty(chain, time,
 		time-10,
 		parent.Difficulty(),
 		parent.NumberU64(),

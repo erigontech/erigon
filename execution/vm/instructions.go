@@ -20,7 +20,6 @@
 package vm
 
 import (
-	"errors"
 	"fmt"
 	"math"
 
@@ -695,18 +694,14 @@ func opNumber(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 }
 
 func opDifficulty(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	var v *uint256.Int
+	var v uint256.Int
 	if interpreter.evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v = new(uint256.Int).SetBytes(interpreter.evm.Context.PrevRanDao.Bytes())
+		v.SetBytes(interpreter.evm.Context.PrevRanDao.Bytes())
 	} else {
-		var overflow bool
-		v, overflow = uint256.FromBig(interpreter.evm.Context.Difficulty)
-		if overflow {
-			return pc, nil, errors.New("interpreter.evm.Context.Difficulty higher than 2^256-1")
-		}
+		v = interpreter.evm.Context.Difficulty
 	}
-	scope.Stack.push(*v)
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 

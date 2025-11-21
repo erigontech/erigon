@@ -5,7 +5,8 @@ package types
 import (
 	"encoding/json"
 	"errors"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -23,7 +24,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		Timestamp             math.HexOrDecimal64                         `json:"timestamp"`
 		ExtraData             hexutil.Bytes                               `json:"extraData"`
 		GasLimit              math.HexOrDecimal64                         `json:"gasLimit"   gencodec:"required"`
-		Difficulty            *math.HexOrDecimal256                       `json:"difficulty" gencodec:"required"`
+		Difficulty            *uint256.Int                                `json:"difficulty" gencodec:"required"`
 		Mixhash               common.Hash                                 `json:"mixHash"`
 		Coinbase              common.Address                              `json:"coinbase"`
 		Alloc                 map[common.UnprefixedAddress]GenesisAccount `json:"alloc"      gencodec:"required"`
@@ -31,7 +32,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		Number                math.HexOrDecimal64                         `json:"number"`
 		GasUsed               math.HexOrDecimal64                         `json:"gasUsed"`
 		ParentHash            common.Hash                                 `json:"parentHash"`
-		BaseFee               *math.HexOrDecimal256                       `json:"baseFeePerGas"`
+		BaseFee               *uint256.Int                                `json:"baseFeePerGas"`
 		BlobGasUsed           *math.HexOrDecimal64                        `json:"blobGasUsed"`
 		ExcessBlobGas         *math.HexOrDecimal64                        `json:"excessBlobGas"`
 		ParentBeaconBlockRoot *common.Hash                                `json:"parentBeaconBlockRoot"`
@@ -44,7 +45,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Timestamp = math.HexOrDecimal64(g.Timestamp)
 	enc.ExtraData = g.ExtraData
 	enc.GasLimit = math.HexOrDecimal64(g.GasLimit)
-	enc.Difficulty = (*math.HexOrDecimal256)(g.Difficulty)
+	enc.Difficulty = g.Difficulty
 	enc.Mixhash = g.Mixhash
 	enc.Coinbase = g.Coinbase
 	if g.Alloc != nil {
@@ -57,7 +58,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Number = math.HexOrDecimal64(g.Number)
 	enc.GasUsed = math.HexOrDecimal64(g.GasUsed)
 	enc.ParentHash = g.ParentHash
-	enc.BaseFee = (*math.HexOrDecimal256)(g.BaseFee)
+	enc.BaseFee = g.BaseFee
 	enc.BlobGasUsed = (*math.HexOrDecimal64)(g.BlobGasUsed)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(g.ExcessBlobGas)
 	enc.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
@@ -74,7 +75,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		Timestamp             *math.HexOrDecimal64                        `json:"timestamp"`
 		ExtraData             *hexutil.Bytes                              `json:"extraData"`
 		GasLimit              *math.HexOrDecimal64                        `json:"gasLimit"   gencodec:"required"`
-		Difficulty            *math.HexOrDecimal256                       `json:"difficulty" gencodec:"required"`
+		Difficulty            *uint256.Int                                `json:"difficulty" gencodec:"required"`
 		Mixhash               *common.Hash                                `json:"mixHash"`
 		Coinbase              *common.Address                             `json:"coinbase"`
 		Alloc                 map[common.UnprefixedAddress]GenesisAccount `json:"alloc"      gencodec:"required"`
@@ -82,7 +83,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		Number                *math.HexOrDecimal64                        `json:"number"`
 		GasUsed               *math.HexOrDecimal64                        `json:"gasUsed"`
 		ParentHash            *common.Hash                                `json:"parentHash"`
-		BaseFee               *math.HexOrDecimal256                       `json:"baseFeePerGas"`
+		BaseFee               *uint256.Int                                `json:"baseFeePerGas"`
 		BlobGasUsed           *math.HexOrDecimal64                        `json:"blobGasUsed"`
 		ExcessBlobGas         *math.HexOrDecimal64                        `json:"excessBlobGas"`
 		ParentBeaconBlockRoot *common.Hash                                `json:"parentBeaconBlockRoot"`
@@ -112,7 +113,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 	if dec.Difficulty == nil {
 		return errors.New("missing required field 'difficulty' for Genesis")
 	}
-	g.Difficulty = (*big.Int)(dec.Difficulty)
+	g.Difficulty = dec.Difficulty
 	if dec.Mixhash != nil {
 		g.Mixhash = *dec.Mixhash
 	}
@@ -139,7 +140,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		g.ParentHash = *dec.ParentHash
 	}
 	if dec.BaseFee != nil {
-		g.BaseFee = (*big.Int)(dec.BaseFee)
+		g.BaseFee = dec.BaseFee
 	}
 	if dec.BlobGasUsed != nil {
 		g.BlobGasUsed = (*uint64)(dec.BlobGasUsed)
