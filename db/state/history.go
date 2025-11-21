@@ -182,6 +182,22 @@ func (h *History) ValuesTables(tx kv.Tx) (htables []string) {
 	return
 }
 
+func (h *History) parsedValuesTable(tx kv.Tx) (htables []string, steps []uint64) {
+	if !h.Sharded {
+		panic(fmt.Sprintf("can't call parsedValuesTable for %s", h.HistoryIdx))
+	}
+	htables = h.ValuesTables(tx)
+	for _, th := range htables {
+		var step uint64
+		_, err := fmt.Sscanf(th, h.ValuesTable+"_%d", &step)
+		if err != nil {
+			panic(err)
+		}
+		steps = append(steps, step)
+	}
+	return
+}
+
 func (h *History) Close() {
 	if h == nil {
 		return
@@ -939,6 +955,11 @@ type HistoryRoTx struct {
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
+	multiValsC    *MultiCursor
+	multiValsCDup *MultiCursorDupSort
+	//valsCSharded    map[uint64]kv.Cursor
+	valsCDupSharded map[uint64]kv.CursorDupSort
+
 	_bufTs           []byte
 	snappyReadBuffer []byte
 }
@@ -957,6 +978,7 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 		files:             files,
 		stepSize:          h.stepSize,
 		stepsInFrozenFile: h.stepsInFrozenFile,
+		valsCDupSharded:   make(map[uint64]kv.CursorDupSort),
 		trace:             false,
 	}
 }
@@ -1047,70 +1069,108 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (
-		seek       = make([]byte, 8, 256)
-		valsCDup   kv.RwCursorDupSort
-		valsC      kv.RwCursor
-		err        error
-		pruneValue func(k, txnm []byte) error
-		pruned     int
+		seek         = make([]byte, 8, 256)
+		err          error
+		pruneValue   func(k, txnm []byte) error
+		pruned       int
+		droppedSteps []uint64
+		valsC        *MultiCursor
+		valsCDup     *MultiCursorDupSort
 	)
+
+	isTxNumDroppedFn := func(txNum uint64) bool { return false }
 
 	if ht.h.Sharded {
 		pruneValue = nil
 		// TODO: implement sharded history pruning
 		// can delete table or can delete parts as well (like unwind or snapshots disabled)...
-		if txFrom%ht.stepSize == 0 && txTo%ht.stepSize == 0 {
+		htables, steps := ht.h.parsedValuesTable(rwTx)
+		for i, htable := range htables {
+			step := steps[i]
+			// if step is totally included in txFrom, txTo - drop whole table
+			tableFrom := step * ht.h.stepSize
+			tableTo := tableFrom + ht.h.stepSize
+			if tableFrom >= txFrom && tableTo <= txTo {
+				if err := rwTx.DropTable(htable); err != nil {
+					return nil, err
+				}
+				droppedSteps = append(droppedSteps, step)
+			}
 		}
+		isTxNumDroppedFn = func(txNum uint64) bool {
+			for _, step := range droppedSteps {
+				tableFrom := step * ht.h.stepSize
+				tableTo := tableFrom + ht.h.stepSize
+				if txNum >= tableFrom && txNum < tableTo {
+					return true
+				}
+			}
+			return false
+		}
+	}
+
+	var getDupCursorFn func(step uint64) (kv.RwCursorDupSort, error)
+	var getCursorFn func(step uint64) (kv.RwCursor, error)
+
+	if !ht.h.HistoryLargeValues {
+		valsCDup, err = ht.multiValsCursorDup(rwTx)
+		if err != nil {
+			return nil, err
+		}
+		defer valsCDup.Close()
 	} else {
-
-		if !ht.h.HistoryLargeValues {
-			valsCDup, err = rwTx.RwCursorDupSort(ht.h.ValuesTable)
-			if err != nil {
-				return nil, err
-			}
-			defer valsCDup.Close()
-		} else {
-			valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
-			if err != nil {
-				return nil, err
-			}
-			defer valsC.Close()
+		valsC, err = ht.multiValsCursor(rwTx)
+		if err != nil {
+			return nil, err
 		}
+		defer valsC.Close()
+	}
 
-		pruneValue = func(k, txnm []byte) error {
-			txNum := binary.BigEndian.Uint64(txnm)
-			if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
-				return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
-			}
-
-			if ht.h.HistoryLargeValues {
-				seek = append(bytes.Clone(k), txnm...)
-				if err := valsC.Delete(seek); err != nil {
-					return err
-				}
-			} else {
-				vv, err := valsCDup.SeekBothRange(k, txnm)
-				if err != nil {
-					return err
-				}
-				if len(vv) < 8 {
-					return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.FilenameBase, len(vv))
-				}
-				if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
-					return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
-				}
-				if err = valsCDup.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-
-			pruned++
+	pruneValue = func(k, txnm []byte) error {
+		txNum := binary.BigEndian.Uint64(txnm)
+		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
+			return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
+		}
+		if isTxNumDroppedFn(txNum) {
 			return nil
 		}
+		step := txNum / ht.h.stepSize
 
-		if !forced && ht.h.SnapshotsDisabled {
-			forced = true // or index.CanPrune will return false cuz no snapshots made
+		if ht.h.HistoryLargeValues {
+			seek = append(bytes.Clone(k), txnm...)
+			valsC, err := getCursorFn(step)
+			if err != nil {
+				return err
+			}
+			if err := valsC.Delete(seek); err != nil {
+				return err
+			}
+		} else {
+			valsCDup, err := getDupCursorFn(step)
+			if err != nil {
+				return err
+			}
+			vv, err := valsCDup.SeekBothRange(k, txnm)
+			if err != nil {
+				return err
+			}
+			if len(vv) < 8 {
+				return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.FilenameBase, len(vv))
+			}
+			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
+				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
+			}
+			if err = valsCDup.DeleteCurrent(); err != nil {
+				return err
+			}
 		}
+
+		pruned++
+		return nil
+	}
+
+	if !forced && ht.h.SnapshotsDisabled {
+		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
 	stat, err := ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
@@ -1236,30 +1296,107 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 	return ht.historySeekInDB(key, txNum, roTx)
 }
 
-func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if ht.valsC != nil {
-		return ht.valsC, nil
+//	func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+//		if ht.h.Sharded {
+//			panic("called valsCursor for sharded tables")
+//		}
+//		if ht.valsC != nil {
+//			return ht.valsC, nil
+//		}
+//		ht.valsC, err = tx.Cursor(ht.h.ValuesTable) //nolint:gocritic
+//		if err != nil {
+//			return nil, err
+//		}
+//		return ht.valsC, nil
+//	}
+//
+//	func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
+//		if ht.h.Sharded {
+//			panic("called valsCursorDup for sharded tables")
+//		}
+//		if ht.valsCDup != nil {
+//			return ht.valsCDup, nil
+//		}
+//		ht.valsCDup, err = tx.CursorDupSort(ht.h.ValuesTable) //nolint:gocritic
+//		if err != nil {
+//			return nil, err
+//		}
+//		return ht.valsCDup, nil
+//	}
+func (ht *HistoryRoTx) multiValsCursor(tx kv.Tx) (*MultiCursor, error) {
+	if ht.multiValsC != nil {
+		return ht.multiValsC, nil
 	}
-	ht.valsC, err = tx.Cursor(ht.h.ValuesTable) //nolint:gocritic
+	var err error
+	tables := ht.h.ValuesTables(tx)
+	ht.multiValsC, err = NewMultiCursor(tx, ht.h.ValuesTable, tables)
 	if err != nil {
 		return nil, err
 	}
-	return ht.valsC, nil
+	return ht.multiValsC, nil
 }
-func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
-	if ht.valsCDup != nil {
-		return ht.valsCDup, nil
+func (ht *HistoryRoTx) multiValsCursorDup(tx kv.Tx) (*MultiCursorDupSort, error) {
+	if ht.multiValsCDup != nil {
+		return ht.multiValsCDup, nil
 	}
-	ht.valsCDup, err = tx.CursorDupSort(ht.h.ValuesTable) //nolint:gocritic
+	var err error
+	tables := ht.h.ValuesTables(tx)
+	ht.multiValsCDup, err = NewMultiCursorDupSort(tx, ht.h.ValuesTable, tables)
 	if err != nil {
 		return nil, err
 	}
-	return ht.valsCDup, nil
+	return ht.multiValsCDup, nil
 }
+
+// func (ht *HistoryRoTx) valsCursorSharded(tx kv.Tx, txNum uint64) (c kv.Cursor, err error) {
+// 	step := txNum / ht.h.stepSize
+// 	if !ht.h.Sharded {
+// 		panic("called valsCursorSharded for unsharded tables")
+// 	}
+// 	if c, ok := ht.valsCSharded[step]; ok {
+// 		return c, nil
+// 	}
+// 	table := ht.h.historyValsTable(step)
+// 	c, err = tx.Cursor(table)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	ht.valsCSharded[step] = c
+// 	return c, nil
+// }
+
+// func (ht *HistoryRoTx) valsCursorDupSharded(tx kv.Tx, txNum uint64) (c kv.CursorDupSort, err error) {
+// 	step := txNum / ht.h.stepSize
+// 	if !ht.h.Sharded {
+// 		panic("called valsCursorDupSharded for unsharded tables")
+// 	}
+// 	if c, ok := ht.valsCDupSharded[step]; ok {
+// 		return c, nil
+// 	}
+// 	table := ht.h.historyValsTable(step)
+// 	c, err = tx.CursorDupSort(table)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	ht.valsCDupSharded[step] = c
+// 	return c, nil
+// }
+// func (ht *HistoryRoTx) cachedCursor(tx kv.Tx, txNum uint64) (kv.Cursor, error) {
+// 	if ht.h.Sharded {
+// 		return ht.valsCursorSharded(tx, txNum)
+// 	}
+// 	return ht.valsCursor(tx)
+// }
+// func (ht *HistoryRoTx) cachedCursorDup(tx kv.Tx, txNum uint64) (kv.CursorDupSort, error) {
+// 	if ht.h.Sharded {
+// 		return ht.valsCursorDupSharded(tx, txNum)
+// 	}
+// 	return ht.valsCursorDup(tx)
+// }
 
 func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	if ht.h.HistoryLargeValues {
-		c, err := ht.valsCursor(tx)
+		c, err := ht.multiValsCursor(tx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1277,7 +1414,7 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		// val == []byte{}, means key was created in this txNum and doesn't exist before.
 		return val, true, nil
 	}
-	c, err := ht.valsCursorDup(tx)
+	c, err := ht.multiValsCursorDup(tx)
 	if err != nil {
 		return nil, false, err
 	}

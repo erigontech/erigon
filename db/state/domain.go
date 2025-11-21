@@ -1945,7 +1945,7 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 func (dt *DomainRoTx) Tables(tx kv.Tx) (res []string) {
 	res = []string{dt.d.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
 	// dt.ht.h.ValuesTable
-	res = append(res, dt.ht.ValuesTables(tx)...)
+	res = append(res, dt.ht.h.ValuesTables(tx)...)
 	return
 }
 
