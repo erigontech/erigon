@@ -36,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
+var fileTestSem = make(chan struct{}, 10_000) // Unlimited parallel tests - can eat unlimited disk/ram (and fail)
+
 var (
 	legacyDir  = filepath.Join(".", "legacy-tests")
 	eestDir    = filepath.Join(".", "execution-spec-tests")
@@ -204,6 +206,9 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 }
 
 func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest interface{}) {
+	fileTestSem <- struct{}{}
+	defer func() { <-fileTestSem }()
+
 	t.Parallel()
 	if r, _ := tm.findSkip(name); r != "" {
 		t.Skip(r)
