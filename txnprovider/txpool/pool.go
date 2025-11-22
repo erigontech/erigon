@@ -380,12 +380,19 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	// Update pendingBase for all pool queues and slices
 	if baseFeeChanged {
+		pendingBaseFeeUint256 := uint256.NewInt(pendingBaseFee)
 		p.pending.best.pendingBaseFee = pendingBaseFee
+		p.pending.best.pendingBaseFeeUint256 = *pendingBaseFeeUint256
 		p.pending.worst.pendingBaseFee = pendingBaseFee
+		p.pending.worst.pendingBaseFeeUint256 = *pendingBaseFeeUint256
 		p.baseFee.best.pendingBaseFee = pendingBaseFee
+		p.baseFee.best.pendingBaseFeeUint256 = *pendingBaseFeeUint256
 		p.baseFee.worst.pendingBaseFee = pendingBaseFee
+		p.baseFee.worst.pendingBaseFeeUint256 = *pendingBaseFeeUint256
 		p.queued.best.pendingBaseFee = pendingBaseFee
+		p.queued.best.pendingBaseFeeUint256 = *pendingBaseFeeUint256
 		p.queued.worst.pendingBaseFee = pendingBaseFee
+		p.queued.worst.pendingBaseFeeUint256 = *pendingBaseFeeUint256	
 	}
 
 	pendingBlobFee := stateChanges.PendingBlobFeePerGas
