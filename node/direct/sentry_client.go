@@ -140,7 +140,7 @@ func (c *SentryClientRemote) Messages(ctx context.Context, in *sentryproto.Messa
 }
 
 func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentryproto.PeerCountRequest, opts ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
-	return c.SentryClient.PeerCount(ctx, in)
+	return c.SentryClient.PeerCount(ctx, in, opts...)
 }
 
 // Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
