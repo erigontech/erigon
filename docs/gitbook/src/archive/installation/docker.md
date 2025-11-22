@@ -17,6 +17,10 @@ The Docker image works on **Intel/AMD computers** (linux/amd64) and **Apple Sili
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
 * Images are stored at [https://hub.docker.com/r/erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
 
+## Windows
+
+Note that Docker on Windows is affected by [WSL2 Performance and Data Storage](windows/windows-wsl.md#performance-and-data-storage).
+
 ## Prerequisites
 
 Install [Docker Engine](https://docs.docker.com/engine/install) if you run Linux or [Docker Desktop](https://docs.docker.com/desktop/) if you run macOS/Windows.
