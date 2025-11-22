@@ -24,6 +24,7 @@ import (
 	"math"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/tidwall/btree"
@@ -359,26 +360,43 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64) ([]byte, error) {
+func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64, dedupEF []uint64) ([]byte, error) {
 	preSeq := multiencseq.ReadMultiEncSeq(preBaseNum, preval)
 	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
 	preIt := preSeq.Iterator(0)
 	efIt := seq.Iterator(0)
-	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max())
+
+	var toInsert []uint64
+
 	for preIt.HasNext() {
 		v, err := preIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newSeq.AddOffset(v)
+
+		if slices.Contains(dedupEF, v) {
+			continue
+		}
+
+		toInsert = append(toInsert, v)
 	}
 	for efIt.HasNext() {
 		v, err := efIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newSeq.AddOffset(v)
+
+		if slices.Contains(dedupEF, v) {
+			continue
+		}
+		toInsert = append(toInsert, v)
 	}
+
+	newSeq := multiencseq.NewBuilder(outBaseNum, uint64(len(toInsert)), seq.Max())
+	for i := range toInsert {
+		newSeq.AddOffset(toInsert[i])
+	}
+
 	newSeq.Build()
 	return newSeq.AppendBytes(buf), nil
 }
@@ -584,7 +602,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*FilesItem, error) {
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet, dedupKeyEFs map[string][]uint64) (*FilesItem, error) {
 	if startTxNum == endTxNum {
 		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
 	}
@@ -660,14 +678,27 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		// Pre-rebase the first sequence
 		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
 		preIt := preSeq.Iterator(0)
-		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max())
+
+		var toInsert []uint64
+
 		for preIt.HasNext() {
 			v, err := preIt.Next()
 			if err != nil {
 				return nil, err
 			}
-			newSeq.AddOffset(v)
+
+			if dedupKeyEFs != nil && slices.Contains(dedupKeyEFs[string(lastKey)], v) {
+				continue
+			}
+
+			toInsert = append(toInsert, v)
 		}
+
+		newSeq := multiencseq.NewBuilder(startTxNum, uint64(len(toInsert)), preSeq.Max())
+		for i := range toInsert {
+			newSeq.AddOffset(toInsert[i])
+		}
+
 		newSeq.Build()
 		lastVal = newSeq.AppendBytes(nil)
 		var mergedOnce bool
@@ -676,7 +707,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
-				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum); err != nil {
+				var dedupEF []uint64
+
+				if dedupKeyEFs != nil {
+					dedupEF = dedupKeyEFs[string(lastKey)]
+				}
+
+				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum, dedupEF); err != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, err)
 				}
 			} else {
@@ -750,134 +787,168 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}()
 
-	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
+	if !r.history.needMerge {
+		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps, nil); err != nil {
+			return nil, nil, err
+		}
+
+		closeIndex = false
+		return
+	}
+
+	var comp *seg.Compressor
+	var decomp *seg.Decompressor
+	var rs *recsplit.RecSplit
+	var index *recsplit.Index
+	var closeItem = true
+	defer func() {
+		if closeItem {
+			if comp != nil {
+				comp.Close()
+			}
+			if decomp != nil {
+				decomp.Close()
+			}
+			if rs != nil {
+				rs.Close()
+			}
+			if index != nil {
+				index.Close()
+			}
+			if historyIn != nil {
+				historyIn.closeFilesAndRemove()
+			}
+		}
+	}()
+	fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
+	datPath := ht.h.vNewFilePath(fromStep, toStep)
+	idxPath := ht.h.vAccessorNewFilePath(fromStep, toStep)
+	if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.FilenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
+		return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.FilenameBase, err)
+	}
+	if ht.h.noFsync {
+		comp.DisableFsync()
+	}
+	pagedWr := ht.datarWriter(comp)
+	p := ps.AddNew(path.Base(datPath), 1)
+	defer ps.Delete(p)
+
+	var cp CursorHeap
+	heap.Init(&cp)
+
+	dedupKeyEFs := make(map[string][]uint64) // string because slice can not be a key in Golang
+
+	for _, item := range indexFiles {
+		g := ht.iit.dataReader(item.decompressor)
+		g.Reset(0)
+		if g.HasNext() {
+			var g2 *seg.PagedReader
+			for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
+				if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
+					g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
+					break
+				}
+			}
+			if g2 == nil {
+				panic(fmt.Sprintf("for file: %s, not found corresponding file to merge", g.FileName()))
+			}
+			key, _ := g.Next(nil)
+			val, _ := g.Next(nil)
+			heap.Push(&cp, &CursorItem{
+				t:          FILE_CURSOR,
+				idx:        g,
+				hist:       g2,
+				key:        key,
+				val:        val,
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				reverse:    false,
+			})
+		}
+	}
+	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
+	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
+	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
+	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
+	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
+	var lastKey, valBuf []byte
+	var keyCount int
+	for cp.Len() > 0 {
+		lastKey = append(lastKey[:0], cp[0].key...)
+		// Advance all the items that have this key (including the top)
+		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
+			ci1 := heap.Pop(&cp).(*CursorItem)
+			count := multiencseq.Count(ci1.startTxNum, ci1.val)
+
+			seq := multiencseq.ReadMultiEncSeq(ci1.startTxNum, ci1.val)
+			ss := seq.Iterator(0)
+
+			var dedupVal *[]byte
+			var prevTxNum uint64
+
+			for ss.HasNext() {
+				txNum, err := ss.Next()
+				if err != nil {
+					panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.idx.FileName(), ci1.key))
+				}
+
+				if !ci1.hist.HasNext() {
+					panic(fmt.Errorf("assert: no value??? %s, txNum=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), txNum, count, lastKey, ci1.key))
+				}
+
+				var k, v []byte
+				k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
+
+				if dedupVal != nil && bytes.Equal(*dedupVal, v) {
+					dedupKeyEFs[string(ci1.key)] = append(dedupKeyEFs[string(ci1.key)], prevTxNum)
+					prevTxNum = txNum
+					continue
+				}
+
+				dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
+				dedupVal = &dd
+				prevTxNum = txNum
+
+				if err = pagedWr.Add(k, v); err != nil {
+					return nil, nil, err
+				}
+			}
+
+			// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
+			keyCount += int(count)
+			if ci1.idx.HasNext() {
+				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+				heap.Push(&cp, ci1)
+			}
+		}
+	}
+	if err := pagedWr.Compress(); err != nil {
 		return nil, nil, err
 	}
-	if r.history.needMerge {
-		var comp *seg.Compressor
-		var decomp *seg.Decompressor
-		var rs *recsplit.RecSplit
-		var index *recsplit.Index
-		var closeItem = true
-		defer func() {
-			if closeItem {
-				if comp != nil {
-					comp.Close()
-				}
-				if decomp != nil {
-					decomp.Close()
-				}
-				if rs != nil {
-					rs.Close()
-				}
-				if index != nil {
-					index.Close()
-				}
-				if historyIn != nil {
-					historyIn.closeFilesAndRemove()
-				}
-			}
-		}()
-		fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
-		datPath := ht.h.vNewFilePath(fromStep, toStep)
-		idxPath := ht.h.vAccessorNewFilePath(fromStep, toStep)
-		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.FilenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
-			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.FilenameBase, err)
-		}
-		if ht.h.noFsync {
-			comp.DisableFsync()
-		}
-		pagedWr := ht.datarWriter(comp)
-		p := ps.AddNew(path.Base(datPath), 1)
-		defer ps.Delete(p)
-
-		var cp CursorHeap
-		heap.Init(&cp)
-		for _, item := range indexFiles {
-			g := ht.iit.dataReader(item.decompressor)
-			g.Reset(0)
-			if g.HasNext() {
-				var g2 *seg.PagedReader
-				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
-					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
-						break
-					}
-				}
-				if g2 == nil {
-					panic(fmt.Sprintf("for file: %s, not found corresponding file to merge", g.FileName()))
-				}
-				key, _ := g.Next(nil)
-				val, _ := g.Next(nil)
-				heap.Push(&cp, &CursorItem{
-					t:          FILE_CURSOR,
-					idx:        g,
-					hist:       g2,
-					key:        key,
-					val:        val,
-					startTxNum: item.startTxNum,
-					endTxNum:   item.endTxNum,
-					reverse:    false,
-				})
-			}
-		}
-		// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
-		// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
-		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
-		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
-		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-		var lastKey, valBuf []byte
-		var keyCount int
-		for cp.Len() > 0 {
-			lastKey = append(lastKey[:0], cp[0].key...)
-			// Advance all the items that have this key (including the top)
-			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-				ci1 := heap.Pop(&cp).(*CursorItem)
-				count := multiencseq.Count(ci1.startTxNum, ci1.val)
-				for i := uint64(0); i < count; i++ {
-					if !ci1.hist.HasNext() {
-						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
-					}
-
-					var k, v []byte
-					k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
-					if err = pagedWr.Add(k, v); err != nil {
-						return nil, nil, err
-					}
-				}
-
-				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
-				keyCount += int(count)
-				if ci1.idx.HasNext() {
-					ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-					ci1.val, _ = ci1.idx.Next(ci1.val[:0])
-					heap.Push(&cp, ci1)
-				}
-			}
-		}
-		if err := pagedWr.Compress(); err != nil {
-			return nil, nil, err
-		}
-		comp.Close()
-		comp = nil
-		if decomp, err = seg.NewDecompressor(datPath); err != nil {
-			return nil, nil, err
-		}
-		ps.Delete(p)
-
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
-			return nil, nil, err
-		}
-
-		if index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
-			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
-		}
-		historyIn = newFilesItem(r.history.from, r.history.to, ht.stepSize, ht.stepsInFrozenFile)
-		historyIn.decompressor = decomp
-		historyIn.index = index
-
-		closeItem = false
+	comp.Close()
+	comp = nil
+	if decomp, err = seg.NewDecompressor(datPath); err != nil {
+		return nil, nil, err
 	}
+	ps.Delete(p)
+
+	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps, dedupKeyEFs); err != nil {
+		return nil, nil, err
+	}
+
+	if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		return nil, nil, err
+	}
+
+	if index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
+		return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
+	}
+	historyIn = newFilesItem(r.history.from, r.history.to, ht.stepSize, ht.stepsInFrozenFile)
+	historyIn.decompressor = decomp
+	historyIn.index = index
+
+	closeItem = false
 
 	closeIndex = false
 	return
