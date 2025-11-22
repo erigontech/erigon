@@ -22,9 +22,9 @@ import (
 )
 
 func SliceMap[T any, U any](s []T, mapFunc func(T) U) []U {
-	out := make([]U, 0, len(s))
-	for _, x := range s {
-		out = append(out, mapFunc(x))
+	out := make([]U, len(s))
+	for i, x := range s {
+		out[i] = mapFunc(x)
 	}
 	return out
 }
