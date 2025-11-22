@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -152,7 +151,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	blockNum := r.Version().BlockNum
 	receipt := &types.Receipt{
-		BlockNumber:              big.NewInt(int64(blockNum)),
+		BlockNumber:              uint256.NewInt(blockNum),
 		BlockHash:                r.BlockHash(),
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),

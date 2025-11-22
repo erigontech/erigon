@@ -135,23 +135,23 @@ func TestGetBlockHeaders(t *testing.T) {
 			[]common.Hash{blocks[0].Hash()},
 		},
 		{
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64()}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64()}, Amount: 1},
 			[]common.Hash{currentBlock.Hash()},
 		},
 		{ // If the peer requests a bit into the future, we deliver what we have
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64()}, Amount: 10},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64()}, Amount: 10},
 			[]common.Hash{currentBlock.Hash()},
 		},
 		// Ensure protocol limits are honored
 		{
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 1}, Amount: limit + 10, Reverse: true},
-			getHashes(currentBlock.Number().Uint64(), limit),
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() - 1}, Amount: limit + 10, Reverse: true},
+			getHashes(currentBlock.NumberU64(), limit),
 		},
 		// Check that requesting more than available is handled gracefully
 		{
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 4}, Skip: 3, Amount: 3},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() - 4}, Skip: 3, Amount: 3},
 			[]common.Hash{
-				blocks[currentBlock.Number().Uint64()-4].Hash(),
+				blocks[currentBlock.NumberU64()-4].Hash(),
 				currentBlock.Hash(),
 			},
 		},
@@ -164,10 +164,10 @@ func TestGetBlockHeaders(t *testing.T) {
 		},
 		// Check that requesting more than available is handled gracefully, even if mid skip
 		{
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 4}, Skip: 2, Amount: 3},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() - 4}, Skip: 2, Amount: 3},
 			[]common.Hash{
-				blocks[currentBlock.Number().Uint64()-4].Hash(),
-				blocks[currentBlock.Number().Uint64()-1].Hash(),
+				blocks[currentBlock.NumberU64()-4].Hash(),
+				blocks[currentBlock.NumberU64()-1].Hash(),
 			},
 		}, {
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
@@ -232,7 +232,7 @@ func TestGetBlockHeaders(t *testing.T) {
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: unknown}, Amount: 1},
 			[]common.Hash{},
 		}, {
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() + 1}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() + 1}, Amount: 1},
 			[]common.Hash{},
 		},
 	}

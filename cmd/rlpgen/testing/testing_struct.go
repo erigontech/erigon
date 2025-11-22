@@ -1,18 +1,17 @@
 package testing
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/holiman/uint256"
 )
 
 type TestingStruct struct {
 	a  uint64
 	aa *uint64
-	b  big.Int
-	bb *big.Int
+	//	b  big.Int
+	//	bb *big.Int
 	c  uint256.Int
 	cc *uint256.Int
 	d  types.BlockNonce

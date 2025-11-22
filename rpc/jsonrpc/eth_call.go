@@ -24,7 +24,6 @@ import (
 	"math/big"
 	"unsafe"
 
-	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
@@ -182,7 +181,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
 	}
 
-	blockNum := *(header.Number)
+	blockNum := header.Number
 
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
@@ -899,13 +898,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
 
-		var baseFee *uint256.Int = nil
-		// check if EIP-1559
-		if header.BaseFee != nil {
-			baseFee, _ = uint256.FromBig(header.BaseFee)
-		}
-
-		msg, err := args.ToMessage(api.GasCap, baseFee)
+		msg, err := args.ToMessage(api.GasCap, header.BaseFee)
 		if err != nil {
 			return nil, err
 		}

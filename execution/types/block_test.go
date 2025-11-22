@@ -198,7 +198,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 		},
 	}}
 	to := common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-	feeCap, _ := uint256.FromBig(block.BaseFee())
+	feeCap := block.BaseFee()
 	var tx2 Transaction = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
 			Nonce:    0,
@@ -331,8 +331,8 @@ func makeBenchBlock() *Block {
 		uncles   = make([]*Header, 3)
 	)
 	header := &Header{
-		Difficulty: math.BigPow(11, 11),
-		Number:     math.BigPow(2, 9),
+		Difficulty: *uint256.NewInt(285311670611),
+		Number:     *uint256.NewInt(0x200),
 		GasLimit:   12345678,
 		GasUsed:    1476322,
 		Time:       9876543,
@@ -352,8 +352,8 @@ func makeBenchBlock() *Block {
 	}
 	for i := range uncles {
 		uncles[i] = &Header{
-			Difficulty: math.BigPow(11, 11),
-			Number:     math.BigPow(2, 9),
+			Difficulty: *uint256.NewInt(285311670611),
+			Number:     *uint256.NewInt(0x200),
 			GasLimit:   12345678,
 			GasUsed:    1476322,
 			Time:       9876543,
@@ -375,8 +375,8 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 				TxHash:      common.Hash{},
 				ReceiptHash: common.Hash{},
 				Bloom:       Bloom{},
-				Difficulty:  big.NewInt(100),
-				Number:      big.NewInt(1000),
+				Difficulty:  *uint256.NewInt(100),
+				Number:      *uint256.NewInt(1000),
 				GasLimit:    50,
 				GasUsed:     60,
 				Time:        90,
@@ -385,8 +385,8 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 			{
 				GasUsed:    108,
 				GasLimit:   100,
-				Difficulty: big.NewInt(99),
-				Number:     big.NewInt(1000),
+				Difficulty: *uint256.NewInt(99),
+				Number:     *uint256.NewInt(1000),
 			},
 		},
 		Transactions: [][]byte{
@@ -448,8 +448,8 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 
 func TestAuRaHeaderEncoding(t *testing.T) {
 	t.Parallel()
-	difficulty, ok := new(big.Int).SetString("8398142613866510000000000000000000000000000000", 10)
-	require.True(t, ok)
+	difficulty, err := uint256.FromDecimal("8398142613866510000000000000000000000000000000")
+	require.NoError(t, err)
 
 	header := Header{
 		ParentHash:  common.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
@@ -458,13 +458,13 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 		Root:        common.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
 		TxHash:      common.HexToHash("0x6a35133fbff7ea2cb5ee7635c9fb623f96d31d689d806a2bfe40a2b1d90ee99c"),
 		ReceiptHash: common.HexToHash("0x324f54860e214ea896ea7a05bda30f85541be3157de77a9059a04fdb1e86badd"),
-		Difficulty:  difficulty,
-		Number:      big.NewInt(24679923),
+		Difficulty:  *difficulty,
+		Number:      *uint256.NewInt(24679923),
 		GasLimit:    30_000_000,
 		GasUsed:     3_074_345,
 		Time:        1666343339,
 		Extra:       common.FromHex("0x1234"),
-		BaseFee:     big.NewInt(7_000_000_000),
+		BaseFee:     uint256.NewInt(7_000_000_000),
 		AuRaStep:    13078,
 		AuRaSeal:    common.FromHex("0x75bda30f85541be059646e1acd3613fd100846e42308df2dad8ed79b9a9e91c9db994386599a683820a1394684d41fc139c4805684142e6b15a722a2e9cc51f7ee"),
 	}
@@ -485,14 +485,14 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		ParentHash: common.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
 		Coinbase:   common.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
 		Root:       common.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
-		Difficulty: common.Big0,
-		Number:     big.NewInt(20_000_000),
+		Difficulty: *common.Num0,
+		Number:     *uint256.NewInt(20_000_000),
 		GasLimit:   30_000_000,
 		GasUsed:    3_074_345,
 		Time:       1666343339,
 		Extra:      make([]byte, 0),
 		MixDigest:  common.HexToHash("0x7f04e338b206ef863a1fad30e082bbb61571c74e135df8d1677e3f8b8171a09b"),
-		BaseFee:    big.NewInt(7_000_000_000),
+		BaseFee:    uint256.NewInt(7_000_000_000),
 	}
 
 	withdrawals := make([]*Withdrawal, 2)

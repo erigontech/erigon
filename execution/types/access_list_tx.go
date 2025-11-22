@@ -411,7 +411,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,

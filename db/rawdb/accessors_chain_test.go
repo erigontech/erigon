@@ -329,7 +329,7 @@ func TestHeaderStorage(t *testing.T) {
 	br := m.BlockReader
 
 	// Create a test header to move around the database and make sure it's really new
-	header := &types.Header{Number: big.NewInt(42), Extra: []byte("test header")}
+	header := &types.Header{Number: *uint256.NewInt(42), Extra: []byte("test header")}
 	entry, err := br.Header(ctx, tx, header.Hash(), header.Number.Uint64())
 	require.NoError(t, err)
 	if entry != nil {
@@ -393,7 +393,7 @@ func TestBodyStorage(t *testing.T) {
 	hasher := sha3.NewLegacyKeccak256()
 	_ = rlp.Encode(hasher, body)
 	hash := common.BytesToHash(hasher.Sum(nil))
-	header := &types.Header{Number: common.Big1}
+	header := &types.Header{Number: *common.Num1}
 
 	if entry, _ := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
@@ -441,7 +441,7 @@ func TestBlockStorage(t *testing.T) {
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
-		Number:      big.NewInt(1),
+		Number:      *common.Num1,
 		Extra:       []byte("test block"),
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
@@ -721,8 +721,8 @@ func TestHeadStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header"), Number: common.Big1})
-	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: common.Big1})
+	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header"), Number: *common.Num1})
+	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: *common.Num1})
 
 	// Assign separate entries for the head header and block
 	rawdb.WriteHeadHeaderHash(tx, blockHead.Hash())
@@ -754,7 +754,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
 	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
 
-	header := &types.Header{Number: big.NewInt(1)}
+	header := &types.Header{Number: *common.Num1}
 	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
 
 	// Create the two receipts to manage afterwards
@@ -768,7 +768,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		TxHash:          tx1.Hash(),
 		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
-		BlockNumber:     header.Number,
+		BlockNumber:     &header.Number,
 		BlockHash:       header.Hash(),
 
 		TransactionIndex: 0,
@@ -785,7 +785,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		TxHash:           tx2.Hash(),
 		ContractAddress:  common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 		GasUsed:          222222,
-		BlockNumber:      header.Number,
+		BlockNumber:      &header.Number,
 		BlockHash:        header.Hash(),
 		TransactionIndex: 1,
 	}
@@ -879,7 +879,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
-		Number:      big.NewInt(1),
+		Number:      *common.Num1,
 		Extra:       []byte("test block"),
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
@@ -1080,7 +1080,8 @@ func TestBadBlocks(t *testing.T) {
 			Uncles: []*types.Header{{Extra: []byte("test header")}},
 		}
 
-		header := &types.Header{Number: big.NewInt(int64(number))}
+		header := &types.Header{}
+		header.Number.SetUint64(number)
 		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
 		require.NoError(rawdb.WriteHeader(tx, header))
 		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))

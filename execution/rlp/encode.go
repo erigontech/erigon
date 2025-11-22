@@ -21,15 +21,15 @@ package rlp
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"math/bits"
 	"reflect"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/
@@ -39,8 +39,6 @@ const (
 	// EmptyListCode is the RLP code for empty lists.
 	EmptyListCode = 0xC0
 )
-
-var ErrNegativeBigInt = errors.New("rlp: cannot encode negative big.Int")
 
 var (
 	// Common encoded values.
@@ -161,10 +159,6 @@ func makeWriter(typ reflect.Type, ts tags) (writer, error) {
 	switch {
 	case typ == rawValueType:
 		return writeRawValue, nil
-	case typ.AssignableTo(reflect.PtrTo(bigInt)):
-		return writeBigIntPtr, nil
-	case typ.AssignableTo(bigInt):
-		return writeBigIntNoPtr, nil
 	case typ.AssignableTo(reflect.PtrTo(uint256Int)):
 		return writeUint256Ptr, nil
 	case typ.AssignableTo(uint256Int):
@@ -224,49 +218,8 @@ func writeBool(val reflect.Value, w *encBuffer) error {
 	return nil
 }
 
-func writeBigIntPtr(val reflect.Value, w *encBuffer) error {
-	ptr := val.Interface().(*big.Int)
-	if ptr == nil {
-		w.str = append(w.str, EmptyStringCode)
-		return nil
-	}
-	return writeBigInt(ptr, w)
-}
-
-func writeBigIntNoPtr(val reflect.Value, w *encBuffer) error {
-	i := val.Interface().(big.Int)
-	return writeBigInt(&i, w)
-}
-
 // wordBytes is the number of bytes in a big.Word
 const wordBytes = (32 << (uint64(^big.Word(0)) >> 63)) / 8
-
-func writeBigInt(i *big.Int, w *encBuffer) error {
-	if i.Sign() == -1 {
-		return ErrNegativeBigInt
-	}
-	bitlen := i.BitLen()
-	if bitlen <= 64 {
-		w.encodeUint(i.Uint64())
-		return nil
-	}
-	// Integer is larger than 64 bits, encode from i.Bits().
-	// The minimal byte length is bitlen rounded up to the next
-	// multiple of 8, divided by 8.
-	length := ((bitlen + 7) & -8) >> 3
-	w.encodeStringHeader(length)
-	w.str = append(w.str, make([]byte, length)...)
-	index := length
-	buf := w.str[len(w.str)-length:]
-	for _, d := range i.Bits() {
-		for j := 0; j < wordBytes && index > 0; j++ {
-			index--
-			buf[index] = byte(d)
-			d >>= 8
-		}
-	}
-	return nil
-}
 
 func writeUint256Ptr(val reflect.Value, w *encBuffer) error {
 	ptr := val.Interface().(*uint256.Int)
@@ -573,14 +526,6 @@ func IntLenExcludingHead(i uint64) int {
 	return intsize(i)
 }
 
-func BigIntLenExcludingHead(i *big.Int) int {
-	bitLen := i.BitLen()
-	if bitLen < 8 {
-		return 0
-	}
-	return common.BitLenToByteLen(bitLen)
-}
-
 func Uint256LenExcludingHead(i uint256.Int) int {
 	bitLen := i.BitLen()
 	if bitLen < 8 {
@@ -590,6 +535,7 @@ func Uint256LenExcludingHead(i uint256.Int) int {
 }
 
 // precondition: len(buffer) >= 9
+// TODO(yperbasis): rename to EncodeUint64
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
 	if 0 < i && i < 0x80 {
 		buffer[0] = byte(i)
@@ -601,28 +547,6 @@ func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
 	size := intsize(i)
 	buffer[8-size] = 0x80 + byte(size)
 	_, err := w.Write(buffer[8-size : 9])
-	return err
-}
-
-func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
-	bitLen := 0 // treat nil as 0
-	if i != nil {
-		bitLen = i.BitLen()
-	}
-	if bitLen < 8 {
-		if bitLen > 0 {
-			buffer[0] = byte(i.Uint64())
-		} else {
-			buffer[0] = 0x80
-		}
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-
-	size := common.BitLenToByteLen(bitLen)
-	buffer[0] = 0x80 + byte(size)
-	i.FillBytes(buffer[1 : 1+size])
-	_, err := w.Write(buffer[:1+size])
 	return err
 }
 
