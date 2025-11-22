@@ -52,6 +52,13 @@ var (
 	topic1H256   = gointerfaces.ConvertHashToH256(topic1)
 )
 
+func newTestFilters(t *testing.T, config FiltersConfig) *Filters {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return New(ctx, config, nil, nil, nil, func() {}, log.New())
+}
+
 func TestFilters_GenerateSubscriptionID(t *testing.T) {
 	t.Parallel()
 	sz := 1000
@@ -76,7 +83,7 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	f := newTestFilters(t, config)
 
 	subbedTopic := common.BytesToHash([]byte{10, 20})
 
@@ -109,7 +116,7 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	f := newTestFilters(t, config)
 
 	var nilTopic common.Hash
 	subbedTopic := common.BytesToHash([]byte{10, 20})
@@ -143,8 +150,8 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
-
+	f := newTestFilters(t, config)
+	
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
 		Topics:    [][]common.Hash{},
@@ -184,7 +191,7 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	f := newTestFilters(t, config)
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -260,7 +267,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	}
 
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	f := newTestFilters(t, config)
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters
@@ -385,7 +392,7 @@ func TestFilters_AddLogs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: tt.maxLogs}
-			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+			f := newTestFilters(t, config)
 			logID := LogsSubID("test-log")
 			logEntry := &types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
 
@@ -419,7 +426,7 @@ func TestFilters_AddPendingBlocks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxHeaders: tt.maxHeaders}
-			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+			f := newTestFilters(t, config)
 			blockID := HeadsSubID("test-block")
 			header := &types.Header{}
 
@@ -454,7 +461,7 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: tt.maxTxs}
-			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+			f := newTestFilters(t, config)
 			txID := PendingTxsSubID("test-tx")
 			var txn types.Transaction = types.NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
 			txn, _ = txn.WithSignature(*types.LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
