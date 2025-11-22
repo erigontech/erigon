@@ -46,6 +46,9 @@ func SliceShuffle[T any](s []T) {
 }
 
 func SliceTakeLast[T any](s []T, count int) []T {
+	if count < 0 {
+		return s[:0]
+	}
 	length := len(s)
 	if length > count {
 		return s[length-count:]
