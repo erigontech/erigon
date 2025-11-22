@@ -351,6 +351,15 @@ func (d *Domain) openDirtyFiles() (err error) {
 					versionTooLowPanic(fName, d.FileVersion.DataKV)
 				}
 
+				if fileVer.Major > d.FileVersion.DataKV.Current.Major {
+					_, fName := filepath.Split(fPath)
+					d.logger.Debug("[agg] Domain.openDirtyFiles: file has greater version and can't be proceeded", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
@@ -378,6 +387,14 @@ func (d *Domain) openDirtyFiles() (err error) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, d.FileVersion.AccessorKVI)
 					}
+					if fileVer.Major > d.FileVersion.AccessorKVI.Current.Major {
+						_, fName := filepath.Split(fPath)
+						d.logger.Debug("[agg] Domain.openDirtyFiles: file has greater version and can't be proceeded", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -397,6 +414,14 @@ func (d *Domain) openDirtyFiles() (err error) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, d.FileVersion.AccessorBT)
 					}
+					if fileVer.Major > d.FileVersion.AccessorBT.Current.Major {
+						_, fName := filepath.Split(fPath)
+						d.logger.Debug("[agg] Domain.openDirtyFiles: file has greater version and can't be proceeded", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -415,6 +440,14 @@ func (d *Domain) openDirtyFiles() (err error) {
 					if fileVer.Less(d.FileVersion.AccessorKVEI.MinSupported) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, d.FileVersion.AccessorKVEI)
+					}
+					if fileVer.Major > d.FileVersion.AccessorKVEI.Current.Major {
+						_, fName := filepath.Split(fPath)
+						d.logger.Debug("[agg] Domain.openDirtyFiles: file has greater version and can't be proceeded", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -464,6 +497,14 @@ func (h *History) openDirtyFiles() error {
 					_, fName := filepath.Split(fPath)
 					versionTooLowPanic(fName, h.FileVersion.DataV)
 				}
+				if fileVer.Major > h.FileVersion.DataV.Current.Major {
+					_, fName := filepath.Split(fPath)
+					h.logger.Debug("[agg] History.openDirtyFiles: file has greater version and can't be proceeded", "f", fName)
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					continue
+				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
@@ -504,6 +545,14 @@ func (h *History) openDirtyFiles() error {
 					if fileVer.Less(h.FileVersion.AccessorVI.MinSupported) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, h.FileVersion.AccessorVI)
+					}
+					if fileVer.Major > h.FileVersion.AccessorVI.Current.Major {
+						_, fName := filepath.Split(fPath)
+						h.logger.Debug("[agg] History.openDirtyFiles: file has greater version and can't be proceeded", "f", fName)
+						invalidFilesMu.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFilesMu.Unlock()
+						continue
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -554,6 +603,14 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					_, fName := filepath.Split(fPath)
 					versionTooLowPanic(fName, ii.FileVersion.DataEF)
 				}
+				if fileVer.Major > ii.FileVersion.DataEF.Current.Major {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file has greater version and can't be proceeded", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
@@ -583,6 +640,15 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, ii.FileVersion.AccessorEFI)
 					}
+					if fileVer.Major > ii.FileVersion.AccessorEFI.Current.Major {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file has greater version and can't be proceeded", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
+
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
