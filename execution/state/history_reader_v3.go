@@ -139,7 +139,8 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address) ([]byte, erro
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, code)
+		lenc, cs := printCode(code)
+		fmt.Printf("ReadAccountCode [%x] => [%d:%s]\n", address, lenc, cs)
 	}
 	return code, err
 }

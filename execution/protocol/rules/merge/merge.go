@@ -219,7 +219,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
-				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
+				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got:%v", header.RequestsHash, rh)
 			}
 		}
 	}

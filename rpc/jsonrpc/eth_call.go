@@ -403,7 +403,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -596,7 +596,7 @@ func verifyExecResult(execResult *protocol.EphemeralExecResult, block *types.Blo
 	return nil
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -659,7 +659,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, errors.New("engine is not rules.Engine")
 	}
 
-	roTx2, err := db.BeginRo(ctx)
+	roTx2, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -685,7 +685,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(txBatch2, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
 	if err != nil {
 		return nil, err
 	}
