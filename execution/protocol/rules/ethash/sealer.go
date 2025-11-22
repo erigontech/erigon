@@ -173,7 +173,10 @@ func (s *remoteSealer) loop() {
 			// Gather all hash rate submitted by remote sealer.
 			var total uint64
 			for _, rate := range s.rates {
-				// this could overflow
+				if math.MaxUint64-total < rate.rate {
+					total = math.MaxUint64
+					break
+				}
 				total += rate.rate
 			}
 			req <- total
