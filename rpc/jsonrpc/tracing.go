@@ -536,7 +536,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		err = config.StateOverrides.Override(ibs)
+		err = config.StateOverrides.OverrideAndCommit(ibs, rules)
 		if err != nil {
 			return err
 		}

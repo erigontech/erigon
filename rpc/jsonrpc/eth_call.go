@@ -877,14 +877,17 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if args.AccessList != nil {
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
-	for {
-		state := state.New(stateReader)
-		// Override the fields of specified contracts before execution.
-		if stateOverrides != nil {
-			if err := stateOverrides.Override(state); err != nil {
-				return nil, err
-			}
+
+	current_state := state.New(stateReader)
+	// Override the fields of specified contracts before execution.
+	if stateOverrides != nil {
+		if err := stateOverrides.OverrideAndCommit(current_state, blockCtx.Rules(chainConfig)); err != nil {
+			return nil, err
 		}
+	}
+
+	for {
+		state := current_state.Copy()
 
 		// Retrieve the current access list to expand
 		accessList := prevTracer.AccessList()
