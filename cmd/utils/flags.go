@@ -687,13 +687,6 @@ var (
 		Value: "16mb",
 		Usage: "Bytes per second, example: 32mb. Set Inf for no limit.",
 	}
-	// Deprecated. Shouldn't do anything. TODO: Remove.
-	TorrentDownloadSlotsFlag = cli.IntFlag{
-		Name:   "torrent.download.slots",
-		Value:  32,
-		Usage:  "Amount of files to download in parallel.",
-		Hidden: true,
-	}
 	// TODO: Currently unused.
 	TorrentStaticPeersFlag = cli.StringFlag{
 		Name:   "torrent.staticpeers",
