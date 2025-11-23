@@ -40,7 +40,7 @@ You can then start Erigon with the below command:&#x20;
 To run Erigon after a native compilation, enter the following command in your Command Prompt or PowerShell:
 
 ```powershell
-start erigon.exe [options]
+erigon.exe [options]
 ```
 
 {% hint style="warning" %}

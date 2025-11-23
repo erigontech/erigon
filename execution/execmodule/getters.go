@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package eth1
+package execmodule
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -91,7 +91,7 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *executionpro
 	}
 	rawBody := body.RawBody()
 
-	return &executionproto.GetBodyResponse{Body: eth1_utils.ConvertRawBlockBodyToRpc(rawBody, blockNumber, blockHash)}, nil
+	return &executionproto.GetBodyResponse{Body: moduleutil.ConvertRawBlockBodyToRpc(rawBody, blockNumber, blockHash)}, nil
 }
 
 func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
@@ -118,7 +118,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *executionp
 		return &executionproto.GetHeaderResponse{Header: nil}, nil
 	}
 
-	return &executionproto.GetHeaderResponse{Header: eth1_utils.HeaderToHeaderRPC(header)}, nil
+	return &executionproto.GetHeaderResponse{Header: moduleutil.HeaderToHeaderRPC(header)}, nil
 }
 
 func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *executionproto.GetBodiesByHashesRequest) (*executionproto.GetBodiesBatchResponse, error) {
@@ -155,7 +155,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 
 		bodies = append(bodies, &executionproto.BlockBody{
 			Transactions: txs,
-			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+			Withdrawals:  moduleutil.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
 
@@ -198,7 +198,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 
 		bodies = append(bodies, &executionproto.BlockBody{
 			Transactions: txs,
-			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+			Withdrawals:  moduleutil.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
 	// Remove trailing nil values as per spec
@@ -288,7 +288,7 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 		return nil, errors.New("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
 	}
 	return &executionproto.GetHeaderResponse{
-		Header: eth1_utils.HeaderToHeaderRPC(h),
+		Header: moduleutil.HeaderToHeaderRPC(h),
 	}, nil
 }
 
@@ -318,7 +318,7 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *executionproto
 		return &executionproto.GetTDResponse{Td: nil}, nil
 	}
 
-	return &executionproto.GetTDResponse{Td: eth1_utils.ConvertBigIntToRpc(td)}, nil
+	return &executionproto.GetTDResponse{Td: moduleutil.ConvertBigIntToRpc(td)}, nil
 }
 
 func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*executionproto.ForkChoice, error) {

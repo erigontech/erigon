@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package eth1_chain_reader
+package chainreader
 
 import (
 	"context"
@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -68,7 +68,7 @@ func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header 
 	if resp == nil || resp.Header == nil {
 		return nil
 	}
-	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
+	ret, err := moduleutil.HeaderRpcToHeader(resp.Header)
 	if err != nil {
 		log.Warn("[engine] CurrentHeader", "err", err)
 		return nil
@@ -88,7 +88,7 @@ func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash common.Hash, 
 	if resp == nil || resp.Header == nil {
 		return nil
 	}
-	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
+	ret, err := moduleutil.HeaderRpcToHeader(resp.Header)
 	if err != nil {
 		log.Warn("[engine] GetHeader", "err", err)
 		return nil
@@ -114,7 +114,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash common.H
 	if resp == nil || resp.Body == nil {
 		return nil
 	}
-	body, err := eth1_utils.ConvertRawBlockBodyFromRpc(resp.Body)
+	body, err := moduleutil.ConvertRawBlockBodyFromRpc(resp.Body)
 	if err != nil {
 		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
@@ -143,7 +143,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 	if resp == nil || resp.Body == nil {
 		return nil
 	}
-	body, err := eth1_utils.ConvertRawBlockBodyFromRpc(resp.Body)
+	body, err := moduleutil.ConvertRawBlockBodyFromRpc(resp.Body)
 	if err != nil {
 		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
@@ -168,7 +168,7 @@ func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.
 	if resp == nil || resp.Header == nil {
 		return nil
 	}
-	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
+	ret, err := moduleutil.HeaderRpcToHeader(resp.Header)
 	if err != nil {
 		log.Warn("[engine] GetHeaderByHash", "err", err)
 		return nil
@@ -188,7 +188,7 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uin
 	if resp == nil || resp.Header == nil {
 		return nil
 	}
-	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
+	ret, err := moduleutil.HeaderRpcToHeader(resp.Header)
 	if err != nil {
 		log.Warn("[engine] GetHeaderByNumber", "err", err)
 		return nil
@@ -208,7 +208,7 @@ func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, numb
 	if resp == nil || resp.Td == nil {
 		return nil
 	}
-	return eth1_utils.ConvertBigIntFromRpc(resp.Td)
+	return moduleutil.ConvertBigIntFromRpc(resp.Td)
 }
 
 func (c ChainReaderWriterEth1) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
@@ -224,7 +224,7 @@ func (c ChainReaderWriterEth1) GetBodiesByHashes(ctx context.Context, hashes []c
 	}
 	ret := make([]*types.RawBody, len(resp.Bodies))
 	for i := range ret {
-		ret[i], err = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+		ret[i], err = moduleutil.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
 		if err != nil {
 			return nil, err
 		}
@@ -242,7 +242,7 @@ func (c ChainReaderWriterEth1) GetBodiesByRange(ctx context.Context, start, coun
 	}
 	ret := make([]*types.RawBody, len(resp.Bodies))
 	for i := range ret {
-		ret[i], err = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+		ret[i], err = moduleutil.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
 		if err != nil {
 			return nil, err
 		}
@@ -290,7 +290,7 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 
 func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
+		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
@@ -318,7 +318,7 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
+		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
@@ -401,7 +401,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 		Timestamp:             uint64(attributes.Timestamp),
 		PrevRandao:            gointerfaces.ConvertHashToH256(attributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient),
-		Withdrawals:           eth1_utils.ConvertWithdrawalsToRpc(attributes.Withdrawals),
+		Withdrawals:           moduleutil.ConvertWithdrawalsToRpc(attributes.Withdrawals),
 		ParentHash:            gointerfaces.ConvertHashToH256(baseHash),
 	}
 	if attributes.ParentBeaconBlockRoot != nil {
