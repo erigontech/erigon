@@ -152,7 +152,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
 			}
-			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum, se.logPrefix, nil)
+			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
 			if err != nil {
