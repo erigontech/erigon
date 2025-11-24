@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -446,21 +445,21 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutil.B
 }
 
 type GasPriceCache struct {
-	latestPrice *big.Int
+	latestPrice *uint256.Int
 	latestHash  common.Hash
 	mtx         sync.Mutex
 }
 
 func NewGasPriceCache() *GasPriceCache {
 	return &GasPriceCache{
-		latestPrice: big.NewInt(0),
+		latestPrice: uint256.NewInt(0),
 		latestHash:  common.Hash{},
 	}
 }
 
-func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
+func (c *GasPriceCache) GetLatest() (common.Hash, *uint256.Int) {
 	var hash common.Hash
-	var price *big.Int
+	var price *uint256.Int
 	c.mtx.Lock()
 	hash = c.latestHash
 	price = c.latestPrice
@@ -468,7 +467,7 @@ func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
 	return hash, price
 }
 
-func (c *GasPriceCache) SetLatest(hash common.Hash, price *big.Int) {
+func (c *GasPriceCache) SetLatest(hash common.Hash, price *uint256.Int) {
 	c.mtx.Lock()
 	c.latestPrice = price
 	c.latestHash = hash

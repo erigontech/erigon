@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -386,14 +384,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	ibs := state.New(stateReader)
 
-	var baseFee *uint256.Int
-	if header.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
-		if overflow {
-			return errors.New("header.BaseFee uint256 overflow")
-		}
-	}
+	baseFee := header.BaseFee
 
 	if config != nil && config.BlockOverrides != nil {
 		if config.BlockOverrides.BaseFeePerGas != nil {
