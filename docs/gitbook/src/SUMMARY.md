@@ -5,8 +5,8 @@
 * [Introduction](README.md)
   * [Why using Erigon?](get-started/readme/why-using-erigon.md)
 * [Hardware Requirements](get-started/hardware-requirements.md)
-* [Installation](get-started/installation-2/README.md)
-  * [Upgrading from a previous version](get-started/installation-2/upgrading.md)
+* [Installation](get-started/installation/README.md)
+  * [Upgrading from a previous version](get-started/installation/upgrading.md)
 * [Migrating from Geth](get-started/migrating-from-geth.md)
 * [Easy Nodes](get-started/easy-nodes/README.md)
   * [How to run a Ethereum node](get-started/easy-nodes/how-to-run-an-ethereum-node/README.md)
@@ -60,14 +60,14 @@
 
 ## STAKING
 
-* [Using Caplin as Validator](get-started/fundamentals/staking/caplin.md)
-* [Using an external consensus client as validator](get-started/fundamentals/staking/external-consensus-client-as-validator.md)
-* [Shutter Network](get-started/fundamentals/staking/shutter-network.md)
+* [Using Caplin as Validator](staking/caplin.md)
+* [Using an external consensus client as validator](staking/external-consensus-client-as-validator.md)
+* [Shutter Network](staking/shutter-network.md)
 
 ## ABOUT
 
-* [Contributing](get-started/about/contributing.md)
-* [License](get-started/about/license.md)
-* [Disclaimer](get-started/about/disclaimer.md)
-* [Donate](get-started/about/donate.md)
-* [How to reach us](get-started/about/how-to-reach-us.md)
+* [Contributing](about/contributing.md)
+* [License](about/license.md)
+* [Disclaimer](about/disclaimer.md)
+* [Donate](about/donate.md)
+* [How to reach us](about/how-to-reach-us.md)
