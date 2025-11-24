@@ -26,6 +26,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -54,6 +55,9 @@ type GossipManager struct {
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
 	subscribeAll   bool
+	//maxInboundTrafficPerPeer     datasize.ByteSize
+	//maxOutboundTrafficPerPeer    datasize.ByteSize
+	//adaptableTrafficRequirements bool
 }
 
 func NewGossipManager(
@@ -63,6 +67,9 @@ func NewGossipManager(
 	ethClock eth_clock.EthereumClock,
 	subscribeAll bool,
 	activeIndicies uint64,
+	maxInboundTrafficPerPeer datasize.ByteSize,
+	maxOutboundTrafficPerPeer datasize.ByteSize,
+	adaptableTrafficRequirements bool,
 ) *GossipManager {
 	gm := &GossipManager{
 		p2p:                p2p,
@@ -76,6 +83,7 @@ func NewGossipManager(
 		activeIndicies:     activeIndicies,
 	}
 
+	go gm.observeBandwidth(context.Background(), maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	gm.goCheckResubscribe()
 	gm.stats.goPrintStats()
 	return gm
@@ -487,4 +495,67 @@ func extractSubnetIndexByGossipTopic(name string) int {
 		return -1
 	}
 	return index
+}
+
+func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficPerPeer datasize.ByteSize, maxOutboundTrafficPerPeer datasize.ByteSize, adaptableTrafficRequirements bool) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	for {
+		topics := g.subscriptions.AllTopics()
+		countAttSubnetsSubscribed := 0
+		countColumnSidecarSubscribed := 0
+		for _, topic := range topics {
+			if strings.Contains(topic, "beacon_attestation") {
+				countAttSubnetsSubscribed++
+			}
+			if strings.Contains(topic, "data_column_sidecar") {
+				countColumnSidecarSubscribed++
+			}
+		}
+
+		multiplierForAdaptableTraffic := 1.0
+		if adaptableTrafficRequirements {
+			multiplierForAdaptableTraffic = ((float64(countAttSubnetsSubscribed) / float64(g.networkConfig.AttestationSubnetCount)) * 8) + 1
+			multiplierForAdaptableTraffic += ((float64(countColumnSidecarSubscribed) / float64(g.beaconConfig.NumberOfColumns)) * 16)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			totals := g.p2p.BandwidthCounter().GetBandwidthTotals()
+			monitor.ObserveTotalInBytes(totals.TotalIn)
+			monitor.ObserveTotalOutBytes(totals.TotalOut)
+			minBound := datasize.KB
+			// define rate cap
+			maxRateIn := float64(max(maxInboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
+			maxRateOut := float64(max(maxOutboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
+			peers := g.p2p.Host().Network().Peers()
+			maxPeersToBan := 16
+			// do not ban peers if we have less than 1/8 of max peer count
+			if len(peers) <= maxPeersToBan {
+				continue
+			}
+			maxPeersToBan = min(maxPeersToBan, len(peers)-maxPeersToBan)
+
+			peersToBan := make([]peer.ID, 0, len(peers))
+			// Check which peers should be banned
+			for _, p := range peers {
+				// get peer bandwidth
+				peerBandwidth := g.p2p.BandwidthCounter().GetBandwidthForPeer(p)
+				// check if peer is over limit
+				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
+					peersToBan = append(peersToBan, p)
+				}
+			}
+			// if we have more than 1/8 of max peer count to ban, limit to maxPeersToBan
+			if len(peersToBan) > maxPeersToBan {
+				peersToBan = peersToBan[:maxPeersToBan]
+			}
+			// ban hammer
+			for _, p := range peersToBan {
+				//g.p2p.Peers().SetBanStatus(p, true)
+				g.p2p.Host().Peerstore().RemovePeer(p)
+				g.p2p.Host().Network().ClosePeer(p)
+			}
+		}
+	}
 }

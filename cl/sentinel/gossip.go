@@ -276,9 +276,7 @@ func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 }*/
 
 func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
-	if expiry.After(sub.expiration.Load().(time.Time)) {
-		sub.expiration.Store(expiry)
-	}
+	panic("do not call this")
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub
