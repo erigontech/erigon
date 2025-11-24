@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	goruntime "runtime"
 	"runtime/pprof"
@@ -259,9 +258,9 @@ func runCmd(ctx *cli.Context) error {
 		GasPrice:    *gasPrice,
 		Value:       *value,
 		Difficulty:  genesisConfig.Difficulty,
-		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
+		Time:        genesisConfig.Timestamp,
 		Coinbase:    genesisConfig.Coinbase,
-		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
+		BlockNumber: genesisConfig.Number,
 	}
 
 	if tracer != nil {
@@ -324,8 +323,8 @@ func runCmd(ctx *cli.Context) error {
 		rules := &chain.Rules{}
 		if chainConfig != nil {
 			blockContext := evmtypes.BlockContext{
-				BlockNumber: runtimeConfig.BlockNumber.Uint64(),
-				Time:        runtimeConfig.Time.Uint64(),
+				BlockNumber: runtimeConfig.BlockNumber,
+				Time:        runtimeConfig.Time,
 			}
 			rules = blockContext.Rules(chainConfig)
 		}

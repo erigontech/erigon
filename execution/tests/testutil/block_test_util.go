@@ -26,7 +26,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"reflect"
 	"testing"
 
@@ -84,7 +83,7 @@ type btHeader struct {
 	Coinbase              common.Address
 	MixHash               common.Hash
 	Nonce                 types.BlockNonce
-	Number                *big.Int
+	Number                *uint256.Int
 	Hash                  common.Hash
 	ParentHash            common.Hash
 	ReceiptTrie           common.Hash
@@ -92,11 +91,11 @@ type btHeader struct {
 	TransactionsTrie      common.Hash
 	UncleHash             common.Hash
 	ExtraData             []byte
-	Difficulty            *big.Int
+	Difficulty            *uint256.Int
 	GasLimit              uint64
 	GasUsed               uint64
 	Timestamp             uint64
-	BaseFeePerGas         *big.Int
+	BaseFeePerGas         *uint256.Int
 	WithdrawalsRoot       *common.Hash
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
@@ -300,7 +299,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Nonce != h2.Nonce {
 		return fmt.Errorf("nonce: want: %x have: %x", h.Nonce, h2.Nonce)
 	}
-	if h.Number.Cmp(h2.Number) != 0 {
+	if h.Number.Cmp(&h2.Number) != 0 {
 		return fmt.Errorf("number: want: %v have: %v", h.Number, h2.Number)
 	}
 	if h.ParentHash != h2.ParentHash {
@@ -321,7 +320,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !bytes.Equal(h.ExtraData, h2.Extra) {
 		return fmt.Errorf("extra data: want: %x have: %x", h.ExtraData, h2.Extra)
 	}
-	if h.Difficulty.Cmp(h2.Difficulty) != 0 {
+	if h.Difficulty.Cmp(&h2.Difficulty) != 0 {
 		return fmt.Errorf("difficulty: want: %v have: %v", h.Difficulty, h2.Difficulty)
 	}
 	if h.GasLimit != h2.GasLimit {
