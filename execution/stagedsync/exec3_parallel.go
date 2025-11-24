@@ -649,11 +649,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 						reader := state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
-						postTxIndex := finalVersion.TxIndex
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap()
 						ibs.SetVersionMap(localVersionMap)
-						ibs.SetTxContext(finalVersion.BlockNum, postTxIndex)
+						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 
 						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
@@ -687,41 +686,20 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
 						}
 
-						finalReads := ibs.VersionedReads()
-						postVersion := finalVersion
-						postVersion.TxIndex = postTxIndex
-						if finalReads != nil {
-							blockExecutor.blockIO.RecordReads(postVersion, finalReads)
-						}
+						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
+						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
 
 						finalWrites := ibs.VersionedWrites(true)
-
-						stateWriter := state.NewBufferedWriter(pe.rs, nil)
-
-						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
-							return state.StateUpdates{}, err
-						}
-
-						stateUpdates := stateWriter.WriteSet()
-
 						if len(finalWrites) > 0 {
-							blockExecutor.blockIO.RecordWrites(postVersion, finalWrites)
+							blockExecutor.blockIO.RecordWrites(finalVersion, finalWrites)
 							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
-						finalAccesses := map[common.Address]struct{}{}
-						if finalReads != nil {
-							finalReads.Scan(func(vr *state.VersionedRead) bool {
-								finalAccesses[vr.Address] = struct{}{}
-								return true
-							})
+						stateWriter := state.NewBufferedWriter(pe.rs, nil)
+						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
+							return state.StateUpdates{}, err
 						}
-						for _, w := range finalWrites {
-							finalAccesses[w.Address] = struct{}{}
-						}
-						if len(finalAccesses) > 0 {
-							blockExecutor.blockIO.RecordAccesses(postVersion, finalAccesses)
-						}
+						stateUpdates := stateWriter.WriteSet()
 
 						return stateUpdates, nil
 					}()
