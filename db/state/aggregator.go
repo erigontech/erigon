@@ -1012,7 +1012,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		if len(t) != 8 {
 			return nil
 		}
-		if time.Now().Sub(time.Unix(0, int64(binary.BigEndian.Uint64(t)))) < lastChaintipMaxTime {
+		if time.Since(time.Unix(int64(binary.BigEndian.Uint64(t)), 0)) < lastChaintipMaxTime {
 			wasOnChaintip = true
 		}
 		return err

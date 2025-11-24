@@ -250,7 +250,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				timeBytes := make([]byte, 8)
 				now := uint64(time.Now().Unix())
 				binary.BigEndian.PutUint64(timeBytes, now)
-				err = rwTx.(kv.TemporalRwTx).Put(kv.ChaintipTiming, []byte("time"), timeBytes)
+				err = rwTx.Put(kv.ChaintipTiming, []byte("time"), timeBytes)
 				if err != nil {
 					return nil, rwTx, err
 				}
