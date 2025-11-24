@@ -424,6 +424,7 @@ type Message struct {
 	SkipAccountChecks bool // same as checkNonce
 	SkipL1Charging    bool
 	TxRunMode         MessageRunMode // deprecated (shoudl be)
+	TxRunContext      *MessageRunContext
 	Tx                Transaction
 	EffectiveGas      uint64 // amount of gas effectively used by transaction (used in ArbitrumSubmitRetryableTx)
 }
