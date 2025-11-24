@@ -724,7 +724,7 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
-	IsArbitrum, IsStylus                              bool
+	IsArbitrum, IsStylus, IsDia                       bool
 	ArbOSVersion                                      uint64
 }
 
