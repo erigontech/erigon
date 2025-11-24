@@ -267,7 +267,7 @@ func (c *Contract) JumpDest() *JumpDestCache {
 
 // UseMultiGas attempts the use gas, subtracts it, increments usedMultiGas, and returns true on success
 func (c *Contract) UseMultiGas(multiGas multigas.MultiGas, logger *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
-	if !c.useGas(multiGas.SingleGas(), logger, reason) {
+	if !c.UseGas(multiGas.SingleGas(), logger, reason) {
 		return false
 	}
 	c.UsedMultiGas.SaturatingAddInto(multiGas)
