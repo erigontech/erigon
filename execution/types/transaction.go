@@ -442,20 +442,6 @@ func (msg *Message) SetAccessList(accessList AccessList)    { msg.accessList = a
 func (msg *Message) SetSkipAccountCheck(skipCheck bool)     { msg.SkipAccountChecks = skipCheck }
 func (msg *Message) SetBlobHashes(blobHashes []common.Hash) { msg.blobHashes = blobHashes }
 
-type MessageRunMode uint8
-
-const (
-	MessageCommitMode MessageRunMode = iota
-	MessageGasEstimationMode
-	MessageEthcallMode
-	MessageReplayMode
-)
-
-// these message modes are executed onchain so cannot make any gas shortcuts
-func (m MessageRunMode) ExecutedOnChain() bool { // can use isFree for that??
-	return m == MessageCommitMode || m == MessageReplayMode
-}
-
 // eof arbitrum
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
