@@ -201,9 +201,10 @@ func (hi *HistoryRangeAsOfFiles) Next() ([]byte, []byte, error) {
 type HistoryRangeAsOfDB struct {
 	largeValues bool
 	roTx        kv.Tx
-	valsC       kv.Cursor
-	valsCDup    kv.CursorDupSort
+	valsC       *MultiCursor
+	valsCDup    *MultiCursorDupSort
 	valsTable   string
+	h           *History
 
 	from, toPrefix []byte
 	orderAscend    order.By
@@ -247,7 +248,7 @@ func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 	var seek []byte
 	var err error
 	if hi.valsC == nil {
-		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
+		if hi.valsC, err = hi.multiValsCursor(hi.roTx); err != nil {
 			return err
 		}
 		firstKey, _, err := hi.valsC.Seek(hi.from)
@@ -290,7 +291,7 @@ func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 	var seek []byte
 	var err error
 	if hi.valsCDup == nil {
-		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
+		if hi.valsCDup, err = hi.multiValsDupCursor(hi.roTx); err != nil {
 			return err
 		}
 		seek = hi.from
@@ -374,6 +375,16 @@ func (hi *HistoryRangeAsOfDB) Next() ([]byte, []byte, error) {
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
 	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
+}
+
+func (hi *HistoryRangeAsOfDB) multiValsCursor(tx kv.Tx) (*MultiCursor, error) {
+	tables := hi.h.ValuesTables(tx)
+	return NewMultiCursor(tx, hi.valsTable, tables)
+}
+
+func (hi *HistoryRangeAsOfDB) multiValsDupCursor(tx kv.Tx) (*MultiCursorDupSort, error) {
+	tables := hi.h.ValuesTables(tx)
+	return NewMultiCursorDupSort(tx, hi.valsTable, tables)
 }
 
 // HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"

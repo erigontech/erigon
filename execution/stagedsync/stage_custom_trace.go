@@ -483,10 +483,10 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 
 	var tables []string
 	if produce.ReceiptDomain {
-		tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
+		tables = append(tables, tx.Debug().DomainTables(kv.ReceiptDomain)...)
 	}
 	if produce.RCacheDomain {
-		tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
+		tables = append(tables, tx.Debug().DomainTables(kv.RCacheDomain)...)
 	}
 	if produce.LogAddr {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)

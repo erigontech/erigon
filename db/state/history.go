@@ -952,11 +952,8 @@ type HistoryRoTx struct {
 
 	trace bool
 
-	valsC    kv.Cursor
-	valsCDup kv.CursorDupSort
-
-	multiValsC    *MultiCursor
-	multiValsCDup *MultiCursorDupSort
+	valsC    *MultiCursor
+	valsCDup *MultiCursorDupSort
 	//valsCSharded    map[uint64]kv.Cursor
 	valsCDupSharded map[uint64]kv.CursorDupSort
 
@@ -1324,28 +1321,28 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 //		return ht.valsCDup, nil
 //	}
 func (ht *HistoryRoTx) multiValsCursor(tx kv.Tx) (*MultiCursor, error) {
-	if ht.multiValsC != nil {
-		return ht.multiValsC, nil
+	if ht.valsC != nil {
+		return ht.valsC, nil
 	}
 	var err error
 	tables := ht.h.ValuesTables(tx)
-	ht.multiValsC, err = NewMultiCursor(tx, ht.h.ValuesTable, tables)
+	ht.valsC, err = NewMultiCursor(tx, ht.h.ValuesTable, tables)
 	if err != nil {
 		return nil, err
 	}
-	return ht.multiValsC, nil
+	return ht.valsC, nil
 }
 func (ht *HistoryRoTx) multiValsCursorDup(tx kv.Tx) (*MultiCursorDupSort, error) {
-	if ht.multiValsCDup != nil {
-		return ht.multiValsCDup, nil
+	if ht.valsCDup != nil {
+		return ht.valsCDup, nil
 	}
 	var err error
 	tables := ht.h.ValuesTables(tx)
-	ht.multiValsCDup, err = NewMultiCursorDupSort(tx, ht.h.ValuesTable, tables)
+	ht.valsCDup, err = NewMultiCursorDupSort(tx, ht.h.ValuesTable, tables)
 	if err != nil {
 		return nil, err
 	}
-	return ht.multiValsCDup, nil
+	return ht.valsCDup, nil
 }
 
 // func (ht *HistoryRoTx) valsCursorSharded(tx kv.Tx, txNum uint64) (c kv.Cursor, err error) {
@@ -1449,6 +1446,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 	dbit := &HistoryRangeAsOfDB{
 		largeValues: ht.h.HistoryLargeValues,
 		roTx:        roTx,
+		h:           ht.h,
 		valsTable:   ht.h.ValuesTable,
 		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 

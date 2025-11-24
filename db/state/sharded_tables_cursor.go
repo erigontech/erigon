@@ -15,6 +15,7 @@ type MultiCursor struct {
 	//stepSize  uint64
 
 	currentPos int
+	sharded    bool
 }
 
 type multiCursorTbl struct {
@@ -33,19 +34,32 @@ func newMultiCursor(tx kv.Tx, tblSchema string, tables []string, initCursors boo
 		tables:  make([]multiCursorTbl, len(tables)),
 		cursors: make([]kv.Cursor, len(tables)),
 	}
+	sharded := true
+	if len(tables) == 1 {
+		if tables[0] == tblSchema {
+			sharded = false
+		}
+	}
 	var step uint64
 	var err error
 	for i, tbl := range tables {
-		_, err := fmt.Sscanf(tbl, tblSchema+"_%d", &step)
-		if err != nil {
-			return nil, err
+		if sharded {
+			_, err := fmt.Sscanf(tbl, tblSchema+"_%d", &step)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			step = 0
 		}
+
 		mc.tables[i] = multiCursorTbl{table: tbl, step: step}
 	}
 
-	sort.Slice(mc.tables, func(i int, j int) bool {
-		return mc.tables[i].step < mc.tables[j].step
-	})
+	if sharded {
+		sort.Slice(mc.tables, func(i int, j int) bool {
+			return mc.tables[i].step < mc.tables[j].step
+		})
+	}
 
 	if initCursors {
 		for i, tbl := range mc.tables {
@@ -56,6 +70,8 @@ func newMultiCursor(tx kv.Tx, tblSchema string, tables []string, initCursors boo
 		}
 	}
 
+	mc.sharded = sharded
+
 	return mc, nil
 }
 
@@ -64,7 +80,7 @@ func (mc *MultiCursor) First() ([]byte, []byte, error) {
 }
 
 func (mc *MultiCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	for i, _ := range mc.tables {
+	for i := range mc.tables {
 		k, v, err := mc.cursors[i].Seek(seek)
 		if err != nil {
 			return nil, nil, err
@@ -79,7 +95,7 @@ func (mc *MultiCursor) Seek(seek []byte) ([]byte, []byte, error) {
 }
 
 func (mc *MultiCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
-	for i, _ := range mc.tables {
+	for i := range mc.tables {
 		k, v, err := mc.cursors[i].SeekExact(seek)
 		if err != nil {
 			return nil, nil, err
@@ -103,7 +119,6 @@ func (mc *MultiCursor) Next() ([]byte, []byte, error) {
 			return k, v, nil
 		}
 	}
-	mc.currentPos = len(mc.tables)
 	return nil, nil, nil
 }
 
@@ -118,7 +133,6 @@ func (mc *MultiCursor) Prev() ([]byte, []byte, error) {
 			return k, v, nil
 		}
 	}
-	mc.currentPos = 0
 	return nil, nil, nil
 }
 
@@ -137,6 +151,9 @@ func (mc *MultiCursor) Close() {
 }
 
 func (mc *MultiCursor) CursorFromStep(step uint64) (kv.Cursor, error) {
+	if !mc.sharded {
+		return mc.cursors[0], nil
+	}
 	for i, s := range mc.tables {
 		if s.step == step {
 			return mc.cursors[i], nil
@@ -176,7 +193,7 @@ func NewMultiCursorDupSort(tx kv.Tx, tblSchema string, tables []string) (*MultiC
 }
 
 func (mcd *MultiCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-	for i, _ := range mcd.tables {
+	for i := range mcd.tables {
 		k, v, err := mcd.cursor(i).SeekBothExact(key, value)
 		if err != nil {
 			return nil, nil, err
@@ -190,7 +207,7 @@ func (mcd *MultiCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte,
 }
 
 func (mcd *MultiCursorDupSort) SeekBothRange(key, value []byte) ([]byte, error) {
-	for i, _ := range mcd.tables {
+	for i := range mcd.tables {
 		k, err := mcd.cursor(i).SeekBothRange(key, value)
 		if err != nil {
 			return nil, err
@@ -257,10 +274,13 @@ func (mcd *MultiCursorDupSort) cursor(i int) kv.CursorDupSort {
 	return mcd.MultiCursor.cursors[i].(kv.CursorDupSort)
 }
 
-func (mc *MultiCursorDupSort) CursorDupSortFromStep(step uint64) (kv.CursorDupSort, error) {
-	for i, s := range mc.tables {
+func (mcd *MultiCursorDupSort) CursorDupSortFromStep(step uint64) (kv.CursorDupSort, error) {
+	if !mcd.sharded {
+		return mcd.cursor(0), nil
+	}
+	for i, s := range mcd.tables {
 		if s.step == step {
-			return mc.cursor(i), nil
+			return mcd.cursor(i), nil
 		}
 	}
 	return nil, fmt.Errorf("step %d not found", step)
