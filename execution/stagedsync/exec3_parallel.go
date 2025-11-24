@@ -702,9 +702,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
-						stateUpdates := stateWriter.WriteSet()
 
-						return stateUpdates, nil
+						return stateWriter.WriteSet(), nil
 					}()
 
 					if err != nil {
