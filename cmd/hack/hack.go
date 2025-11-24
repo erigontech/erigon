@@ -33,10 +33,8 @@ import (
 	"strings"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-	"github.com/holiman/uint256"
 
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
-	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -51,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -647,25 +644,6 @@ func scanTxs(chaindata string) error {
 	return nil
 }
 
-func devTx(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	cc := tool.ChainConfig(tx)
-	txn := types.NewTransaction(2, common.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
-	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), core.DevnetSignPrivateKey)
-	tool.Check(err)
-	buf := bytes.NewBuffer(nil)
-	err = signedTx.MarshalBinary(buf)
-	tool.Check(err)
-	fmt.Printf("%x\n", buf.Bytes())
-	return nil
-}
-
 func chainConfig(name string) error {
 	spec, err := chainspec.ChainSpecByName(name)
 	if err != nil {
@@ -789,8 +767,6 @@ func main() {
 
 	var err error
 	switch *action {
-	case "cfg":
-		flow.TestGenCfg()
 
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))
@@ -840,8 +816,6 @@ func main() {
 	case "scanTxs":
 		err = scanTxs(*chaindata)
 
-	case "devTx":
-		err = devTx(*chaindata)
 	case "chainConsfig":
 		err = chainConfig(*name)
 	case "iterate":

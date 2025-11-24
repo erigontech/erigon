@@ -31,14 +31,14 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/exec/calltracer"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -60,7 +60,7 @@ type Task interface {
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
-	ResetGasPool(*core.GasPool)
+	ResetGasPool(*protocol.GasPool)
 
 	Tx() types.Transaction
 	TxType() uint8
@@ -77,7 +77,7 @@ type Task interface {
 
 	Rules() *chain.Rules
 
-	GasPool() *core.GasPool
+	GasPool() *protocol.GasPool
 
 	IsBlockEnd() bool
 	IsHistoric() bool
@@ -197,7 +197,7 @@ type BlockResult struct {
 	Receipts types.Receipts
 }
 
-type ApplyMessage func(evm *vm.EVM, msg core.Message, gp *core.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
+type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
@@ -223,7 +223,7 @@ type TxTask struct {
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 
-	gasPool      *core.GasPool
+	gasPool      *protocol.GasPool
 	sender       *common.Address
 	message      *types.Message
 	signer       *types.Signer
@@ -369,11 +369,11 @@ func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 	t.dependencies = nil
 }
 
-func (t *TxTask) GasPool() *core.GasPool {
+func (t *TxTask) GasPool() *protocol.GasPool {
 	return t.gasPool
 }
 
-func (t *TxTask) ResetGasPool(gasPool *core.GasPool) {
+func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
 	t.gasPool = gasPool
 }
 
@@ -435,7 +435,7 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 
 		var txContext evmtypes.TxContext
 		if msg != nil {
-			txContext = core.NewEVMTxContext(msg)
+			txContext = protocol.NewEVMTxContext(msg)
 		}
 		evm.ResetBetweenBlocks(t.EvmBlockContext, txContext, ibs, vmCfg, t.Rules())
 	}
@@ -479,7 +479,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
+			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
@@ -517,7 +517,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			message, err := txTask.TxMessage()
 
 			if err != nil {
-				return evmtypes.ExecutionResult{}, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 			}
 
 			// Apply the transaction to the current state (included in the env).
@@ -525,21 +525,21 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			var applyErr error
 
 			if !calcFees {
-				applyRes, applyErr = core.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
+				applyRes, applyErr = protocol.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
 			} else {
-				applyRes, applyErr = core.ApplyMessage(evm, message, txTask.GasPool(), true, false, engine)
+				applyRes, applyErr = protocol.ApplyMessage(evm, message, txTask.GasPool(), true, false, engine)
 			}
 
 			if applyErr != nil {
-				if _, ok := applyErr.(core.ErrExecAbortError); !ok {
-					return evmtypes.ExecutionResult{}, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
+				if _, ok := applyErr.(protocol.ErrExecAbortError); !ok {
+					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
 				}
 
 				return evmtypes.ExecutionResult{}, applyErr
 			}
 
 			if applyRes == nil {
-				return evmtypes.ExecutionResult{}, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
+				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
 			}
 
 			return *applyRes, err
@@ -574,7 +574,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	evm *vm.EVM,
-	gasPool *core.GasPool,
+	gasPool *protocol.GasPool,
 	ibs *state.IntraBlockState,
 	chainConfig *chain.Config) *TxResult {
 	var result TxResult

@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -56,7 +56,7 @@ type EngineBlockDownloader struct {
 	status        atomic.Value // current Status of the downloading process, aka: is it doing anything
 	blockReader   services.FullBlockReader
 	db            kv.RoDB
-	chainRW       eth1_chain_reader.ChainReaderWriterEth1
+	chainRW       chainreader.ChainReaderWriterEth1
 	syncCfg       ethconfig.Sync
 	lock          sync.Mutex
 	logger        log.Logger
@@ -87,7 +87,7 @@ func NewEngineBlockDownloader(
 		syncCfg:       syncCfg,
 		logger:        logger,
 		blockReader:   blockReader,
-		chainRW:       eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		chainRW:       chainreader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
 		bbd:           bbd,
 		badHeaders:    badHeaders,
 	}

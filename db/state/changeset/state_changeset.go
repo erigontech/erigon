@@ -212,10 +212,20 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 					var location common.Hash
 					copy(address[:], entry.Key[:length.Addr])
 					copy(location[:], entry.Key[length.Addr:len(entry.Key)-8])
-					if entry.Value == nil {
-						fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty]\n", blockNumber, address, location)
-					} else {
+					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
+					prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
+					if len(entry.Value) > 0 {
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [%x]\n", blockNumber, address, location, entry.Value)
+					} else {
+						if keyStep != prevStep {
+							if prevStep == 0 {
+								fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
+							} else {
+								fmt.Printf("diffset (Block:%d): storage [%x %x], in prev step: {key: %d, prev: %d}\n", blockNumber, address, location, keyStep, prevStep)
+							}
+						} else {
+							fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
+						}
 					}
 				}
 			}

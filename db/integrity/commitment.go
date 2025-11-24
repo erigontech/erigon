@@ -231,23 +231,12 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 }
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
-	it, err := tx.HistoryRange(kv.AccountsDomain, int(info.blockMinTxNum), int(info.txNum)+1, order.Asc, -1)
+	touchLoggingVisitor := func(k []byte) {
+		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum(), "file", filepath.Base(f.Fullpath()))
+	}
+	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, touchLoggingVisitor)
 	if err != nil {
 		return err
-	}
-	defer it.Close()
-	var touches uint64
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return err
-		}
-		if len(k) != length.Addr {
-			return fmt.Errorf("%w: invalid account key length %d for root block %d account touches", ErrIntegrity, len(k), sd.BlockNum())
-		}
-		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum(), "file", filepath.Base(f.Fullpath()))
-		sd.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(k), nil)
-		touches++
 	}
 	logger.Info("recomputing commitment root after", "touches", touches, "file", filepath.Base(f.Fullpath()))
 	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil)
@@ -568,4 +557,125 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 	}
 	compression := statecfg.Schema.GetDomainCfg(newDomain).Compression
 	return seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
+}
+
+func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, logger log.Logger) error {
+	logger.Info("checking commitment hist at block", "blockNum", blockNum)
+	start := time.Now()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	header, err := br.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	txNumsReader := br.TxnumReader(ctx)
+	minTxNum, err := txNumsReader.Min(tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumsReader.Max(tx, blockNum)
+	if err != nil {
+		return err
+	}
+	toTxNum := maxTxNum + 1
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
+	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
+	err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
+	if err != nil {
+		return err
+	}
+	if sd.BlockNum() != blockNum {
+		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", sd.BlockNum(), blockNum)
+	}
+	if sd.TxNum() != maxTxNum {
+		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", sd.TxNum(), maxTxNum)
+	}
+	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	touchLoggingVisitor := func(k []byte) {
+		args := []any{"key", common.Address(k[:length.Addr])}
+		if len(k) > length.Addr {
+			args = append(args, "slot", common.Hash(k[length.Addr:]))
+		}
+		logger.Debug("commitment touched key", args...)
+	}
+	touchStart := time.Now()
+	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, touchLoggingVisitor)
+	if err != nil {
+		return err
+	}
+	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, touchLoggingVisitor)
+	if err != nil {
+		return err
+	}
+	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, touchLoggingVisitor)
+	if err != nil {
+		return err
+	}
+	touchDur := time.Since(touchStart)
+	logger.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
+	recalcStart := time.Now()
+	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */)
+	if err != nil {
+		return err
+	}
+	rootHash := common.Hash(root)
+	if header.Root != rootHash {
+		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
+	}
+	logger.Info(
+		"commitment root matches",
+		"blockNum", blockNum,
+		"txNum", maxTxNum,
+		"root", rootHash,
+		"totalDur", time.Since(start),
+		"touchDur", touchDur,
+		"recalcDur", time.Since(recalcStart),
+	)
+	return nil
+}
+
+func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
+	if from >= to {
+		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
+	}
+	start := time.Now()
+	for blockNum := from; blockNum < to; blockNum++ {
+		err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
+		if err != nil {
+			return err
+		}
+	}
+	dur := time.Since(start)
+	blks := to - from
+	rate := float64(blks) / dur.Seconds()
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to)
+	return nil
+}
+
+func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
+	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum)+1, order.Asc, -1)
+	if err != nil {
+		return 0, err
+	}
+	defer stream.Close()
+	var touches uint64
+	for stream.HasNext() {
+		k, _, err := stream.Next()
+		if err != nil {
+			return 0, err
+		}
+		if visitor != nil {
+			visitor(k)
+		}
+		sd.GetCommitmentCtx().TouchKey(d, string(k), nil)
+		touches++
+	}
+	return touches, nil
 }

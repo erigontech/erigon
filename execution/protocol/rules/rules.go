@@ -37,8 +37,6 @@ import (
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
 // blockchain during header verification.
-//
-//go:generate mockgen -typed=true -destination=./chain_header_reader_mock.go -package=consensus . ChainHeaderReader
 type ChainHeaderReader interface {
 	// Config retrieves the blockchain's chain configuration.
 	Config() *chain.Config
@@ -71,8 +69,6 @@ type ChainHeaderReader interface {
 
 // ChainReader defines a small collection of methods needed to access the local
 // blockchain during header and/or uncle verification.
-//
-//go:generate mockgen -typed=true -destination=./chain_reader_mock.go -package=consensus . ChainReader
 type ChainReader interface {
 	ChainHeaderReader
 	// GetBlock retrieves a block from the database by hash and number.

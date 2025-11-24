@@ -60,6 +60,17 @@ var hashersPool = sync.Pool{
 	},
 }
 
+// hash or if RLP < 32 bytes --> RLP
+func CalcNodeHash(n Node) ([]byte, error) {
+	h := newHasher(false)
+	var hn common.Hash
+	_, err := h.hash(n, false, hn[:])
+	if err != nil {
+		return nil, err
+	}
+	return hn[:], nil
+}
+
 func newHasher(valueNodesRlpEncoded bool) *hasher {
 	h := hashersPool.Get().(*hasher)
 	h.valueNodesRlpEncoded = valueNodesRlpEncoded
