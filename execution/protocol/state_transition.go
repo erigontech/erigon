@@ -658,7 +658,6 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			// authority is added to accessed_address in prepare step
 
 			// BAL: captures authorities even if validation fails
-			// st.state.VersionRead(authority, state.AddressPath, common.Hash{}, state.MapRead, st.state.Version(), nil)
 			st.state.MarkAddressAccess(authority)
 
 			// 4. authority code should be empty or already delegated
