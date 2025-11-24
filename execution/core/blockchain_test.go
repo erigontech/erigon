@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -191,6 +193,56 @@ func TestLastBlock(t *testing.T) {
 	if chain.TopBlock.Hash() != rawdb.ReadHeadBlockHash(tx) {
 		t.Fatalf("Write/Get HeadBlockHash failed")
 	}
+}
+
+func TestBlockAccessListIsPersisted(t *testing.T) {
+	prevExec3 := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	defer func() { dbg.Exec3Parallel = prevExec3 }()
+	t.Setenv("ERIGON_EXEC3_PARALLEL", "true")
+	t.Setenv("EXEC3_PARALLEL", "true")
+
+	txIO := state.NewVersionedIO(0)
+	txVersion := state.Version{BlockNum: 1, TxIndex: 0}
+	addr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+
+	readKey := common.HexToHash("0x01")
+	readSet := state.ReadSet{
+		addr: {
+			state.AccountKey{Path: state.StoragePath, Key: readKey}: {
+				Address: addr,
+				Path:    state.StoragePath,
+				Key:     readKey,
+				Version: txVersion,
+			},
+		},
+	}
+	txIO.RecordReads(txVersion, readSet)
+
+	write := &state.VersionedWrite{
+		Address: addr,
+		Path:    state.BalancePath,
+		Version: txVersion,
+		Val:     *uint256.NewInt(1),
+	}
+	txIO.RecordWrites(txVersion, state.VersionedWrites{write})
+	txIO.RecordAccesses(txVersion, map[common.Address]struct{}{addr: {}})
+
+	header := &types.Header{
+		Number:     big.NewInt(1),
+		ParentHash: common.HexToHash("0x01"),
+		GasLimit:   params.GenesisGasLimit,
+		Time:       1,
+	}
+
+	block := types.NewBlockWithHeader(header)
+	bal := stagedsync.CreateBAL(1, txIO)
+	require.NotEmpty(t, bal)
+	block.SetBlockAccessList(bal)
+
+	require.NotNil(t, block.Header().BlockAccessListHash)
+	require.Equal(t, bal.Hash(), *block.Header().BlockAccessListHash)
+	require.Equal(t, bal.Hash(), block.BlockAccessList().Hash())
 }
 
 // Tests that given a starting canonical chain of a given size, it can be extended

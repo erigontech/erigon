@@ -196,7 +196,6 @@ func (evm *EVM) call(typ OpCode, caller common.Address, callerAddress common.Add
 
 	// BAL: record address access even if call fails due to gas/call depth and to precompiles
 	evm.intraBlockState.MarkAddressAccess(addr)
-	//evm.intraBlockState.VersionRead(addr, state.AddressPath, common.Hash{}, state.MapRead, evm.intraBlockState.Version(), accounts.Account{})
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if evm.Config().Tracer != nil {
@@ -303,7 +302,6 @@ func (evm *EVM) call(typ OpCode, caller common.Address, callerAddress common.Add
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
 		evm.intraBlockState.RevertToSnapshot(snapshot, err)
-		//evm.intraBlockState.VersionRead(addr, state.AddressPath, common.Hash{}, state.MapRead, evm.intraBlockState.Version(), accounts.Account{})
 		if err != ErrExecutionReverted {
 			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 				evm.Config().Tracer.OnGasChange(gas, 0, tracing.GasChangeCallFailedExecution)
@@ -390,7 +388,6 @@ func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemai
 
 	// BAL: record target address even on failed CREATE/CREATE2 calls
 	evm.intraBlockState.MarkAddressAccess(address)
-	//evm.intraBlockState.VersionRead(address, state.AddressPath, common.Hash{}, state.MapRead, evm.intraBlockState.Version(), accounts.Account{})
 
 	if evm.Config().Tracer != nil {
 		evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gasRemaining, value, nil)
