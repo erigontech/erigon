@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
 )
 
 const (
@@ -148,7 +147,7 @@ func (s *Sentinel) listenForPeers() {
 	}
 }
 
-func (s *Sentinel) connectToBootnodes() error {
+/*func (s *Sentinel) connectToBootnodes() error {
 	for i := range s.discoverConfig.Bootnodes {
 		if err := s.discoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
 			if !enr.IsNotFound(err) {
@@ -160,7 +159,7 @@ func (s *Sentinel) connectToBootnodes() error {
 	multiAddresses := convertToMultiAddr(s.discoverConfig.Bootnodes)
 	s.connectWithAllPeers(multiAddresses)
 	return nil
-}
+}*/
 
 /*
 func (s *Sentinel) setupENR(

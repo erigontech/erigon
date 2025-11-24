@@ -17,22 +17,9 @@
 package sentinel
 
 import (
-	"crypto/ecdsa"
-	"fmt"
-	"net"
-
 	"github.com/c2h5oh/datasize"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
-
-	"github.com/libp2p/go-libp2p"
-	mplex "github.com/libp2p/go-libp2p-mplex"
-	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/p2p/security/noise"
-	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
-	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type SentinelConfig struct {
@@ -61,6 +48,7 @@ type SentinelConfig struct {
 	MaxPeerCount       uint64
 }
 
+/*
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {
 	privBytes := privkey.D.Bytes()
 	if len(privBytes) < 32 {
@@ -151,3 +139,4 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 	options = append(options, libp2p.Ping(false))
 	return options, nil
 }
+*/

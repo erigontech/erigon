@@ -103,6 +103,11 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		return nil, err
 	}
 
+	// connect to bootnodes
+	if err := p.connectToBootnodes(ctx, discCfg); err != nil {
+		return nil, err
+	}
+
 	// setup ENR
 	if err := p.setupENR(); err != nil {
 		return nil, err

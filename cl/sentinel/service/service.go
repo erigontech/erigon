@@ -26,7 +26,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -47,22 +45,23 @@ var _ sentinelproto.SentinelServer = (*SentinelServer)(nil)
 type SentinelServer struct {
 	sentinelproto.UnimplementedSentinelServer
 
-	ctx            context.Context
-	sentinel       *sentinel.Sentinel
-	gossipNotifier *gossipNotifier
+	ctx      context.Context
+	sentinel *sentinel.Sentinel
+	//gossipNotifier *gossipNotifier
 
 	logger log.Logger
 }
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
-		sentinel:       sentinel,
-		ctx:            ctx,
-		gossipNotifier: newGossipNotifier(),
-		logger:         logger,
+		sentinel: sentinel,
+		ctx:      ctx,
+		//gossipNotifier: newGossipNotifier(),
+		logger: logger,
 	}
 }
 
+/*
 // extractSubnetIndexByGossipTopic takes a topic and extract the blob sidecar
 func extractSubnetIndexByGossipTopic(name string) int {
 	// e.g blob_sidecar_3, we want to extract 3
@@ -79,7 +78,7 @@ func extractSubnetIndexByGossipTopic(name string) int {
 		return -1
 	}
 	return index
-}
+}*/
 
 //BanPeer(context.Context, *Peer) (*EmptyMessage, error)
 
@@ -412,35 +411,6 @@ func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sent
 	return &sentinelproto.EmptyMessage{}, nil*/
 	panic("do not call this")
 	return nil, nil
-}
-
-func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
-	if isDiagEnabled {
-		diaglib.Send(diaglib.PeerStatisticMsgUpdate{
-			PeerName: "TODO",
-			PeerType: "Sentinel",
-			PeerID:   peerID,
-			Inbound:  inbound,
-			MsgType:  msgType,
-			MsgCap:   msgCap,
-			Bytes:    bytes,
-		})
-	}
-}
-
-func parseTopic(input string) (string, string) {
-	// e.g /eth2/d31f6191/blob_sidecar_3/ssz_snappy
-	parts := strings.Split(input, "/")
-
-	if len(parts) < 4 {
-		return "unknown", "unknown"
-	}
-
-	capability := parts[1]
-	topick := parts[3]
-
-	return capability, topick
 }
 
 type ResponseCode int

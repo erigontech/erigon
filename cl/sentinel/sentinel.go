@@ -21,12 +21,10 @@ import (
 	"fmt"
 	"net/http"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/go-chi/chi/v5"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -35,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -255,79 +252,6 @@ func New(
 	return s, nil
 }
 
-func (s *Sentinel) observeBandwidth(ctx context.Context) {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	for {
-		countAttSubnetsSubscribed, countColumnSidecarSubscribed := func() (attCount int, columnSidecarCount int) {
-			if s.subManager == nil {
-				return
-			}
-			s.GossipManager().subscriptions.Range(func(key, value any) bool {
-				sub := value.(*GossipSubscription)
-				sub.lock.Lock()
-				defer sub.lock.Unlock()
-				if sub.topic == nil {
-					return true
-				}
-				if strings.Contains(sub.topic.String(), "beacon_attestation") && sub.subscribed.Load() {
-					attCount++
-				}
-				if strings.Contains(sub.topic.String(), "data_column_sidecar") && sub.subscribed.Load() {
-					columnSidecarCount++
-				}
-				return true
-			})
-			return
-		}()
-
-		multiplierForAdaptableTraffic := 1.0
-		if s.cfg.AdaptableTrafficRequirements {
-			multiplierForAdaptableTraffic = ((float64(countAttSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
-			multiplierForAdaptableTraffic += ((float64(countColumnSidecarSubscribed) / float64(s.cfg.BeaconConfig.NumberOfColumns)) * 16)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			totals := s.p2p.BandwidthCounter().GetBandwidthTotals()
-			monitor.ObserveTotalInBytes(totals.TotalIn)
-			monitor.ObserveTotalOutBytes(totals.TotalOut)
-			minBound := datasize.KB
-			// define rate cap
-			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
-			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
-			peers := s.p2p.Host().Network().Peers()
-			maxPeersToBan := 16
-			// do not ban peers if we have less than 1/8 of max peer count
-			if len(peers) <= maxPeersToBan {
-				continue
-			}
-			maxPeersToBan = min(maxPeersToBan, len(peers)-maxPeersToBan)
-
-			peersToBan := make([]peer.ID, 0, len(peers))
-			// Check which peers should be banned
-			for _, p := range peers {
-				// get peer bandwidth
-				peerBandwidth := s.p2p.BandwidthCounter().GetBandwidthForPeer(p)
-				// check if peer is over limit
-				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
-					peersToBan = append(peersToBan, p)
-				}
-			}
-			// if we have more than 1/8 of max peer count to ban, limit to maxPeersToBan
-			if len(peersToBan) > maxPeersToBan {
-				peersToBan = peersToBan[:maxPeersToBan]
-			}
-			// ban hammer
-			for _, p := range peersToBan {
-				s.Peers().SetBanStatus(p, true)
-				s.Host().Peerstore().RemovePeer(p)
-				s.Host().Network().ClosePeer(p)
-			}
-		}
-	}
-}
-
 func (s *Sentinel) ReqRespHandler() http.Handler {
 	return s.httpApi
 }
@@ -353,9 +277,9 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.p2p.UDPv5Listener().LocalNode(),
 		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
 
-	if err := s.connectToBootnodes(); err != nil {
+	/*if err := s.connectToBootnodes(); err != nil {
 		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)
-	}
+	}*/
 	// Configuring handshake
 	s.p2p.Host().Network().Notify(&network.NotifyBundle{
 		ConnectedF: s.onConnection,
@@ -369,7 +293,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 
 	go s.listenForPeers()
 	//go s.forkWatcher()
-	go s.observeBandwidth(s.ctx)
+	//go s.observeBandwidth(s.ctx)
 
 	return s.LocalNode(), nil
 }
