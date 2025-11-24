@@ -5,6 +5,7 @@ description: Contributing to the Erigon 3 Documentation
 # Contributing
 
 This documentation is powered by Gitbook but can be edited locally by using [MdBook](https://rust-lang.github.io/mdBook).
+This documentation is powered by Gitbook but can be edited locally by using [MdBook](https://rust-lang.github.io/mdBook).
 
 To contribute to the Erigon Docs, you can either:
 
