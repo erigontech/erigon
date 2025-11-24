@@ -1,0 +1,165 @@
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package state
+
+import (
+	"bytes"
+	"container/heap"
+	"context"
+	"fmt"
+
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/seg"
+)
+
+// this is an internal function which helps to filter content of the history snapshots files
+// and deduplicate values in it.
+//
+// This function is supposed to be used only as part of the snapshot tooling
+// to help rebuilding existing snapshots. It should not be used for for
+// background merging process because it is not memory-efficient
+func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet) error {
+	if !r.any() {
+		return nil
+	}
+
+	var decomp *seg.Decompressor
+
+	fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
+	datPath := ht.h.vNewFilePath(fromStep, toStep)
+	idxPath := ht.h.vAccessorNewFilePath(fromStep, toStep)
+
+	comp, err := seg.NewCompressor(ctx, "dedup hist "+ht.h.FilenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger)
+	if err != nil {
+		return fmt.Errorf("deduo %s history compressor: %w", ht.h.FilenameBase, err)
+	}
+
+	pagedWr := ht.datarWriter(comp)
+
+	var cp CursorHeap
+	heap.Init(&cp)
+
+	dedupKeyEFs := make(map[string][]uint64) // string because slice can not be a key in Golang
+
+	for _, item := range indexFiles {
+		g := ht.iit.dataReader(item.decompressor)
+		g.Reset(0)
+		if g.HasNext() {
+			var g2 *seg.PagedReader
+			for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
+				if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
+					g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
+					break
+				}
+			}
+			if g2 == nil {
+				panic(fmt.Sprintf("for file: %s, not found corresponding file to merge", g.FileName()))
+			}
+			key, _ := g.Next(nil)
+			val, _ := g.Next(nil)
+			heap.Push(&cp, &CursorItem{
+				t:          FILE_CURSOR,
+				idx:        g,
+				hist:       g2,
+				key:        key,
+				val:        val,
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				reverse:    false,
+			})
+		}
+	}
+	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
+	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
+	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
+	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
+	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
+	var lastKey, valBuf []byte
+	var keyCount int
+	for cp.Len() > 0 {
+		lastKey = append(lastKey[:0], cp[0].key...)
+		// Advance all the items that have this key (including the top)
+		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
+			ci1 := heap.Pop(&cp).(*CursorItem)
+			count := multiencseq.Count(ci1.startTxNum, ci1.val)
+
+			seq := multiencseq.ReadMultiEncSeq(ci1.startTxNum, ci1.val)
+			ss := seq.Iterator(0)
+
+			var dedupVal *[]byte
+			var prevTxNum uint64
+
+			for ss.HasNext() {
+				txNum, err := ss.Next()
+				if err != nil {
+					panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.idx.FileName(), ci1.key))
+				}
+
+				if !ci1.hist.HasNext() {
+					panic(fmt.Errorf("assert: no value??? %s, txNum=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), txNum, count, lastKey, ci1.key))
+				}
+
+				var k, v []byte
+				k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
+
+				if dedupVal != nil && bytes.Equal(*dedupVal, v) {
+					dedupKeyEFs[string(ci1.key)] = append(dedupKeyEFs[string(ci1.key)], prevTxNum)
+					prevTxNum = txNum
+					continue
+				}
+
+				dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
+				dedupVal = &dd
+				prevTxNum = txNum
+
+				if err = pagedWr.Add(k, v); err != nil {
+					return err
+				}
+			}
+
+			// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
+			keyCount += int(count)
+			if ci1.idx.HasNext() {
+				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+				heap.Push(&cp, ci1)
+			}
+		}
+	}
+	if err := pagedWr.Compress(); err != nil {
+		return err
+	}
+	comp.Close()
+	comp = nil
+	if decomp, err = seg.NewDecompressor(datPath); err != nil {
+		return err
+	}
+
+	indexIn, err := ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps, dedupKeyEFs)
+	if err != nil {
+		return err
+	}
+
+	if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		return err
+	}
+
+	return nil
+}
