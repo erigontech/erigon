@@ -201,7 +201,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO)
-						log.Info("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "validate", bal.Validate())
+						log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
 
 						if pe.cfg.chainConfig.IsGlamsterdam(applyResult.BlockTime) {
 							headerBALHash := *lastHeader.BlockAccessListHash
