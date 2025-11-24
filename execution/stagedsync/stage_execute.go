@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -491,6 +492,13 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 				"externalTx", useExternalTx,
 			)
+		}
+	} else {
+		timeBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(timeBytes, uint64(time.Now().Unix()))
+		err = tx.(kv.TemporalRwTx).Put(kv.ChaintipTiming, []byte("time"), timeBytes)
+		if err != nil {
+			return err
 		}
 	}
 

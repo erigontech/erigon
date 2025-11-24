@@ -998,9 +998,29 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	if dbg.NoPrune() {
 		return false, nil
 	}
+
 	// On tip-of-chain timeout is about `3sec`
 	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
 	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
+	lastChaintipMaxTime := 3 * time.Hour
+	wasOnChaintip := false
+	err = at.a.db.View(ctx, func(tx kv.Tx) error {
+		t, err := tx.GetOne(kv.ChaintipTiming, []byte("time"))
+		if err != nil {
+			return err
+		}
+		if time.Now().Sub(time.Unix(0, int64(binary.BigEndian.Uint64(t)))) < lastChaintipMaxTime {
+			wasOnChaintip = true
+		}
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+
+	if wasOnChaintip {
+		return false, nil
+	}
 
 	furiousPrune := timeout > 5*time.Hour
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute

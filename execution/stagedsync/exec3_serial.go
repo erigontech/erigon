@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -243,6 +244,13 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				pruneTimeout = 10 * time.Hour
 
 				if err = rwTx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+					return nil, rwTx, err
+				}
+			} else {
+				timeBytes := make([]byte, 8)
+				binary.BigEndian.PutUint64(timeBytes, uint64(time.Now().Unix()))
+				err = rwTx.Put(kv.ChaintipTiming, []byte("time"), timeBytes)
+				if err != nil {
 					return nil, rwTx, err
 				}
 			}

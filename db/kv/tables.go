@@ -264,6 +264,9 @@ const (
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
+
+	// Chaintip timing
+	ChaintipTiming = "ChaintipTiming"
 )
 
 // Keys
@@ -428,6 +431,7 @@ var ChaindataTables = []string{
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
 	HashedStorageDeprecated,
+	ChaintipTiming,
 }
 
 const (
