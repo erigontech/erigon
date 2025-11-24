@@ -384,7 +384,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	defer func() {
 		if dbg.Enabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipts",
-				"blockNum", block.NumberU64(),
+				"blockNum", blockNum,
 				"nil receipts in db", receiptsFromDB == nil)
 		}
 	}()
