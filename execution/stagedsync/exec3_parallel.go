@@ -206,7 +206,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if pe.cfg.chainConfig.IsGlamsterdam(applyResult.BlockTime) {
 							headerBALHash := *lastHeader.BlockAccessListHash
 							if headerBALHash != b.BlockAccessList().Hash() {
-								return fmt.Errorf("block %d: invalid block access list, hash mistmatch: got %s expected %s", applyResult.BlockNum, headerBALHash, b.BlockAccessList().Hash())
+								return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, headerBALHash, b.BlockAccessList().Hash())
 							}
 							if headerBALHash != bal.Hash() {
 								return fmt.Errorf("block %d: block access list mismatch: got %s expected %s", applyResult.BlockNum, headerBALHash, bal.Hash())
