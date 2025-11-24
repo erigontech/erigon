@@ -1009,6 +1009,9 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		if err != nil {
 			return err
 		}
+		if len(t) != 8 {
+			return nil
+		}
 		if time.Now().Sub(time.Unix(0, int64(binary.BigEndian.Uint64(t)))) < lastChaintipMaxTime {
 			wasOnChaintip = true
 		}
@@ -1019,6 +1022,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	}
 
 	if wasOnChaintip {
+		log.Info("was on chaintip skipped pruning")
 		return false, nil
 	}
 

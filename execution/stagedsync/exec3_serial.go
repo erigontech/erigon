@@ -248,11 +248,13 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				}
 			} else {
 				timeBytes := make([]byte, 8)
-				binary.BigEndian.PutUint64(timeBytes, uint64(time.Now().Unix()))
-				err = rwTx.Put(kv.ChaintipTiming, []byte("time"), timeBytes)
+				now := uint64(time.Now().Unix())
+				binary.BigEndian.PutUint64(timeBytes, now)
+				err = rwTx.(kv.TemporalRwTx).Put(kv.ChaintipTiming, []byte("time"), timeBytes)
 				if err != nil {
 					return nil, rwTx, err
 				}
+				log.Info("on chaintip", "time", now)
 			}
 
 			if _, err := rwTx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
