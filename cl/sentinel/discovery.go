@@ -148,66 +148,6 @@ func (s *Sentinel) listenForPeers() {
 	}
 }
 
-/*func (s *Sentinel) connectToBootnodes() error {
-	for i := range s.discoverConfig.Bootnodes {
-		if err := s.discoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
-			if !enr.IsNotFound(err) {
-				log.Error("[Sentinel] Could not retrieve tcp port")
-			}
-			continue
-		}
-	}
-	multiAddresses := convertToMultiAddr(s.discoverConfig.Bootnodes)
-	s.connectWithAllPeers(multiAddresses)
-	return nil
-}*/
-
-/*
-func (s *Sentinel) setupENR(
-	node *enode.LocalNode,
-) (*enode.LocalNode, error) {
-	forkId, err := s.ethClock.ForkId()
-	if err != nil {
-		return nil, err
-	}
-	nfd, err := s.ethClock.NextForkDigest()
-	if err != nil {
-		return nil, err
-	}
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, forkId))
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.CgcKey, []byte{}))
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.NfdKey, nfd))
-	return node, nil
-}
-
-func (s *Sentinel) updateENR(node *enode.LocalNode) {
-	for {
-		nextForkEpoch := s.ethClock.NextForkEpochIncludeBPO()
-		if nextForkEpoch == s.cfg.BeaconConfig.FarFutureEpoch {
-			break
-		}
-		// sleep until next fork epoch
-		wakeupTime := s.ethClock.GetSlotTime(nextForkEpoch * s.cfg.BeaconConfig.SlotsPerEpoch).Add(time.Second)
-		log.Info("[Sentinel] Sleeping until next fork epoch", "nextForkEpoch", nextForkEpoch, "wakeupTime", wakeupTime)
-		time.Sleep(time.Until(wakeupTime)) // add 1 second for safety
-		nfd, err := s.ethClock.NextForkDigest()
-		if err != nil {
-			log.Warn("[Sentinel] Could not get next fork digest", "err", err)
-			break
-		}
-		node.Set(enr.WithEntry(s.cfg.NetworkConfig.NfdKey, nfd))
-		forkId, err := s.ethClock.ForkId()
-		if err != nil {
-			log.Warn("[Sentinel] Could not get fork id", "err", err)
-			break
-		}
-		node.Set(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, forkId))
-		log.Info("[Sentinel] Updated fork id and nfd")
-	}
-}*/
-
 func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()

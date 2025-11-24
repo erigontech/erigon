@@ -23,7 +23,6 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -49,25 +48,6 @@ import (
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-)
-
-const (
-	// overlay parameters
-	gossipSubD    = 4 // topic stable mesh target count
-	gossipSubDlo  = 2 // topic stable mesh low watermark
-	gossipSubDhi  = 6 // topic stable mesh high watermark
-	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
-
-	// gossip parameters
-	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
-	gossipSubMcacheGossip = 3   // number of windows to gossip about
-	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
-	// heartbeat interval
-	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
-
-	// decayToZero specifies the terminal value that we will use when decaying
-	// a value.
-	decayToZero = 0.01
 )
 
 type Sentinel struct {
@@ -101,93 +81,9 @@ type Sentinel struct {
 	metadataLock sync.Mutex
 }
 
-/*
-func (s *Sentinel) createLocalNode(
-	privKey *ecdsa.PrivateKey,
-	ipAddr net.IP,
-	udpPort, tcpPort int,
-	tmpDir string,
-) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(s.ctx, "", tmpDir, s.logger)
-	if err != nil {
-		return nil, fmt.Errorf("could not open node's peer database: %w", err)
-	}
-	localNode := enode.NewLocalNode(db, privKey, s.logger)
-
-	ipEntry := enr.IP(ipAddr)
-	udpEntry := enr.UDP(udpPort)
-	tcpEntry := enr.TCP(tcpPort)
-
-	localNode.Set(ipEntry)
-	localNode.Set(udpEntry)
-	localNode.Set(tcpEntry)
-
-	localNode.SetFallbackIP(ipAddr)
-	localNode.SetFallbackUDP(udpPort)
-	//s.setupENR(localNode)
-	//go s.updateENR(localNode)
-
-	return localNode, nil
-}*/
-
 func (s *Sentinel) SetStatus(status *cltypes.Status) {
 	s.handshaker.SetStatus(status)
 }
-
-/*
-func (s *Sentinel) createListener() (*discover.UDPv5, error) {
-	var (
-		ipAddr  = s.cfg.IpAddr
-		port    = s.cfg.Port
-		discCfg = s.discoverConfig
-	)
-
-	ip := net.ParseIP(ipAddr)
-	if ip == nil {
-		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
-	}
-
-	var bindIP net.IP
-	var networkVersion string
-	// If the IP is an IPv4 address, bind to the correct zero address.
-	if ip.To4() != nil {
-		bindIP, networkVersion = ip.To4(), "udp4"
-	} else {
-		bindIP, networkVersion = ip.To16(), "udp6"
-	}
-
-	udpAddr := &net.UDPAddr{
-		IP:   bindIP,
-		Port: port,
-	}
-	conn, err := net.ListenUDP(networkVersion, udpAddr)
-	if err != nil {
-		return nil, err
-	}
-
-	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort), s.cfg.TmpDir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Start stream handlers
-	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
-	if err != nil {
-		return nil, err
-	}
-
-	handlers.NewConsensusHandlers(
-		s.ctx,
-		s.blockReader,
-		s.indiciesDB,
-		s.p2p.Host(),
-		s.peers,
-		s.cfg.NetworkConfig,
-		localNode,
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
-
-	return net, err
-}*/
 
 // This is just one of the examples from the libp2p repository.
 func New(
@@ -243,7 +139,6 @@ func New(
 	s.peers = peers.NewPool(s.p2p.Host())
 
 	mux := chi.NewRouter()
-	//	mux := httpreqresp.NewRequestHandler(host)
 	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host()))
 	s.httpApi = mux
 
@@ -312,90 +207,6 @@ func (s *Sentinel) HasTooManyPeers() bool {
 	active, _, _ := s.GetPeersCount()
 	return active >= int(s.cfg.MaxPeerCount)
 }
-
-// func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
-// 	ret := false
-
-// 	nodeAttnets := bitfield.NewBitvector64()
-// 	nodeSyncnets := bitfield.NewBitvector4()
-// 	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &nodeAttnets)); err != nil {
-// 		log.Trace("Could not load att subnet", "err", err)
-// 		return false
-// 	}
-// 	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &nodeSyncnets)); err != nil {
-// 		log.Trace("Could not load sync subnet", "err", err)
-// 		return false
-// 	}
-
-// 	s.subManager.subscriptions.Range(func(key, value any) bool {
-// 		sub := value.(*GossipSubscription)
-// 		sub.lock.Lock()
-// 		defer sub.lock.Unlock()
-// 		if sub.sub == nil {
-// 			return true
-// 		}
-
-// 		if !sub.subscribed.Load() {
-// 			return true
-// 		}
-
-// 		if len(sub.topic.ListPeers()) > peerSubnetTarget {
-// 			return true
-// 		}
-// 		if gossip.IsTopicBeaconAttestation(sub.sub.Topic()) {
-// 			ret = s.isPeerUsefulForAttNet(sub, nodeAttnets)
-// 			return !ret
-// 		}
-
-// 		if gossip.IsTopicSyncCommittee(sub.sub.Topic()) {
-// 			ret = s.isPeerUsefulForSyncNet(sub, nodeSyncnets)
-// 			return !ret
-// 		}
-
-// 		return true
-// 	})
-// 	return ret
-// }
-
-// func (s *Sentinel) isPeerUsefulForAttNet(sub *GossipSubscription, nodeAttnets bitfield.Bitvector64) bool {
-// 	splitTopic := strings.Split(sub.sub.Topic(), "/")
-// 	if len(splitTopic) < 4 {
-// 		return false
-// 	}
-// 	subnetIdStr, found := strings.CutPrefix(splitTopic[3], "beacon_attestation_")
-// 	if !found {
-// 		return false
-// 	}
-// 	subnetId, err := strconv.Atoi(subnetIdStr)
-// 	if err != nil {
-// 		log.Warn("Could not parse subnet id", "subnet", subnetIdStr, "err", err)
-// 		return false
-// 	}
-// 	// check if subnetIdth bit is set in nodeAttnets
-// 	return nodeAttnets.BitAt(uint64(subnetId))
-
-// }
-
-// func (s *Sentinel) isPeerUsefulForSyncNet(sub *GossipSubscription, nodeSyncnets bitfield.Bitvector4) bool {
-// 	splitTopic := strings.Split(sub.sub.Topic(), "/")
-// 	if len(splitTopic) < 4 {
-// 		return false
-// 	}
-// 	syncnetIdStr, found := strings.CutPrefix(splitTopic[3], "sync_committee_")
-// 	if !found {
-// 		return false
-// 	}
-// 	syncnetId, err := strconv.Atoi(syncnetIdStr)
-// 	if err != nil {
-// 		log.Warn("Could not parse syncnet id", "syncnet", syncnetIdStr, "err", err)
-// 		return false
-// 	}
-// 	// check if syncnetIdth bit is set in nodeSyncnets
-// 	if nodeSyncnets.BitAt(uint64(syncnetId)) {
-// 		return true
-// 	}
-// 	return false
-// }
 
 func (s *Sentinel) GetPeersCount() (active int, connected int, disconnected int) {
 	peers := s.p2p.Host().Network().Peers()
