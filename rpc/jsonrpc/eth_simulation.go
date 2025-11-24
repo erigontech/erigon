@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -172,10 +172,10 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 type simulator struct {
 	base              *types.Header
 	chainConfig       *chain.Config
-	engine            consensus.EngineReader
+	engine            protocolrules.EngineReader
 	blockReader       services.FullBlockReader
 	logger            log.Logger
-	gasPool           *core.GasPool
+	gasPool           *protocol.GasPool
 	returnDataLimit   int
 	evmCallTimeout    time.Duration
 	commitmentHistory bool
@@ -188,7 +188,7 @@ func newSimulator(
 	req *SimulationRequest,
 	header *types.Header,
 	chainConfig *chain.Config,
-	engine consensus.EngineReader,
+	engine protocolrules.EngineReader,
 	blockReader services.FullBlockReader,
 	logger log.Logger,
 	gasCap uint64,
@@ -202,7 +202,7 @@ func newSimulator(
 		engine:            engine,
 		blockReader:       blockReader,
 		logger:            logger,
-		gasPool:           new(core.GasPool).AddGas(gasCap),
+		gasPool:           new(protocol.GasPool).AddGas(gasCap),
 		returnDataLimit:   returnDataLimit,
 		evmCallTimeout:    evmCallTimeout,
 		commitmentHistory: commitmentHistory,
@@ -460,15 +460,16 @@ func (s *simulator) simulateBlock(
 	if s.traceTransfers {
 		// Transfers must be recorded as if they were logs: use a tracer that records all logs and ether transfers
 		vmConfig.Tracer = tracer.Hooks()
+		intraBlockState.SetHooks(vmConfig.Tracer)
 	}
 
 	// Apply pre-transaction state modifications before block execution.
-	engine, ok := s.engine.(consensus.Engine)
+	engine, ok := s.engine.(protocolrules.Engine)
 	if !ok {
-		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
+		return nil, nil, errors.New("rules engine reader does not support full rules.Engine")
 	}
 	systemCallCustom := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		return core.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
+		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
 	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
 	engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
@@ -533,6 +534,7 @@ func (s *simulator) simulateBlock(
 		}
 		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
 	} else {
+		//nolint:staticcheck
 		// We cannot compute the state root for historical state w/o commitment history, so we just use the zero hash (default value).
 	}
 
@@ -582,7 +584,7 @@ func (s *simulator) simulateCall(
 	}
 	msg.SetCheckGas(s.validation)
 	msg.SetCheckNonce(s.validation)
-	txCtx := core.NewEVMTxContext(msg)
+	txCtx := protocol.NewEVMTxContext(msg)
 	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
@@ -603,7 +605,7 @@ func (s *simulator) simulateCall(
 	}()
 
 	s.gasPool.AddBlobGas(msg.BlobGas())
-	result, err := core.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
+	result, err := protocol.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
 	if err != nil {
 		return nil, nil, nil, txValidationError(err)
 	}
@@ -613,7 +615,7 @@ func (s *simulator) simulateCall(
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	*cumulativeGasUsed += result.GasUsed
-	receipt := core.MakeReceipt(header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
+	receipt := protocol.MakeReceipt(header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
 	*cumulativeBlobGasUsed += receipt.BlobGasUsed
 
 	var logs []*types.Log
@@ -708,25 +710,25 @@ func txValidationError(err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, core.ErrNonceTooHigh):
+	case errors.Is(err, protocol.ErrNonceTooHigh):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeNonceTooHigh}
-	case errors.Is(err, core.ErrNonceTooLow):
+	case errors.Is(err, protocol.ErrNonceTooLow):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeNonceTooLow}
-	case errors.Is(err, core.ErrSenderNoEOA):
+	case errors.Is(err, protocol.ErrSenderNoEOA):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeSenderIsNotEOA}
-	case errors.Is(err, core.ErrFeeCapVeryHigh):
+	case errors.Is(err, protocol.ErrFeeCapVeryHigh):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
-	case errors.Is(err, core.ErrTipVeryHigh):
+	case errors.Is(err, protocol.ErrTipVeryHigh):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
-	case errors.Is(err, core.ErrTipAboveFeeCap):
+	case errors.Is(err, protocol.ErrTipAboveFeeCap):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
-	case errors.Is(err, core.ErrFeeCapTooLow):
+	case errors.Is(err, protocol.ErrFeeCapTooLow):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
-	case errors.Is(err, core.ErrInsufficientFunds):
+	case errors.Is(err, protocol.ErrInsufficientFunds):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInsufficientFunds}
-	case errors.Is(err, core.ErrIntrinsicGas):
+	case errors.Is(err, protocol.ErrIntrinsicGas):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeIntrinsicGas}
-	case errors.Is(err, core.ErrMaxInitCodeSizeExceeded):
+	case errors.Is(err, protocol.ErrMaxInitCodeSizeExceeded):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeMaxInitCodeSizeExceeded}
 	}
 	return &rpc.CustomError{

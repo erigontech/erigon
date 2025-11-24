@@ -47,8 +47,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -382,9 +382,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if baseFeeChanged {
 		p.pending.best.pendingBaseFee = pendingBaseFee
 		p.pending.worst.pendingBaseFee = pendingBaseFee
-		p.baseFee.best.pendingBastFee = pendingBaseFee
+		p.baseFee.best.pendingBaseFee = pendingBaseFee
 		p.baseFee.worst.pendingBaseFee = pendingBaseFee
-		p.queued.best.pendingBastFee = pendingBaseFee
+		p.queued.best.pendingBaseFee = pendingBaseFee
 		p.queued.worst.pendingBaseFee = pendingBaseFee
 	}
 
@@ -1714,7 +1714,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[AuthAndNonce{senderAddr.String(), mt.TxnSlot.Nonce}]; ok {
+	if _, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
@@ -1722,7 +1722,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
 			// Self authorization nonce should be senderNonce + 1
-			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce+1 {
+			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.NonceTooLow
 			}

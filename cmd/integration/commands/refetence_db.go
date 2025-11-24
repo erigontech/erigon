@@ -372,10 +372,6 @@ MainLoop:
 		if err != nil {
 			panic(err)
 		}
-		err = fileScanner.Err()
-		if err != nil {
-			panic(err)
-		}
 		if bucket == "" {
 			panic("bucket not parse")
 		}

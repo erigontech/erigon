@@ -2,7 +2,6 @@ package types
 
 import (
 	"bytes"
-	"reflect"
 	"strings"
 	"testing"
 

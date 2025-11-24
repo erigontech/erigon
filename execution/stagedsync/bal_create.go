@@ -21,14 +21,12 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO) types.BlockAccessList {
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
 		accessIndex := blockAccessIndex(txIndex)
 
-		// update reads
 		txIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
 			account := ensureAccountState(ac, vr.Address)
-			updateAccountRead(account, vr, accessIndex)
+			updateAccountRead(account, vr)
 			return true
 		})
 
-		// update writes
 		for _, vw := range txIO.WriteSet(txIndex) {
 			account := ensureAccountState(ac, vw.Address)
 			updateAccountWrite(account, vw, accessIndex)
@@ -39,7 +37,6 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO) types.BlockAccessList {
 		}
 	}
 
-	// construct BAL from map
 	bal := make([]*types.AccountChanges, 0, len(ac))
 	for _, account := range ac {
 		account.finalize()
@@ -51,13 +48,12 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO) types.BlockAccessList {
 		return bal[i].Address.Cmp(bal[j].Address) < 0
 	})
 
-	// Write BAL to text file for debugging/analysis
 	writeBALToFile(bal, blockNum)
 
 	return bal
 }
 
-func updateAccountRead(account *accountState, vr *state.VersionedRead, accessIndex uint16) {
+func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 	if vr == nil {
 		panic("vr should not be nil")
 	}

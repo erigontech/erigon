@@ -428,7 +428,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
@@ -501,7 +501,7 @@ func TestVersionMapRevert(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -562,7 +562,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 	states := []*IntraBlockState{s}
 
@@ -631,7 +631,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -720,7 +720,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -846,7 +846,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	sClean := s.Copy()

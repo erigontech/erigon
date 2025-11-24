@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
@@ -71,10 +72,11 @@ type VersionMap struct {
 	trace bool
 }
 
-func NewVersionMap() *VersionMap {
+func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 	vm := &VersionMap{
 		s: map[common.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
 	}
+	vm.WriteChanges(changes)
 	return vm
 }
 
@@ -94,6 +96,26 @@ func (vm *VersionMap) getKeyCells(addr common.Address, path AccountPath, key com
 	}
 
 	return
+}
+
+func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
+	for _, accountChanges := range changes {
+		for _, storageChanges := range accountChanges.StorageChanges {
+			for _, change := range storageChanges.Changes {
+				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+			}
+		}
+		for _, balanceChange := range accountChanges.BalanceChanges {
+			vm.Write(accountChanges.Address, BalancePath, common.Hash{}, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
+		}
+		for _, nonceChange := range accountChanges.NonceChanges {
+			vm.Write(accountChanges.Address, NoncePath, common.Hash{}, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
+		}
+		for _, codeChange := range accountChanges.CodeChanges {
+			vm.Write(accountChanges.Address, CodePath, common.Hash{}, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Data, true)
+		}
+	}
+
 }
 
 func (vm *VersionMap) Write(addr common.Address, path AccountPath, key common.Hash, v Version, data interface{}, complete bool) {

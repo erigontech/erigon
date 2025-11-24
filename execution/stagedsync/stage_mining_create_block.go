@@ -32,12 +32,11 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -132,9 +131,9 @@ type MiningCreateBlockCfg struct {
 	db                     kv.RwDB
 	miner                  MiningState
 	chainConfig            *chain.Config
-	engine                 consensus.Engine
+	engine                 rules.Engine
 	tmpdir                 string
-	blockBuilderParameters *core.BlockBuilderParameters
+	blockBuilderParameters *builder.Parameters
 	blockReader            services.FullBlockReader
 }
 
@@ -142,8 +141,8 @@ func StageMiningCreateBlockCfg(
 	db kv.RwDB,
 	miner MiningState,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
-	blockBuilderParameters *core.BlockBuilderParameters,
+	engine rules.Engine,
+	blockBuilderParameters *builder.Parameters,
 	tmpdir string,
 	blockReader services.FullBlockReader,
 ) MiningCreateBlockCfg {
@@ -243,7 +242,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := core.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
+	header := builder.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
@@ -358,14 +357,14 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 	return nil
 }
 
-func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
 	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {
 		return
 	}
 	for _, u := range nonCanonicalBlocks {
-		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
+		if builder.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
 			localUncles[u.Hash()] = u
 		} else {
 			remoteUncles[u.Hash()] = u

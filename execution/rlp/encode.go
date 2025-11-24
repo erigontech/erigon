@@ -243,7 +243,7 @@ const wordBytes = (32 << (uint64(^big.Word(0)) >> 63)) / 8
 
 func writeBigInt(i *big.Int, w *encBuffer) error {
 	if i.Sign() == -1 {
-		return errors.New("rlp: cannot encode negative *big.Int")
+		return ErrNegativeBigInt
 	}
 	bitlen := i.BitLen()
 	if bitlen <= 64 {
@@ -302,7 +302,7 @@ func writeBytes(val reflect.Value, w *encBuffer) error {
 	return nil
 }
 
-var byteType = reflect.TypeOf(byte(0))
+var byteType = reflect.TypeFor[byte]()
 
 func makeByteArrayWriter(typ reflect.Type) writer {
 	length := typ.Len()

@@ -204,8 +204,8 @@ func addErrorContext(err error, ctx string) error {
 
 var (
 	decoderInterface = reflect.TypeOf(new(Decoder)).Elem()
-	bigInt           = reflect.TypeOf(big.Int{})
-	uint256Int       = reflect.TypeOf(uint256.Int{})
+	bigInt           = reflect.TypeFor[big.Int]()
+	uint256Int       = reflect.TypeFor[uint256.Int]()
 )
 
 func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {
@@ -837,6 +837,10 @@ func (s *Stream) uint(maxbits int) (uint64, error) {
 	}
 }
 
+// Deprecated: Uint256Bytes generates unecessary garbage by
+// returning a heap buffer which is immediately converted
+// into an array and disguared.  Use Uint256() instead
+// which processed the buffer internally so it doesnt leak
 func (s *Stream) Uint256Bytes() ([]byte, error) {
 	b, err := s.bigIntBytes()
 	if err != nil {
