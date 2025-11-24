@@ -6,7 +6,7 @@
   * [Why using Erigon?](get-started/readme/why-using-erigon.md)
 * [Hardware Requirements](get-started/hardware-requirements.md)
 * [Installation](get-started/installation/README.md)
-  * [Upgrading from a previous version](get-started/installation-2/upgrading.md)
+  * [Upgrading from a previous version](get-started/installation/upgrading.md)
 * [Migrating from Geth](get-started/migrating-from-geth.md)
 * [Easy Nodes](get-started/easy-nodes/README.md)
   * [How to run a Ethereum node](get-started/easy-nodes/how-to-run-an-ethereum-node/README.md)
