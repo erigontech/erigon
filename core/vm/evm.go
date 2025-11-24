@@ -258,10 +258,10 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, arbInfo)
+		// ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, arbInfo)
 
 		var precompileMultiGas multigas.MultiGas
-		ret, gas, precompileMultiGas, err = RunPrecompiledContract(p, input, gas, evm.Config.Tracer, info)
+		ret, gas, precompileMultiGas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, arbInfo)
 		usedMultiGas.SaturatingAddInto(precompileMultiGas)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
@@ -361,10 +361,10 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 //
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
-func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
 	callerContract, ok := caller.(*Contract)
 	if !ok {
-		return nil, gas, fmt.Errorf("caller is not of type *Contract")
+		return nil, gas, multigas.ZeroGas(), fmt.Errorf("caller is not of type *Contract")
 	}
 	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false, &AdvancedPrecompileCall{
 		PrecompileAddress: addr,
@@ -380,7 +380,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 // as parameters while disallowing any modifications to the state during the call.
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
-func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
 	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false, &AdvancedPrecompileCall{
 		PrecompileAddress: addr,
 		ActingAsAddress:   addr,

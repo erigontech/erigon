@@ -33,3 +33,8 @@ type AdvancedPrecompile interface {
 	RunAdvanced(input []byte, suppliedGas uint64, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, usedMultiGas multigas.MultiGas, err error)
 	PrecompiledContract
 }
+
+type arbosAwarePrecompile interface {
+	SetArbosVersion(arbosVersion uint64)
+	PrecompiledContract
+}
