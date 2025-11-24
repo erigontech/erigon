@@ -19,7 +19,7 @@ jobs:
       changed_files: ${{ steps.filter.outputs.changed_files }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Check for changes within out-of-scope dirs or files
         id: filter
@@ -66,7 +66,7 @@ jobs:
           
       - name: "Checkout code with submodules and large files (lfs)"
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
           submodules: recursive
