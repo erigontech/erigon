@@ -40,7 +40,9 @@
 * [Docker Compose](get-started/fundamentals/docker-compose.md)
 * [Otterscan](get-started/fundamentals/otterscan.md)
 * [web3 Wallet](get-started/fundamentals/web3-wallet.md)
-* [Interacting with Erigon](fundamentals/interacting-with-erigon/README.md)
+
+## INTERACTING WITH ERIGON
+
   * [RPC Service](fundamentals/interacting-with-erigon/interacting-with-erigon/README.md)
     * [eth](fundamentals/interacting-with-erigon/interacting-with-erigon/eth.md)
     * [erigon](fundamentals/interacting-with-erigon/interacting-with-erigon/erigon.md)
