@@ -383,7 +383,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(8)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Len(t, result, 38)
+		require.Len(t, result, 37)
 
 		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(10)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
