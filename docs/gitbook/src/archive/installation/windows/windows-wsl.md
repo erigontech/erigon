@@ -8,12 +8,12 @@ WSL enables you to run a complete GNU/Linux environment natively within Windows,
 
 ### Installation and Version
 
-* Official Installation: Follow Microsoft's official guide to install WSL: [https://learn.microsoft.com/en-us/windows/wsl/install](https://learn.microsoft.com/en-us/windows/wsl/install)
-* Required Version: WSL Version 2 is the only version supported by Erigon.
+* Official Installation: Follow Microsoft's official guide to install WSL**2**: [https://learn.microsoft.com/en-us/windows/wsl/install](https://learn.microsoft.com/en-us/windows/wsl/install)
+* Required Version: WSL version 2 is the only version supported by Erigon.
 
 ### Building Erigon
 
-Once WSL 2 is set up, you can build and run Erigon exactly as you would on a regular Linux distribution.
+Once WSL2 is set up, you can build and run Erigon exactly as you would on a regular Linux distribution.
 
 {% content-ref url="../linux-and-macos/" %}
 [linux-and-macos](../linux-and-macos/)
@@ -23,10 +23,10 @@ Once WSL 2 is set up, you can build and run Erigon exactly as you would on a reg
 
 The location of your Erigon data directory (`datadir`) is the most crucial factor for performance in WSL.
 
-| **Data Location**                                                         | **Performance & Configuration**                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC daemon works efficiently.                                                                                                                                        |
-| Avoid: Mounted Windows Partitions (e.g., `/mnt/c/`, `/mnt/d/`)            | Significantly Affected Performance. This is due to: \<ul>\<li>The mounted drives using DrvFS (a slower network file system).\</li>\<li>The MDBX database locking the data for exclusive access, limiting simultaneous processes.\</li>\</ul> |
+| **Data Location**                                                         | **Performance & Configuration**                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------- |------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC daemon works efficiently.                                                                                                                                                                                                                                                                                                                                                            |
+| Avoid: Mounted Windows Partitions (e.g., `/mnt/c/`, `/mnt/d/`)            | Performance is reduced as the native Windows drives are mounted using DrvFS (a slower network file system). This affects MDBX database access, and complicates filesystem operations that expect unix-like behaviour. Setting [`automount.options=metadata`](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#automount-options) in `/etc/wsl.conf` in your distribution is recommended, but not required. Note that Docker on Windows is also affected. |
 
 ### RPC Daemon Configuration
 
@@ -43,6 +43,6 @@ The choice of data location directly impacts how you must configure the RPC daem
 
 ### Networking Notes
 
-Be aware that the default WSL 2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
+Be aware that the default WSL2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
 
-If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL 2 IP address when configuring NAT on your router.
+If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring NAT on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).

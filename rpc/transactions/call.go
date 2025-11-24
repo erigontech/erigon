@@ -155,7 +155,7 @@ func DoCall(
 	}
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
-		if err := stateOverrides.Override(state); err != nil {
+		if err := stateOverrides.OverrideAndCommit(state, blockCtx.Rules(chainConfig)); err != nil {
 			return nil, err
 		}
 	}
