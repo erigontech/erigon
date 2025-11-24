@@ -10,7 +10,7 @@ To contribute to the Erigon Docs, you can either:
 
 1. Create an Issue: Open a new issue in the main branch to suggest changes or report problems.
 2. Open a Branch and Submit a PR:
-   1. Install MdBook with  `cargo mdbook` ;
+   1. Install MdBook;
    2. Create a new branch in GitHub;
    3. Before proceeding, make a backup of the `docs/gitbook/src/SUMMARY.md` file. Remove all empty lines and any lines starting with `##` to ensure compatibility with MdBook.
    4. To render the documentation locally, navigate in your terminal to the `/docs/gitbook` folder and run `mdbook serve`.
