@@ -43,20 +43,20 @@
 
 ## INTERACTING WITH ERIGON
 
-  * [RPC Service](interacting-with-erigon/interacting-with-erigon/README.md)
-    * [eth](interacting-with-erigon/interacting-with-erigon/eth.md)
-    * [erigon](interacting-with-erigon/interacting-with-erigon/erigon.md)
-    * [engine](interacting-with-erigon/interacting-with-erigon/engine.md)
-    * [web3](interacting-with-erigon/interacting-with-erigon/web3.md)
-    * [net](interacting-with-erigon/interacting-with-erigon/net.md)
-    * [debug](interacting-with-erigon/interacting-with-erigon/debug.md)
-    * [trace](interacting-with-erigon/interacting-with-erigon/trace.md)
-    * [txpool](interacting-with-erigon/interacting-with-erigon/txpool.md)
-    * [admin](interacting-with-erigon/interacting-with-erigon/admin.md)
-    * [bor](interacting-with-erigon/interacting-with-erigon/bor.md)
-    * [ots](interacting-with-erigon/interacting-with-erigon/ots.md)
-    * [internal](interacting-with-erigon/interacting-with-erigon/internal.md)
-    * [gRPC](interacting-with-erigon/interacting-with-erigon/grpc.md)
+  * [RPC Service](interacting-with-erigon/README.md)
+    * [eth](interacting-with-erigon/eth.md)
+    * [erigon](interacting-with-erigon/erigon.md)
+    * [engine](interacting-with-erigon/engine.md)
+    * [web3](interacting-with-erigon/web3.md)
+    * [net](interacting-with-erigon/net.md)
+    * [debug](interacting-with-erigon/debug.md)
+    * [trace](interacting-with-erigon/trace.md)
+    * [txpool](interacting-with-erigon/txpool.md)
+    * [admin](interacting-with-erigon/admin.md)
+    * [bor](interacting-with-erigon/bor.md)
+    * [ots](interacting-with-erigon/ots.md)
+    * [internal](interacting-with-erigon/internal.md)
+    * [gRPC](interacting-with-erigon/grpc.md)
 
 ## STAKING
 
