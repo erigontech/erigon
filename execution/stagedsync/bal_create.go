@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -14,7 +15,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func CreateBAL(blockNum uint64, txIO *state.VersionedIO) types.BlockAccessList {
+func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.BlockAccessList {
 	ac := make(map[common.Address]*accountState)
 	maxTxIndex := len(txIO.Inputs()) - 1
 
@@ -48,7 +49,7 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO) types.BlockAccessList {
 		return bal[i].Address.Cmp(bal[j].Address) < 0
 	})
 
-	writeBALToFile(bal, blockNum)
+	writeBALToFile(bal, blockNum, dataDir)
 
 	return bal
 }
@@ -309,8 +310,18 @@ func cloneBytes(input []byte) []byte {
 }
 
 // writeBALToFile writes the Block Access List to a text file for debugging/analysis
-func writeBALToFile(bal types.BlockAccessList, blockNum uint64) {
-	filename := fmt.Sprintf("/Users/shohamc1/bals/bal_block_%d.txt", blockNum)
+func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) {
+	if dataDir == "" {
+		return
+	}
+
+	balDir := filepath.Join(dataDir, "bal")
+	if err := os.MkdirAll(balDir, 0755); err != nil {
+		log.Warn("Failed to create BAL directory", "dir", balDir, "error", err)
+		return
+	}
+
+	filename := filepath.Join(balDir, fmt.Sprintf("bal_block_%d.txt", blockNum))
 
 	file, err := os.Create(filename)
 	if err != nil {

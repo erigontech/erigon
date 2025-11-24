@@ -200,7 +200,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO)
+						bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 						log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
 
 						if pe.cfg.chainConfig.IsGlamsterdam(applyResult.BlockTime) {
