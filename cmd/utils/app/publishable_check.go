@@ -24,8 +24,8 @@ func CheckFilesForSchema(schema state.SnapNameSchema, checkLastFileTo int64) (la
 	// - starts from 0
 	// - more than 0 files
 	// - no overlaps
-	// each data file has corresponding index/bt etc.1
-	// versions: between min supported version and max
+	// - each data file has corresponding index/bt etc.1
+	// - versions: between min supported version and max
 	// - lastFileTo check
 	// - sum = maxTo check (probably redundant if no gaps/overlaps)
 
@@ -102,25 +102,36 @@ func CheckFilesForSchema(schema state.SnapNameSchema, checkLastFileTo int64) (la
 	accessors := schema.AccessorList()
 	for _, dataFile := range dataFiles {
 		// corresponding accessor exists?
+		from, to := kv.RootNum(dataFile.From), kv.RootNum(dataFile.To)
+
+		// should get the same name as dataFile...
+		// this checks the version is correct (between min and current), and that there's only one such data file
+		if _, err := schema.DataFile(version.StrictSearchVersion, from, to); err != nil {
+			return 0, fmt.Errorf("unsupported data file version: %s: %v", dataFile.Name, err)
+		}
 
 		if accessors.Has(statecfg.AccessorHashMap) {
 			for idxPos := uint8(0); idxPos < uint8(schema.AccessorIdxCount()); idxPos++ {
-				file, found := schema.AccessorIdxFile(version.SearchVersion, kv.RootNum(dataFile.From), kv.RootNum(dataFile.To), 0)
-				if !found {
-					return 0, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %s)", schema.DataTag(), dataFile.Name, idxPos)
+				_, err := schema.AccessorIdxFile(version.StrictSearchVersion, from, to, 0)
+				if err != nil {
+					return 0, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %v", schema.DataTag(), dataFile.Name, idxPos, err)
 				}
-				accInfo, ok := schema.Parse(filepath.Base(file))
-				if !ok {
-					return 0, fmt.Errorf("unable to parse %s accessor idx file name %s", schema.DataTag(), file)
-				}
-
-				//TODO: I need schema to return supported version range
-				//				if accInfo.Version.GreaterOrEqual()
-
 			}
-
 		}
 
+		if accessors.Has(statecfg.AccessorBTree) {
+			_, err := schema.BtIdxFile(version.StrictSearchVersion, from, to)
+			if err != nil {
+				return 0, fmt.Errorf("missing %s bt tree file for data file %s: %v", schema.DataTag(), dataFile.Name, err)
+			}
+		}
+
+		if accessors.Has(statecfg.AccessorExistence) {
+			_, err := schema.ExistenceFile(version.StrictSearchVersion, from, to)
+			if err != nil {
+				return 0, fmt.Errorf("missing %s existence filter for data file %s: %v", schema.DataTag(), dataFile.Name, err)
+			}
+		}
 	}
 
 	return dataFiles[len(dataFiles)-1].To, nil

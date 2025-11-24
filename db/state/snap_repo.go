@@ -388,21 +388,22 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 
 			accessors := p.AccessorList()
 
-			var err error
 			if item.index == nil && accessors.Has(statecfg.AccessorHashMap) {
-				fPath, ok := p.AccessorIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
-				if ok {
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
-						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files maybe good
-					}
+				fPath, err := p.AccessorIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
+				if err != nil {
+					f.logger.Error("SnapshotRepo.openDirtyFiles accessor path", "err", err, "f", fPath)
+				} else if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
+					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files maybe good
 				}
 			}
 
 			if item.bindex == nil && accessors.Has(statecfg.AccessorBTree) {
-				fPath, ok := p.BtIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
-				if ok {
+				fPath, err := p.BtIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
+				if err != nil {
+					f.logger.Error("SnapshotRepo.openDirtyFiles btindex path", "err", err, "f", fPath)
+				} else {
 					r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, r); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -412,13 +413,13 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 				}
 			}
 			if item.existence == nil && accessors.Has(statecfg.AccessorExistence) {
-				fPath, ok := p.ExistenceFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
-				if ok {
-					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
-						_, fName := filepath.Split(fPath)
-						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files maybe good
-					}
+				fPath, err := p.ExistenceFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
+				if err != nil {
+					f.logger.Error("SnapshotRepo.openDirtyFiles existence path", "err", err, "f", fPath)
+				} else if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+					_, fName := filepath.Split(fPath)
+					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files maybe good
 				}
 			}
 		}

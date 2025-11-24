@@ -30,11 +30,12 @@ type SnapNameSchema interface {
 
 	// these give out full filepath, not just filename
 	// if version.IsZero(), then current version is used
-	// if version.IsSearch(), then directory is searched for existing file (with any version in supported range)
-	DataFile(version statecfg.Version, from, to RootNum) (filename string, found bool)
-	AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint16) (filename string, found bool) // index or accessor file (recsplit typically)
-	BtIdxFile(version statecfg.Version, from, to RootNum) (filename string, found bool)
-	ExistenceFile(version statecfg.Version, from, to RootNum) (filename string, found bool)
+	// if version.IsSearch() or IsStrictSearch(), then directory is searched for existing file (will try to find any version in supported range)
+	// err might be returned only when search version is used...
+	DataFile(version statecfg.Version, from, to RootNum) (filename string, err error)
+	AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint16) (filename string, err error) // index or accessor file (recsplit typically)
+	BtIdxFile(version statecfg.Version, from, to RootNum) (filename string, err error)
+	ExistenceFile(version statecfg.Version, from, to RootNum) (filename string, err error)
 
 	// metadata
 	AccessorIdxCount() uint16
@@ -174,29 +175,29 @@ func (s *E2SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
 	}
 }
 
-func (s *E2SnapSchema) DataFile(version statecfg.Version, from, to RootNum) (string, bool) {
-	if version.IsZero() {
-		version = s.currentVersion.DataFileVersion.Current
+func (s *E2SnapSchema) DataFile(filev statecfg.Version, from, to RootNum) (string, error) {
+	if filev.IsZero() {
+		filev = s.currentVersion.DataFileVersion.Current
 	}
-	if !version.IsSearch() {
-		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg))), true
+	if !filev.IsSearch() {
+		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", filev, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg))), nil
 	}
 
 	pattern := s.fileFormat(s.dataFileMetadata.folder, "*", from, to, string(DataExtensionSeg))
-	return findFilesWithVersionsByPattern(pattern)
+	return findFilesWithVersionsByPattern(filev, pattern, s.currentVersion.DataFileVersion, s.Parse)
 }
 
-func (s *E2SnapSchema) AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint16) (string, bool) {
-	if version.IsZero() {
-		version = s.currentVersion.AccessorVersion.Current
+func (s *E2SnapSchema) AccessorIdxFile(filev statecfg.Version, from, to RootNum, idxPos uint16) (string, error) {
+	if filev.IsZero() {
+		filev = s.currentVersion.AccessorVersion.Current
 	}
-	if !version.IsSearch() {
-		return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx))), true
+	if !filev.IsSearch() {
+		return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", filev, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx))), nil
 	}
 
 	// search for index file in directory
 	pattern := s.fileFormat(s.indexFileMetadata.folder, "*", from, to, string(AccessorExtensionIdx))
-	return findFilesWithVersionsByPattern(pattern)
+	return findFilesWithVersionsByPattern(filev, pattern, s.currentVersion.AccessorVersion, s.Parse)
 }
 
 func (s *E2SnapSchema) fileFormat(folder string, version string, from, to RootNum, ext string) string {
@@ -204,11 +205,11 @@ func (s *E2SnapSchema) fileFormat(folder string, version string, from, to RootNu
 	return filepath.Join(folder, basefile)
 }
 
-func (s *E2SnapSchema) BtIdxFile(version statecfg.Version, from, to RootNum) (string, bool) {
+func (s *E2SnapSchema) BtIdxFile(version statecfg.Version, from, to RootNum) (string, error) {
 	panic("unsupported")
 }
 
-func (s *E2SnapSchema) ExistenceFile(version statecfg.Version, from, to RootNum) (string, bool) {
+func (s *E2SnapSchema) ExistenceFile(version statecfg.Version, from, to RootNum) (string, error) {
 	panic("unsupported")
 }
 
@@ -425,34 +426,34 @@ func (s *E3SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
 	return nil, false
 }
 
-func (s *E3SnapSchema) DataFile(version statecfg.Version, from, to RootNum) (string, bool) {
-	if version.IsZero() {
-		version = s.currentVersion.DataFileVersion.Current
+func (s *E3SnapSchema) DataFile(filev statecfg.Version, from, to RootNum) (string, error) {
+	if filev.IsZero() {
+		filev = s.currentVersion.DataFileVersion.Current
 	}
-	if !version.IsSearch() {
-		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataExtension)), true
+	if !filev.IsSearch() {
+		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", filev, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataExtension)), nil
 	}
 
 	pattern := s.fileFormat(s.dataFileMetadata.folder, "*", from, to, string(s.dataExtension))
-	return findFilesWithVersionsByPattern(pattern)
+	return findFilesWithVersionsByPattern(filev, pattern, s.currentVersion.DataFileVersion, s.Parse)
 }
 
-func (s *E3SnapSchema) AccessorIdxFile(version statecfg.Version, from, to RootNum, idxPos uint16) (string, bool) {
+func (s *E3SnapSchema) AccessorIdxFile(filev statecfg.Version, from, to RootNum, idxPos uint16) (string, error) {
 	if !s.indexFileMetadata.supported {
 		panic(fmt.Sprintf("%s not supported for %s", statecfg.AccessorHashMap, s.dataFileTag))
 	}
 	if idxPos > 0 {
 		panic("e3 accessor idx pos should be 0")
 	}
-	if version.IsZero() {
-		version = s.currentVersion.AccessorIdxVersion.Current
+	if filev.IsZero() {
+		filev = s.currentVersion.AccessorIdxVersion.Current
 	}
-	if !version.IsSearch() {
-		return s.fileFormat(s.indexFileMetadata.folder, version.String(), from, to, string(s.accessorIdxExtension)), true
+	if !filev.IsSearch() {
+		return s.fileFormat(s.indexFileMetadata.folder, filev.String(), from, to, string(s.accessorIdxExtension)), nil
 	}
 
 	basefile := s.fileFormat(s.indexFileMetadata.folder, "*", from, to, string(s.accessorIdxExtension))
-	return findFilesWithVersionsByPattern(basefile)
+	return findFilesWithVersionsByPattern(filev, basefile, s.currentVersion.AccessorIdxVersion, s.Parse)
 }
 
 func (s *E3SnapSchema) fileFormat(folder string, version string, from, to RootNum, ext string) string {
@@ -460,32 +461,32 @@ func (s *E3SnapSchema) fileFormat(folder string, version string, from, to RootNu
 	return filepath.Join(folder, basefile)
 }
 
-func (s *E3SnapSchema) BtIdxFile(version statecfg.Version, from, to RootNum) (string, bool) {
+func (s *E3SnapSchema) BtIdxFile(filev statecfg.Version, from, to RootNum) (string, error) {
 	if !s.btIdxFileMetadata.supported {
 		panic(fmt.Sprintf("%s not supported for %s", statecfg.AccessorBTree, s.dataFileTag))
 	}
-	if version.IsZero() {
-		version = s.currentVersion.BtIdxVersion.Current
+	if filev.IsZero() {
+		filev = s.currentVersion.BtIdxVersion.Current
 	}
-	if !version.IsSearch() {
-		return s.fileFormat(s.btIdxFileMetadata.folder, version.String(), from, to, ".bt"), true
+	if !filev.IsSearch() {
+		return s.fileFormat(s.btIdxFileMetadata.folder, filev.String(), from, to, ".bt"), nil
 	}
 	basefile := s.fileFormat(s.btIdxFileMetadata.folder, "*", from, to, ".bt")
-	return findFilesWithVersionsByPattern(basefile)
+	return findFilesWithVersionsByPattern(filev, basefile, s.currentVersion.BtIdxVersion, s.Parse)
 }
 
-func (s *E3SnapSchema) ExistenceFile(version statecfg.Version, from, to RootNum) (string, bool) {
+func (s *E3SnapSchema) ExistenceFile(filev statecfg.Version, from, to RootNum) (string, error) {
 	if !s.existenceFileMetadata.supported {
 		panic(fmt.Sprintf("%s not supported for %s", statecfg.AccessorExistence, s.dataFileTag))
 	}
-	if version.IsZero() {
-		version = s.currentVersion.ExistenceVersion.Current
+	if filev.IsZero() {
+		filev = s.currentVersion.ExistenceVersion.Current
 	}
-	if !version.IsSearch() {
-		return s.fileFormat(s.existenceFileMetadata.folder, version.String(), from, to, ".kvei"), true
+	if !filev.IsSearch() {
+		return s.fileFormat(s.existenceFileMetadata.folder, filev.String(), from, to, ".kvei"), nil
 	}
 	basefile := s.fileFormat(s.existenceFileMetadata.folder, "*", from, to, ".kvei")
-	return findFilesWithVersionsByPattern(basefile)
+	return findFilesWithVersionsByPattern(filev, basefile, s.currentVersion.ExistenceVersion, s.Parse)
 }
 
 func (s *E3SnapSchema) DataTag() string {
@@ -590,14 +591,39 @@ func NewIISnapSchema(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs)
 }
 
 // fullpath pattern
-func findFilesWithVersionsByPattern(pattern string) (string, bool) {
+func findFilesWithVersionsByPattern(searchVer version.Version, pattern string, supported version.Versions, parseOp func(filename string) (*SnapInfo, bool)) (string, error) {
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		panic(fmt.Sprintf("invalid pattern: %s, err: %v", pattern, err))
 	}
 
+	isStrict := searchVer.Eq(version.StrictSearchVersion)
+
 	if len(matches) == 0 {
-		return "", false
+		return "", fmt.Errorf("no match found for pattern %s", pattern)
 	}
-	return matches[0], true
+	if isStrict && len(matches) > 1 {
+		return "", fmt.Errorf("more than one match found for pattern: %s", pattern)
+	}
+	maxVersion := version.ZeroVersion
+	maxMatch := ""
+	for _, match := range matches {
+		filename := filepath.Base(match)
+		info, ok := parseOp(filename)
+		if !ok {
+			panic(fmt.Sprintf("match %s can't be parsed, shouldn't happen, fail fast", filename))
+		}
+		if supported.MinSupported.GreaterOrEqual(info.Version) && supported.Current.LessOrEqual(info.Version) && maxVersion.Less(info.Version) {
+			maxVersion = info.Version
+			maxMatch = match
+			continue
+		}
+		if isStrict {
+			return "", fmt.Errorf("can't parse file (strict=true) %s", match)
+		}
+	}
+	if maxVersion.IsZero() {
+		return "", fmt.Errorf("couldn't find parseable file for pattern %s", pattern)
+	}
+	return maxMatch, nil
 }
