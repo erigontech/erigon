@@ -12,7 +12,7 @@ The Erigon CLI has a wide range of flags that can be used to customize its behav
 
 ## Command line options
 
-Here's a breakdown of some of the flags, see [options](configuring-erigon.md#options) for the full list:
+Here's a breakdown of the most important flags, see [options](configuring-erigon.md#options) for the full list:
 
 ### General Options
 
