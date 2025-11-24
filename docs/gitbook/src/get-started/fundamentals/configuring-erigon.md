@@ -25,7 +25,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--config value`: Sets Erigon flags using a YAML/TOML file.
 * `--version, -v`: Prints the version information.
 * `--help, -h`: Displays help information.
-* `--chain value`: Sets the name of the [network](https://erigon.gitbook.io/docs/fundamentals/supported-networks) to join.
+* `--chain value`: Sets the name of the [network](supported-networks.md) to join.
   * Default: `mainnet`
 * `--networkid value`: Explicitly sets the network ID.
   * Default: `1`
