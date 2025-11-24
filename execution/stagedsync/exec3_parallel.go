@@ -121,7 +121,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	defer executorCancel()
 
-	pe.resetWorkers(ctx, pe.rs, rwTx)
+	if err := pe.resetWorkers(ctx, pe.rs, rwTx); err != nil {
+		return nil, rwTx, err
+	}
 
 	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
 		return nil, rwTx, err
@@ -801,9 +803,12 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	return execLoopCtx, func() {
 		execLoopCtxCancel()
-		pe.wait(ctx)
-		pe.stopWorkers()
-		pe.in.Close()
+		defer pe.stopWorkers()
+		defer pe.in.Close()
+
+		if err := pe.wait(ctx); err != nil {
+			pe.logger.Debug("exec loop cancel failed", "err", err)
+		}
 	}
 }
 
@@ -922,17 +927,23 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 
 	if task.IsBlockEnd() || txIndex < 0 {
 		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
-			ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
+			if err := ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
+				return nil, err
+			}
 		}
 		return nil, nil
 	}
 
 	if task.shouldDelayFeeCalc {
 		if txTask.Config.IsLondon(blockNum) {
-			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
+			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+				return nil, err
+			}
 		}
 
-		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
+		if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+			return nil, err
+		}
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
