@@ -60,9 +60,9 @@
 
 ## STAKING
 
-* [Using Caplin as Validator](get-started/fundamentals/staking/caplin.md)
-* [Using an external consensus client as validator](get-started/fundamentals/staking/external-consensus-client-as-validator.md)
-* [Shutter Network](get-started/fundamentals/staking/shutter-network.md)
+* [Using Caplin as Validator](staking/caplin.md)
+* [Using an external consensus client as validator](staking/external-consensus-client-as-validator.md)
+* [Shutter Network](staking/shutter-network.md)
 
 ## ABOUT
 
