@@ -1417,6 +1417,26 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 	return nil
 }
 
+// CompactRange rebuilds the history files within the specified transaction range by performing a forced self-merge.
+// If the range contains existing static files, the method collects all files belonging to that span and merges them.
+func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint64) error {
+	if len(ht.iit.files) == 0 {
+		return nil
+	}
+
+	mergeRange := NewHistoryRanges(
+		*NewMergeRange("", true, fromTxNum, toTxNum),
+		*NewMergeRange("", true, fromTxNum, toTxNum),
+	)
+
+	efFiles, vFiles, err := ht.staticFilesInRange(mergeRange)
+	if err != nil {
+		return err
+	}
+
+	return ht.deduplicateFiles(ctx, efFiles, vFiles, mergeRange, background.NewProgressSet())
+}
+
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	if ht.h.HistoryLargeValues {
 		from := make([]byte, len(key)+8)
