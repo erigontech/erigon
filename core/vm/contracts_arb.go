@@ -34,7 +34,8 @@ type AdvancedPrecompile interface {
 	PrecompiledContract
 }
 
-type arbosAwarePrecompile interface {
+// TODO move into arbitrum package
+type ArbosAwarePrecompile interface {
 	SetArbosVersion(arbosVersion uint64)
 	PrecompiledContract
 }
