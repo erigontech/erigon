@@ -281,7 +281,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("getCodeSize failed")
 		}
 		if args.To != nil && codeSize == 0 {
-			failed, _, err := execute(ctx, caller, params.TxGas, engine)
+			failed, _, err := doCall(ctx, caller, params.TxGas, engine)
 			if err == nil && !failed {
 				return hexutil.Uint64(params.TxGas), nil
 			}
@@ -290,7 +290,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// We first execute the transaction at the highest allowable gas limit, since if this fails we
 	// can return error immediately.
-	failed, result, err := execute(ctx, caller, hi, engine)
+	failed, result, err := doCall(ctx, caller, hi, engine)
 	if err != nil {
 		return 0, err
 	}
@@ -317,7 +317,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// binary search.
 	optimisticGasLimit := (result.GasUsed + params.CallStipend) * 64 / 63
 	if optimisticGasLimit < hi {
-		failed, _, err := execute(ctx, caller, hi, engine)
+		failed, _, err := doCall(ctx, caller, hi, engine)
 		if err != nil {
 			return 0, err
 		}
@@ -340,7 +340,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			// range here is skewed to favor the low side.
 			mid = lo * 2
 		}
-		failed, _, err := execute(ctx, caller, hi, engine)
+		failed, _, err := doCall(ctx, caller, mid, engine)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more.
@@ -360,7 +360,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 // returns true if the transaction fails for a reason that might be related to
 // not enough gas. A non-nil error means execution failed due to reasons unrelated
 // to the gas limit.
-func execute(ctx context.Context, caller *transactions.ReusableCaller, gasLimit uint64, engine rules.EngineReader) (bool, *evmtypes.ExecutionResult, error) {
+func doCall(ctx context.Context, caller *transactions.ReusableCaller, gasLimit uint64, engine rules.EngineReader) (bool, *evmtypes.ExecutionResult, error) {
 	result, err := caller.DoCallWithNewGas(ctx, gasLimit, engine)
 	if err != nil {
 		if errors.Is(err, protocol.ErrIntrinsicGas) {
