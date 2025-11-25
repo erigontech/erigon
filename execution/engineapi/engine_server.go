@@ -17,7 +17,6 @@
 package engineapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -52,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -120,34 +118,6 @@ func NewEngineServer(
 	srv.consuming.Store(consuming)
 
 	return srv
-}
-
-// decodeBlockAccessListBytes decodes the provided RLP-encoded block access list using
-// the AccountChanges DecodeRLP methods to enforce canonical integer encoding.
-func decodeBlockAccessListBytes(data []byte) (types.BlockAccessList, error) {
-	stream := rlp.NewStream(bytes.NewReader(data), 0)
-	if _, err := stream.List(); err != nil {
-		return nil, err
-	}
-	var out types.BlockAccessList
-	for {
-		var ac types.AccountChanges
-		if err := ac.DecodeRLP(stream); err != nil {
-			if errors.Is(err, rlp.EOL) {
-				break
-			}
-			return nil, err
-		}
-		acCopy := ac
-		out = append(out, &acCopy)
-	}
-	if err := stream.ListEnd(); err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
 }
 
 func (e *EngineServer) Start(
@@ -320,7 +290,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
-			blockAccessList, err := decodeBlockAccessListBytes(*req.BlockAccessList)
+			blockAccessList, err := types.DecodeBlockAccessListBytes(*req.BlockAccessList)
 			if err != nil {
 				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}

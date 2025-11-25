@@ -329,10 +329,9 @@ func ConvertBlockAccessListFromExecutionProto(protoList []*executionproto.BlockA
 				if sc.Changes != nil {
 					bal[i].StorageChanges[j].Changes = make([]*types.StorageChange, len(sc.Changes))
 					for k, c := range sc.Changes {
-						val := gointerfaces.ConvertH256ToUint256Int(c.Value)
 						bal[i].StorageChanges[j].Changes[k] = &types.StorageChange{
 							Index: uint16(c.Index),
-							Value: *val,
+							Value: gointerfaces.ConvertH256ToHash(c.Value),
 						}
 					}
 				}
@@ -399,10 +398,10 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 				if sc.Changes != nil {
 					bal[i].StorageChanges[j].Changes = make([]*types.StorageChange, len(sc.Changes))
 					for k, c := range sc.Changes {
-						val := gointerfaces.ConvertH256ToUint256Int(c.Value)
+						val := gointerfaces.ConvertH256ToHash(c.Value)
 						bal[i].StorageChanges[j].Changes[k] = &types.StorageChange{
 							Index: uint16(c.Index),
-							Value: *val,
+							Value: val,
 						}
 					}
 				}

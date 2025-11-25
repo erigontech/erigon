@@ -383,6 +383,6 @@ func (b *Eth1Block) Body() *types.RawBody {
 	})
 	return &types.RawBody{
 		Transactions: b.Transactions.UnderlyngReference(),
-		Withdrawals:  types.Withdrawals(withdrawals),
+		Withdrawals:  withdrawals,
 	}
 }

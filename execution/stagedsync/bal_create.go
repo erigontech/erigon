@@ -68,7 +68,8 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 }
 
 func addStorageUpdate(ac *types.AccountChanges, vw *state.VersionedWrite, txIndex uint16) {
-	value := vw.Val.(uint256.Int)
+	val := vw.Val.(uint256.Int)
+	value := common.Hash(val.Bytes32())
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,

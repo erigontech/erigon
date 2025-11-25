@@ -42,7 +42,7 @@ type SlotChanges struct {
 
 type StorageChange struct {
 	Index uint16
-	Value uint256.Int
+	Value common.Hash
 }
 
 type BalanceChange struct {
@@ -225,7 +225,7 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 
 func (sc *StorageChange) EncodingSize() int {
 	return 1 + rlp.IntLenExcludingHead(uint64(sc.Index)) +
-		1 + rlp.Uint256LenExcludingHead(sc.Value)
+		rlp.StringLen(sc.Value[:])
 }
 
 func (sc *StorageChange) EncodeRLP(w io.Writer) error {
@@ -239,7 +239,7 @@ func (sc *StorageChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(uint64(sc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeUint256(sc.Value, w, b[:])
+	return rlp.EncodeString(sc.Value[:], w, b[:])
 }
 
 func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
@@ -254,14 +254,9 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	sc.Index = uint16(idx)
-	valBytes, err := s.Bytes()
-	if err != nil {
+	if err := s.ReadBytes(sc.Value[:]); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	if len(valBytes) > 32 {
-		return fmt.Errorf("read Value: integer too large")
-	}
-	sc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
@@ -474,6 +469,16 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 	}
 	*out = changes
 	return nil
+}
+
+// DecodeBlockAccessListBytes decodes an RLP-encoded block access list and returns it.
+func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
+	stream := rlp.NewStream(bytes.NewReader(data), 0)
+	var bal BlockAccessList
+	if err := decodeBlockAccessList(&bal, stream); err != nil {
+		return nil, err
+	}
+	return bal, nil
 }
 
 func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
