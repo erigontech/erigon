@@ -19,7 +19,7 @@ func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes SnapshotType
 		dataVer := snapt.Versions()
 		accessorVer := snapt.Indexes()[0].Version
 		snaptSchemaVersion := state.NewE2SnapSchemaVersion(dataVer, accessorVer)
-		blockAndBlobs[snapt.Enum()] = state.NewE2SnapSchemaWithStepAndDir(dirs.SnapCaplin, snapt.Name(), []string{snapt.Indexes()[0].Name}, stepSize, snaptSchemaVersion)
+		blockAndBlobs[snapt.Enum()] = state.NewE2SnapSchemaWithStepAndDir(dirs.Snap, snapt.Name(), []string{snapt.Indexes()[0].Name}, stepSize, snaptSchemaVersion)
 	}
 
 	statemp := make(map[string]state.SnapNameSchema)

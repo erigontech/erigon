@@ -183,7 +183,7 @@ func (s *E2SnapSchema) DataFile(filev statecfg.Version, from, to RootNum) (strin
 		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", filev, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg))), nil
 	}
 
-	pattern := s.fileFormat(s.dataFileMetadata.folder, "*", from, to, string(DataExtensionSeg))
+	pattern := s.fileFormat("*", from, to)
 	return findFilesWithVersionsByPattern(filev, pattern, s.currentVersion.DataFileVersion, s.Parse)
 }
 
@@ -196,13 +196,18 @@ func (s *E2SnapSchema) AccessorIdxFile(filev statecfg.Version, from, to RootNum,
 	}
 
 	// search for index file in directory
-	pattern := s.fileFormat(s.indexFileMetadata.folder, "*", from, to, string(AccessorExtensionIdx))
+	pattern := s.idxFileFormat("*", from, to, idxPos)
 	return findFilesWithVersionsByPattern(filev, pattern, s.currentVersion.AccessorVersion, s.Parse)
 }
 
-func (s *E2SnapSchema) fileFormat(folder string, version string, from, to RootNum, ext string) string {
-	basefile := fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, ext)
-	return filepath.Join(folder, basefile)
+func (s *E2SnapSchema) fileFormat(version string, from, to RootNum) string {
+	basefile := fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg))
+	return filepath.Join(s.dataFileMetadata.folder, basefile)
+}
+
+func (s *E2SnapSchema) idxFileFormat(version string, from, to RootNum, idxPos uint16) string {
+	basefile := fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx))
+	return filepath.Join(s.indexFileMetadata.folder, basefile)
 }
 
 func (s *E2SnapSchema) BtIdxFile(version statecfg.Version, from, to RootNum) (string, error) {
@@ -613,7 +618,7 @@ func findFilesWithVersionsByPattern(searchVer version.Version, pattern string, s
 		if !ok {
 			panic(fmt.Sprintf("match %s can't be parsed, shouldn't happen, fail fast", filename))
 		}
-		if supported.MinSupported.GreaterOrEqual(info.Version) && supported.Current.LessOrEqual(info.Version) && maxVersion.Less(info.Version) {
+		if info.Version.GreaterOrEqual(supported.MinSupported) && info.Version.LessOrEqual(supported.Current) && maxVersion.Less(info.Version) {
 			maxVersion = info.Version
 			maxMatch = match
 			continue
