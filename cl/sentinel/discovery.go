@@ -19,8 +19,6 @@ package sentinel
 import (
 	"context"
 	"errors"
-	"net"
-	"strconv"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -29,10 +27,8 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
-	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 const (
@@ -176,7 +172,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			s.peers.RemovePeer(peerId)
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
-			s.peers.AddPeer(peerId)
+			/*s.peers.AddPeer(peerId)
 			if _, ok := s.pidToEnr.Load(peerId); !ok {
 				//log.Debug("[caplin sentinel] onConnection: no enr for peer", "peer", peerId.String())
 
@@ -192,9 +188,14 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 					log.Debug("[caplin sentinel] onConnection: failed to get remote public key raw bytes", "peer", peerId.String(), "err", err)
 					return
 				}
-				ethPubKey, err := crypto.UnmarshalPubkey(remotePubKeyBytes)
+				/*ethPubKey, err := crypto.UnmarshalPubkey(remotePubKeyBytes)
 				if err != nil {
 					log.Debug("[caplin sentinel] onConnection: failed to unmarshal remote public key", "peer", peerId.String(), "err", err)
+					return
+				}*/
+			/*	ethPubKey, err := lcrypto.UnmarshalECDSAPublicKey(remotePubKeyBytes)
+				if err != nil {
+					log.Debug("[caplin sentinel] onConnection: failed to convert remote public key to ecdsa", "peer", peerId.String(), "err", err)
 					return
 				}
 
@@ -217,11 +218,11 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 
 				ip := net.ParseIP(host)
 				tcpPort, _ := strconv.Atoi(portStr)
-				newNode := enode.NewV4(ethPubKey, ip, tcpPort, tcpPort)
+				newNode := enode.NewV4(ethPubKey.(*lcrypto.ECDSAPublicKey), ip, tcpPort, tcpPort)
 				s.pidToEnr.Store(peerId, newNode.String())
 				s.pidToEnodeId.Store(peerId, newNode.ID())
 				log.Debug("[caplin sentinel] onConnection: stored enr and enode id for peer", "peer", peerId.String(), "enr", newNode.String(), "enodeId", newNode.ID().String())
-			}
+			}*/
 		}
 	}()
 }
