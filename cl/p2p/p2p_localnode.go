@@ -12,13 +12,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-type LocalNode struct {
-	privKey          *ecdsa.PrivateKey
-	ipAddr           net.IP
-	udpPort, tcpPort int
-	tmpDir           string
-}
-
 func newLocalNode(
 	ctx context.Context,
 	privKey *ecdsa.PrivateKey,
@@ -43,8 +36,6 @@ func newLocalNode(
 
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
-	//s.setupENR(localNode)
-	//go s.updateENR(localNode)
 
 	return localNode, nil
 }

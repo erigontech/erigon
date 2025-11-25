@@ -29,7 +29,7 @@ func (p *P2Pmanager) connectToBootnodes(ctx context.Context, discoverConfig disc
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := p.ConnectWithPeer(ctx, peerInfo, nil); err != nil {
+			if err := p.connectWithPeer(ctx, peerInfo, nil); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -58,7 +58,7 @@ func (p *P2Pmanager) connectToBootnodes(ctx context.Context, discoverConfig disc
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool
 // it errors when if fail to connect with the peer, for instance, if it fails the handshake
 // if it does not return an error, the peer is attempted to be added to the pool
-func (p *P2Pmanager) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem *semaphore.Weighted) (err error) {
+func (p *P2Pmanager) connectWithPeer(ctx context.Context, info peer.AddrInfo, sem *semaphore.Weighted) (err error) {
 	if sem != nil {
 		defer sem.Release(1)
 	}
