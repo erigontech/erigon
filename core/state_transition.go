@@ -621,6 +621,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 		deployedContract = new(common.Address)
 	)
+
+	// Check against hardcoded transaction hashes that have previously reverted, so instead
+	// of executing the transaction we just update state nonce and remaining gas to avoid
+	// state divergence.
+	usedMultiGas, vmerr = st.handleRevertedTx(msg.(*types.Message), usedMultiGas)
+
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
@@ -639,6 +645,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 
+		// Refund the gas that was held to limit the amount of computation done.
+		st.gasRemaining += st.calcHeldGasRefund()
+
 		if st.evm.ProcessingHook.IsArbitrum() {
 			st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
@@ -652,6 +661,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 				st.gasRemaining += refund
 			}
 
+			// Arbitrum: set the multigas refunds
+			usedMultiGas = usedMultiGas.WithRefund(refund)
 			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
 				// After EIP-7623: Data-heavy transactions pay the floor gas.
 				if st.gasUsed() < floorGas7623 {
@@ -663,7 +674,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 					}
 				}
 			}
-			usedMultiGas = usedMultiGas.WithRefund(refund)
 
 		} else { // Other networks
 			gasUsed := st.gasUsed()
@@ -769,6 +779,49 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	return result, nil
+}
+
+func (st *StateTransition) calcHeldGasRefund() uint64 {
+	return st.evm.ProcessingHook.ForceRefundGas()
+}
+
+// Arbitrum  // TODO move
+// RevertedTxGasUsed maps specific transaction hashes that have been previously reverted to the amount
+// of GAS used by that specific transaction alone.
+var RevertedTxGasUsed = map[common.Hash]uint64{
+	// Arbitrum Sepolia (chain_id=421614). Tx timestamp: Oct-13-2025 03:30:36 AM +UTC
+	common.HexToHash("0x58df300a7f04fe31d41d24672786cbe1c58b4f3d8329d0d74392d814dd9f7e40"): 45174,
+}
+
+// handleRevertedTx attempts to process a reverted transaction. It returns
+// ErrExecutionReverted with the updated multiGas if a matching reverted
+// tx is found; otherwise, it returns nil error with unchangedmultiGas
+func (st *StateTransition) handleRevertedTx(msg *types.Message, usedMultiGas multigas.MultiGas) (multigas.MultiGas, error) {
+	if msg.Tx == nil {
+		return usedMultiGas, nil
+	}
+
+	txHash := msg.Tx.Hash()
+	if l2GasUsed, ok := RevertedTxGasUsed[txHash]; ok {
+		pn, err := st.state.GetNonce(msg.From())
+		if err != nil {
+			return usedMultiGas, fmt.Errorf("handle revert: %w", err)
+		}
+		err = st.state.SetNonce(msg.From(), uint64(pn)+1)
+		if err != nil {
+			return usedMultiGas, fmt.Errorf("handle revert: %w", err)
+		}
+
+		// Calculate adjusted gas since l2GasUsed contains params.TxGas
+		adjustedGas := l2GasUsed - params.TxGas
+		st.gasRemaining -= adjustedGas
+
+		// Update multigas and return ErrExecutionReverted error
+		usedMultiGas = usedMultiGas.SaturatingAdd(multigas.ComputationGas(adjustedGas))
+		return usedMultiGas, vm.ErrExecutionReverted
+	}
+
+	return usedMultiGas, nil
 }
 
 func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]common.Address, error) {

@@ -402,6 +402,56 @@ func (z *MultiGas) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+//
+//// IntrinsicMultiGas returns the intrinsic gas as a multi-gas.
+//func IntrinsicMultiGas(data []byte, accessList types.AccessList, authList []types.SetCodeAuthorization, isContractCreation, isHomestead, isEIP2028, isEIP3860 bool) (MultiGas, error) {
+//	// Set the starting gas for the raw transaction
+//	var gas MultiGas
+//	if isContractCreation && isHomestead {
+//		gas.SaturatingIncrementInto(ResourceKindComputation, params.TxGasContractCreation)
+//	} else {
+//		gas.SaturatingIncrementInto(ResourceKindComputation, params.TxGas)
+//	}
+//	dataLen := uint64(len(data))
+//	// Bump the required gas by the amount of transactional data
+//	if dataLen > 0 {
+//		// Zero and non-zero bytes are priced differently
+//		z := uint64(bytes.Count(data, []byte{0}))
+//		nz := dataLen - z
+//
+//		// Make sure we don't exceed uint64 for all data combinations
+//		nonZeroGas := params.TxDataNonZeroGasFrontier
+//		if isEIP2028 {
+//			nonZeroGas = params.TxDataNonZeroGasEIP2028
+//		}
+//		if (math.MaxUint64-gas.SingleGas())/nonZeroGas < nz {
+//			return ZeroGas(), vm.ErrGasUintOverflow
+//		}
+//		gas.SaturatingIncrementInto(ResourceKindL2Calldata, nz*nonZeroGas)
+//
+//		if (math.MaxUint64-gas.SingleGas())/params.TxDataZeroGas < z {
+//			return ZeroGas(), vm.ErrGasUintOverflow
+//		}
+//		gas.SaturatingIncrementInto(ResourceKindL2Calldata, z*params.TxDataZeroGas)
+//
+//		if isContractCreation && isEIP3860 {
+//			lenWords := toWordSize(dataLen)
+//			if (math.MaxUint64-gas.SingleGas())/params.InitCodeWordGas < lenWords {
+//				return ZeroGas(), vm.ErrGasUintOverflow
+//			}
+//			gas.SaturatingIncrementInto(ResourceKindComputation, lenWords*params.InitCodeWordGas)
+//		}
+//	}
+//	if lenAccessList != nil {
+//		gas.SaturatingIncrementInto(ResourceKindStorageAccess, lenAccessList*params.TxAccessListAddressGas)
+//		gas.SaturatingIncrementInto(ResourceKindStorageAccess, uint64(accessList.StorageKeys())*params.TxAccessListStorageKeyGas)
+//	}
+//	if authList != nil {
+//		gas.SaturatingIncrementInto(ResourceKindStorageGrowth, uint64(len(authList))*params.CallNewAccountGas)
+//	}
+//	return gas, nil
+//}
+
 // IntrinsicMultiGas returns the intrinsic gas as a multi-gas. (TODO: move to arb package)
 func IntrinsicMultiGas(data []byte, accessListLen, storageKeysLen uint64, isContractCreation bool, isEIP2, isEIP2028, isEIP3860, isEIP7623, isAATxn bool, authorizationsLen uint64) (MultiGas, uint64, bool) {
 	dataLen := uint64(len(data))
@@ -468,7 +518,6 @@ func IntrinsicMultiGas(data []byte, accessListLen, storageKeysLen uint64, isCont
 	if accessListLen > 0 {
 		gas.SaturatingIncrementInto(ResourceKindStorageAccess, accessListLen*params.TxAccessListAddressGas)
 		gas.SaturatingIncrementInto(ResourceKindStorageAccess, storageKeysLen*params.TxAccessListStorageKeyGas)
-
 	}
 
 	if authorizationsLen > 0 {
