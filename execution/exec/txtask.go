@@ -107,8 +107,9 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms map[common.Address]struct{}
-	TraceTos   map[common.Address]struct{}
+	TraceFroms        map[common.Address]struct{}
+	TraceTos          map[common.Address]struct{}
+	AccessedAddresses map[common.Address]struct{}
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -564,6 +565,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			panic(err)
 		}
 
+		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}

@@ -239,6 +239,8 @@ type Config struct {
 
 	StateStream bool
 
+	ExperimentalBAL bool
+
 	// URL to connect to Heimdall node
 	HeimdallURL string
 	// No heimdall service
