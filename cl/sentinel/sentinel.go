@@ -233,6 +233,7 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		entry := &sentinelproto.Peer{}
 		peerInfo := s.p2p.Host().Network().Peerstore().PeerInfo(p)
 		if len(peerInfo.Addrs) == 0 {
+			log.Debug("[caplin sentinel] no addrs for peer", "peer", p.String())
 			continue
 		}
 		entry.Address = peerInfo.Addrs[0].String()

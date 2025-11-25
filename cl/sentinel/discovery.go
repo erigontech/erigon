@@ -19,6 +19,8 @@ package sentinel
 import (
 	"context"
 	"errors"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -27,8 +29,10 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 const (
@@ -148,7 +152,7 @@ func (s *Sentinel) listenForPeers() {
 	}
 }
 
-func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
+func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()
 		if s.HasTooManyPeers() {
@@ -163,6 +167,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		if err != nil {
 			log.Trace("[sentinel] failed to validate peer:", "err", err)
 		}
+
 		if !valid {
 			log.Trace("Handshake was unsuccessful")
 			// on handshake fail, we disconnect with said peer, and remove them from our pool
@@ -173,7 +178,49 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 			// we were able to succesfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
 			if _, ok := s.pidToEnr.Load(peerId); !ok {
-				log.Debug("[caplin sentinel] onConnection: no enr for peer", "peer", peerId.String())
+				//log.Debug("[caplin sentinel] onConnection: no enr for peer", "peer", peerId.String())
+
+				// enode id
+				remotePubKey := conn.RemotePublicKey()
+				if remotePubKey == nil {
+					log.Debug("[caplin sentinel] onConnection: no remote public key for peer", "peer", peerId.String())
+					return
+				}
+
+				remotePubKeyBytes, err := remotePubKey.Raw()
+				if err != nil {
+					log.Debug("[caplin sentinel] onConnection: failed to get remote public key raw bytes", "peer", peerId.String(), "err", err)
+					return
+				}
+				ethPubKey, err := crypto.UnmarshalPubkey(remotePubKeyBytes)
+				if err != nil {
+					log.Debug("[caplin sentinel] onConnection: failed to unmarshal remote public key", "peer", peerId.String(), "err", err)
+					return
+				}
+
+				// enr
+				remoteAddr := conn.RemoteMultiaddr()
+				if remoteAddr == nil {
+					log.Debug("[caplin sentinel] onConnection: no remote address for peer", "peer", peerId.String())
+					return
+				}
+				netAddr, err := manet.ToNetAddr(remoteAddr)
+				if err != nil {
+					log.Debug("[caplin sentinel] onConnection: failed to convert remote address to net address", "peer", peerId.String(), "err", err)
+					return
+				}
+				host, portStr, err := net.SplitHostPort(netAddr.String())
+				if err != nil {
+					log.Debug("[caplin sentinel] onConnection: failed to split host and port", "peer", peerId.String(), "err", err)
+					return
+				}
+
+				ip := net.ParseIP(host)
+				tcpPort, _ := strconv.Atoi(portStr)
+				newNode := enode.NewV4(ethPubKey, ip, tcpPort, tcpPort)
+				s.pidToEnr.Store(peerId, newNode.String())
+				s.pidToEnodeId.Store(peerId, newNode.ID())
+				log.Debug("[caplin sentinel] onConnection: stored enr and enode id for peer", "peer", peerId.String(), "enr", newNode.String(), "enodeId", newNode.ID().String())
 			}
 		}
 	}()
