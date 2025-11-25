@@ -19,7 +19,7 @@ func BenchmarkSortedAllocKeys(b *testing.B) {
 	}
 
 	b.Run("Origin:StringKeysAndToAddress", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			keys := sortedAllocKeys(alloc)
 			for _, key := range keys {
 				_ = common.BytesToAddress([]byte(key))
@@ -28,7 +28,7 @@ func BenchmarkSortedAllocKeys(b *testing.B) {
 	})
 
 	b.Run("Optimized:AddressKeys", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = sortedAllocAddresses(alloc)
 		}
 	})

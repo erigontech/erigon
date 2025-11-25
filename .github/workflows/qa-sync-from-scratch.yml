@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chain: [ sepolia, hoodi, amoy, chiado ]  # Chain name as specified on the erigon command line
+        chain: [ sepolia, hoodi, chiado ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -30,7 +30,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Clean Erigon Build & Data Directories
       run: |

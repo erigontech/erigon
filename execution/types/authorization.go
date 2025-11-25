@@ -42,7 +42,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
 
-	authLen := (1 + rlp.Uint256LenExcludingHead(&ath.ChainID))
+	authLen := (1 + rlp.Uint256LenExcludingHead(ath.ChainID))
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(ath.Nonce)
 
@@ -51,7 +51,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 	}
 
 	// chainId, address, nonce
-	if err := rlp.EncodeUint256(&ath.ChainID, data, buf); err != nil {
+	if err := rlp.EncodeUint256(ath.ChainID, data, buf); err != nil {
 		return nil, err
 	}
 
@@ -105,11 +105,11 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = (1 + rlp.Uint256LenExcludingHead(&auth.ChainID))
+	authLen = (1 + rlp.Uint256LenExcludingHead(auth.ChainID))
 	authLen += rlp.U64Len(auth.Nonce)
 	authLen += 1 + length.Addr
 
-	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
+	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(auth.R)) + (1 + rlp.Uint256LenExcludingHead(auth.S))
 
 	return
 }
@@ -200,7 +200,7 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 		}
 
 		// 1. encode ChainId
-		if err := rlp.EncodeUint256(&authorizations[i].ChainID, w, b); err != nil {
+		if err := rlp.EncodeUint256(authorizations[i].ChainID, w, b); err != nil {
 			return err
 		}
 		// 2. encode Address
@@ -220,10 +220,10 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 		if err := rlp.EncodeInt(uint64(authorizations[i].YParity), w, b); err != nil {
 			return err
 		}
-		if err := rlp.EncodeUint256(&authorizations[i].R, w, b); err != nil {
+		if err := rlp.EncodeUint256(authorizations[i].R, w, b); err != nil {
 			return err
 		}
-		if err := rlp.EncodeUint256(&authorizations[i].S, w, b); err != nil {
+		if err := rlp.EncodeUint256(authorizations[i].S, w, b); err != nil {
 			return err
 		}
 	}

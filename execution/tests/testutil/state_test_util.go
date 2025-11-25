@@ -45,8 +45,8 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -246,11 +246,11 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 
 	// Prepare the EVM.
-	txContext := core.NewEVMTxContext(msg)
+	txContext := protocol.NewEVMTxContext(msg)
 	header := block.HeaderNoCopy()
 	//blockNum, txNum := header.Number.Uint64(), 1
 
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
+	context := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = uint256.Int{}
@@ -277,9 +277,9 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 
 	// Execute the message.
 	snapshot := statedb.PushSnapshot()
-	gaspool := new(core.GasPool)
+	gaspool := new(protocol.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
-	res, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
+	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	gasUsed := uint64(0)
 	if res != nil {
 		gasUsed = res.GasUsed
@@ -383,7 +383,7 @@ func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 }
 
-func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {
+func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (protocol.Message, error) {
 	// Derive sender from private key if present.
 	var from accounts.Address
 	if len(tx.PrivateKey) > 0 {

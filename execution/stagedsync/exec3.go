@@ -44,8 +44,8 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -258,11 +258,12 @@ func ExecV3(ctx context.Context,
 	var lastCommittedBlockNum uint64
 
 	if parallel {
-		if !inMemExec {
+		if !inMemExec { //nolint:staticcheck
 			// this is becuase for parallel execution the shared domain needs to
 			// be co-ordinated between exec and unwind - otherwise unwound state
 			// is not visible to parallel workers
 			// TODO return fmt.Errorf("parallel exec only supports inmem exec")
+
 		}
 
 		pe := &parallelExecutor{
@@ -614,7 +615,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			header := b.HeaderNoCopy()
 			getHashFnMutex := sync.Mutex{}
 
-			blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
+			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
 				getHashFnMutex.Lock()
 				defer getHashFnMutex.Unlock()
 				err = tx.Apply(ctx, func(tx kv.Tx) (err error) {
@@ -672,7 +673,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			te.execRequests <- &execRequest{
 				b.Number().Uint64(), b.Hash(),
-				core.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
+				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
+				b.BlockAccessList(),
 				txTasks, applyResults, false, exhausted,
 			}
 

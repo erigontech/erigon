@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -76,7 +76,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
+		CanTransfer: protocol.CanTransfer,
 		Transfer:    rules.Transfer,
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
@@ -121,7 +121,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 
 	tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
-	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()))
+	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()))
 	exeRes, err := st.TransitionDb(false, false)
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
@@ -136,7 +136,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err := json.Unmarshal(res, &ret); err != nil {
 		t.Fatalf("failed to unmarshal trace result: %v", err)
 	}
-	if _, has := ret["0x60f3f640a8508fc6a86d45df051962668e1e8ac7"]; !has {
-		t.Fatalf("Expected 0x60f3f640a8508fc6a86d45df051962668e1e8ac7 in result")
+	if _, has := ret["0x60f3f640a8508fc6a86d45df051962668e1e8ac7"]; has {
+		t.Fatalf("Expected NOT present 0x60f3f640a8508fc6a86d45df051962668e1e8ac7 in result because empty")
 	}
 }

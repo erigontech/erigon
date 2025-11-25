@@ -25,7 +25,7 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	txNumsReader := blockReader.TxnumReader(ctx)
 
 	if err := ValidateDomainProgress(db, kv.ReceiptDomain, txNumsReader); err != nil {
-		return nil
+		return err
 	}
 
 	tx, err := db.BeginTemporalRo(ctx)

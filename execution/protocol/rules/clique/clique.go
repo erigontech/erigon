@@ -334,7 +334,7 @@ func (c *Clique) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < ExtraVanity {
-		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, ExtraVanity-len(header.Extra))...)
+		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, ExtraVanity-len(header.Extra))...) //nolint: gocritic
 	}
 	header.Extra = header.Extra[:ExtraVanity]
 
@@ -442,7 +442,7 @@ func (c *Clique) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Bl
 		}
 	}
 	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
+	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) //nolint:staticcheck
 	if header.Difficulty.Cmp(diffNoTurn) == 0 {
 		// It's not our turn explicitly to sign, delay it a bit
 		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime

@@ -83,12 +83,11 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/execution/eth1"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -141,6 +140,7 @@ import (
 )
 
 // Config contains the configuration options of the ETH protocol.
+//
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
 
@@ -164,7 +164,7 @@ type Ethereum struct {
 	genesisBlock *types.Block
 	genesisHash  common.Hash
 
-	eth1ExecutionServer *eth1.EthereumExecutionModule
+	eth1ExecutionServer *execmodule.EthereumExecutionModule
 
 	ethBackendRPC       *privateapi2.EthBackendServer
 	ethRpcClient        rpchelper.ApiBackend
@@ -395,7 +395,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.genesisHash = genesis.Hash()
 
 	setDefaultMinerGasLimit(chainConfig, config, logger)
-	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
+	setBorDefaultTxPoolPriceLimit(chainConfig, &config.TxPool, logger)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 	if dbg.OnlyCreateDB {
@@ -878,7 +878,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	astridEnabled := chainConfig.Bor != nil
 
 	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	assembleBlockPOS := func(param *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
@@ -894,13 +894,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					&vm.Config{},
 					backend.notifications,
 					config.StateStream,
-					/*stateStream=*/ false,
+					/*badBlockHalt*/ false,
 					dirs,
 					blockReader,
 					backend.sentriesClient.Hd,
 					config.Genesis,
 					config.Sync,
 					stageloop.SilkwormForExecutionStage(backend.silkworm, config),
+					config.ExperimentalBAL,
 				),
 				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
@@ -991,12 +992,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentLogs, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
+	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentLogs, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000), txPoolRpcClient)
+	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, 1000), txPoolRpcClient)
 	if err != nil {
 		return nil, err
 	}
@@ -1299,8 +1300,10 @@ func (s *Ethereum) setUpSnapDownloader(
 		return nil
 	}
 
-	if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
-		return err
+	if downloaderCfg != nil {
+		if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
+			return err
+		}
 	}
 
 	if s.config.Snapshot.DownloaderAddr != "" {
@@ -1662,7 +1665,7 @@ func (s *Ethereum) TxpoolServer() txpoolproto.TxpoolServer {
 	return s.txPoolGrpcServer
 }
 
-func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
+func (s *Ethereum) ExecutionModule() *execmodule.EthereumExecutionModule {
 	return s.eth1ExecutionServer
 }
 
@@ -1734,11 +1737,12 @@ func setDefaultMinerGasLimit(chainConfig *chain.Config, config *ethconfig.Config
 }
 
 // setBorDefaultTxPoolPriceLimit enforces MinFeeCap to be equal to BorDefaultTxPoolPriceLimit (25gwei by default)
-func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.Config, logger log.Logger) {
+func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config *txpoolcfg.Config, logger log.Logger) {
 	if chainConfig.Bor != nil && config.MinFeeCap != txpoolcfg.BorDefaultTxPoolPriceLimit {
 		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
+	_ = config.MinFeeCap
 }
 
 func sentryMux(sentries []sentryproto.SentryClient) sentryproto.SentryClient {

@@ -188,7 +188,7 @@ func (stx *BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, 
 	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
 	// size of MaxFeePerBlobGas
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerBlobGas)
+	payloadSize += rlp.Uint256LenExcludingHead(*stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
 	payloadSize += rlp.ListPrefixLen(blobHashesLen) + blobHashesLen
@@ -214,7 +214,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(stx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.ChainID, w, b); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -222,11 +222,11 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(stx.TipCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(stx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.FeeCap, w, b); err != nil {
 		return err
 	}
 	// encode GasLimit
@@ -242,7 +242,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(stx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.Value, w, b); err != nil {
 		return err
 	}
 	// encode Data
@@ -258,7 +258,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode MaxFeePerBlobGas
-	if err := rlp.EncodeUint256(stx.MaxFeePerBlobGas, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.MaxFeePerBlobGas, w, b); err != nil {
 		return err
 	}
 	// prefix
@@ -270,15 +270,15 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode V
-	if err := rlp.EncodeUint256(&stx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(stx.V, w, b); err != nil {
 		return err
 	}
 	// encode R
-	if err := rlp.EncodeUint256(&stx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(stx.R, w, b); err != nil {
 		return err
 	}
 	// encode S
-	if err := rlp.EncodeUint256(&stx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(stx.S, w, b); err != nil {
 		return err
 	}
 	return nil

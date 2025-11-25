@@ -1536,10 +1536,7 @@ func TestGetBlobsV1(t *testing.T) {
 	proofs := make([]goethkzg.KZGProof, 0, len(blobBundles))
 	for _, bb := range blobBundles {
 		blobs = append(blobs, bb.Blob)
-		for _, p := range bb.Proofs {
-			proofs = append(proofs, p)
-		}
-
+		proofs = append(proofs, bb.Proofs...)
 	}
 	require.Equal(len(proofs), len(blobHashes))
 	assert.Equal(blobTxn.BlobBundles[0].Blob, blobs[0])

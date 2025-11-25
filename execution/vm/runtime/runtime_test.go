@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -415,7 +415,7 @@ func TestBlockhash(t *testing.T) {
 	input := common.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
 	cfg := &Config{
-		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
+		GetHashFn:   protocol.GetHashFn(header, chain.GetHeader),
 		BlockNumber: new(big.Int).Set(header.Number),
 		Time:        new(big.Int),
 	}

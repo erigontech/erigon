@@ -382,9 +382,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if baseFeeChanged {
 		p.pending.best.pendingBaseFee = pendingBaseFee
 		p.pending.worst.pendingBaseFee = pendingBaseFee
-		p.baseFee.best.pendingBastFee = pendingBaseFee
+		p.baseFee.best.pendingBaseFee = pendingBaseFee
 		p.baseFee.worst.pendingBaseFee = pendingBaseFee
-		p.queued.best.pendingBastFee = pendingBaseFee
+		p.queued.best.pendingBaseFee = pendingBaseFee
 		p.queued.worst.pendingBaseFee = pendingBaseFee
 	}
 

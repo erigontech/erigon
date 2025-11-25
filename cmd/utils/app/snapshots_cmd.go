@@ -357,6 +357,49 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "check-commitment-hist-at-blk",
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("check commitment history at block: could not setup logger: %w", err))
+				}
+				err = doCheckCommitmentHistAtBlk(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-commitment-hist-at-blk] failure", "err", err)
+					return err
+				}
+				log.Info("[check-commitment-hist-at-blk] success")
+				return nil
+			},
+			Description: "check if our historical commitment data matches the state root at a given block",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to verify", Required: true},
+			}),
+		},
+		{
+			Name: "check-commitment-hist-at-blk-range",
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("check commitment history at block range: could not setup logger: %w", err))
+				}
+				err = doCheckCommitmentHistAtBlkRange(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-commitment-hist-at-blk-range] failure", "err", err)
+					return err
+				}
+				log.Info("[check-commitment-hist-at-blk-range] success")
+				return nil
+			},
+			Description: "check if our historical commitment data matches the state roots of headers for a given [from,to) block range",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
+				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+			}),
+		},
+		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
 				if err := doPublishable(cliCtx); err != nil {
@@ -944,6 +987,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
+		case integrity.StateProgress:
+			if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
 		case integrity.Publishable:
 			if err := doPublishable(cliCtx); err != nil {
 				return err
@@ -966,6 +1013,55 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	return nil
+}
+
+func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	_, _, _, blockRetire, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+	return integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger)
+}
+
+func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	_, _, _, blockRetire, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	from := cliCtx.Uint64("from")
+	to := cliCtx.Uint64("to")
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, logger)
 }
 
 func CheckBorChain(chainName string) bool {
@@ -1570,8 +1666,8 @@ func doMeta(cliCtx *cli.Context) error {
 			}
 		}
 		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HR(), "keys_size", keysSize.HR(), "vals_size", valsSize.HR(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HR(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
-	} else if strings.HasSuffix(fname, ".bt") {
-		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
+	} else if before, ok := strings.CutSuffix(fname, ".bt"); ok {
+		kvFPath := before + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
 			panic(err)

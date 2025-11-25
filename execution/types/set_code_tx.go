@@ -309,7 +309,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -317,11 +317,11 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(tx.TipCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.FeeCap, w, b); err != nil {
 		return err
 	}
 	// encode GasLimit
@@ -333,7 +333,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
 		return err
 	}
 	// encode Data
@@ -357,15 +357,15 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode V
-	if err := rlp.EncodeUint256(&tx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
 		return err
 	}
 	// encode R
-	if err := rlp.EncodeUint256(&tx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
 		return err
 	}
 	// encode S
-	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
 	return nil

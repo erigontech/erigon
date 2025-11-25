@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/contracts"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -78,7 +78,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// effectively turning it from contract account to a non-contract account
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {

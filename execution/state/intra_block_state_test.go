@@ -429,7 +429,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 
 	s := NewWithVersionMap(reader, mvhm)
@@ -506,10 +506,8 @@ func TestVersionMapRevert(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
-	reader := NewReaderV3(domains.AsGetter(tx))
-
-	s := NewWithVersionMap(reader, mvhm)
+	mvhm := NewVersionMap(nil)
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
 
@@ -571,9 +569,8 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
-	reader := NewReaderV3(domains.AsGetter(tx))
-	s := NewWithVersionMap(reader, mvhm)
+	mvhm := NewVersionMap(nil)
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
@@ -644,9 +641,8 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
-	reader := NewReaderV3(domains.AsGetter(tx))
-	s := NewWithVersionMap(reader, mvhm)
+	mvhm := NewVersionMap(nil)
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
 
@@ -737,9 +733,8 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
-	reader := NewReaderV3(domains.AsGetter(tx))
-	s := NewWithVersionMap(reader, mvhm)
+	mvhm := NewVersionMap(nil)
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
 
@@ -831,8 +826,8 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[1].PopSnapshot(tx1Snapshot)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 	// map deletes necessary here as they happen in scheduler not ibs
-	states[1].versionMap.Delete(addr, StatePath, key1, 1, true)
-	states[1].versionMap.Delete(addr, StatePath, key2, 1, true)
+	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
+	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
 	states[1].versionMap.Delete(addr, BalancePath, accounts.NilKey, 1, true)
 
 	// Tx3 read
@@ -875,7 +870,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := NewVersionMap()
+	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
 

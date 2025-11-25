@@ -1284,6 +1284,7 @@ func concat(s1 []byte, s2 ...byte) []byte {
 }
 
 // Root returns the root hash of the trie.
+//
 // Deprecated: use Hash instead.
 func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 

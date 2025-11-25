@@ -211,7 +211,7 @@ var compactDomains = &cobra.Command{
 			logger.Error("No domains specified")
 			return
 		}
-		supportedDomain := []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain}
+		supportedDomain := []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain}
 		var compactionDomains []kv.Domain
 
 		for _, domain := range domainsStr {
