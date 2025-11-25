@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -173,6 +174,19 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
+			if _, ok := s.pidToEnodeId.Load(peerId); !ok {
+				remotePubKeyBytes, err := conn.RemotePublicKey().Raw()
+				if err != nil {
+					log.Debug("[caplin sentinel] onConnection: failed to get remote public key raw bytes", "peer", peerId.String(), "err", err)
+					return
+				}
+				ethPubKey, err := crypto.UnmarshalPubkey(remotePubKeyBytes)
+				if err != nil {
+					log.Debug("[caplin sentinel] onConnection: failed to unmarshal remote public key", "peer", peerId.String(), "err", err)
+					return
+				}
+				s.pidToEnodeId.Store(peerId, enode.PubkeyToIDV4(ethPubKey))
+			}
 		}
 	}()
 }
