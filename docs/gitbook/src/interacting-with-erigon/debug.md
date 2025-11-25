@@ -8,6 +8,12 @@ The `debug` namespace provides debugging and diagnostic methods for Erigon node 
 
 The debug namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon. For security reasons, these methods are considered private and should not be exposed on public RPC endpoints.
 
+For API usage refer to the below official resources:
+
+{% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
+
+{% embed url="https://ethereum.github.io/execution-apis/api-documentation/" %}
+
 ### Security and Access Control
 
 * Debug methods are considered private and should not be exposed on public RPC endpoints;
@@ -31,5 +37,3 @@ The debug namespace must be explicitly enabled using the `--http.api` flag when 
 * These methods are essential for debugging transaction execution issues;
 * Storage range methods help analyze contract state changes;
 * Memory management methods assist in performance optimization and resource monitoring.
-
-{% include "../../../.gitbook/includes/api-documentation-3.md" %}

@@ -97,6 +97,8 @@ type IntraBlockState struct {
 	trace          bool
 	tracingHooks   *tracing.Hooks
 	balanceInc     map[common.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	addressAccess  map[common.Address]struct{}
+	recordAccess   bool
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
@@ -126,6 +128,8 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[common.Address]*BalanceIncrease{},
+		addressAccess:     nil,
+		recordAccess:      false,
 		txIndex:           0,
 		trace:             false,
 		dep:               UnknownDep,
@@ -797,6 +801,8 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 			sdb.touch(addr)
 		}
 
+		// BAL: record coinbase/selfdestruct recipients even with 0 value
+		sdb.MarkAddressAccess(addr)
 		return nil
 	}
 
@@ -1447,7 +1453,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	// creation clashes between trnascations get detected
 	sdb.versionRead(addr, BalancePath, common.Hash{}, source, version, newObj.Balance())
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
-
 	return nil
 }
 
@@ -1788,6 +1793,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.
 	}
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
+	sdb.addressAccess = make(map[common.Address]struct{})
+	sdb.recordAccess = true
 	return nil
 }
 
@@ -1828,6 +1835,29 @@ func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Ha
 	return sdb.accessList.Contains(addr, slot)
 }
 
+func (sdb *IntraBlockState) MarkAddressAccess(addr common.Address) {
+	if !sdb.recordAccess || sdb.addressAccess == nil {
+		return
+	}
+	sdb.addressAccess[addr] = struct{}{}
+}
+
+// AccessedAddresses returns and resets the set of addresses touched during the current transaction.
+func (sdb *IntraBlockState) AccessedAddresses() map[common.Address]struct{} {
+	if len(sdb.addressAccess) == 0 {
+		sdb.recordAccess = false
+		sdb.addressAccess = nil
+		return nil
+	}
+	out := make(map[common.Address]struct{}, len(sdb.addressAccess))
+	for addr := range sdb.addressAccess {
+		out[addr] = struct{}{}
+	}
+	sdb.recordAccess = false
+	sdb.addressAccess = nil
+	return out
+}
+
 func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
@@ -1836,6 +1866,7 @@ func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.A
 }
 
 func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath, key common.Hash, val any) {
+	sdb.MarkAddressAccess(addr)
 	if sdb.versionMap != nil {
 		if sdb.versionedWrites == nil {
 			sdb.versionedWrites = WriteSet{}
@@ -1858,6 +1889,7 @@ func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath
 }
 
 func (sdb *IntraBlockState) versionRead(addr common.Address, path AccountPath, key common.Hash, source ReadSource, version Version, val any) {
+	sdb.MarkAddressAccess(addr)
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}

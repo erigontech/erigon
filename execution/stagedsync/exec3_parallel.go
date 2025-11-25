@@ -209,19 +209,21 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						// TODO --- BAL Implementation integration point ---
-						//  At this stage applyResult.TxIO contains the reads and writes for all of the completed
-						// transactions in the block.  The state.VersionedRead, and state.VersionedWrite objects contain
-						// version information contains details the data read & writes and the associated transactions
-						//
-						// It should be possible to iterate this list and construct the blocks BAL here
-						//
-						// For more details on how to iterate this list look at:
-						//
-						// dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
-						//
-						// which iterates the list and prints it contents
-						//
+						if pe.cfg.experimentalBAL {
+							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
+							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
+
+							if pe.cfg.chainConfig.IsGlamsterdam(applyResult.BlockTime) {
+								headerBALHash := *lastHeader.BlockAccessListHash
+								if headerBALHash != b.BlockAccessList().Hash() {
+									return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, headerBALHash, b.BlockAccessList().Hash())
+								}
+								if headerBALHash != bal.Hash() {
+									return fmt.Errorf("block %d: block access list mismatch: got %s expected %s", applyResult.BlockNum, headerBALHash, bal.Hash())
+								}
+							}
+						}
+
 						if err := protocol.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
@@ -588,13 +590,18 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if blockResult.BlockNum > 0 {
 					result := blockExecutor.results[len(blockExecutor.results)-1]
 
+					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
+					finalVersion := finalTask.Version()
 					stateUpdates, err := func() (state.StateUpdates, error) {
 						pe.RLock()
 						defer pe.RUnlock()
 
-						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))))
-						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
-						ibs.SetVersion(result.Version().Incarnation)
+						reader := state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
+						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+						ibs.SetVersion(finalVersion.Incarnation)
+						localVersionMap := state.NewVersionMap(nil)
+						ibs.SetVersionMap(localVersionMap)
+						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 
 						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
@@ -625,11 +632,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						if err != nil {
-							return state.StateUpdates{}, fmt.Errorf("can't finalize block: %w", err)
+							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
+						}
+
+						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
+						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
+
+						finalWrites := ibs.VersionedWrites(true)
+						if len(finalWrites) > 0 {
+							blockExecutor.blockIO.RecordWrites(finalVersion, finalWrites)
+							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
 						stateWriter := state.NewBufferedWriter(pe.rs, nil)
-
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
@@ -1234,15 +1249,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			if res.Version().Incarnation > len(be.tasks) {
 				if execErr.OriginError != nil {
-					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
+					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))
 				} else {
-					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation)
+					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation, len(be.tasks))
 				}
 			}
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.blockNum, "err", execErr)
 			}
 			be.blockIO.RecordReads(res.Version(), res.TxIn)
+			be.blockIO.RecordAccesses(res.Version(), res.AccessedAddresses)
 			var addedDependencies bool
 			if execErr.DependencyTxIndex >= 0 {
 				dependency := execErr.DependencyTxIndex + 1
@@ -1293,6 +1309,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txVersion := res.Version()
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
+		be.blockIO.RecordAccesses(txVersion, res.AccessedAddresses)
 
 		if res.Version().Incarnation == 0 {
 			be.blockIO.RecordWrites(txVersion, res.TxOut)

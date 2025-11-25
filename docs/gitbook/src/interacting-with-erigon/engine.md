@@ -8,6 +8,12 @@ The Engine API is a standardized JSON-RPC interface defined by the Ethereum spec
 
 The Engine API replaced older `eth_` methods for consensus communication. It is only required when running Erigon with an external consensus client like Prysm, Lighthouse, or Teku, as these external clients communicate exclusively through this interface.
 
+For API usage refer to the below official resources:
+
+{% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
+
+{% embed url="https://ethereum.github.io/execution-apis/api-documentation/" %}
+
 #### Default Erigon Behavior (Caplin)
 
 By default, Erigon runs its own embedded consensus layer client, Caplin. For optimized performance, Caplin bypasses the Engine API and uses direct internal calls to communicate with Erigon's execution layer.
@@ -30,5 +36,3 @@ For security, the Engine API listens on port 8551 by default and requires JWT au
 * A JWT secret is automatically generated and saved in the file `jwt.hex` within your data directory.
 * This secret must be shared with your external consensus layer client to establish secure communication.
 * If your CL client runs on a different machine, you must expose the API using `--authrpc.addr 0.0.0.0` and configure virtual hosts appropriately with `--authrpc.vhosts`.
-
-{% include "../../../.gitbook/includes/api-documentation-3.md" %}

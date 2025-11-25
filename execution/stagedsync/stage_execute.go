@@ -88,6 +88,7 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
+	experimentalBAL bool
 }
 
 func StageExecuteBlocksCfg(
@@ -107,28 +108,30 @@ func StageExecuteBlocksCfg(
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	silkworm *silkworm.Silkworm,
+	experimentalBAL bool,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
 
 	return ExecuteBlockCfg{
-		db:            db,
-		prune:         pm,
-		batchSize:     batchSize,
-		chainConfig:   chainConfig,
-		engine:        engine,
-		vmConfig:      vmConfig,
-		dirs:          dirs,
-		notifications: notifications,
-		stateStream:   stateStream,
-		badBlockHalt:  badBlockHalt,
-		blockReader:   blockReader,
-		hd:            hd,
-		genesis:       genesis,
-		historyV3:     true,
-		syncCfg:       syncCfg,
-		silkworm:      silkworm,
+		db:              db,
+		prune:           pm,
+		batchSize:       batchSize,
+		chainConfig:     chainConfig,
+		engine:          engine,
+		vmConfig:        vmConfig,
+		dirs:            dirs,
+		notifications:   notifications,
+		stateStream:     stateStream,
+		badBlockHalt:    badBlockHalt,
+		blockReader:     blockReader,
+		hd:              hd,
+		genesis:         genesis,
+		historyV3:       true,
+		syncCfg:         syncCfg,
+		silkworm:        silkworm,
+		experimentalBAL: experimentalBAL,
 	}
 }
 
