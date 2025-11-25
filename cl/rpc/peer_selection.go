@@ -30,7 +30,7 @@ var (
 	peersCandidateRefreshInterval = time.Second * 15
 	allCustodyIndices             = func() map[uint64]bool {
 		indices := make(map[uint64]bool)
-		for i := uint64(0); i < clparams.GetBeaconConfig().NumberOfColumns; i++ {
+		for i := uint64(0); i < 128; i++ {
 			indices[i] = true
 		}
 		return indices
