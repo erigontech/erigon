@@ -228,6 +228,7 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 
 	out := &sentinelproto.PeersInfoResponse{Peers: make([]*sentinelproto.Peer, 0, len(peers))}
 
+	log.Debug("[caplin sentinel] getting peers infos", "peers", len(peers))
 	for _, p := range peers {
 		entry := &sentinelproto.Peer{}
 		peerInfo := s.p2p.Host().Network().Peerstore().PeerInfo(p)
@@ -265,6 +266,7 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		}
 		out.Peers = append(out.Peers, entry)
 	}
+	log.Debug("[caplin sentinel] peers infos", "peers", len(out.Peers))
 	return out
 }
 
