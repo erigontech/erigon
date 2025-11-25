@@ -28,6 +28,9 @@ import (
 	"strings"
 	"time"
 
+	"os"
+	"sync"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -669,6 +672,10 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr common.Address) (common
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr common.Address, key common.Hash, value *uint256.Int) error {
+	// --- 埋点开始 ---
+    sdb.logAccess(addr, key, "READ")
+    // --- 埋点结束 ---
+	
 	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
@@ -1066,6 +1073,9 @@ func (sdb *IntraBlockState) Incarnation() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr common.Address, key common.Hash, value uint256.Int) error {
+	// --- 埋点开始 ---
+    sdb.logAccess(addr, key, "WRITE")
+    // --- 埋点结束 ---
 	return sdb.setState(addr, key, value, false)
 }
 
@@ -1999,3 +2009,45 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 	}
 	return nil
 }
+
+// =================== 科研实验代码开始 ===================
+
+var (
+	// 定义全局文件句柄和锁
+	researchLogFile *os.File
+	researchOnce    sync.Once
+	researchLock    sync.Mutex
+)
+
+// logAccess 是我们用来记录日志的辅助函数
+func (sdb *IntraBlockState) logAccess(addr common.Address, key common.Hash, opType string) {
+	// 1. 懒加载：只在第一次调用时创建文件
+	researchOnce.Do(func() {
+		// 注意：这里硬编码了你的路径，实验代码没关系
+		filePath := "/home/tianyumao/workspace/transaction-replay/access_log.csv"
+		
+		// 打开文件，追加模式 | 创建模式 | 只写模式
+		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Printf("❌ [Experiment Error] Cannot create log file: %v\n", err)
+			return
+		}
+		researchLogFile = f
+		
+		// 写入 CSV 表头
+		researchLogFile.WriteString("BlockNum,TxIndex,Address,SlotKey,Type\n")
+		fmt.Printf("✅ [Experiment] Logging started at: %s\n", filePath)
+	})
+
+	if researchLogFile != nil {
+		researchLock.Lock()
+		defer researchLock.Unlock()
+
+		// 格式：区块号, 交易索引, 合约地址, 存储槽Key, 操作类型(READ/WRITE)
+		// 注意：sdb.blockNum 和 sdb.txIndex 是 IntraBlockState 的字段
+		fmt.Fprintf(researchLogFile, "%d,%d,%s,%s,%s\n", 
+			sdb.blockNum, sdb.txIndex, addr.Hex(), key.Hex(), opType)
+	}
+}
+// =================== 科研实验代码结束 ===================
+
