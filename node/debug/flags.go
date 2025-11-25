@@ -208,38 +208,6 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 			StartPProf(address, nil)
 		}
 	}
-
-	pyroscope, err := flags.GetBool(pyroscopeFlag.Name)
-	if err != nil {
-		log.Error("failed setting config flags from yaml/toml file", "err", err)
-		panic(err)
-	}
-	pyroscopeServer, err := flags.GetString(pyroscopeServerFlag.Name)
-	if err != nil {
-		log.Error("failed setting config flags from yaml/toml file", "err", err)
-		panic(err)
-	}
-	pyroscopeTags, err := flags.GetStringSlice(pyroscopeTagsFlag.Name)
-	if err != nil {
-		log.Error("failed setting config flags from yaml/toml file", "err", err)
-		panic(err)
-	}
-
-	if pyroscope {
-		tags := make(map[string]string)
-		for _, rawTag := range pyroscopeTags {
-			parts := strings.Split(rawTag, "=")
-			if len(parts) == 2 { // Ignore invalid tags
-				tags[parts[0]] = parts[1]
-			}
-		}
-		if err := Handler.StartPyroscopeProfiler(pyroscopeServer, tags); err != nil {
-			log.Error("failed starting pyroscope profiler", "err", err)
-			panic(err)
-		}
-
-	}
-
 	return logger
 }
 
@@ -315,6 +283,24 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	if metricsEnabled || pprofEnabled {
 		torrentMsg := fmt.Sprintf("curl -s http://%s%s > torrentStatus.txt", torrentClientStatusAddr, downloader.TorrentClientStatusPath)
 		log.Info("To get torrent client status", "command", torrentMsg)
+	}
+
+	pyroscopeEnabled := ctx.Bool(pyroscopeFlag.Name)
+	pyroscopeServer := ctx.String(pyroscopeServerFlag.Name)
+	pyroscopeTags := ctx.StringSlice(pyroscopeTagsFlag.Name)
+
+	if pyroscopeEnabled {
+		tags := make(map[string]string)
+		for _, rawTag := range pyroscopeTags {
+			parts := strings.Split(rawTag, "=")
+			if len(parts) == 2 { // Ignore invalid tags
+				tags[parts[0]] = parts[1]
+			}
+		}
+		if err := Handler.StartPyroscopeProfiler(pyroscopeServer, tags); err != nil {
+			log.Error("failed starting pyroscope profiler", "err", err)
+			panic(err)
+		}
 	}
 
 	return logger, tracer, metricsMux, pprofMux, nil
