@@ -282,6 +282,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var blockAccessList types.BlockAccessList
+	var err error
 	if version >= clparams.GloasVersion {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
@@ -290,7 +291,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
-			blockAccessList, err := types.DecodeBlockAccessListBytes(*req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
 			if err != nil {
 				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
@@ -304,6 +305,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	} else if req.BlockAccessList != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
 	}
+	log.Info(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 
 	"github.com/holiman/uint256"
 
@@ -853,4 +854,89 @@ func validateSlotChangeList(slots []*SlotChanges) error {
 		}
 	}
 	return nil
+}
+
+// DebugString renders the block access list into a human-readable multiline string.
+func (bal BlockAccessList) DebugString() string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "accounts=%d", len(bal))
+	for i, account := range bal {
+		if account == nil {
+			fmt.Fprintf(&sb, "\n[%d] <nil>", i)
+			continue
+		}
+		fmt.Fprintf(&sb, "\n[%d] addr=%s", i, account.Address.Hex())
+		if len(account.StorageChanges) > 0 {
+			sb.WriteString("\n  storageChanges:")
+			for _, slotChange := range account.StorageChanges {
+				sb.WriteString("\n    - slot=")
+				sb.WriteString(slotChange.Slot.Hex())
+				sb.WriteString(" changes=[")
+				for j, change := range slotChange.Changes {
+					if j > 0 {
+						sb.WriteString(" ")
+					}
+					if change == nil {
+						sb.WriteString("<nil>")
+						continue
+					}
+					fmt.Fprintf(&sb, "%d:%s", change.Index, change.Value.Hex())
+				}
+				sb.WriteString("]")
+			}
+		}
+		if len(account.StorageReads) > 0 {
+			sb.WriteString("\n  storageReads=[")
+			for j, read := range account.StorageReads {
+				if j > 0 {
+					sb.WriteString(" ")
+				}
+				sb.WriteString(read.Hex())
+			}
+			sb.WriteString("]")
+		}
+		if len(account.BalanceChanges) > 0 {
+			sb.WriteString("\n  balanceChanges=[")
+			for j, change := range account.BalanceChanges {
+				if j > 0 {
+					sb.WriteString(" ")
+				}
+				if change == nil {
+					sb.WriteString("<nil>")
+					continue
+				}
+				fmt.Fprintf(&sb, "%d:%s", change.Index, change.Value.Hex())
+			}
+			sb.WriteString("]")
+		}
+		if len(account.NonceChanges) > 0 {
+			sb.WriteString("\n  nonceChanges=[")
+			for j, change := range account.NonceChanges {
+				if j > 0 {
+					sb.WriteString(" ")
+				}
+				if change == nil {
+					sb.WriteString("<nil>")
+					continue
+				}
+				fmt.Fprintf(&sb, "%d:%d", change.Index, change.Value)
+			}
+			sb.WriteString("]")
+		}
+		if len(account.CodeChanges) > 0 {
+			sb.WriteString("\n  codeChanges=[")
+			for j, change := range account.CodeChanges {
+				if j > 0 {
+					sb.WriteString(" ")
+				}
+				if change == nil {
+					sb.WriteString("<nil>")
+					continue
+				}
+				fmt.Fprintf(&sb, "%d:len(%d)", change.Index, len(change.Data))
+			}
+			sb.WriteString("]")
+		}
+	}
+	return sb.String()
 }

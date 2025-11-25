@@ -40,6 +40,12 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 
 	bal := make([]*types.AccountChanges, 0, len(ac))
 	for _, account := range ac {
+		// The system address shows up as a touched address due to a balance check in IBS
+		// during a system call, however this should not be included in the BAL.
+		if isSystemBALAddress(account.changes.Address) {
+			continue
+		}
+
 		account.finalize()
 		normalizeAccountChanges(account.changes)
 		bal = append(bal, account.changes)
@@ -61,6 +67,9 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 
 	switch vr.Path {
 	case state.StoragePath:
+		if hasStorageWrite(account.changes, vr.Key) {
+			return
+		}
 		account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
 	default:
 		// Only track storage reads for BAL. Balance/nonce/code changes are tracked via writes, others are ignored
@@ -70,6 +79,7 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 func addStorageUpdate(ac *types.AccountChanges, vw *state.VersionedWrite, txIndex uint16) {
 	val := vw.Val.(uint256.Int)
 	value := common.Hash(val.Bytes32())
+	removeStorageRead(ac, vw.Key)
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,
@@ -126,6 +136,28 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 			account.code.recordWrite(accessIndex, val, cloneBytes, bytes.Equal)
 		}
 	default:
+	}
+}
+
+func isSystemBALAddress(addr common.Address) bool {
+	return addr == state.SystemAddress
+}
+
+func hasStorageWrite(ac *types.AccountChanges, slot common.Hash) bool {
+	for _, sc := range ac.StorageChanges {
+		if sc != nil && sc.Slot == slot {
+			return true
+		}
+	}
+	return false
+}
+
+func removeStorageRead(ac *types.AccountChanges, slot common.Hash) {
+	for i := range ac.StorageReads {
+		if ac.StorageReads[i] == slot {
+			ac.StorageReads = append(ac.StorageReads[:i], ac.StorageReads[i+1:]...)
+			return
+		}
 	}
 }
 
