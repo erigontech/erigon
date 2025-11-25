@@ -55,7 +55,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	if err != nil {
 		return err
 	}
-	log.Debug("[caplin] Connected with peer", "peer", info.ID)
+	log.Trace("[caplin] Connected with peer", "peer", info.ID)
 	return nil
 }
 

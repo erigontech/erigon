@@ -2,11 +2,13 @@ package p2p
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/sync/semaphore"
 )
@@ -73,4 +75,27 @@ func (p *P2Pmanager) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, se
 		return err
 	}
 	return nil
+}
+
+func (p *P2Pmanager) peerMonitor(ctx context.Context) {
+	ticker := time.NewTicker(time.Second * 30)
+	for {
+		select {
+		case <-ticker.C:
+			connected := 0
+			closed := 0
+			peers := p.Host().Network().Peers()
+			for _, peer := range peers {
+				if p.Host().Network().Connectedness(peer) == network.Connected {
+					connected++
+				} else {
+					p.Host().Network().ClosePeer(peer)
+					closed++
+				}
+			}
+			log.Debug("[caplin p2p] reporting connected peers", "connected", connected, "closed", closed)
+		case <-ctx.Done():
+			return
+		}
+	}
 }
