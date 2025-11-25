@@ -464,7 +464,7 @@ func addTransactionsToMiningBlock(
 
 		if txn.Type() == types.AccountAbstractionTxType {
 			aaTxn := txn.(*types.AccountAbstractionTransaction)
-			blockContext := protocol.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, coinbase, chainConfig)
+			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, coinbase, chainConfig)
 			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
 			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
 			if err != nil {

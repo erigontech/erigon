@@ -28,7 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/holiman/uint256"
 
 	ethereum "github.com/erigontech/erigon"
@@ -741,7 +740,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 	txContext := protocol.NewEVMTxContext(msg)
 	header := block.Header()
-	evmContext := core.NewEVMBlockContext(header, protocol.GetHashFn(header, b.getHeader), b.m.Engine, accounts.NilAddress, b.m.ChainConfig)
+	evmContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, b.getHeader), b.m.Engine, accounts.NilAddress, b.m.ChainConfig)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})

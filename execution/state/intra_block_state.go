@@ -1798,7 +1798,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
-	sdb.addressAccess = make(map[common.Address]struct{})
+	sdb.addressAccess = make(map[accounts.Address]struct{})
 	sdb.recordAccess = true
 	return nil
 }
@@ -1848,13 +1848,13 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address) {
 }
 
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
-func (sdb *IntraBlockState) AccessedAddresses() map[common.Address]struct{} {
+func (sdb *IntraBlockState) AccessedAddresses() map[accounts.Address]struct{} {
 	if len(sdb.addressAccess) == 0 {
 		sdb.recordAccess = false
 		sdb.addressAccess = nil
 		return nil
 	}
-	out := make(map[common.Address]struct{}, len(sdb.addressAccess))
+	out := make(map[accounts.Address]struct{}, len(sdb.addressAccess))
 	for addr := range sdb.addressAccess {
 		out[addr] = struct{}{}
 	}
@@ -1863,7 +1863,7 @@ func (sdb *IntraBlockState) AccessedAddresses() map[common.Address]struct{} {
 	return out
 }
 
-func (sdb *IntraBlockState) accountRead(addr common.Address, account accounts.Account, source ReadSource, version Version) {
+func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
 		versionRead[*accounts.Account](sdb, addr, AddressPath, accounts.NilKey, source, version, &data)

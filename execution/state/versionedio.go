@@ -709,21 +709,21 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
 	}
 }
 
-func (io *VersionedIO) RecordAccesses(txVersion Version, addresses map[common.Address]struct{}) {
+func (io *VersionedIO) RecordAccesses(txVersion Version, addresses map[accounts.Address]struct{}) {
 	if len(addresses) == 0 {
 		return
 	}
 	if len(io.accessed) <= txVersion.TxIndex+1 {
-		io.accessed = append(io.accessed, make([]map[common.Address]struct{}, txVersion.TxIndex+2-len(io.accessed))...)
+		io.accessed = append(io.accessed, make([]map[accounts.Address]struct{}, txVersion.TxIndex+2-len(io.accessed))...)
 	}
-	dest := make(map[common.Address]struct{}, len(addresses))
+	dest := make(map[accounts.Address]struct{}, len(addresses))
 	for addr := range addresses {
 		dest[addr] = struct{}{}
 	}
 	io.accessed[txVersion.TxIndex+1] = dest
 }
 
-func (io *VersionedIO) AccessedAddresses(txIndex int) map[common.Address]struct{} {
+func (io *VersionedIO) AccessedAddresses(txIndex int) map[accounts.Address]struct{} {
 	if len(io.accessed) <= txIndex+1 {
 		return nil
 	}

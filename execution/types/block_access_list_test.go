@@ -10,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestBlockAccessListValidateOrdering(t *testing.T) {
@@ -18,8 +19,8 @@ func TestBlockAccessListValidateOrdering(t *testing.T) {
 	addrB[19] = 0x01
 
 	list := BlockAccessList{
-		{Address: addrA},
-		{Address: addrB},
+		{Address: accounts.InternAddress(addrA)},
+		{Address: accounts.InternAddress(addrB)},
 	}
 	if err := list.Validate(); err == nil {
 		t.Fatalf("expected ordering error, got nil")
@@ -34,8 +35,8 @@ func TestAccountChangesEncodeRejectsUnsortedReads(t *testing.T) {
 	slotB[31] = 0x01
 
 	ac := &AccountChanges{
-		Address:      addr,
-		StorageReads: []common.Hash{slotA, slotB},
+		Address:      accounts.InternAddress(addr),
+		StorageReads: []accounts.StorageKey{accounts.InternKey(slotA), accounts.InternKey(slotB)},
 	}
 
 	var buf bytes.Buffer
@@ -62,18 +63,18 @@ func TestDecodeBalanceChangesRejectsOutOfOrderIndices(t *testing.T) {
 func TestBlockAccessListRLPEncoding(t *testing.T) {
 	bal := BlockAccessList{
 		{
-			Address: common.HexToAddress("0x00000000000000000000000000000000000000aa"),
+			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
 			StorageChanges: []*SlotChanges{
 				{
-					Slot: common.HexToHash("0x01"),
+					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*StorageChange{
 						{Index: 1, Value: *uint256.NewInt(2)},
 						{Index: 5, Value: *uint256.NewInt(3)},
 					},
 				},
 			},
-			StorageReads: []common.Hash{
-				common.HexToHash("0x02"),
+			StorageReads: []accounts.StorageKey{
+				accounts.InternKey(common.HexToHash("0x02")),
 			},
 			BalanceChanges: []*BalanceChange{
 				{Index: 1, Value: *uint256.NewInt(4)},
