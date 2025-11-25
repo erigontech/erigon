@@ -80,7 +80,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Coinbase:    common.Address{},
 		BlockNumber: 8000000,
 		Time:        5,
-		Difficulty:  big.NewInt(0x30000),
+		Difficulty:  *uint256.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 		BaseFee:     uint256.Int{},
 		BlobBaseFee: *uint256.NewInt(50000),

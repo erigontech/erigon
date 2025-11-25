@@ -58,7 +58,7 @@ func TestSenders(t *testing.T) {
 
 	// prepare txn so it works with our test
 	signer1 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
-	header := &types.Header{Number: common.Big1}
+	header := &types.Header{Number: *common.Num1}
 	hash := header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
 	require.NoError(rawdb.WriteBody(tx, hash, 1, &types.Body{
@@ -90,7 +90,7 @@ func TestSenders(t *testing.T) {
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
 
 	signer2 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
-	header.Number = common.Big2
+	header.Number = *common.Num2
 	hash = header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
 	require.NoError(rawdb.WriteBody(tx, hash, 2, &types.Body{
@@ -133,7 +133,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 2))
 
-	header.Number = common.Big3
+	header.Number = *common.Num3
 	hash = header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
 	err = rawdb.WriteBody(tx, hash, 3, &types.Body{
@@ -150,19 +150,19 @@ func TestSenders(t *testing.T) {
 	require.NoError(err)
 
 	{
-		header.Number = common.Big1
+		header.Number = *common.Num1
 		hash = header.Hash()
 		found, senders, _ := br.BlockWithSenders(m.Ctx, tx, hash, 1)
 		assert.NotNil(t, found)
 		assert.Len(t, found.Body().Transactions, 2)
 		assert.Len(t, senders, 2)
-		header.Number = common.Big2
+		header.Number = *common.Num2
 		hash = header.Hash()
 		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Body().Transactions))
 		assert.Len(t, senders, 3)
-		header.Number = common.Big3
+		header.Number = *common.Num3
 		hash = header.Hash()
 		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 3)
 		assert.NotNil(t, found)

@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -92,7 +93,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 
 	expected := 1
 	header := &types.Header{
-		Number: big.NewInt(int64(expected)),
+		Number: *uint256.NewInt(uint64(expected)),
 	}
 
 	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header))

@@ -77,7 +77,7 @@ func TestSuggestPrice(t *testing.T) {
 	config := gaspricecfg.Config{
 		Blocks:     2,
 		Percentile: 60,
-		Default:    big.NewInt(common.GWei),
+		Default:    uint256.NewInt(common.GWei),
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
@@ -94,8 +94,8 @@ func TestSuggestPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
 	}
-	expect := big.NewInt(common.GWei * int64(30))
-	if got.Cmp(expect) != 0 {
+	expect := common.GWei * uint64(30)
+	if got.CmpUint64(expect) != 0 {
 		t.Fatalf("Gas price mismatch, want %d, got %d", expect, got)
 	}
 }
