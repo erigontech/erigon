@@ -349,6 +349,13 @@ func (h *History) Scan(toTxNum uint64) error {
 	}
 
 	h.reCalcVisibleFiles(toTxNum)
+
+	salt, err := GetStateIndicesSalt(h.dirs, false, h.logger)
+	if err != nil {
+		return err
+	}
+
+	h.salt.Store(salt)
 	return nil
 }
 

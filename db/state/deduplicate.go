@@ -94,7 +94,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var lastKey, valBuf []byte
-	var keyCount int
+	var dedupCount int
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
 		// Advance all the items that have this key (including the top)
@@ -128,6 +128,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 
 					dedupKeyEFs[string(ci1.key)][prevTxNum] = struct{}{}
 					prevTxNum = txNum
+					dedupCount++
 					continue
 				}
 
@@ -141,7 +142,6 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 			}
 
 			// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
-			keyCount += int(count)
 			if ci1.idx.HasNext() {
 				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
 				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
@@ -157,6 +157,8 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 	if decomp, err = seg.NewDecompressor(datPath); err != nil {
 		return err
 	}
+
+	fmt.Println("Values to deduplicate:", dedupCount)
 
 	indexIn, err := ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps, dedupKeyEFs)
 	if err != nil {
