@@ -126,6 +126,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 		s.pidToEnr.Store(peerInfo.ID, node.String())
 		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
+		log.Debug("[caplin sentinel] storing enr and enode id", "peer", peerInfo.ID.String(), "enr", node.String(), "enodeId", node.ID().String())
 		// Skip Peer if IP was private.
 		if node.IP().IsPrivate() {
 			continue
@@ -158,6 +159,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 			s.peers.RemovePeer(peerId)
 			return
 		}
+
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
 			log.Trace("[sentinel] failed to validate peer:", "err", err)
