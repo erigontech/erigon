@@ -18,23 +18,17 @@ package sentinel
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/x509"
 	"errors"
-	"net"
-	"strconv"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr/net"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
-	lpcrypto "github.com/libp2p/go-libp2p/core/crypto"
 )
 
 const (
@@ -179,72 +173,6 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
-			if _, ok := s.pidToEnr.Load(peerId); !ok {
-				//log.Debug("[caplin sentinel] onConnection: no enr for peer", "peer", peerId.String())
-
-				// enode id
-				remotePubKey := conn.RemotePublicKey()
-				if remotePubKey == nil {
-					log.Debug("[caplin sentinel] onConnection: no remote public key for peer", "peer", peerId.String())
-					return
-				}
-
-				remotePubKeyBytes, err := remotePubKey.Raw()
-				if err != nil {
-					log.Debug("[caplin sentinel] onConnection: failed to get remote public key raw bytes", "peer", peerId.String(), "err", err)
-					return
-				}
-				/*ethPubKey, err := crypto.UnmarshalPubkey(remotePubKeyBytes)
-				if err != nil {
-					log.Debug("[caplin sentinel] onConnection: failed to unmarshal remote public key", "peer", peerId.String(), "err", err)
-					return
-				}*/
-				pubKey, err := lpcrypto.UnmarshalECDSAPublicKey(remotePubKeyBytes)
-				if err != nil {
-					log.Debug("[caplin sentinel] onConnection: failed to convert remote public key to ecdsa", "peer", peerId.String(), "err", err)
-					return
-				}
-
-				raw, err := pubKey.Raw()
-				if err != nil {
-					log.Debug("[caplin sentinel] onConnection: failed to get remote public key raw bytes", "peer", peerId.String(), "err", err)
-					return
-				}
-				parsed, err := x509.ParsePKIXPublicKey(raw)
-				if err != nil {
-					log.Debug("[caplin sentinel] onConnection: failed to parse remote public key", "peer", peerId.String(), "err", err)
-					return
-				}
-
-				ethPubKey, ok := parsed.(*ecdsa.PublicKey)
-				if !ok {
-					log.Debug("[caplin sentinel] onConnection: failed to convert remote public key to ecdsa", "peer", peerId.String())
-					return
-				}
-				// enr
-				remoteAddr := conn.RemoteMultiaddr()
-				if remoteAddr == nil {
-					log.Debug("[caplin sentinel] onConnection: no remote address for peer", "peer", peerId.String())
-					return
-				}
-				netAddr, err := manet.ToNetAddr(remoteAddr)
-				if err != nil {
-					log.Debug("[caplin sentinel] onConnection: failed to convert remote address to net address", "peer", peerId.String(), "err", err)
-					return
-				}
-				host, portStr, err := net.SplitHostPort(netAddr.String())
-				if err != nil {
-					log.Debug("[caplin sentinel] onConnection: failed to split host and port", "peer", peerId.String(), "err", err)
-					return
-				}
-
-				ip := net.ParseIP(host)
-				tcpPort, _ := strconv.Atoi(portStr)
-				newNode := enode.NewV4(ethPubKey, ip, tcpPort, tcpPort)
-				s.pidToEnr.Store(peerId, newNode.String())
-				s.pidToEnodeId.Store(peerId, newNode.ID())
-				log.Debug("[caplin sentinel] onConnection: stored enr and enode id for peer", "peer", peerId.String(), "enr", newNode.String(), "enodeId", newNode.ID().String())
-			}
 		}
 	}()
 }

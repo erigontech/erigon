@@ -28,6 +28,13 @@ var (
 
 var (
 	peersCandidateRefreshInterval = time.Second * 15
+	allCustodyIndices             = func() map[uint64]bool {
+		indices := make(map[uint64]bool)
+		for i := uint64(0); i < clparams.GetBeaconConfig().NumberOfColumns; i++ {
+			indices[i] = true
+		}
+		return indices
+	}()
 )
 
 type columnDataPeers struct {
@@ -107,10 +114,8 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			}
 			custodyIndices := map[cltypes.CustodyIndex]bool{}
 			if peer.EnodeId == "" {
-				// fill all custody indices
-				for i := cltypes.CustodyIndex(0); i < c.beaconConfig.NumberOfCustodyGroups; i++ {
-					custodyIndices[i] = true
-				}
+				// if no enode id, use all custody indices
+				custodyIndices = allCustodyIndices
 			} else {
 				// get custody indices
 				enodeId := enode.HexID(peer.EnodeId)
