@@ -2,6 +2,7 @@ package testing
 
 import (
 	"bytes"
+	"math/big"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -38,6 +39,10 @@ func (tr *TRand) RandUint256() *uint256.Int {
 	return a
 }
 
+func (tr *TRand) RandBig() *big.Int {
+	return big.NewInt(int64(tr.rnd.Int()))
+}
+
 func (tr *TRand) RandBytes(size int) []byte {
 	arr := make([]byte, size)
 	for i := 0; i < size; i++ {
@@ -67,6 +72,8 @@ func check(t *testing.T, f string, want, got interface{}) {
 func compareTestingStructs(t *testing.T, a, b *TestingStruct) {
 	check(t, "obj.a", a.a, b.a)
 	check(t, "obj.aa", a.aa, b.aa)
+	check(t, "obj.b", a.b, b.b)
+	check(t, "obj.bb", a.bb, b.bb)
 	check(t, "obj.c", a.c, b.c)
 	check(t, "obj.cc", a.cc, b.cc)
 	check(t, "obj.d", a.d, b.d)
@@ -182,6 +189,8 @@ func randTestingStruct(tr *TRand) *TestingStruct {
 	enc := TestingStruct{
 		a:  *tr.RandUint64(),
 		aa: tr.RandUint64(),
+		b:  *tr.RandBig(),
+		bb: tr.RandBig(),
 		c:  *tr.RandUint256(),
 		cc: tr.RandUint256(),
 		d:  types.BlockNonce(tr.RandBytes(8)),

@@ -5,6 +5,7 @@ package testing
 import (
 	"fmt"
 	"io"
+	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -17,6 +18,11 @@ func (obj *TestingStruct) EncodingSize() (size int) {
 	size += rlp.IntLenExcludingHead(uint64(obj.a)) + 1
 	if obj.aa != nil {
 		size += rlp.IntLenExcludingHead(uint64(*obj.aa)) + 1
+	}
+	size += rlp.BigIntLenExcludingHead(&obj.b) + 1
+	size += 1
+	if obj.bb != nil {
+		size += rlp.BigIntLenExcludingHead(obj.bb)
 	}
 	size += rlp.Uint256LenExcludingHead(obj.c) + 1
 	size += rlp.Uint256LenExcludingHead(*obj.cc) + 1
@@ -103,6 +109,12 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 		if err := rlp.EncodeInt(uint64(*obj.aa), w, b[:]); err != nil {
 			return err
 		}
+	}
+	if err := rlp.EncodeBigInt(&obj.b, w, b[:]); err != nil {
+		return err
+	}
+	if err := rlp.EncodeBigInt(obj.bb, w, b[:]); err != nil {
+		return err
 	}
 	if err := rlp.EncodeUint256(obj.c, w, b[:]); err != nil {
 		return err
@@ -341,6 +353,14 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 	var b []byte
 	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("error decoding field b, err: %w", err)
+	}
+	obj.b = *(new(big.Int).SetBytes(b))
+	if b, err = s.Uint256Bytes(); err != nil {
+		return fmt.Errorf("error decoding field bb, err: %w", err)
+	}
+	obj.bb = new(big.Int).SetBytes(b)
+	if b, err = s.Uint256Bytes(); err != nil {
+		return fmt.Errorf("error decoding field c, err: %w", err)
 	}
 	obj.c = *(new(uint256.Int).SetBytes(b))
 	if b, err = s.Uint256Bytes(); err != nil {

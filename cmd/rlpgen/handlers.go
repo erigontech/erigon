@@ -180,6 +180,58 @@ func uintPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	fmt.Fprintf(b3, "    }\n")
 }
 
+func bigIntHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	if named, ok := fieldType.(*types.Named); !ok {
+		_exit("bigIntHandle: expected filedType to be Named")
+	} else {
+		_ = addToImports(named)
+	}
+	// size
+	fmt.Fprintf(b1, "    size += rlp.BigIntLenExcludingHead(&obj.%s) + 1\n", fieldName)
+
+	// encode
+	fmt.Fprintf(b2, "    if err := rlp.EncodeBigInt(&obj.%s, w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "        return err\n")
+	fmt.Fprintf(b2, "    }\n")
+
+	// decode
+	addDecodeBuf(b3)
+	fmt.Fprintf(b3, "    if b, err = s.Uint256Bytes(); err != nil {\n")
+	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
+	fmt.Fprintf(b3, "    }\n")
+	fmt.Fprintf(b3, "    obj.%s = *(new(big.Int).SetBytes(b))\n", fieldName)
+}
+
+func bigIntPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	if ptr, ok := fieldType.(*types.Pointer); !ok {
+		_exit("bigIntPtrHandle: expected fieldType to be Pointer")
+	} else {
+		if named, ok := ptr.Elem().(*types.Named); !ok {
+			_exit("bigIntPtrHandle: expected filedType to be Pointer Named")
+		} else {
+			_ = addToImports(named)
+		}
+	}
+
+	// size
+	fmt.Fprintf(b1, "    size += 1\n")
+	fmt.Fprintf(b1, "    if obj.%s != nil {\n", fieldName)
+	fmt.Fprintf(b1, "        size += rlp.BigIntLenExcludingHead(obj.%s)\n", fieldName)
+	fmt.Fprintf(b1, "    }\n")
+
+	// encode
+	fmt.Fprintf(b2, "    if err := rlp.EncodeBigInt(obj.%s, w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "        return err\n")
+	fmt.Fprintf(b2, "    }\n")
+
+	// decode
+	addDecodeBuf(b3)
+	fmt.Fprintf(b3, "    if b, err = s.Uint256Bytes(); err != nil {\n")
+	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
+	fmt.Fprintf(b3, "    }\n")
+	fmt.Fprintf(b3, "    obj.%s = new(big.Int).SetBytes(b)\n", fieldName)
+}
+
 func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
 	if named, ok := fieldType.(*types.Named); !ok {
 		_exit("uint256Handle: expected filedType to be Named")
