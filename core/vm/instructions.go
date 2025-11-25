@@ -969,7 +969,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 	scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
-	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false)
+	res, addr, returnGas, usedMultiGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -984,6 +984,8 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	}
 
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
@@ -1010,7 +1012,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, false)
+	res, addr, returnGas, usedMultiGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, false)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -1021,6 +1023,8 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 	scope.Stack.push(&stackValue)
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
@@ -1049,7 +1053,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, _, err := interpreter.evm.Call(scope.Contract, toAddr, args, gas, &value, false /* bailout */)
+	ret, returnGas, usedMultiGas, err := interpreter.evm.Call(scope.Contract, toAddr, args, gas, &value, false /* bailout */)
 
 	if err != nil {
 		temp.Clear()
@@ -1063,6 +1067,10 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	}
 
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+
+	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -1094,7 +1102,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, _, err := interpreter.evm.CallCode(scope.Contract, toAddr, args, gas, &value)
+	ret, returnGas, usedMultiGas, err := interpreter.evm.CallCode(scope.Contract, toAddr, args, gas, &value)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1107,6 +1115,10 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	}
 
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+
+	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -1149,6 +1161,9 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
+	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+
 	interpreter.returnData = ret
 	return ret, nil
 }
@@ -1189,6 +1204,9 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+
+	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
 
 	interpreter.returnData = ret
 	return ret, nil

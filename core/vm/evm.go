@@ -399,12 +399,12 @@ func (c *codeAndHash) Hash() common.Hash {
 	return c.hash
 }
 
-func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool) ([]byte, common.Address, uint64, error) {
+func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool) ([]byte, common.Address, uint64, multigas.MultiGas, error) {
 	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress common.Address, leftOverGas uint64, err error) {
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress common.Address, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
 	depth := evm.interpreter.Depth()
 
 	if evm.Config().Tracer != nil {
@@ -418,26 +418,26 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// limit.
 	if depth > int(params.CallCreateDepth) {
 		err = ErrDepth
-		return nil, common.Address{}, gasRemaining, err
+		return nil, common.Address{}, gasRemaining, multigas.ZeroGas(), err
 	}
 	canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value)
 	if err != nil {
-		return nil, common.Address{}, 0, err
+		return nil, common.Address{}, 0, multigas.ZeroGas(), err
 	}
 	if !canTransfer {
 		if !bailout {
 			err = ErrInsufficientBalance
-			return nil, common.Address{}, gasRemaining, err
+			return nil, common.Address{}, gasRemaining, multigas.ZeroGas(), err
 		}
 	}
 	if incrementNonce {
 		nonce, err := evm.intraBlockState.GetNonce(caller.Address())
 		if err != nil {
-			return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			return nil, common.Address{}, 0, multigas.ZeroGas(), fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if nonce+1 < nonce {
 			err = ErrNonceUintOverflow
-			return nil, common.Address{}, gasRemaining, err
+			return nil, common.Address{}, gasRemaining, multigas.ZeroGas(), err
 		}
 		evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
 	}
@@ -449,22 +449,22 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// Ensure there's no existing contract already at the designated address
 	contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
 	if err != nil {
-		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return nil, common.Address{}, 0, multigas.ZeroGas(), fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	nonce, err := evm.intraBlockState.GetNonce(address)
 	if err != nil {
-		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return nil, common.Address{}, 0, multigas.ZeroGas(), fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	hasStorage, err := evm.intraBlockState.HasStorage(address)
 	if err != nil {
-		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return nil, common.Address{}, 0, multigas.ZeroGas(), fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != empty.CodeHash) || hasStorage {
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining, 0, tracing.GasChangeCallFailedExecution)
 		}
-		return nil, common.Address{}, 0, err
+		return nil, common.Address{}, 0, multigas.ComputationGas(gasRemaining), err
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
@@ -480,7 +480,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.config.NoRecursion && depth > 0 {
-		return nil, address, gasRemaining, nil
+		return nil, address, gasRemaining, contract.GetTotalUsedMultiGas(), nil
 	}
 
 	ret, err = evm.interpreter.Run(contract, nil, false)
@@ -524,13 +524,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
+		evm.intraBlockState.RevertToSnapshot(snapshot, err)
 		if err != ErrExecutionReverted {
 			contract.UseMultiGas(multigas.ComputationGas(contract.Gas), evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
 		}
 	}
 
-	return ret, address, contract.Gas, err
+	return ret, address, contract.Gas, contract.GetTotalUsedMultiGas(), err
 }
 
 func (evm *EVM) maxCodeSize() int {
@@ -542,10 +542,10 @@ func (evm *EVM) maxCodeSize() int {
 
 // Create creates a new contract using code as deployment code.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
 	nonce, err := evm.intraBlockState.GetNonce(caller.Address())
 	if err != nil {
-		return nil, common.Address{}, 0, err
+		return nil, common.Address{}, 0, multigas.ZeroGas(), err
 	}
 	contractAddr = types.CreateAddress(caller.Address(), nonce)
 	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout)
@@ -556,7 +556,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, end
 // The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr common.Address, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = types.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
 	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout)
@@ -564,8 +564,8 @@ func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, en
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 // Unlike the normal Create & Create2, it doesn't increment caller's nonce.
-func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, contractAddr common.Address) (ret []byte, leftOverGas uint64, err error) {
-	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, false)
+func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, contractAddr common.Address) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
+	ret, _, leftOverGas, usedMultiGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, false)
 	return
 }
 

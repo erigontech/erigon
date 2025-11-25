@@ -120,6 +120,9 @@ func NewContract(caller ContractRef, addr common.Address, value *uint256.Int, ga
 		// This pointer will be off the state transition
 		Gas:       gas,
 		jumpdests: jumpDest,
+
+		UsedMultiGas:     multigas.ZeroGas(),
+		RetainedMultiGas: multigas.ZeroGas(),
 	}
 }
 
