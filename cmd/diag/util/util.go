@@ -150,8 +150,10 @@ func SaveDataToFile(filePath string, fileName string, data string) error {
 	}
 	defer file.Close()
 
-	_, err = file.WriteString(fmt.Sprintf("%v\n", data))
-	if err != nil {
+	if _, err = io.WriteString(file, data); err != nil {
+		return err
+	}
+	if _, err = io.WriteString(file, "\n"); err != nil {
 		return err
 	}
 
