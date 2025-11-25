@@ -46,7 +46,9 @@ var discard = Protocol{
 				return NewPeerError(PeerErrorTest, DiscProtocolError, err, "peer_test: 'discard' protocol ReadMsg error")
 			}
 			fmt.Printf("discarding %d\n", msg.Code)
-			msg.Discard()
+			if err := msg.Discard(); err != nil {
+				return NewPeerError(PeerErrorInvalidMessage, DiscNetworkError, err, "peer_test: failed to discard message payload")
+			}
 		}
 	},
 }
