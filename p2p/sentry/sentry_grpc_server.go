@@ -430,14 +430,18 @@ func runPeer(
 		}
 
 		if msg.Size > eth.ProtocolMaxMsgSize {
-			msg.Discard()
+			if err := msg.Discard(); err != nil {
+				return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscNetworkError, fmt.Errorf("sentry.runPeer: discard oversized payload: %w", err), "sentry.runPeer: failed to discard oversized message payload")
+			}
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
 		givePermit := false
 		switch msg.Code {
 		case eth.StatusMsg:
-			msg.Discard()
+			if err := msg.Discard(); err != nil {
+				return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscNetworkError, fmt.Errorf("sentry.runPeer: discard unexpected status payload: %w", err), "sentry.runPeer: failed to discard unexpected status message")
+			}
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
@@ -578,7 +582,9 @@ func runPeer(
 
 		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), true, msgType.String(), msgCap, int(msg.Size))
 
-		msg.Discard()
+		if err := msg.Discard(); err != nil {
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscNetworkError, fmt.Errorf("sentry.runPeer: discard payload: %w", err), "sentry.runPeer: failed to discard message payload")
+		}
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
 	}
 }
@@ -630,7 +636,9 @@ func runWitPeer(
 		}
 
 		if msg.Size > wit.MaxMessageSize {
-			msg.Discard()
+			if err := msg.Discard(); err != nil {
+				return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscNetworkError, fmt.Errorf("sentry.runPeer: discard oversized payload: %w", err), "sentry.runPeer: failed to discard oversized wit message payload")
+			}
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
