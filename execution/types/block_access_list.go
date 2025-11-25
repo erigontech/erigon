@@ -254,10 +254,14 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	sc.Index = uint16(idx)
-	sc.Value, err = s.Uint256()
+	valBytes, err := s.Bytes()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
+	if len(valBytes) > 32 {
+		return fmt.Errorf("read Value: integer too large")
+	}
+	sc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
@@ -294,10 +298,14 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	bc.Index = uint16(idx)
-	bc.Value, err = s.Uint256()
+	valBytes, err := s.Bytes()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
+	if len(valBytes) > 32 {
+		return fmt.Errorf("read Value: integer too large")
+	}
+	bc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 

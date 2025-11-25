@@ -17,7 +17,9 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -50,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -117,6 +120,34 @@ func NewEngineServer(
 	srv.consuming.Store(consuming)
 
 	return srv
+}
+
+// decodeBlockAccessListBytes decodes the provided RLP-encoded block access list using
+// the AccountChanges DecodeRLP methods to enforce canonical integer encoding.
+func decodeBlockAccessListBytes(data []byte) (types.BlockAccessList, error) {
+	stream := rlp.NewStream(bytes.NewReader(data), 0)
+	if _, err := stream.List(); err != nil {
+		return nil, err
+	}
+	var out types.BlockAccessList
+	for {
+		var ac types.AccountChanges
+		if err := ac.DecodeRLP(stream); err != nil {
+			if errors.Is(err, rlp.EOL) {
+				break
+			}
+			return nil, err
+		}
+		acCopy := ac
+		out = append(out, &acCopy)
+	}
+	if err := stream.ListEnd(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func (e *EngineServer) Start(
@@ -280,30 +311,39 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
+	var blockAccessList types.BlockAccessList
 	if version >= clparams.GloasVersion {
-		if req.BlockAccessList != nil {
+		if req.BlockAccessList == nil {
+			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
+		}
+		if len(*req.BlockAccessList) == 0 {
+			blockAccessList = nil
+			header.BlockAccessListHash = &empty.BlockAccessListHash
+		} else {
+			blockAccessList, err := decodeBlockAccessListBytes(*req.BlockAccessList)
+			if err != nil {
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
+			}
+			if err := blockAccessList.Validate(); err != nil {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
+			}
 			hash := crypto.Keccak256Hash(*req.BlockAccessList)
 			header.BlockAccessListHash = &hash
-		} else if s.config.IsAmsterdam(header.Time) {
-			header.BlockAccessListHash = &empty.BlockAccessListHash
 		}
+	} else if req.BlockAccessList != nil {
+		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
 	}
 
-	if version >= clparams.GloasVersion {
-		// From Amsterdam onwards, we support BlockAccessList
-		if req.BlockAccessList != nil {
-			// BlockAccessList validation happens during block execution (in exec3_parallel.go)
-			// Here we just ensure it's present if required by the fork rules (which is implicit in the version check)
-		}
-	}
-
-	// 1. Client software MUST validate that the payload.timestamp is greater than or equal to the Amsterdam timestamp if the payload.timestamp is present.
-	// 2. Client software MUST validate that the payload.timestamp is less than the Amsterdam timestamp if the payload.timestamp is not present.
-	if s.config.AmsterdamTime != nil {
-		if (!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
-			(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
-			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedErrorFromString("unsupported fork")}, nil
-		}
+	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
+		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
+		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) ||
+		(!s.config.IsOsaka(header.Time) && version >= clparams.FuluVersion) ||
+		(s.config.IsOsaka(header.Time) && version < clparams.FuluVersion) ||
+		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
+		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
 	blockHash := req.BlockHash
@@ -377,7 +417,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, nil)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, blockAccessList)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
