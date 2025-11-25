@@ -493,11 +493,12 @@ func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) *
 	liveNodes := &nodesByDistance{target: target}
 	var liveNodesFound = false
 	if preferLive {
+	outer:
 		for _, b := range &tab.buckets {
 			for _, n := range b.entries {
 				if n.livenessChecks > 0 {
 					liveNodesFound = true
-					break
+					break outer
 				}
 			}
 		}

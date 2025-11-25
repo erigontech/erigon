@@ -506,8 +506,7 @@ func newkey() *ecdsa.PrivateKey {
 	return key
 }
 
-// BenchmarkTable_findnodeByID benchmarks the findnodeByID function with different
-func BenchmarkTable_findnodeByID(b *testing.B) {
+func Benchmark_findnodeByID(b *testing.B) {
 	benchmarks := []struct {
 		name       string
 		tableSize  int
