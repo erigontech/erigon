@@ -811,8 +811,11 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
 			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 		}
-		if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+		if _, err := rawdb.WriteRawBodyIfNotExists(tx, blk.Hash(), blockNum, blk.RawBody()); err != nil {
+			return fmt.Errorf("cannot write body: %s", err)
+		}
+		if err := rawdb.WriteTd(tx, blk.Hash(), blockNum, blk.Difficulty()); err != nil {
+			return fmt.Errorf("failed to write total difficulty %d: %w", blockNum, err)
 		}
 		latest = blk
 	}
@@ -824,9 +827,9 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 		}
 
 		syncStages := []stages.SyncStage{
-			stages.Headers,
+			//stages.Headers, // updated by  cfg.bodyDownload.UpdateFromDb(tx);
+			//stages.Bodies,
 			stages.BlockHashes,
-			stages.Bodies,
 			stages.Senders,
 		}
 		for _, stage := range syncStages {
