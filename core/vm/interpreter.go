@@ -384,6 +384,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
+			// TODO seems it should be once UseMultiGas call
 			if !contract.UseGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}

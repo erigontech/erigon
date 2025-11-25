@@ -509,7 +509,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// by the error checking condition below.
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if contract.UseGas(createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage) {
+		if !contract.UseMultiGas(multigas.StorageGrowthGas(createDataGas), evm.Config().Tracer, tracing.GasChangeCallCodeStorage) {
 			evm.intraBlockState.SetCode(address, ret)
 		} else {
 			// If we run out of gas, we do not store the code: the returned code must be empty.
@@ -526,7 +526,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
 		if err != ErrExecutionReverted {
-			contract.UseGas(contract.Gas, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
+			contract.UseMultiGas(multigas.ComputationGas(contract.Gas), evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
 		}
 	}
 

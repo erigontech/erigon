@@ -22,6 +22,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/arb/multigas"
 	"math"
 
 	"github.com/erigontech/erigon/core/state"
@@ -966,7 +967,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	// reuse size int for stackvalue
 	stackvalue := size
 
-	scope.Contract.UseGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
+	scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
 	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false)
 
@@ -1006,7 +1007,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 	// Apply EIP150
 	gas -= gas / 64
-	scope.Contract.UseGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
+	scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 	// reuse size int for stackvalue
 	stackValue := size
 	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, false)
@@ -1148,7 +1149,6 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
-
 	interpreter.returnData = ret
 	return ret, nil
 }
@@ -1189,7 +1189,6 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
-
 
 	interpreter.returnData = ret
 	return ret, nil
