@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -16,6 +17,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
@@ -46,6 +48,8 @@ type P2Pmanager struct {
 	host     host.Host
 	udpv5    *discover.UDPv5
 	ethClock eth_clock.EthereumClock
+
+	bannedPeers *lru.CacheWithTTL[peer.ID, struct{}]
 }
 
 func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (*P2Pmanager, error) {
@@ -80,10 +84,11 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 
 	p := P2Pmanager{
-		cfg:      cfg,
-		host:     host,
-		bwc:      bwc,
-		ethClock: ethClock,
+		cfg:         cfg,
+		host:        host,
+		bwc:         bwc,
+		ethClock:    ethClock,
+		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 1_000, 30*time.Minute),
 	}
 
 	// pubsub
@@ -113,6 +118,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		return nil, err
 	}
 	go p.updateENR()
+	go p.peerMonitor(ctx)
 	return &p, nil
 }
 
