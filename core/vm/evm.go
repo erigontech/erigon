@@ -226,10 +226,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		if err != nil {
 			return nil, 0, multigas.ZeroGas(), err
 		}
-		if !value.IsZero() && !canTransfer {
-			if !bailout {
-				return nil, gas, multigas.ZeroGas(), ErrInsufficientBalance
-			}
+		if !bailout && !value.IsZero() && !canTransfer {
+			return nil, gas, multigas.ZeroGas(), ErrInsufficientBalance
 		}
 	}
 
@@ -258,8 +256,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		// ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, arbInfo)
-
 		var precompileMultiGas multigas.MultiGas
 		ret, gas, precompileMultiGas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, arbInfo)
 		usedMultiGas.SaturatingAddInto(precompileMultiGas)
@@ -300,7 +296,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		gas = contract.Gas
 
 		usedMultiGas.SaturatingAddInto(contract.GetTotalUsedMultiGas())
-
 	}
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
@@ -316,9 +311,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 			usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
 			gas = 0
 		}
-		// TODO: consider clearing up unused snapshots:
-		//} else {
-		//	evm.IntraBlockState().DiscardSnapshot(snapshot)
 	}
 	return ret, gas, usedMultiGas, err
 }
