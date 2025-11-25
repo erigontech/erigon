@@ -84,16 +84,22 @@ func (p *P2Pmanager) peerMonitor(ctx context.Context) {
 		case <-ticker.C:
 			connected := 0
 			closed := 0
+			emptyAddrs := 0
 			peers := p.Host().Network().Peers()
 			for _, peer := range peers {
 				if p.Host().Network().Connectedness(peer) == network.Connected {
 					connected++
+					peerInfo := p.Host().Network().Peerstore().PeerInfo(peer)
+					if len(peerInfo.Addrs) == 0 {
+						p.connectWithPeer(ctx, peerInfo, nil)
+						emptyAddrs++
+					}
 				} else {
 					p.Host().Network().ClosePeer(peer)
 					closed++
 				}
 			}
-			log.Debug("[caplin p2p] reporting connected peers", "connected", connected, "closed", closed)
+			log.Debug("[caplin p2p] reporting connected peers", "connected", connected, "closed", closed, "emptyAddrs", emptyAddrs)
 		case <-ctx.Done():
 			return
 		}
