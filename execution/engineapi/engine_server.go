@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -277,6 +278,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
 		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
+	}
+
+	if version >= clparams.GloasVersion {
+		if req.BlockAccessList != nil {
+			hash := crypto.Keccak256Hash(*req.BlockAccessList)
+			header.BlockAccessListHash = &hash
+		} else if s.config.IsAmsterdam(header.Time) {
+			header.BlockAccessListHash = &empty.BlockAccessListHash
+		}
 	}
 
 	if version >= clparams.GloasVersion {
