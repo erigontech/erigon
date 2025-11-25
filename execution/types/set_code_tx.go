@@ -100,7 +100,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	if tx.To == nil {
 		return ErrNilToFieldTx
 	}
-	hashingOnly := false	
+	hashingOnly := false
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize(hashingOnly)
 	b := NewEncodingBuf()
 	defer PooledBuf.Put(b)
@@ -148,7 +148,8 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce: true,
 		checkGas:   true,
 
-		Tx: tx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           tx,
 	}
 	if !rules.IsPrague {
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")

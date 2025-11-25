@@ -460,6 +460,8 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		checkNonce: checkNonce,
 		checkGas:   checkGas,
 		isFree:     isFree,
+
+		TxRunContext: new(MessageRunContext),
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)

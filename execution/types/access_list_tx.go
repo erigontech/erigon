@@ -28,9 +28,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon-lib/common/length"
 )
 
 // AccessTuple is the element type of an access list.
@@ -465,7 +465,8 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 		checkNonce: true,
 		checkGas:   true,
 
-		Tx: tx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           tx,
 	}
 
 	if !rules.IsBerlin {

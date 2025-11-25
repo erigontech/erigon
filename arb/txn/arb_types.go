@@ -158,7 +158,8 @@ func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 
 func (tx *ArbitrumUnsignedTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
 	msg := &types.Message{
-		Tx: tx,
+		Tx:           tx,
+		TxRunContext: new(types.MessageRunContext),
 	}
 	// if baseFee != nil {
 	// 	msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -554,6 +555,8 @@ func (tx *ArbitrumContractTx) RawSignatureValues() (*uint256.Int, *uint256.Int, 
 func (tx *ArbitrumContractTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
 	msg := &types.Message{
 		Tx: tx,
+
+		TxRunContext: new(types.MessageRunContext),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -988,6 +991,8 @@ func (t *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 func (tx *ArbitrumRetryTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
 	msg := &types.Message{
 		Tx: tx,
+
+		TxRunContext: new(types.MessageRunContext),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -1705,6 +1710,8 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s types.Signer, baseFee *big.Int,
 	msg := &types.Message{
 		Tx:           tx,
 		EffectiveGas: tx.EffectiveGasUsed,
+
+		TxRunContext: new(types.MessageRunContext),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -2059,6 +2066,8 @@ func (tx *ArbitrumDepositTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *
 func (tx *ArbitrumDepositTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
 	msg := &types.Message{
 		Tx: tx,
+
+		TxRunContext: new(types.MessageRunContext),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -2386,6 +2395,8 @@ func (tx *ArbitrumInternalTx) RawSignatureValues() (*uint256.Int, *uint256.Int, 
 func (tx *ArbitrumInternalTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
 	msg := &types.Message{
 		Tx: tx,
+
+		TxRunContext: new(types.MessageRunContext),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())

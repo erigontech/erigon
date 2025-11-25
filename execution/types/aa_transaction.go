@@ -40,7 +40,6 @@ func (tx *NoTimeBoosted) SetTimeboosted(_ *bool) {
 
 }
 
-
 type AccountAbstractionTransaction struct {
 	NoTimeBoosted
 
@@ -181,6 +180,8 @@ func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, r
 		to:         nil,
 		gasPrice:   *tx.FeeCap,
 		blobHashes: []common.Hash{},
+
+		TxRunContext: new(MessageRunContext),
 	}, nil
 }
 
