@@ -26,6 +26,7 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/felixge/fgprof"
 	"github.com/pelletier/go-toml"
@@ -96,12 +97,27 @@ var (
 		Name:  "trace",
 		Usage: "Write execution trace to the given file",
 	}
+	pyroscopeFlag = cli.BoolFlag{
+		Name:  "pyroscope",
+		Usage: "Enable pyroscope profiling",
+	}
+	pyroscopeServerFlag = cli.StringFlag{
+		Name:  "pyroscope.server",
+		Usage: "Pyroscope server address",
+		Value: "http://localhost:4040",
+	}
+	pyroscopeTagsFlag = cli.StringSliceFlag{
+		Name:  "pyroscope.tags",
+		Usage: "Pyroscope tags (list of key=value pairs)",
+		Value: nil,
+	}
 )
 
 // Flags holds all command-line flags required for debugging.
 var Flags = []cli.Flag{
 	&pprofFlag, &pprofAddrFlag, &pprofPortFlag,
 	&cpuprofileFlag, &traceFlag, &vmTraceFlag, &vmTraceJsonConfigFlag,
+	&pyroscopeFlag, &pyroscopeServerFlag, &pyroscopeTagsFlag,
 }
 
 // SetupCobra sets up logging, profiling and tracing for cobra commands
@@ -191,6 +207,37 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 		} else {
 			StartPProf(address, nil)
 		}
+	}
+
+	pyroscope, err := flags.GetBool(pyroscopeFlag.Name)
+	if err != nil {
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
+	}
+	pyroscopeServer, err := flags.GetString(pyroscopeServerFlag.Name)
+	if err != nil {
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
+	}
+	pyroscopeTags, err := flags.GetStringSlice(pyroscopeTagsFlag.Name)
+	if err != nil {
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
+	}
+
+	if pyroscope {
+		tags := make(map[string]string)
+		for _, rawTag := range pyroscopeTags {
+			parts := strings.Split(rawTag, "=")
+			if len(parts) == 2 { // Ignore invalid tags
+				tags[parts[0]] = parts[1]
+			}
+		}
+		if err := Handler.StartPyroscopeProfiler(pyroscopeServer, tags); err != nil {
+			log.Error("failed starting pyroscope profiler", "err", err)
+			panic(err)
+		}
+
 	}
 
 	return logger
@@ -314,6 +361,7 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 // Exit stops all running profiles, flushing their output to the
 // respective file.
 func Exit() {
+	_ = Handler.StopPyroscopeProfiler()
 	_ = Handler.StopCPUProfile()
 	_ = Handler.StopGoTrace()
 }
