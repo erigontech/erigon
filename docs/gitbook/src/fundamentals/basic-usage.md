@@ -19,7 +19,7 @@ erigon [options]
 * You can use Docker Compose like in this [example](../easy-nodes/how-to-run-an-ethereum-node/#id-2.-configure-and-launch-erigon)
 *   Alternatively you can use the Docker syntax, for example:
 
-    &#x20;`docker run -it erigontech/erigon:v3.2.2 [options]`&#x20;
+    `docker run -it erigontech/erigon:v3.2.2 [options]`
 {% endtab %}
 
 {% tab title="Built from Source" %}
@@ -29,7 +29,7 @@ Open your terminal and move to the directory where you installed Erigon
 cd erigon
 ```
 
-You can then start Erigon with the below command:&#x20;
+You can then start Erigon with the below command:
 
 ```shell
 ./build/bin/erigon [options]
@@ -91,7 +91,7 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
 * The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks.md) section. For quick testing, consider selecting a testnet.
 * `--log.dir.path` dictates where [logs](logs.md) will be output - useful for sending reports to the Erigon team when issues occur.
 * Based on the [sync mode](sync-modes.md) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../../fundamentals/interacting-with-erigon/interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet.md).
+* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet.md).
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
 
 To stop the Erigon node you can use the `CTRL+C` command.
