@@ -242,13 +242,12 @@ func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services
 }
 
 type ReusableCaller struct {
-	evm             *vm.EVM
-	intraBlockState *state.IntraBlockState
-	gasCap          uint64
-	baseFee         *uint256.Int
-	stateReader     state.StateReader
-	callTimeout     time.Duration
-	message         *types.Message
+	evm         *vm.EVM
+	gasCap      uint64
+	baseFee     *uint256.Int
+	stateReader state.StateReader
+	callTimeout time.Duration
+	message     *types.Message
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
@@ -271,7 +270,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	// reset the EVM so that we can continue to use it with the new context
 	txCtx := protocol.NewEVMTxContext(r.message)
 
-	r.evm.Reset(txCtx, r.intraBlockState.Copy())
+	r.evm.Reset(txCtx, state.New(r.stateReader))
 
 	timedOut := false
 	go func() {
@@ -340,12 +339,11 @@ func NewReusableCaller(
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 
 	return &ReusableCaller{
-		evm:             evm,
-		intraBlockState: ibs,
-		baseFee:         baseFee,
-		gasCap:          gasCap,
-		callTimeout:     callTimeout,
-		stateReader:     stateReader,
-		message:         msg,
+		evm:         evm,
+		baseFee:     baseFee,
+		gasCap:      gasCap,
+		callTimeout: callTimeout,
+		stateReader: stateReader,
+		message:     msg,
 	}, nil
 }
