@@ -126,7 +126,6 @@ func (s *Sentinel) listenForPeers() {
 		}
 		s.pidToEnr.Store(peerInfo.ID, node.String())
 		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
-		log.Debug("[caplin sentinel] storing enr and enode id", "peer", peerInfo.ID.String(), "enr", node.String(), "enodeId", node.ID().String())
 		// Skip Peer if IP was private.
 		if node.IP().IsPrivate() {
 			continue
@@ -173,6 +172,9 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
+			if _, ok := s.pidToEnr.Load(peerId); !ok {
+				log.Debug("[caplin sentinel] onConnection: no enr for peer", "peer", peerId.String())
+			}
 		}
 	}()
 }
