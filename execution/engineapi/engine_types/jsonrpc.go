@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -32,23 +33,24 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
-	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
-	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
-	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
-	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
-	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
-	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
-	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
-	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
-	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
-	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
+	ParentHash      common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient    common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot       common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot    common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom       hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
+	PrevRandao      common.Hash         `json:"prevRandao"    gencodec:"required"`
+	BlockNumber     hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
+	GasLimit        hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
+	GasUsed         hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
+	Timestamp       hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
+	ExtraData       hexutil.Bytes       `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas   *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash       common.Hash         `json:"blockHash"     gencodec:"required"`
+	Transactions    []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
+	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
+	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
+	BlockAccessList *hexutil.Bytes      `json:"blockAccessList,omitempty"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -202,6 +204,9 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
+	if body.BlockAccessList != nil {
+		res.BlockAccessList = ConvertBlockAccessListFromExecutionProto(body.BlockAccessList)
+	}
 	return res
 }
 
@@ -239,6 +244,9 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
 		excessBlobGas := *payload.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
+	}
+	if payload.Version >= 4 {
+		res.BlockAccessList = ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
 	}
 	return res
 }
@@ -301,4 +309,144 @@ func ConvertPayloadId(payloadId uint64) *hexutil.Bytes {
 	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
 	ret := hexutil.Bytes(encodedPayloadId)
 	return &ret
+}
+
+func ConvertBlockAccessListFromExecutionProto(protoList []*executionproto.BlockAccessListAccount) *hexutil.Bytes {
+	if protoList == nil {
+		return nil
+	}
+	bal := make(types.BlockAccessList, len(protoList))
+	for i, acc := range protoList {
+		bal[i] = &types.AccountChanges{
+			Address: gointerfaces.ConvertH160toAddress(acc.Address),
+		}
+		if acc.StorageChanges != nil {
+			bal[i].StorageChanges = make([]*types.SlotChanges, len(acc.StorageChanges))
+			for j, sc := range acc.StorageChanges {
+				bal[i].StorageChanges[j] = &types.SlotChanges{
+					Slot: gointerfaces.ConvertH256ToHash(sc.Slot),
+				}
+				if sc.Changes != nil {
+					bal[i].StorageChanges[j].Changes = make([]*types.StorageChange, len(sc.Changes))
+					for k, c := range sc.Changes {
+						val := gointerfaces.ConvertH256ToUint256Int(c.Value)
+						bal[i].StorageChanges[j].Changes[k] = &types.StorageChange{
+							Index: uint16(c.Index),
+							Value: *val,
+						}
+					}
+				}
+			}
+		}
+		if acc.StorageReads != nil {
+			bal[i].StorageReads = make([]common.Hash, len(acc.StorageReads))
+			for j, r := range acc.StorageReads {
+				bal[i].StorageReads[j] = gointerfaces.ConvertH256ToHash(r)
+			}
+		}
+		if acc.BalanceChanges != nil {
+			bal[i].BalanceChanges = make([]*types.BalanceChange, len(acc.BalanceChanges))
+			for j, bc := range acc.BalanceChanges {
+				val := gointerfaces.ConvertH256ToUint256Int(bc.Value)
+				bal[i].BalanceChanges[j] = &types.BalanceChange{
+					Index: uint16(bc.Index),
+					Value: *val,
+				}
+			}
+		}
+		if acc.NonceChanges != nil {
+			bal[i].NonceChanges = make([]*types.NonceChange, len(acc.NonceChanges))
+			for j, nc := range acc.NonceChanges {
+				bal[i].NonceChanges[j] = &types.NonceChange{
+					Index: uint16(nc.Index),
+					Value: nc.Value,
+				}
+			}
+		}
+		if acc.CodeChanges != nil {
+			bal[i].CodeChanges = make([]*types.CodeChange, len(acc.CodeChanges))
+			for j, cc := range acc.CodeChanges {
+				bal[i].CodeChanges[j] = &types.CodeChange{
+					Index: uint16(cc.Index),
+					Data:  cc.Data,
+				}
+			}
+		}
+	}
+	encoded, err := rlp.EncodeToBytes(bal)
+	if err != nil {
+		return nil
+	}
+	res := hexutil.Bytes(encoded)
+	return &res
+}
+
+func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessListAccount) *hexutil.Bytes {
+	if protoList == nil {
+		return nil
+	}
+	bal := make(types.BlockAccessList, len(protoList))
+	for i, acc := range protoList {
+		bal[i] = &types.AccountChanges{
+			Address: gointerfaces.ConvertH160toAddress(acc.Address),
+		}
+		if acc.StorageChanges != nil {
+			bal[i].StorageChanges = make([]*types.SlotChanges, len(acc.StorageChanges))
+			for j, sc := range acc.StorageChanges {
+				bal[i].StorageChanges[j] = &types.SlotChanges{
+					Slot: gointerfaces.ConvertH256ToHash(sc.Slot),
+				}
+				if sc.Changes != nil {
+					bal[i].StorageChanges[j].Changes = make([]*types.StorageChange, len(sc.Changes))
+					for k, c := range sc.Changes {
+						val := gointerfaces.ConvertH256ToUint256Int(c.Value)
+						bal[i].StorageChanges[j].Changes[k] = &types.StorageChange{
+							Index: uint16(c.Index),
+							Value: *val,
+						}
+					}
+				}
+			}
+		}
+		if acc.StorageReads != nil {
+			bal[i].StorageReads = make([]common.Hash, len(acc.StorageReads))
+			for j, r := range acc.StorageReads {
+				bal[i].StorageReads[j] = gointerfaces.ConvertH256ToHash(r)
+			}
+		}
+		if acc.BalanceChanges != nil {
+			bal[i].BalanceChanges = make([]*types.BalanceChange, len(acc.BalanceChanges))
+			for j, bc := range acc.BalanceChanges {
+				val := gointerfaces.ConvertH256ToUint256Int(bc.Value)
+				bal[i].BalanceChanges[j] = &types.BalanceChange{
+					Index: uint16(bc.Index),
+					Value: *val,
+				}
+			}
+		}
+		if acc.NonceChanges != nil {
+			bal[i].NonceChanges = make([]*types.NonceChange, len(acc.NonceChanges))
+			for j, nc := range acc.NonceChanges {
+				bal[i].NonceChanges[j] = &types.NonceChange{
+					Index: uint16(nc.Index),
+					Value: nc.Value,
+				}
+			}
+		}
+		if acc.CodeChanges != nil {
+			bal[i].CodeChanges = make([]*types.CodeChange, len(acc.CodeChanges))
+			for j, cc := range acc.CodeChanges {
+				bal[i].CodeChanges[j] = &types.CodeChange{
+					Index: uint16(cc.Index),
+					Data:  cc.Data,
+				}
+			}
+		}
+	}
+	encoded, err := rlp.EncodeToBytes(bal)
+	if err != nil {
+		return nil
+	}
+	res := hexutil.Bytes(encoded)
+	return &res
 }

@@ -200,11 +200,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						if pe.cfg.experimentalBAL {
+						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
 
-							if pe.cfg.chainConfig.IsGlamsterdam(applyResult.BlockTime) {
+							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
 								headerBALHash := *lastHeader.BlockAccessListHash
 								if headerBALHash != b.BlockAccessList().Hash() {
 									return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, headerBALHash, b.BlockAccessList().Hash())

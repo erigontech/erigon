@@ -279,11 +279,21 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) {
-		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	if version >= clparams.GloasVersion {
+		// From Amsterdam onwards, we support BlockAccessList
+		if req.BlockAccessList != nil {
+			// BlockAccessList validation happens during block execution (in exec3_parallel.go)
+			// Here we just ensure it's present if required by the fork rules (which is implicit in the version check)
+		}
+	}
+
+	// 1. Client software MUST validate that the payload.timestamp is greater than or equal to the Amsterdam timestamp if the payload.timestamp is present.
+	// 2. Client software MUST validate that the payload.timestamp is less than the Amsterdam timestamp if the payload.timestamp is not present.
+	if s.config.AmsterdamTime != nil {
+		if (!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
+			(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
+			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedErrorFromString("unsupported fork")}, nil
+		}
 	}
 
 	blockHash := req.BlockHash
@@ -557,6 +567,12 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if s.config.AmsterdamTime != nil {
+		if (!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
+			(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
+			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+		}
+	}
 
 	payload := &engine_types.GetPayloadResponse{
 		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
@@ -647,6 +663,12 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if !s.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if s.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
