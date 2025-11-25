@@ -18,6 +18,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/erigontech/erigon/db/config3"
@@ -147,6 +148,8 @@ var rebuildCmd = &cobra.Command{
 			if i > roTx.FirstStepNotInFiles().ToTxNum(config3.DefaultStepSize) {
 				i = roTx.FirstStepNotInFiles().ToTxNum(config3.DefaultStepSize)
 			}
+
+			fmt.Printf("Compacting files %d-%d step\n", fromTxNum/config3.DefaultStepSize, i/config3.DefaultStepSize)
 
 			err = roTx.CompactRange(context.TODO(), fromTxNum, i)
 			if err != nil {

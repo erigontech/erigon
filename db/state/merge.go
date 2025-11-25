@@ -24,7 +24,6 @@ import (
 	"math"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/tidwall/btree"
@@ -360,7 +359,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64, dedupEF []uint64) ([]byte, error) {
+func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64, dedupEF map[uint64]struct{}) ([]byte, error) {
 	preSeq := multiencseq.ReadMultiEncSeq(preBaseNum, preval)
 	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
 	preIt := preSeq.Iterator(0)
@@ -374,8 +373,10 @@ func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, ou
 			return nil, err
 		}
 
-		if slices.Contains(dedupEF, v) {
-			continue
+		if dedupEF != nil {
+			if _, ok := dedupEF[v]; ok {
+				continue
+			}
 		}
 
 		toInsert = append(toInsert, v)
@@ -386,9 +387,12 @@ func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, ou
 			return nil, err
 		}
 
-		if slices.Contains(dedupEF, v) {
-			continue
+		if dedupEF != nil {
+			if _, ok := dedupEF[v]; ok {
+				continue
+			}
 		}
+
 		toInsert = append(toInsert, v)
 	}
 
@@ -602,7 +606,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet, dedupKeyEFs map[string][]uint64) (*FilesItem, error) {
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet, dedupKeyEFs map[string]map[uint64]struct{}) (*FilesItem, error) {
 	if startTxNum == endTxNum {
 		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
 	}
@@ -687,8 +691,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				return nil, err
 			}
 
-			if dedupKeyEFs != nil && slices.Contains(dedupKeyEFs[string(lastKey)], v) {
-				continue
+			if dedupKeyEFs != nil && dedupKeyEFs[string(lastKey)] != nil {
+				if _, ok := dedupKeyEFs[string(lastKey)][v]; ok {
+					continue
+				}
 			}
 
 			toInsert = append(toInsert, v)
@@ -706,7 +712,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
-				var dedupEF []uint64
+				var dedupEF map[uint64]struct{}
 
 				if dedupKeyEFs != nil {
 					dedupEF = dedupKeyEFs[string(lastKey)]

@@ -56,9 +56,11 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 	var cp CursorHeap
 	heap.Init(&cp)
 
-	dedupKeyEFs := make(map[string][]uint64) // string because slice can not be a key in Golang
+	dedupKeyEFs := make(map[string]map[uint64]struct{}) // string because slice can not be a key in Golang
 
 	for _, item := range indexFiles {
+		defer item.closeFilesAndRemove()
+
 		g := ht.iit.dataReader(item.decompressor)
 		g.Reset(0)
 		if g.HasNext() {
@@ -120,7 +122,11 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 				k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
 
 				if dedupVal != nil && bytes.Equal(*dedupVal, v) {
-					dedupKeyEFs[string(ci1.key)] = append(dedupKeyEFs[string(ci1.key)], prevTxNum)
+					if dedupKeyEFs[string(ci1.key)] == nil {
+						dedupKeyEFs[string(ci1.key)] = make(map[uint64]struct{})
+					}
+
+					dedupKeyEFs[string(ci1.key)][prevTxNum] = struct{}{}
 					prevTxNum = txNum
 					continue
 				}
@@ -159,6 +165,22 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 
 	if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 		return err
+	}
+
+	for _, item := range indexFiles {
+		if item.StartStep(ht.stepSize) == indexIn.StartStep(ht.stepSize) && item.EndStep(ht.stepSize) == indexIn.EndStep(ht.stepSize) {
+			continue
+		}
+
+		item.closeFilesAndRemove()
+	}
+
+	for _, item := range historyFiles {
+		if item.StartStep(ht.stepSize) == indexIn.StartStep(ht.stepSize) && item.EndStep(ht.stepSize) == indexIn.EndStep(ht.stepSize) {
+			continue
+		}
+
+		item.closeFilesAndRemove()
 	}
 
 	return nil
