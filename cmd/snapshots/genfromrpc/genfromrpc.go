@@ -829,7 +829,7 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 		syncStages := []stages.SyncStage{
 			//stages.Headers, // updated by  cfg.bodyDownload.UpdateFromDb(tx);
 			//stages.Bodies,
-			stages.BlockHashes,
+			//stages.BlockHashes,
 			stages.Senders,
 		}
 		for _, stage := range syncStages {
