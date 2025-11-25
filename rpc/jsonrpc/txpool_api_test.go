@@ -18,7 +18,7 @@ package jsonrpc
 
 import (
 	"bytes"
-	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
