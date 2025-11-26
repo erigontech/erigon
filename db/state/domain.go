@@ -1839,6 +1839,10 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		step = maxPrunableStep
 	}
 
+	defer func(t time.Time) {
+		log.Info(fmt.Sprintf(" pruneD[%s] %s, %d-%d\n", dt.d.FilenameBase, time.Since(t), txFrom, txTo))
+	}(time.Now())
+
 	st := time.Now()
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
