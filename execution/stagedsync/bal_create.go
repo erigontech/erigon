@@ -161,6 +161,31 @@ func removeStorageRead(ac *types.AccountChanges, slot common.Hash) {
 	}
 }
 
+func toUint256(v any) (uint256.Int, bool) {
+	switch x := v.(type) {
+	case uint256.Int:
+		return x, true
+	case *uint256.Int:
+		if x == nil {
+			return uint256.Int{}, false
+		}
+		return *x, true
+	case common.Hash:
+		var out uint256.Int
+		out.SetBytes(x[:])
+		return out, true
+	case []byte:
+		if len(x) > 32 {
+			return uint256.Int{}, false
+		}
+		var out uint256.Int
+		out.SetBytes(x)
+		return out, true
+	default:
+		return uint256.Int{}, false
+	}
+}
+
 func blockAccessIndex(txIndex int) uint16 {
 	return uint16(txIndex + 1)
 }

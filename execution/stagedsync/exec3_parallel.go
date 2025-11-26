@@ -975,11 +975,11 @@ type execResult struct {
 	stateUpdates *state.StateUpdates
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
+func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
-		return nil, fmt.Errorf("unexpected task type: %T", result.Task)
+		return nil, nil, nil, fmt.Errorf("unexpected task type: %T", result.Task)
 	}
 
 	blockNum := task.Version().BlockNum
@@ -1004,31 +1004,39 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	txTask, ok := task.Task.(*exec.TxTask)
 
 	if !ok {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 
 	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
-		return nil, err
-	}
 	ibs.SetVersionMap(&state.VersionMap{})
+	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
+		return nil, nil, nil, err
+	}
 	ibs.SetTrace(txTask.Trace)
 
 	if task.IsBlockEnd() || txIndex < 0 {
 		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
 			ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
 		}
-		return nil, nil
+		return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
 	}
 
 	if task.shouldDelayFeeCalc {
-		if txTask.Config.IsLondon(blockNum) {
-			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
+		if txTask.Config.IsLondon(blockNum) && !result.ExecutionResult.FeeBurnt.IsZero() && result.ExecutionResult.BurntContractAddress != (common.Address{}) {
+			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+				log.Info("burn add err", "err", err)
+				return nil, nil, nil, err
+			}
 		}
 
-		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
+		if !result.ExecutionResult.FeeTipped.IsZero() {
+			if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+				log.Info("coinbase add err", "err", err)
+				return nil, nil, nil, err
+			}
+		}
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
@@ -1036,7 +1044,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 				coinbase, err := stateReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
 				if err != nil {
-					return nil, err
+					return nil, nil, nil, err
 				}
 
 				if coinbase != nil {
@@ -1048,7 +1056,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 
 				message, err := task.TxMessage()
 				if err != nil {
-					return nil, err
+					return nil, nil, nil, err
 				}
 
 				postApplyMessageFunc(
@@ -1071,7 +1079,9 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 
 	// we need to flush the finalized writes to the version map so
 	// they are taken into account by subsequent transactions
-	vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
+	allWrites := ibs.VersionedWrites(true)
+
+	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
 	vm.SetTrace(false)
 
 	if txTask.Config.IsByzantium(blockNum) {
@@ -1081,14 +1091,16 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	receipt, err := result.CreateNextReceipt(prevReceipt)
 
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
 	if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
 		hooks.OnTxEnd(receipt, result.Err)
 	}
 
-	return receipt, nil
+	log.Info("number of writes", "len", len(ibs.VersionedWrites(true)))
+
+	return receipt, ibs.VersionedReads(), allWrites, nil
 }
 
 type taskVersion struct {
@@ -1492,10 +1504,28 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				stateWriter := state.NewBufferedWriter(pe.rs, nil)
 
-				_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
+				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
 
 				if err != nil {
 					return nil, err
+				}
+
+				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
+				if addReads != nil {
+					mergedReads := mergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
+					be.blockIO.RecordReads(txVersion, mergedReads)
+				}
+				log.Info("num writes", "num", len(addWrites))
+				if len(addWrites) > 0 {
+					existing := be.blockIO.WriteSet(txVersion.TxIndex)
+					if len(existing) > 0 {
+						combined := append(state.VersionedWrites{}, existing...)
+						combined = append(combined, addWrites...)
+						be.blockIO.RecordWrites(txVersion, combined)
+					} else {
+						log.Info(fmt.Sprintf("writing %d, a: %v", len(addWrites), addWrites))
+						be.blockIO.RecordWrites(txVersion, addWrites)
+					}
 				}
 
 				stateUpdates := stateWriter.WriteSet()
@@ -1705,4 +1735,24 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				statsMutex: &be.Mutex})
 		}
 	}
+}
+
+func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
+	if a == nil && b == nil {
+		return nil
+	}
+	out := make(state.ReadSet)
+	if a != nil {
+		a.Scan(func(vr *state.VersionedRead) bool {
+			out.Set(*vr)
+			return true
+		})
+	}
+	if b != nil {
+		b.Scan(func(vr *state.VersionedRead) bool {
+			out.Set(*vr)
+			return true
+		})
+	}
+	return out
 }
