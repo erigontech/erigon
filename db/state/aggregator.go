@@ -1005,7 +1005,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	furiousPrune := timeout > 5*time.Hour
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
-	var pruneLimit uint64 = 10 // limit looks small: but Commitment.History can have tons of records per 1 txNum. i hope in future we will replace this limit by some cumulative metric.
+	var pruneLimit uint64 = 2 // limit looks small: but Commitment.History can have tons of records per 1 txNum. i hope in future we will replace this limit by some cumulative metric.
 	if furiousPrune {
 		pruneLimit = 1_000_000
 	}
