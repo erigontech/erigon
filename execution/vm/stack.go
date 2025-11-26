@@ -62,6 +62,7 @@ func (st *Stack) Cap() int {
 	return cap(st.data)
 }
 
+// TODO(yperbasis): extract the argument
 func (st *Stack) swap1() {
 	st.data[st.len()-2], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-2]
 }
