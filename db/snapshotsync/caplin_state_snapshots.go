@@ -78,10 +78,10 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 }
 
 func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
-	return func(numId uint64) ([]byte, []byte, error) {
+	D:\lox\erigon\db\snapshotsync\caplin_state_snapshots.go
 		var key, value []byte
 		var err error
-		if err := db.View(context.TODO(), func(tx kv.Tx) error {
+		if err := db.View(ctx, func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
 			value, err = tx.GetOne(tableName, key)
 			value = common.Copy(value)
