@@ -38,6 +38,7 @@ func init() {
 
 	withDataDir2(rebuildCmd)
 	withHistoryDomain(rebuildCmd)
+	withOverrideValuesOnCompressedPage(rebuildCmd)
 
 	historyCmd.AddCommand(printCmd)
 	historyCmd.AddCommand(rebuildCmd)
@@ -50,10 +51,15 @@ func withHistoryDomain(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("domain"))
 }
 
+func withOverrideValuesOnCompressedPage(cmd *cobra.Command) {
+	cmd.Flags().IntVar(&overrideValuesOnCompressedPage, "overrideValuesOnCompressedPage", 0, "Override default history domain ValuesOnCompressed page. The option will be applied for rebuilding snapshots")
+}
+
 var (
-	fromStep      uint64
-	toStep        uint64
-	historyDomain string
+	fromStep                       uint64
+	toStep                         uint64
+	historyDomain                  string
+	overrideValuesOnCompressedPage int
 )
 
 var historyCmd = &cobra.Command{
@@ -151,7 +157,13 @@ var rebuildCmd = &cobra.Command{
 
 			fmt.Printf("Compacting files %d-%d step\n", fromTxNum/config3.DefaultStepSize, i/config3.DefaultStepSize)
 
-			err = roTx.CompactRange(context.TODO(), fromTxNum, i)
+			var opts state.OverrideCompactOpts
+
+			if overrideValuesOnCompressedPage > 0 {
+				opts.HistoryValuesOnCompressedPage = &overrideValuesOnCompressedPage
+			}
+
+			err = roTx.CompactRange(context.TODO(), fromTxNum, i, opts)
 			if err != nil {
 				logger.Error("Failed to rebuild history", "error", err)
 				return
