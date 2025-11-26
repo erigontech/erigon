@@ -997,8 +997,9 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 }
 
 func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+	var pruned int
 	defer func(t time.Time) {
-		log.Info(fmt.Sprintf(" pruneH[%s] %s, %d-%d, %d", ht.h.FilenameBase, time.Since(t), txFrom, txTo, limit))
+		log.Info(fmt.Sprintf(" pruneH[%s] %s, limit=%d, pruned=%d", ht.h.FilenameBase, time.Since(t), limit, pruned))
 	}(time.Now())
 
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
@@ -1024,7 +1025,6 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		defer valsC.Close()
 	}
 
-	var pruned int
 	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
 		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
