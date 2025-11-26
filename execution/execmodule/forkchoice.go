@@ -491,25 +491,27 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
-		err = e.executionPipeline.RunPrune(e.db, tx, initialCycle)
-		if err != nil {
-			sendError("updateForkChoice: RunPrune after hasMore", err)
-			return
-		}
-		if err := sd.Flush(ctx, tx); err != nil {
-			sendError("updateForkChoice:flush sd after hasMore", err)
-			return
-		}
-		sd.ClearRam(true)
-		if err = tx.Commit(); err != nil {
-			sendError("updateForkChoice: tx commit after hasMore", err)
-			return
-		}
-		tx, err = e.db.BeginTemporalRw(ctx)
-		// note we already have defer tx.Rollback() on stack from earlier
-		if err != nil {
-			sendError("updateForkChoice: begin tx after has more", err)
-			return
+		if hasMore {
+			err = e.executionPipeline.RunPrune(e.db, tx, initialCycle)
+			if err != nil {
+				sendError("updateForkChoice: RunPrune after hasMore", err)
+				return
+			}
+			if err := sd.Flush(ctx, tx); err != nil {
+				sendError("updateForkChoice:flush sd after hasMore", err)
+				return
+			}
+			sd.ClearRam(true)
+			if err = tx.Commit(); err != nil {
+				sendError("updateForkChoice: tx commit after hasMore", err)
+				return
+			}
+			tx, err = e.db.BeginTemporalRw(ctx)
+			// note we already have defer tx.Rollback() on stack from earlier
+			if err != nil {
+				sendError("updateForkChoice: begin tx after has more", err)
+				return
+			}
 		}
 	}
 
