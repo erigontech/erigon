@@ -27,7 +27,7 @@ To ensure proper P2P functionality for both the Execution and Consensus layers u
 
 ## Command-Line Switches for Network and Port Configuration
 
-Here is an extensive list of port-related options from the [options](configuring-erigon.md#options) list:
+Here is a comprehensive list of port-related options:
 
 ### Engine
 
