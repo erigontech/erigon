@@ -1033,22 +1033,35 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 
 		if ht.h.HistoryLargeValues {
 			seek = append(bytes.Clone(k), txnm...)
-			if err := valsC.Delete(seek); err != nil {
-				return err
+			for kk, _, err := valsC.Seek(seek); kk != nil; kk, _, err = valsC.Next() {
+				if err != nil {
+					return err
+				}
+				if !bytes.HasPrefix(kk, k) {
+					return nil
+				}
+				seeTxNum := binary.BigEndian.Uint64(kk[len(k):])
+				if seeTxNum >= txTo {
+					return nil
+				}
+				if err = valsC.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
 		} else {
-			vv, err := valsCDup.SeekBothRange(k, txnm)
-			if err != nil {
-				return err
-			}
-			if len(vv) < 8 {
-				return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.FilenameBase, len(vv))
-			}
-			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
-				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
-			}
-			if err = valsCDup.DeleteCurrent(); err != nil {
-				return err
+			for vv, err := valsCDup.SeekBothRange(k, txnm); vv != nil; _, vv, err = valsCDup.NextDup() {
+				if err != nil {
+					return err
+				}
+				if len(vv) < 8 {
+					return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.FilenameBase, len(vv))
+				}
+				if vtx := binary.BigEndian.Uint64(vv); vtx >= txTo {
+					return nil
+				}
+				if err = valsCDup.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
 		}
 
