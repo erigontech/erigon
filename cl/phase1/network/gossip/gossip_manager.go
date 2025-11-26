@@ -245,9 +245,8 @@ Reconnect:
 }
 */
 
-func (g *GossipManager) registerGossipService(service GossipService) error {
-	// wrap service.ProcessMessage to ValidatorEx
-	validator := pubsub.ValidatorEx(func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+func (g *GossipManager) newValidator(service GossipService) pubsub.ValidatorEx {
+	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		// parse the topic and subnet
 		topic := msg.GetTopic()
@@ -315,13 +314,15 @@ func (g *GossipManager) registerGossipService(service GossipService) error {
 		monitor.ObserveGossipTopicSeen(name, len(msgData))
 		g.stats.addAccept(name)
 		return pubsub.ValidationAccept
-	})
+	}
+}
 
+func (g *GossipManager) registerGossipService(service GossipService) error {
+	validator := g.newValidator(service)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
 	}
-
 	// register all topics and subscribe
 	for _, name := range service.Service.Names() {
 		topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
