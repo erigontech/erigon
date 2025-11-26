@@ -340,7 +340,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				txNumIncrement()
 			},
 		}
-		b.header = makeHeader(chainreader, parent, ibs, b.engine)
+		b.header = makeHeader(chainreader, parent, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
@@ -402,7 +402,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
+func makeHeader(chain rules.ChainReader, parent *types.Block, engine rules.Engine) *types.Header {
 	var time uint64
 	if parent.Time() == 0 {
 		time = 10

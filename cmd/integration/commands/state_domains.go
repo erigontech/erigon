@@ -135,7 +135,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -148,7 +148,7 @@ var readDomains = &cobra.Command{
 		}
 		defer stateDb.Close()
 
-		if err := requestDomains(chainDb, stateDb, ctx, readFromDomain, addrs, logger); err != nil {
+		if err := requestDomains(stateDb, ctx, readFromDomain, addrs, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -525,7 +525,7 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 	return somethingCompacted, nil
 }
 
-func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
+func requestDomains(stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
@@ -580,10 +580,4 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	}
 	return nil
-}
-
-func removeManyIgnoreError(filePaths ...string) {
-	for _, filePath := range filePaths {
-		dir.RemoveFile(filePath)
-	}
 }

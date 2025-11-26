@@ -98,7 +98,7 @@ var cmdStageSnapshots = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -235,7 +235,7 @@ var cmdPrintCommitment = &cobra.Command{
 		}
 		defer db.Close()
 
-		if err := printCommitment(db, cmd.Context(), logger); err != nil {
+		if err := printCommitment(db, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -1077,7 +1077,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	return nil
 }
 
-func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)

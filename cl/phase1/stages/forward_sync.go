@@ -59,7 +59,7 @@ func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
 // downloadAndProcessEip4844DA handles downloading and processing of EIP-4844 data availability blobs.
 // It takes highest slot processed, and a list of signed beacon blocks as input.
 // It returns the highest blob slot processed and an error if any.
-func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cfg, highestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (highestBlobSlotProcessed uint64, err error) {
+func downloadAndProcessEip4844DA(ctx context.Context, cfg *Cfg, highestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (highestBlobSlotProcessed uint64, err error) {
 	var (
 		ids   *solid.ListSSZ[*cltypes.BlobIdentifier]
 		blobs *network2.PeerAndSidecars
@@ -124,7 +124,7 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 	}
 
 	if len(denebBlocks) > 0 && shouldProcessBlobs(denebBlocks, cfg) {
-		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, denebBlocks)
+		_, err = downloadAndProcessEip4844DA(ctx, cfg, highestBlockProcessed, denebBlocks)
 		if err != nil {
 			logger.Trace("[Caplin] Failed to process blobs", "err", err)
 			return err
