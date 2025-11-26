@@ -997,7 +997,10 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 }
 
 func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
+	defer func(t time.Time) {
+		fmt.Printf(" pruneH[%s] %s, %d-%d\n", ht.h.FilenameBase, time.Since(t), txFrom, txTo)
+	}(time.Now())
+
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (
