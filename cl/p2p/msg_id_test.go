@@ -31,7 +31,7 @@ import (
 
 func TestMsgID(t *testing.T) {
 	n := clparams.NetworkConfigs[chainspec.MainnetChainID]
-	s := &P2Pmanager{
+	s := &p2pManager{
 		cfg: &P2PConfig{
 			BeaconConfig:  &clparams.MainnetBeaconConfig,
 			NetworkConfig: &n,

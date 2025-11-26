@@ -41,7 +41,7 @@ type P2PConfig struct {
 	MaxPeerCount uint64
 }
 
-type P2Pmanager struct {
+type p2pManager struct {
 	cfg      *P2PConfig
 	pubsub   *pubsub.PubSub
 	bwc      *metrics.BandwidthCounter
@@ -52,7 +52,7 @@ type P2Pmanager struct {
 	bannedPeers *lru.CacheWithTTL[peer.ID, struct{}]
 }
 
-func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (*P2Pmanager, error) {
+func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
 	// Setup discovery
 	enodes := make([]*enode.Node, len(cfg.NetworkConfig.BootNodes))
 	for i, bootnode := range cfg.NetworkConfig.BootNodes {
@@ -83,7 +83,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		return nil, err
 	}
 
-	p := P2Pmanager{
+	p := p2pManager{
 		cfg:         cfg,
 		host:        host,
 		bwc:         bwc,
@@ -122,23 +122,23 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	return &p, nil
 }
 
-func (p *P2Pmanager) Pubsub() *pubsub.PubSub {
+func (p *p2pManager) Pubsub() *pubsub.PubSub {
 	return p.pubsub
 }
 
-func (p *P2Pmanager) Host() host.Host {
+func (p *p2pManager) Host() host.Host {
 	return p.host
 }
 
-func (p *P2Pmanager) BandwidthCounter() *metrics.BandwidthCounter {
+func (p *p2pManager) BandwidthCounter() *metrics.BandwidthCounter {
 	return p.bwc
 }
 
-func (p *P2Pmanager) UDPv5Listener() *discover.UDPv5 {
+func (p *p2pManager) UDPv5Listener() *discover.UDPv5 {
 	return p.udpv5
 }
 
-func (p *P2Pmanager) setupENR() error {
+func (p *p2pManager) setupENR() error {
 	node := p.udpv5.LocalNode()
 	if node == nil {
 		panic("local node is nil")
@@ -159,7 +159,7 @@ func (p *P2Pmanager) setupENR() error {
 	return nil
 }
 
-func (s *P2Pmanager) updateENR() {
+func (s *p2pManager) updateENR() {
 	node := s.udpv5.LocalNode()
 	if node == nil {
 		panic("local node is nil")
@@ -189,15 +189,15 @@ func (s *P2Pmanager) updateENR() {
 	}
 }
 
-func (s *P2Pmanager) UpdateENRAttSubnets(subnetIndex int, on bool) {
+func (s *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
 	s.updateSubnetENR(s.cfg.NetworkConfig.AttSubnetKey, subnetIndex, on)
 }
 
-func (s *P2Pmanager) UpdateENRSyncNets(subnetIndex int, on bool) {
+func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
 	s.updateSubnetENR(s.cfg.NetworkConfig.SyncCommsSubnetKey, subnetIndex, on)
 }
 
-func (s *P2Pmanager) updateSubnetENR(subnetKey string, subnetIndex int, on bool) {
+func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool) {
 	subnetField := bitfield.NewBitvector4()
 	if err := s.udpv5.LocalNode().Node().Load(enr.WithEntry(subnetKey, &subnetField)); err != nil {
 		log.Error("[Sentinel] Could not load syncCommsSubnetKey", "err", err)
