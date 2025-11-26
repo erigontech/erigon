@@ -128,7 +128,9 @@ func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 	loc := stack.peek()
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), loc.Bytes32()); slotMod {
+	if _, slotPresent := evm.IntraBlockState().SlotInAccessList(contract.Address(), loc.Bytes32()); !slotPresent {
+		evm.IntraBlockState().AddSlotToAccessList(contract.Address(), loc.Bytes32())
+
 		// Cold slot access considered as storage access.
 		return multigas.MultiGasFromPairs(
 			multigas.Pair{Kind: multigas.ResourceKindStorageAccess, Amount: params.ColdSloadCostEIP2929 - params.WarmStorageReadCostEIP2929},
@@ -152,7 +154,9 @@ func gasExtCodeCopyEIP2929(evm *EVM, contract *Contract, stack *Stack, mem *Memo
 	}
 	addr := common.Address(stack.peek().Bytes20())
 	// Check slot presence in the access list
-	if evm.IntraBlockState().AddAddressToAccessList(addr) {
+	if !evm.IntraBlockState().AddressInAccessList(addr) {
+		evm.IntraBlockState().AddAddressToAccessList(addr)
+
 		var overflow bool
 		// We charge (cold-warm), since 'warm' is already charged as constantGas
 		// Charge cold → warm delta as storage-access gas.
@@ -175,7 +179,9 @@ func gasExtCodeCopyEIP2929(evm *EVM, contract *Contract, stack *Stack, mem *Memo
 func gasEip2929AccountCheck(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (multigas.MultiGas, error) {
 	addr := common.Address(stack.peek().Bytes20())
 	// If the caller cannot afford the cost, this change will be rolled back
-	if evm.IntraBlockState().AddAddressToAccessList(addr) {
+	if !evm.IntraBlockState().AddressInAccessList(addr) {
+		evm.IntraBlockState().AddAddressToAccessList(addr)
+
 		// The warm storage read cost is already charged as constantGas
 		// charge cold -> warm delta as storage access
 		// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
@@ -263,8 +269,9 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			multiGas = multigas.ZeroGas()
 			address  = common.Address(stack.peek().Bytes20())
 		)
-		// If the caller cannot afford the cost, this change will be rolled back
-		if evm.IntraBlockState().AddAddressToAccessList(address) {
+		if !evm.IntraBlockState().AddressInAccessList(address) {
+			// If the caller cannot afford the cost, this change will be rolled back
+			evm.IntraBlockState().AddAddressToAccessList(address)
 			// Cold account access considered as storage access.
 			// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
 			multiGas = multiGas.SaturatingIncrement(multigas.ResourceKindStorageAccess, params.ColdAccountAccessCostEIP2929)
