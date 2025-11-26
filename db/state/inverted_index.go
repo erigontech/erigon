@@ -781,6 +781,11 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txT
 
 func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
+	if fn == nil {
+		defer func(t time.Time) {
+			log.Info(fmt.Sprintf(" pruneII[%s] %s, %d-%d\n", iit.ii.FilenameBase, time.Since(t), txFrom, txTo))
+		}(time.Now())
+	}
 
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
