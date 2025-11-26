@@ -27,7 +27,6 @@ import (
 
 type Service[T any] interface {
 	Names() []string
-	IsMyGossipMessage(name string) bool
 	DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (T, error)
 	ProcessMessage(ctx context.Context, subnet *uint64, msg T) error
 }
