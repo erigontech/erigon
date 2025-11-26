@@ -727,7 +727,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite)
+	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite, nil)
 	return err
 }
 
@@ -736,7 +736,7 @@ var (
 	prevReceiptTime = new(atomic.Uint64)
 )
 
-func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool) (lastBlockNum uint64, err error) {
+func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool, f func(tx kv.RwTx, lastBlockNum uint64) error) (lastBlockNum uint64, err error) {
 	var (
 		batchSize                = uint64(5)
 		blockRPS, blockBurst     = 5000, 5 // rps, amount of simultaneous requests
@@ -789,8 +789,23 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 
 		if rwTx != nil {
 			err = commitUpdate(rwTx, blocks)
+			if err != nil {
+				return 0, err
+			}
+			if f != nil {
+				err = f(rwTx, lastBlockNum)
+			}
+
 		} else {
-			err = db.Update(ctx, func(tx kv.RwTx) error { return commitUpdate(tx, blocks) })
+			err = db.Update(ctx, func(tx kv.RwTx) error {
+				if err := commitUpdate(tx, blocks); err != nil {
+					return err
+				}
+				if f != nil {
+					err = f(tx, lastBlockNum)
+				}
+				return err
+			})
 		}
 		if err != nil {
 			return 0, err

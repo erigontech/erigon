@@ -179,12 +179,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
 
-	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestBlock.Uint64(), false, true, false)
-	if err != nil {
-		return fmt.Errorf("error fetching and committing blocks from rpc: %w", err)
-	}
-
-	finaliseState := func(tx kv.RwTx) error {
+	finaliseState := func(tx kv.RwTx, lastCommittedBlockNum uint64) error {
 		err = cfg.hd.ReadProgressFromDb(tx)
 		if err != nil {
 			return fmt.Errorf("error reading header progress from db: %w", err)
@@ -209,27 +204,23 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return nil
 	}
 
-	if tx != nil {
-		if err = finaliseState(tx); err != nil {
-			return fmt.Errorf("error updating DB after insertion: %w", err)
-		}
+	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestBlock.Uint64(), false, true, false, finaliseState)
+	if err != nil {
+		return fmt.Errorf("error fetching and committing blocks from rpc: %w", err)
+	}
+
+	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("commit failed: %w", err)
 		}
 		tx = nil
-	} else {
-		err = cfg.db.Update(ctx, func(tx kv.RwTx) error { return finaliseState(tx) })
-	}
-
-	if err != nil {
-		return fmt.Errorf("error updating DB after insertion: %w", err)
 	}
 
 	ethdb.InitialiazeLocalWasmTarget()
 
-	if latestBlock.Uint64()-firstBlock > 1 {
-		log.Info("[Arbitrum] Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(),
-			"latestProcessedBlock", lastCommittedBlockNum, "wasTxCommitted", !useExternalTx)
+	if lastCommittedBlockNum-firstBlock > 1 {
+		log.Info("[Arbitrum] Headers stage completed", "latestProcessedBlock", lastCommittedBlockNum,
+			"from", firstBlock, "to", latestBlock.Uint64(), "wasTxCommitted", !useExternalTx)
 	}
 	return nil
 }
