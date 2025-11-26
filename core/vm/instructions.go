@@ -982,6 +982,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	} else {
 		stackvalue.SetBytes(addr.Bytes())
 	}
+	scope.Stack.push(stackvalue)
 
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
@@ -1297,6 +1298,15 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	interpreter.evm.IntraBlockState().SubBalance(callerAddr, balance, tracing.BalanceDecreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
+
+	if interpreter.evm.chainConfig.IsArbitrum() && beneficiary.Bytes20() == scope.Contract.Address() {
+		// SelfDestruct6780 only destructs the contract if selfdestructing in the same transaction as contract creation
+		// So we only account for the balance burn if the contract is actually destructed by checking if the balance is zero.
+		if b, err := interpreter.evm.IntraBlockState().GetBalance(scope.Contract.Address()); err == nil && b.Sign() == 0 {
+			// Arbitrum: calling selfdestruct(this) burns the balance
+			interpreter.evm.IntraBlockState().ExpectBalanceBurn(&balance)
+		}
+	}
 	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
 		interpreter.cfg.Tracer.OnEnter(interpreter.Depth(), byte(SELFDESTRUCT), scope.Contract.Address(), beneficiary.Bytes20(), false, []byte{}, 0, &balance, nil)
 	}
