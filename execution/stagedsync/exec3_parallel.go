@@ -211,7 +211,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								//}
 								if headerBALHash != bal.Hash() {
 									log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
-									return fmt.Errorf("block %d: block access list mismatch: got %s expected %s", applyResult.BlockNum, bal.Hash(), headerBALHash)
+									return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
 								}
 							}
 						}
