@@ -95,7 +95,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 
 	_, err = sentinel.Start()
 	require.NoError(t, err)
-	h := sentinel.host
+	h := sentinel.p2p.Host()
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/3202"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
@@ -208,7 +208,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 
 	_, err = sentinel.Start()
 	require.NoError(t, err)
-	h := sentinel.host
+	h := sentinel.p2p.Host()
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5021"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
@@ -327,7 +327,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 
 	_, err = sentinel.Start()
 	require.NoError(t, err)
-	h := sentinel.host
+	h := sentinel.p2p.Host()
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5001"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
