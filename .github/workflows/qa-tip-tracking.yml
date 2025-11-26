@@ -7,12 +7,6 @@ on:
     branches:
       - 'release/3.*'
   workflow_dispatch: # Run manually
-    inputs:
-      explicit_upgrade:
-        description: 'If true, perform explicit upgrade steps (by default they happen automatically)'
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -88,29 +82,9 @@ jobs:
       run: |
         rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
         cp $ERIGON_REFERENCE_DATA_DIR/../erigon $ERIGON_TESTBED_DATA_DIR/../
+        echo "chaindata_saved=true" >> $GITHUB_OUTPUT
 
-    # Upgrade
-
-    - name: Print datadir contents before upgrade (for debugging)
-      working-directory: ${{ github.workspace }}
-      run: |
-        find $ERIGON_TESTBED_DATA_DIR
-
-    # The following task runs the datadir upgrade procedure explicitly.
-    # It is unnecessary and is executed automatically by erigon when it detects the old format.
-    - name: Run the datadir upgrade procedure
-      if: ${{ inputs.explicit_upgrade }}
-      working-directory: ${{ github.workspace }}
-      run: |
-        ./build/bin/erigon snapshots update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
-
-    - name: Print datadir contents after upgrade (for debugging)
-      if: ${{ inputs.explicit_upgrade }}
-      working-directory: ${{ github.workspace }}
-      run: |
-        find $ERIGON_TESTBED_DATA_DIR
-
-    # Tip-Tracking test
+    # Upgrade & track the chain tip
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
@@ -126,13 +100,6 @@ jobs:
         
         # Save the subsection reached status
         echo "test_executed=true" >> $GITHUB_OUTPUT
-        
-        # Clean up Erigon process if it's still running
-        if kill -0 $ERIGON_PID 2> /dev/null; then
-          echo "Terminating Erigon"
-          kill $ERIGON_PID
-          wait $ERIGON_PID
-        fi
 
         # Check test runner script exit status
         if [ $test_exit_status -eq 0 ]; then
@@ -143,17 +110,18 @@ jobs:
           echo "Upgrade & tip-tracking test encountered an error"
           echo "::error::Upgrade & tip-tracking test encountered an error"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          exit 1
         fi
 
     - name: Upload Downloader Torrent Client Status
-      if: always()
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v5
       with:
-        name: torrent-client-status
+        name: torrent-client-status-${{ env.CHAIN }}
         path: torrent-client-status.txt
 
     - name: Save test results
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
       run: |
@@ -174,28 +142,28 @@ jobs:
           --result_file ${{ github.workspace }}/result-$CHAIN.json
 
     - name: Upload test results
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v5
       with:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v5
       with:
         name: erigon-logs
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v5
       with:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Delete Erigon Testbed Data Directory
-      if: ${{ always() }}
+      if: ${{ always() && steps.save_chaindata_step.outputs.chaindata_saved == 'true' }}
       run: |
         if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
           rm -rf $ERIGON_TESTBED_DATA_DIR
@@ -205,12 +173,4 @@ jobs:
       if: ${{ always() }}
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-
-    - name: Action for Not Success
-      if: ${{ always() }}
-      run: |
-        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
-          echo "::error::Error detected during upgrade & tip-tracking test"
-        exit 1
-        fi
         
