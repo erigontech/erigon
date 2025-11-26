@@ -17,7 +17,7 @@ func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service
 		conditions: conditions,
 	}
 	gm.registeredServices = append(gm.registeredServices, gossipSrv)
-	if err := gm.registerGossipService(gossipSrv); err != nil {
+	if err := gm.registerGossipService(wrappedService, conditions...); err != nil {
 		panic(err)
 	}
 }
