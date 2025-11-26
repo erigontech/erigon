@@ -32,7 +32,7 @@ This Docker image is fully supported on **Linux**, **macOS**, and **Windows**.
 
 _(Note: The container itself is built on multi-platform Linux architectures (linux/amd64 and linux/arm64), which is handled automatically by your Docker setup.)_
 
-#### Prerequisites
+### **Prerequisites**
 
 [Docker Engine](https://docs.docker.com/engine/install) if you run Linux or [Docker Desktop](https://docs.docker.com/desktop/) if you run macOS/Windows.
 
@@ -45,7 +45,11 @@ _(Note: The container itself is built on multi-platform Linux architectures (lin
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
 * Images are stored at [https://hub.docker.com/r/erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
 
-#### Download and start Erigon in Docker
+{% hint style="warning" %}
+**Windows**: note that Docker on Windows is affected by [WSL2 Performance and Data Storage](./#window-subsystem-for-linux-wsl).
+{% endhint %}
+
+### **Download and start Erigon in Docker**
 
 Here are the steps to download and start Erigon in Docker.
 
@@ -97,7 +101,7 @@ docker run -it erigontech/erigon:v3.2.2 --chain=hoodi --prune.mode=minimal --dat
 
 <summary>Pre-built Binaries (Linux Only)</summary>
 
-#### 1. Select Your Processor Architecture and Download
+**1. Select Your Processor Architecture and Download**
 
 Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., <code class="expression">space.vars.version</code>) or whichever version you prefer.
 
@@ -109,7 +113,7 @@ Download the appropriate binary file for your processor architecture:
 
 Note that the Release Page Assets table contains also the **checksum** for each file and a checksum file.
 
-#### 2. Verifying Binary Integrity with Checksums
+**2. Verifying Binary Integrity with Checksums**
 
 To verify the integrity and ensure your downloaded Erigon file hasn't been corrupted or tampered with, use the SHA256 checksums provided in the official release by following these steps:
 
@@ -135,7 +139,7 @@ Compare the checksum found in the previous step with those in the Release Notes 
 
 The two checksum strings must match exactly. If they do not match, the file is corrupted, and you should delete it and download it again.
 
-#### 3. Installing the Binary Executable
+**3. Installing the Binary Executable**
 
 After downloading and verifying the checksum, follow the instructions below based on the file type you chose.
 
@@ -173,7 +177,7 @@ This method gives you a standalone executable that can be run from any directory
     sudo mv erigon /usr/local/bin/
     ```
 
-#### 4. Running Erigon
+**4. Running Erigon**
 
 After installation, you can run Erigon from your terminal:
 
@@ -197,7 +201,7 @@ This method is significantly more difficult than using pre-built binaries or Doc
 If you are a casual user or lack CLI expertise, we strongly recommend using the official pre-built binaries or Docker documentation.
 {% endhint %}
 
-#### 1. Software Requirements
+**1. Software Requirements**
 
 If you intend to build Erigon from source, you must first meet the necessary prerequisites.
 
@@ -226,7 +230,7 @@ This turns the C++ part of Erigon's code into a program your computer can run. Y
 * For **Clang** follow the instructions at [https://clang.llvm.org/get\_started.html](https://clang.llvm.org/get_started.html);
 * For **GCC** (version 10 or newer): [https://gcc.gnu.org/install/index.html](https://gcc.gnu.org/install/index.html).
 
-#### 2. Building Erigon from Source
+**2. Building Erigon from Source**
 
 The basic Erigon configuration is suitable for most users who simply want to run a node. To ensure you are building a specific, stable release, use Git tags.
 
@@ -271,7 +275,7 @@ make -j<n> erigon
 
 The resulting executable binary will be created in the `./build/bin/erigon` path.
 
-#### 3. Running Erigon
+**3. Running Erigon**
 
 After installation, you can run Erigon from your terminal:
 
@@ -287,7 +291,7 @@ After installation, you can run Erigon from your terminal:
 
 <summary>Native Compilation</summary>
 
-#### 1. Software Prerequisites
+**1. Software Prerequisites**
 
 You must install the following software and set the below environment variables before compiling Erigon.
 
@@ -337,7 +341,7 @@ Click the “**Environment Variables...**” button.
 
 <figure><img src="../../.gitbook/assets/image (4).png" alt=""><figcaption></figcaption></figure>
 
-Look down at the "**System variables**" box and double click on "**Path**" to add a new path (or  select and click on "**Edit**").
+Look down at the "**System variables**" box and double click on "**Path**" to add a new path (or select and click on "**Edit**").
 
 <figure><img src="../../.gitbook/assets/image (5).png" alt=""><figcaption></figcaption></figure>
 
@@ -349,7 +353,7 @@ Then click on the "**New**" button and paste the following path:
 
 <figure><img src="../../.gitbook/assets/image (6).png" alt=""><figcaption></figcaption></figure>
 
-#### 2. Clone the Erigon repository
+**2. Clone the Erigon repository**
 
 Open the Command Prompt and type the following:
 
@@ -369,7 +373,7 @@ You might need to change the `ExecutionPolicy` to allow scripts created locally 
 Set-ExecutionPolicy RemoteSigned
 ```
 
-#### 3. Compiling Erigon
+**3. Compiling Erigon**
 
 This section outlines the two primary methods for compiling the Erigon client and its associated modules directly from the source code on a Windows environment. Compiling from source ensures you are running the latest version and gives you control over the final binaries.
 
@@ -421,7 +425,7 @@ The executable binary `erigon.exe` should have been created in the `.\build\bin\
 
 You can use the same command to build other binaries such as `RPCDaemon`, `TxPool`, `Sentry` and `Downloader`.
 
-#### 4. Running Erigon
+**4. Running Erigon**
 
 To make Erigon executable from anywhere from your terminal repeat step 1.5 and add Erigon executable path
 
@@ -449,21 +453,21 @@ WSL enables you to run a complete GNU/Linux environment natively within Windows,
 
 **Installation and Version**
 
-* Official Installation: Follow Microsoft's official guide to install WSL: [https://learn.microsoft.com/en-us/windows/wsl/install](https://learn.microsoft.com/en-us/windows/wsl/install)
-* Required Version: WSL Version 2 is the only version supported by Erigon.
+* Official Installation: Follow Microsoft's official guide to install WSL2: [https://learn.microsoft.com/en-us/windows/wsl/install](https://learn.microsoft.com/en-us/windows/wsl/install)
+* Required Version: WSL version 2 is the only version supported by Erigon.
 
 **Building Erigon**
 
-Once WSL 2 is set up, you can build and run Erigon exactly as you would on a regular [#linux](./#linux "mention") distribution.
+Once WSL2 is set up, you can build and run Erigon exactly as you would on a regular [#linux](./#linux "mention") distribution.
 
 **Performance and Data Storage**
 
 The location of your Erigon data directory (`datadir`) is the most crucial factor for performance in WSL.
 
-| **Data Location**                                                         | **Performance & Configuration**                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC daemon works efficiently.                                                                                                                                        |
-| Avoid: Mounted Windows Partitions (e.g., `/mnt/c/`, `/mnt/d/`)            | Significantly Affected Performance. This is due to: \<ul>\<li>The mounted drives using DrvFS (a slower network file system).\</li>\<li>The MDBX database locking the data for exclusive access, limiting simultaneous processes.\</li>\</ul> |
+| **Data Location**                                                         | **Performance & Configuration**                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC daemon works efficiently.                                                                                                                                                                                                                                                                                                                                                            |
+| Avoid: Mounted Windows Partitions (e.g., `/mnt/c/`, `/mnt/d/`)            | Performance is reduced as the native Windows drives are mounted using DrvFS (a slower network file system). This affects MDBX database access, and complicates filesystem operations that expect unix-like behaviour. Setting [`automount.options=metadata`](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#automount-options) in `/etc/wsl.conf` in your distribution is recommended, but not required. Note that Docker on Windows is also affected. |
 
 **RPC Daemon Configuration**
 
@@ -480,14 +484,14 @@ The choice of data location directly impacts how you must configure the RPC daem
 
 **Networking Notes**
 
-Be aware that the default WSL 2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
+Be aware that the default WSL2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
 
-If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL 2 IP address when configuring NAT on your router.
+If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring NAT on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
 
 </details>
 
 Once you have Erigon installed, you can see Basic Usage to configure your node.
 
-{% content-ref url="../fundamentals/basic-usage.md" %}
-[basic-usage.md](../fundamentals/basic-usage.md)
+{% content-ref url="../../fundamentals/basic-usage.md" %}
+[basic-usage.md](../../fundamentals/basic-usage.md)
 {% endcontent-ref %}

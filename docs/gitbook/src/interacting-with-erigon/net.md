@@ -8,6 +8,10 @@ The `net` namespace provides network-related methods that are part of the standa
 
 The `net` namespace is enabled by default in Erigon's RPC daemon and provides essential network information that applications use to understand the node's connectivity status and network configuration.
 
+For API usage refer to the below official resources:
+
+{% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
+
 ### Implementation Details
 
 * The net namespace is implemented in `NetAPIImpl` which uses the `ethBackend` to access network information.
@@ -36,5 +40,3 @@ The `net` namespace is enabled by default in Erigon's RPC daemon and provides es
 
 * The current implementation shows some limitations noted in the documentation, such as hardcoded return values in certain scenarios.
 * `net_peerCount` specifically counts only internal sentries, which may not reflect the total peer count in distributed setups.
-
-{% include "../../../.gitbook/includes/api-documentation-2.md" %}
