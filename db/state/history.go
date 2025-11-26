@@ -1030,7 +1030,10 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
 			return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
 		}
-
+		if limit == 0 {
+			return nil
+		}
+		limit--
 		if ht.h.HistoryLargeValues {
 			seek = append(bytes.Clone(k), txnm...)
 			for kk, _, err := valsC.Seek(seek); kk != nil; kk, _, err = valsC.Next() {
@@ -1047,6 +1050,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 				if err = valsC.DeleteCurrent(); err != nil {
 					return err
 				}
+				pruned++
 			}
 		} else {
 			for vv, err := valsCDup.SeekBothRange(k, txnm); vv != nil; _, vv, err = valsCDup.NextDup() {
@@ -1062,10 +1066,10 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 				if err = valsCDup.DeleteCurrent(); err != nil {
 					return err
 				}
+				pruned++
 			}
 		}
 
-		pruned++
 		return nil
 	}
 	mxPruneSizeHistory.AddInt(pruned)

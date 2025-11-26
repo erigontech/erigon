@@ -845,7 +845,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
 		}
 
-		limitTxNums--
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
@@ -853,11 +852,15 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 			}
+			if limitTxNums == 0 {
+				return stat, nil
+			}
 			if fn != nil {
 				if err = fn(v, k); err != nil {
 					return nil, fmt.Errorf("fn error: %w", err)
 				}
 			} else {
+				limitTxNums--
 				if err = idxDelCursor.DeleteExact(v, k); err != nil {
 					return nil, err
 				}
