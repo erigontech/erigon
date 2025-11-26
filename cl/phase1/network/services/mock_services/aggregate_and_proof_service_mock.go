@@ -15,7 +15,7 @@ import (
 
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	services "github.com/erigontech/erigon/cl/phase1/network/services"
-	sentinelproto "github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -44,18 +44,18 @@ func (m *MockAggregateAndProofService) EXPECT() *MockAggregateAndProofServiceMoc
 }
 
 // DecodeGossipMessage mocks base method.
-func (m *MockAggregateAndProofService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*services.SignedAggregateAndProofForGossip, error) {
+func (m *MockAggregateAndProofService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*services.SignedAggregateAndProofForGossip, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DecodeGossipMessage", data, version)
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", pid, data, version)
 	ret0, _ := ret[0].(*services.SignedAggregateAndProofForGossip)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
-func (mr *MockAggregateAndProofServiceMockRecorder) DecodeGossipMessage(data, version any) *MockAggregateAndProofServiceDecodeGossipMessageCall {
+func (mr *MockAggregateAndProofServiceMockRecorder) DecodeGossipMessage(pid, data, version any) *MockAggregateAndProofServiceDecodeGossipMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockAggregateAndProofService)(nil).DecodeGossipMessage), data, version)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockAggregateAndProofService)(nil).DecodeGossipMessage), pid, data, version)
 	return &MockAggregateAndProofServiceDecodeGossipMessageCall{Call: call}
 }
 
@@ -71,51 +71,51 @@ func (c *MockAggregateAndProofServiceDecodeGossipMessageCall) Return(arg0 *servi
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockAggregateAndProofServiceDecodeGossipMessageCall) Do(f func(*sentinelproto.GossipData, clparams.StateVersion) (*services.SignedAggregateAndProofForGossip, error)) *MockAggregateAndProofServiceDecodeGossipMessageCall {
+func (c *MockAggregateAndProofServiceDecodeGossipMessageCall) Do(f func(peer.ID, []byte, clparams.StateVersion) (*services.SignedAggregateAndProofForGossip, error)) *MockAggregateAndProofServiceDecodeGossipMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockAggregateAndProofServiceDecodeGossipMessageCall) DoAndReturn(f func(*sentinelproto.GossipData, clparams.StateVersion) (*services.SignedAggregateAndProofForGossip, error)) *MockAggregateAndProofServiceDecodeGossipMessageCall {
+func (c *MockAggregateAndProofServiceDecodeGossipMessageCall) DoAndReturn(f func(peer.ID, []byte, clparams.StateVersion) (*services.SignedAggregateAndProofForGossip, error)) *MockAggregateAndProofServiceDecodeGossipMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
-// IsMyGossipMessage mocks base method.
-func (m *MockAggregateAndProofService) IsMyGossipMessage(name string) bool {
+// Names mocks base method.
+func (m *MockAggregateAndProofService) Names() []string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsMyGossipMessage", name)
-	ret0, _ := ret[0].(bool)
+	ret := m.ctrl.Call(m, "Names")
+	ret0, _ := ret[0].([]string)
 	return ret0
 }
 
-// IsMyGossipMessage indicates an expected call of IsMyGossipMessage.
-func (mr *MockAggregateAndProofServiceMockRecorder) IsMyGossipMessage(name any) *MockAggregateAndProofServiceIsMyGossipMessageCall {
+// Names indicates an expected call of Names.
+func (mr *MockAggregateAndProofServiceMockRecorder) Names() *MockAggregateAndProofServiceNamesCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMyGossipMessage", reflect.TypeOf((*MockAggregateAndProofService)(nil).IsMyGossipMessage), name)
-	return &MockAggregateAndProofServiceIsMyGossipMessageCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Names", reflect.TypeOf((*MockAggregateAndProofService)(nil).Names))
+	return &MockAggregateAndProofServiceNamesCall{Call: call}
 }
 
-// MockAggregateAndProofServiceIsMyGossipMessageCall wrap *gomock.Call
-type MockAggregateAndProofServiceIsMyGossipMessageCall struct {
+// MockAggregateAndProofServiceNamesCall wrap *gomock.Call
+type MockAggregateAndProofServiceNamesCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockAggregateAndProofServiceIsMyGossipMessageCall) Return(arg0 bool) *MockAggregateAndProofServiceIsMyGossipMessageCall {
+func (c *MockAggregateAndProofServiceNamesCall) Return(arg0 []string) *MockAggregateAndProofServiceNamesCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockAggregateAndProofServiceIsMyGossipMessageCall) Do(f func(string) bool) *MockAggregateAndProofServiceIsMyGossipMessageCall {
+func (c *MockAggregateAndProofServiceNamesCall) Do(f func() []string) *MockAggregateAndProofServiceNamesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockAggregateAndProofServiceIsMyGossipMessageCall) DoAndReturn(f func(string) bool) *MockAggregateAndProofServiceIsMyGossipMessageCall {
+func (c *MockAggregateAndProofServiceNamesCall) DoAndReturn(f func() []string) *MockAggregateAndProofServiceNamesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

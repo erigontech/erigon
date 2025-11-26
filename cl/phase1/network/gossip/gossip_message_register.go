@@ -51,10 +51,6 @@ func (w *serviceWrapper[T]) Names() []string {
 	return w.service.Names()
 }
 
-func (w *serviceWrapper[T]) IsMyGossipMessage(name string) bool {
-	return w.service.IsMyGossipMessage(name)
-}
-
 func (w *serviceWrapper[T]) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (any, error) {
 	return w.service.DecodeGossipMessage(pid, data, version)
 }
