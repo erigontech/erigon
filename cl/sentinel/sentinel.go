@@ -56,7 +56,7 @@ type Sentinel struct {
 	ctx      context.Context
 	cfg      *SentinelConfig
 	peers    *peers.Pool
-	p2p      *p2p.P2Pmanager
+	p2p      p2p.P2PManager
 
 	httpApi http.Handler
 
@@ -97,7 +97,7 @@ func New(
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
-	p2p *p2p.P2Pmanager,
+	p2p p2p.P2PManager,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx:                ctx,

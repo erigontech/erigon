@@ -56,7 +56,7 @@ func createSentinel(
 	ethClock eth_clock.EthereumClock,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
-	p2p *p2p.P2Pmanager,
+	p2p p2p.P2PManager,
 	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		context.Background(),
@@ -78,75 +78,7 @@ func createSentinel(
 	if err != nil {
 		return nil, nil, err
 	}
-	/*gossipTopics := []sentinel.GossipTopic{
-		sentinel.BeaconBlockSsz,
-		//sentinel.VoluntaryExitSsz,
-		sentinel.ProposerSlashingSsz,
-		sentinel.AttesterSlashingSsz,
-		sentinel.BlsToExecutionChangeSsz,
-		////sentinel.LightClientFinalityUpdateSsz,
-		////sentinel.LightClientOptimisticUpdateSsz,
-		sentinel.SyncCommitteeContributionAndProofSsz,
-		sentinel.BeaconAggregateAndProofSsz,
-	}
 
-	gossipTopics = append(
-		gossipTopics,
-		generateSubnetsTopics(
-			gossip.TopicNamePrefixBlobSidecar,
-			int(cfg.BeaconConfig.MaxBlobsPerBlockElectra),
-		)...)
-
-	attestationSubnetTopics := generateSubnetsTopics(
-		gossip.TopicNamePrefixBeaconAttestation,
-		int(cfg.NetworkConfig.AttestationSubnetCount),
-	)
-
-	gossipTopics = append(
-		gossipTopics,
-		attestationSubnetTopics[AttestationSubnetSubscriptions:]...)
-
-	gossipTopics = append(
-		gossipTopics,
-		generateSubnetsTopics(
-			gossip.TopicNamePrefixSyncCommittee,
-			int(cfg.BeaconConfig.SyncCommitteeSubnetCount),
-		)...)
-
-	for subnet := range cfg.BeaconConfig.DataColumnSidecarSubnetCount {
-		topic := sentinel.GossipTopic{
-			Name:     gossip.TopicNameDataColumnSidecar(subnet),
-			CodecStr: sentinel.SSZSnappyCodec,
-		}
-		// just subscribe but do not listen to the messages. This topic will be dynamically controlled in peerdas.
-		if _, err := sent.SubscribeGossip(topic, time.Unix(0, 0)); err != nil {
-			logger.Error("[Sentinel] failed to subscribe to data column sidecar", "err", err)
-		}
-	}
-
-	for _, v := range gossipTopics {
-		if err := sent.Unsubscribe(v); err != nil {
-			logger.Error("[Sentinel] failed to start sentinel", "err", err)
-			continue
-		}
-
-		// now lets separately connect to the gossip topics. this joins the room
-		_, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name, cfg.SubscribeAllTopics)) // Listen forever.
-		if err != nil {
-			logger.Error("[Sentinel] failed to start sentinel", "err", err)
-		}
-	}
-
-	for k := 0; k < AttestationSubnetSubscriptions; k++ {
-		if err := sent.Unsubscribe(attestationSubnetTopics[k]); err != nil {
-			logger.Error("[Sentinel] failed to start sentinel", "err", err)
-			continue
-		}
-		_, err := sent.SubscribeGossip(attestationSubnetTopics[k], time.Unix(0, math.MaxInt64)) // Listen forever.
-		if err != nil {
-			logger.Error("[Sentinel] failed to start sentinel", "err", err)
-		}
-	}*/
 	return sent, localNode, nil
 }
 
@@ -160,7 +92,7 @@ func StartSentinelService(
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	PeerDasStateReader peerdasstate.PeerDasStateReader,
-	p2p *p2p.P2Pmanager,
+	p2p p2p.P2PManager,
 	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
 	ctx := context.Background()
 	sent, localNode, err := createSentinel(

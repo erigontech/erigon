@@ -51,7 +51,7 @@ type GossipManager struct {
 
 	registeredServices []GossipService
 	stats              *gossipMessageStats
-	p2p                *p2p.P2Pmanager
+	p2p                p2p.P2PManager
 
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
@@ -59,7 +59,7 @@ type GossipManager struct {
 }
 
 func NewGossipManager(
-	p2p *p2p.P2Pmanager,
+	p2p p2p.P2PManager,
 	beaconConfig *clparams.BeaconChainConfig,
 	networkConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
