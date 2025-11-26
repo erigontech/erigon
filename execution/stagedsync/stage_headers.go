@@ -210,7 +210,13 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	}
 
 	if tx != nil {
-		err = finaliseState(tx)
+		if err = finaliseState(tx); err != nil {
+			return fmt.Errorf("error updating DB after insertion: %w", err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("commit failed: %w", err)
+		}
+		tx = nil
 	} else {
 		err = cfg.db.Update(ctx, func(tx kv.RwTx) error { return finaliseState(tx) })
 	}
@@ -225,7 +231,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("[Arbitrum] Headers stage completed", "from", firstBlock, "to", latestBlock.Uint64(),
 			"latestProcessedBlock", lastCommittedBlockNum, "wasTxCommitted", !useExternalTx)
 	}
-	return tx.Commit()
+	return nil
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
