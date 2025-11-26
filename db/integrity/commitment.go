@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -612,14 +613,33 @@ func checkCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	logger.Info("checking commitment hist vals in", "v", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+	txCount := endTxNum - startTxNum
+	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 10)
+	if coverageQuotient > txCount {
+		panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d", coverageQuotient, txCount))
+	}
+	bucket := rand.Intn(int(coverageQuotient))
+	bucketSize := txCount / coverageQuotient
+	bucketStart := startTxNum + uint64(bucket)*bucketSize
+	bucketEnd := min(bucketStart+bucketSize, endTxNum)
+	logger.Info(
+		"checking commitment hist vals in",
+		"v", fileName,
+		"startTxNum", startTxNum,
+		"endTxNum", endTxNum,
+		"coverageQuotient", coverageQuotient,
+		"bucket", bucket,
+		"bucketSize", bucketSize,
+		"bucketStart", bucketStart,
+		"bucketEnd", bucketEnd,
+	)
 	txNumReader := br.TxnumReader(ctx)
-	it, err := tx.HistoryRange(kv.CommitmentDomain, int(startTxNum), int(endTxNum), order.Asc, -1)
+	it, err := tx.HistoryRange(kv.CommitmentDomain, int(bucketStart), int(bucketEnd), order.Asc, -1)
 	if err != nil {
 		return 0, err
 	}
