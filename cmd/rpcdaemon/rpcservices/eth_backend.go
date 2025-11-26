@@ -295,7 +295,7 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 	for {
 		receipts, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
-			log.Info("rpcdaemon: the logs subscription channel was closed")
+			log.Info("rpcdaemon: the receipts subscription channel was closed")
 			break
 		}
 		if err != nil {
