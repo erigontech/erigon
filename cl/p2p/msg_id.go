@@ -16,7 +16,7 @@ import (
 // + message.topic + snappy_decompress(message.data))[:20]. Otherwise, set message-id to the first 20 bytes of the SHA256 hash of the concatenation
 // of the following data: MESSAGE_DOMAIN_INVALID_SNAPPY, the length of the topic byte string (encoded as little-endian uint64),
 // the topic byte string, and the raw message data: i.e. SHA256(MESSAGE_DOMAIN_INVALID_SNAPPY + uint_to_bytes(uint64(len(message.topic))) + message.topic + message.data)[:20].
-func (s *P2Pmanager) msgId(pmsg *pubsubpb.Message) string {
+func (s *p2pManager) msgId(pmsg *pubsubpb.Message) string {
 	topic := *pmsg.Topic
 	topicLen := len(topic)
 	topicLenBytes := utils.Uint64ToLE(uint64(topicLen)) // topicLen cannot be negative

@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func (p *P2Pmanager) connectToBootnodes(ctx context.Context, discoverConfig discover.Config) error {
+func (p *p2pManager) connectToBootnodes(ctx context.Context, discoverConfig discover.Config) error {
 	for i := range discoverConfig.Bootnodes {
 		if err := discoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
 			if !enr.IsNotFound(err) {
@@ -58,7 +58,7 @@ func (p *P2Pmanager) connectToBootnodes(ctx context.Context, discoverConfig disc
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool
 // it errors when if fail to connect with the peer, for instance, if it fails the handshake
 // if it does not return an error, the peer is attempted to be added to the pool
-func (p *P2Pmanager) connectWithPeer(ctx context.Context, info peer.AddrInfo, sem *semaphore.Weighted) (err error) {
+func (p *p2pManager) connectWithPeer(ctx context.Context, info peer.AddrInfo, sem *semaphore.Weighted) (err error) {
 	if sem != nil {
 		defer sem.Release(1)
 	}
@@ -77,7 +77,7 @@ func (p *P2Pmanager) connectWithPeer(ctx context.Context, info peer.AddrInfo, se
 	return nil
 }
 
-func (p *P2Pmanager) peerMonitor(ctx context.Context) {
+func (p *p2pManager) peerMonitor(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 30)
 	for {
 		select {

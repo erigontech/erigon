@@ -23,13 +23,13 @@ type TopicSubscription struct {
 }
 
 type TopicSubscriptions struct {
-	p2p          *p2p.P2Pmanager
+	p2p          p2p.P2PManager
 	subs         map[string]*TopicSubscription
 	mutex        sync.RWMutex
 	toSubscribes map[string]time.Time // this indicates the topics that probably need to be subscribed later
 }
 
-func NewTopicSubscriptions(p2p *p2p.P2Pmanager) *TopicSubscriptions {
+func NewTopicSubscriptions(p2p p2p.P2PManager) *TopicSubscriptions {
 	s := &TopicSubscriptions{
 		p2p:          p2p,
 		subs:         make(map[string]*TopicSubscription),

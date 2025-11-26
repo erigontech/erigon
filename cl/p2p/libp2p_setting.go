@@ -36,7 +36,7 @@ func scoreDecay(totalDurationDecay time.Duration, beaconConfig *clparams.BeaconC
 	return math.Pow(decayToZero, 1/float64(numOfTimes))
 }
 
-func (s *P2Pmanager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
+func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
 	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
 	oneEpochDuration := time.Duration(beaconConfig.SlotsPerEpoch) * oneSlotDuration
 
