@@ -783,7 +783,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 	if fn == nil {
 		defer func(t time.Time) {
-			log.Info(fmt.Sprintf(" pruneII[%s] %s, %d-%d\n", iit.ii.FilenameBase, time.Since(t), txFrom, txTo))
+			log.Info(fmt.Sprintf(" pruneII[%s] %s, %d-%d", iit.ii.FilenameBase, time.Since(t), txFrom, txTo))
 		}(time.Now())
 	}
 
