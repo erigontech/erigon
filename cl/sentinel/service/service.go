@@ -47,7 +47,6 @@ type SentinelServer struct {
 
 	ctx      context.Context
 	sentinel *sentinel.Sentinel
-	//gossipNotifier *gossipNotifier
 
 	logger log.Logger
 }
@@ -56,31 +55,9 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 	return &SentinelServer{
 		sentinel: sentinel,
 		ctx:      ctx,
-		//gossipNotifier: newGossipNotifier(),
-		logger: logger,
+		logger:   logger,
 	}
 }
-
-/*
-// extractSubnetIndexByGossipTopic takes a topic and extract the blob sidecar
-func extractSubnetIndexByGossipTopic(name string) int {
-	// e.g blob_sidecar_3, we want to extract 3
-	// reject if last character is not a number
-	if !unicode.IsNumber(rune(name[len(name)-1])) {
-		return -1
-	}
-	// get the last part of the topic
-	parts := strings.Split(name, "_")
-	// convert it to int
-	index, err := strconv.Atoi(parts[len(parts)-1])
-	if err != nil {
-		log.Warn("[Sentinel] failed to parse subnet index", "topic", name, "err", err)
-		return -1
-	}
-	return index
-}*/
-
-//BanPeer(context.Context, *Peer) (*EmptyMessage, error)
 
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
 	active, _, _ := s.sentinel.GetPeersCount()
@@ -100,86 +77,10 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sen
 
 func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.GossipData) (*sentinelproto.EmptyMessage, error) {
 	panic("do not call this")
-	/*manager := s.sentinel.GossipManager()
-	// Snappify payload before sending it to gossip
-	compressedData := utils.CompressSnappy(msg.Data)
-
-	//trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
-
-	var subscription *sentinel.GossipSubscription
-
-	switch msg.Name {
-	case gossip.TopicNameBeaconBlock,
-		gossip.TopicNameBeaconAggregateAndProof,
-		gossip.TopicNameVoluntaryExit,
-		gossip.TopicNameProposerSlashing,
-		gossip.TopicNameSyncCommitteeContributionAndProof,
-		gossip.TopicNameAttesterSlashing,
-		gossip.TopicNameBlsToExecutionChange:
-		subscription = manager.GetMatchingSubscription(msg.Name)
-	default:
-		// check subnets
-		switch {
-		case gossip.IsTopicBlobSidecar(msg.Name):
-			if msg.SubnetId == nil {
-				return nil, errors.New("subnetId is required for blob sidecar")
-			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
-		case gossip.IsTopicSyncCommittee(msg.Name):
-			if msg.SubnetId == nil {
-				return nil, errors.New("subnetId is required for sync_committee")
-			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameSyncCommittee(int(*msg.SubnetId)))
-		case gossip.IsTopicBeaconAttestation(msg.Name):
-			if msg.SubnetId == nil {
-				return nil, errors.New("subnetId is required for beacon attestation")
-			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameBeaconAttestation(*msg.SubnetId))
-		case gossip.IsTopicDataColumnSidecar(msg.Name):
-			if msg.SubnetId == nil {
-				return nil, errors.New("subnetId is required for data column sidecar")
-			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameDataColumnSidecar(*msg.SubnetId))
-		default:
-			return &sentinelproto.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
-		}
-	}
-	if subscription == nil {
-		return &sentinelproto.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
-	}
-	return &sentinelproto.EmptyMessage{}, subscription.Publish(compressedData)*/
 }
 
 func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
-	// first of all subscribe
 	panic("do not call this")
-	/*ch, subId, err := s.gossipNotifier.addSubscriber()
-	if err != nil {
-		return err
-	}
-	defer s.gossipNotifier.removeSubscriber(subId)
-
-	for {
-		select {
-		// Exit on stream context done
-		case <-stream.Context().Done():
-			return nil
-		case packet := <-ch:
-			if !s.gossipMatchSubscription(packet, data) {
-				continue
-			}
-			if err := stream.Send(&sentinelproto.GossipData{
-				Data: packet.data,
-				Name: packet.t,
-				Peer: &sentinelproto.Peer{
-					Pid: packet.pid,
-				},
-				SubnetId: packet.subnetId,
-			}); err != nil {
-				s.logger.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
-			}
-		}
-	}*/
 }
 
 func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelproto.SubscriptionData) bool {
@@ -399,18 +300,7 @@ func (s *SentinelServer) ListenToGossip() {
 */
 
 func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
-	/*var (
-		topic      = expiryReq.GetTopic()
-		expiryTime = time.Unix(int64(expiryReq.GetExpiryUnixSecs()), 0)
-	)
-	subs := s.sentinel.GossipManager().GetMatchingSubscription(topic)
-	if subs == nil {
-		return nil, errors.New("no such subscription")
-	}
-	subs.OverwriteSubscriptionExpiry(expiryTime)
-	return &sentinelproto.EmptyMessage{}, nil*/
 	panic("do not call this")
-	return nil, nil
 }
 
 type ResponseCode int
