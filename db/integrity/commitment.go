@@ -578,6 +578,8 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	}
 	if dbg.EnvBool("CHECK_COMMITMENT_HIST_VAL_SEQUENTIAL", false) {
 		eg.SetLimit(1)
+	} else {
+		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
 	var integrityErr error
 	var totalVals atomic.Uint64
@@ -619,7 +621,8 @@ func checkCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	}
 	defer tx.Rollback()
 	txCount := endTxNum - startTxNum
-	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 10)
+	// cover 5% by doing random bucket sampling from each file
+	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 20)
 	if coverageQuotient > txCount {
 		panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d", coverageQuotient, txCount))
 	}
