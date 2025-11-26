@@ -12,10 +12,13 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+// RegisterGossipServices registers all the gossip services with the given gossip manager.
+// Put it in a separate file to avoid circular dependency because it depends on many big packages.
 func RegisterGossipServices(
 	gm *gossip.GossipManager,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
+	// services
 	blockService services.BlockService,
 	attesterSlashingService services.AttesterSlashingService,
 	blobService services.BlobSidecarsService,
@@ -28,53 +31,53 @@ func RegisterGossipServices(
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
 ) {
-	waitReady := WithHeadSlotReady(forkChoiceReader, ethClock)
+	waitReady := withHeadSlotReady(forkChoiceReader, ethClock)
 
 	// register services
-	gossip.RegisterGossipService(gm, blockService, WithRateLimiterByPeer(1, 2))
-	gossip.RegisterGossipService(gm, syncContributionService, waitReady, WithRateLimiterByPeer(8, 16))
-	gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, WithRateLimiterByPeer(8, 16))
-	gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, WithRateLimiterByPeer(8, 16))
-	gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, WithRateLimiterByPeer(2, 8))
-	gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, WithRateLimiterByPeer(2, 8))
-	gossip.RegisterGossipService(gm, blsToExecutionChangeService, waitReady, WithRateLimiterByPeer(2, 8))
-	gossip.RegisterGossipService(gm, proposerSlashingService, waitReady, WithRateLimiterByPeer(2, 8))
-	gossip.RegisterGossipService(gm, attestationService, waitReady, WithGlobalTimeBasedRateLimiter(6*time.Second, 250))
-	gossip.RegisterGossipService(gm, blobService, WithEndVersion(clparams.FuluVersion), WithGlobalTimeBasedRateLimiter(6*time.Second, 32))
+	gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2))
+	gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(8, 16))
+	gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withRateLimiterByPeer(8, 16))
+	gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withRateLimiterByPeer(8, 16))
+	gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, withRateLimiterByPeer(2, 8))
+	gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(2, 8))
+	gossip.RegisterGossipService(gm, blsToExecutionChangeService, waitReady, withRateLimiterByPeer(2, 8))
+	gossip.RegisterGossipService(gm, proposerSlashingService, waitReady, withRateLimiterByPeer(2, 8))
+	gossip.RegisterGossipService(gm, attestationService, waitReady, withGlobalTimeBasedRateLimiter(6*time.Second, 250))
+	gossip.RegisterGossipService(gm, blobService, withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, 32))
 	// fulu
-	gossip.RegisterGossipService(gm, dataColumnSidecarService, WithBeginVersion(clparams.FuluVersion), WithRateLimiterByPeer(32, 64))
+	gossip.RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64))
 }
 
-func WithHeadSlotReady(forkChoiceReader forkchoice.ForkChoiceStorageReader, ethClock eth_clock.EthereumClock) gossip.ConditionFunc {
+func withHeadSlotReady(forkChoiceReader forkchoice.ForkChoiceStorageReader, ethClock eth_clock.EthereumClock) gossip.ConditionFunc {
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return forkChoiceReader.HighestSeen()+8 >= ethClock.GetCurrentSlot()
 	}
 }
 
-// WithBeginVersion returns a condition that checks if the current version is greater than or equal to the begin version
-func WithBeginVersion(beginVersion clparams.StateVersion) gossip.ConditionFunc {
+// withBeginVersion returns a condition that checks if the current version is greater than or equal to the begin version
+func withBeginVersion(beginVersion clparams.StateVersion) gossip.ConditionFunc {
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return curVersion >= beginVersion
 	}
 }
 
-// WithEndVersion returns a condition that checks if the current version is less than the end version
-func WithEndVersion(endVersion clparams.StateVersion) gossip.ConditionFunc {
+// withEndVersion returns a condition that checks if the current version is less than the end version
+func withEndVersion(endVersion clparams.StateVersion) gossip.ConditionFunc {
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return curVersion < endVersion
 	}
 }
 
-// WithGlobalTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
-func WithGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) gossip.ConditionFunc {
+// withGlobalTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
+func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) gossip.ConditionFunc {
 	limiter := newTimeBasedRateLimiter(duration, maxRequests)
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.tryAcquire()
 	}
 }
 
-// WithRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
-func WithRateLimiterByPeer(ratePerSecond float64, burst int) gossip.ConditionFunc {
+// withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
+func withRateLimiterByPeer(ratePerSecond float64, burst int) gossip.ConditionFunc {
 	limiter := newTokenBucketRateLimiter(ratePerSecond, burst)
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.acquire(pid.String())
