@@ -627,12 +627,12 @@ func copyAddressPtr(a *common.Address) *common.Address {
 	return &cpy
 }
 
-// // TransactionToMessage converts a transaction into a Message.
-func TransactionToMessage(tx types.Transaction, s ArbitrumSigner, baseFee *big.Int, runmode types.MessageRunMode) (msg *types.Message, err error) {
+// TransactionToMessage converts a transaction into a Message.
+func TransactionToMessage(tx types.Transaction, s ArbitrumSigner, baseFee *big.Int, runCtx *types.MessageRunContext) (msg *types.Message, err error) {
 	// tx.AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules)
 	msg = &types.Message{
-		TxRunMode: runmode,
-		Tx:        tx,
+		TxRunContext: runCtx,
+		Tx:           tx,
 	}
 	msg.SetNonce(tx.GetNonce())
 	msg.SetGasLimit(tx.GetGasLimit())

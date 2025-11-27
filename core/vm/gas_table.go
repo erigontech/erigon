@@ -287,8 +287,8 @@ func makeGasLog(n uint64) gasFunc {
 			}
 		}
 
-		var memorySizeGas uint64
 		// Data payload bytes → history growth at LogDataGas (gas per byte).
+		var memorySizeGas uint64
 		if memorySizeGas, overflow = math.SafeMul(requestedSize, params.LogDataGas); overflow {
 			return multigas.ZeroGas(), ErrGasUintOverflow
 		}
@@ -364,11 +364,11 @@ func gasCreateEip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 	if overflow {
 		return multigas.ZeroGas(), ErrGasUintOverflow
 	}
-	var ics = uint64(params.MaxCodeSize)
-	if evm.chainRules.IsArbitrum {
-		ics = evm.chainConfig.MaxInitCodeSize()
-	}
-	if size > ics {
+	//var ics = uint64(params.MaxCodeSize)
+	//if evm.chainRules.IsArbitrum {
+	//	ics = evm.chainConfig.MaxInitCodeSize()
+	//}
+	if size > evm.chainConfig.MaxInitCodeSize() {
 		return multigas.ZeroGas(), fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
 	// Since size <= params.MaxInitCodeSize, these multiplication cannot overflow
@@ -391,11 +391,11 @@ func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, 
 	if overflow {
 		return multigas.ZeroGas(), ErrGasUintOverflow
 	}
-	var ics = uint64(params.MaxCodeSize)
-	if evm.chainRules.IsArbitrum {
-		ics = evm.chainConfig.MaxInitCodeSize()
-	}
-	if size > ics {
+	//var ics = uint64(params.MaxCodeSize)
+	//if evm.chainRules.IsArbitrum {
+	//	ics = evm.chainConfig.MaxInitCodeSize()
+	//}
+	if size > evm.chainConfig.MaxInitCodeSize() {
 		return multigas.ZeroGas(), fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
 	// Since size <= params.MaxInitCodeSize, these multiplication cannot overflow
@@ -530,8 +530,7 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 	}
 
 	gas := multiGas.SingleGas()
-	var callGasTemp uint64
-	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
+	callGasTemp, err := callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
 	evm.SetCallGasTemp(callGasTemp)
 
 	if err != nil {

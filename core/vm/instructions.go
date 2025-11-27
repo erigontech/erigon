@@ -1021,8 +1021,8 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	} else {
 		stackValue.SetBytes(addr.Bytes())
 	}
-
 	scope.Stack.push(&stackValue)
+
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
