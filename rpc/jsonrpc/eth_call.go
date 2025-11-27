@@ -317,7 +317,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// binary search.
 	optimisticGasLimit := (result.GasUsed + params.CallStipend) * 64 / 63
 	if optimisticGasLimit < hi {
-		failed, _, err := doCall(ctx, caller, hi, engine)
+		failed, _, err := doCall(ctx, caller, optimisticGasLimit, engine)
 		if err != nil {
 			return 0, err
 		}
@@ -333,7 +333,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if float64(hi-lo)/float64(hi) < estimateGasErrorRatio {
 			break
 		}
-		mid := lo + (hi-lo)/2
+		mid := (lo+hi)/2
 		if mid > lo*2 {
 			// Most txs don't need much higher gas limit than their gas used, and most txs don't
 			// require near the full block limit of gas, so the selection of where to bisect the
