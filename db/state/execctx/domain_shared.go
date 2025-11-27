@@ -347,6 +347,8 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	return logMetrics
 }
 
+var dup, nonDup int
+
 // DomainPut
 // Optimizations:
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
@@ -370,7 +372,15 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-	case kv.RCacheDomain, kv.CommitmentDomain:
+	case kv.CommitmentDomain:
+		if bytes.Equal(prevVal, v) {
+			dup++
+		} else {
+			nonDup++
+		}
+
+		//noop
+	case kv.RCacheDomain:
 		//noop
 	default:
 		if bytes.Equal(prevVal, v) {
