@@ -1025,6 +1025,10 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		defer valsC.Close()
 	}
 
+	if kv.CommitmentDomain.String() == ht.h.FilenameBase {
+		fmt.Printf("Prune history commitment large=%t\n", ht.h.HistoryLargeValues)
+	}
+
 	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
 		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
