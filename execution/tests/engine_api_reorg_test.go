@@ -23,15 +23,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
 )
 
 func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t *testing.T) {
@@ -152,14 +155,91 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 			config.MaxReorgDepth = n
 		},
 	})
+	// getCurrentBlockHash returns the hash of the last canonical block, i.e. what you get from LastHeader table
+	getCurrentBlockHash := func(ctx context.Context) (currentBlockHash common.Hash, err error) {
+		headerResponse, err := eatSync.EthereumBackend.ExecutionModule().CurrentHeader(ctx, &emptypb.Empty{})
+		currentBlockHash = gointerfaces.ConvertH256ToHash(headerResponse.Header.BlockHash)
+		return
+	}
+	// getForkChoiceHeadBlockHash returns the block hash for the last fork choice i.e. what you get from LastForkChoiceHead table
+	getForkChoiceHeadBlockHash := func(ctx context.Context) (headBlockHash common.Hash, err error) {
+		forkChoice, err := eatSync.EthereumBackend.ExecutionModule().GetForkChoice(ctx, &emptypb.Empty{})
+		headBlockHash = gointerfaces.ConvertH256ToHash(forkChoice.HeadBlockHash)
+		return
+	}
+	// getMaxTxNum returns the maximum TxNum associated with the given block number
+	getMaxTxNum := func(ctx context.Context, blockNum uint64) (maxTxNum uint64, err error) {
+		chainDB := eatSync.EthereumBackend.ChainDB()
+		roTx, err := chainDB.BeginRo(ctx)
+		if err != nil {
+			return 0, err
+		}
+		defer roTx.Rollback()
+		maxTxNum, err = rawdbv3.TxNums.Max(roTx, blockNum)
+		return
+	}
 	eatSync.Run(t, func(ctx context.Context, t *testing.T, eatSync EngineApiTester) {
+		// After initialization the chain comprises the genesys block (0) + an empty block (1) => the head is at block 1
+		block1Hash := eatSync.MockCl.State().ParentElBlock
+		headBlockHash, err := getForkChoiceHeadBlockHash(ctx)
+		require.NoError(t, err)
+		require.Equal(t, block1Hash, headBlockHash)
+		currentBlockHash, err := getCurrentBlockHash(ctx)
+		require.NoError(t, err)
+		require.Equal(t, block1Hash, currentBlockHash)
+		maxTxNum, err := getMaxTxNum(ctx, n+1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), maxTxNum)
+
+		// Insert the canonical chain without any ForkChoiceUpdated yet => the head must still be at block 1
 		for _, payload := range canonicalChain {
 			_, err := eatSync.MockCl.InsertNewPayload(ctx, payload)
 			require.NoError(t, err)
 		}
-		err := eatSync.MockCl.UpdateForkChoice(ctx, canonicalChain[len(canonicalChain)-1])
+		headBlockHash, err = getForkChoiceHeadBlockHash(ctx)
 		require.NoError(t, err)
+		require.Equal(t, block1Hash, headBlockHash)
+		maxTxNum, err = getMaxTxNum(ctx, n+1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), maxTxNum)
+
+		// Set fork choice to the last canonical block => the head must be updated accordingly
+		err = eatSync.MockCl.UpdateForkChoice(ctx, canonicalChain[len(canonicalChain)-1])
+		require.NoError(t, err)
+		headBlockHash, err = getForkChoiceHeadBlockHash(ctx)
+		require.NoError(t, err)
+		require.Equal(t, canonicalChain[len(canonicalChain)-1].ExecutionPayload.BlockHash, headBlockHash)
+		currentBlockHash, err = getCurrentBlockHash(ctx)
+		require.NoError(t, err)
+		require.Equal(t, canonicalChain[len(canonicalChain)-1].ExecutionPayload.BlockHash, currentBlockHash)
+		maxTxNum, err = getMaxTxNum(ctx, n+1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(195), maxTxNum)
+
+		// Insert new payload on a side fork => this triggers an unwind which should not be committed, so same head
 		_, err = eatSync.MockCl.InsertNewPayload(ctx, sideChain[len(sideChain)-1])
 		require.NoError(t, err)
+		headBlockHash, err = getForkChoiceHeadBlockHash(ctx)
+		require.NoError(t, err)
+		require.Equal(t, canonicalChain[len(canonicalChain)-1].ExecutionPayload.BlockHash, headBlockHash)
+		currentBlockHash, err = getCurrentBlockHash(ctx)
+		require.NoError(t, err)
+		require.Equal(t, canonicalChain[len(canonicalChain)-1].ExecutionPayload.BlockHash, currentBlockHash)
+		maxTxNum, err = getMaxTxNum(ctx, n+1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(195), maxTxNum)
+
+		// Set fork choice to the last block of the side fork => the head must be updated accordingly
+		err = eatSync.MockCl.UpdateForkChoice(ctx, sideChain[len(sideChain)-1])
+		require.NoError(t, err)
+		headBlockHash, err = getForkChoiceHeadBlockHash(ctx)
+		require.NoError(t, err)
+		require.Equal(t, sideChain[len(sideChain)-1].ExecutionPayload.BlockHash, headBlockHash)
+		currentBlockHash, err = getCurrentBlockHash(ctx)
+		require.NoError(t, err)
+		require.Equal(t, sideChain[len(sideChain)-1].ExecutionPayload.BlockHash, currentBlockHash)
+		maxTxNum, err = getMaxTxNum(ctx, n+1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(195), maxTxNum)
 	})
 }
