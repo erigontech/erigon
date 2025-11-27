@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/p2p"
+	p2p_mock_services "github.com/erigontech/erigon/cl/p2p/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -147,11 +147,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		return nil
 	}).AnyTimes()
 
-	p2p, err := p2p.NewP2Pmanager(ctx, &p2p.P2PConfig{
-		NetworkConfig: &clparams.NetworkConfig{},
-		BeaconConfig:  &bcfg,
-	}, logger, ethClock)
-	require.NoError(t, err)
+	p2p := p2p_mock_services.NewMockP2PManager(ctrl)
 	gossipManager := gossip.NewGossipManager(p2p, &bcfg, &clparams.NetworkConfig{}, ethClock, false, 0, 0, 0, false)
 
 	vp = validator_params.NewValidatorParams()
