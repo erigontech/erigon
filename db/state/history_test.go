@@ -376,6 +376,40 @@ func TestHistoryAfterPrune(t *testing.T) {
 	})
 }
 
+func TestHistoryInconsistentPrune(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	db, h, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, 32, true)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+
+	var keys, vals []string
+	it, err := hc.HistoryRange(14, 31, order.Asc, -1, roTx)
+	require.NoError(t, err)
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		keys = append(keys, fmt.Sprintf("%x", k))
+		vals = append(vals, fmt.Sprintf("%x", v))
+	}
+
+	require.Equal(t, "010000000000000e", keys[13])
+	require.Equal(t, "", vals[13])
+
+	// fmt.Println(keys)
+	// fmt.Println(vals)
+}
+
 func TestHistoryCanPrune(t *testing.T) {
 	t.Parallel()
 
