@@ -292,7 +292,7 @@ var Schema = SchemaGen{
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
-			HistoryLargeValues: true,
+			HistoryLargeValues: false,
 			HistoryIdx:         kv.ReceiptHistoryIdx,
 
 			IiCfg: InvIdxCfg{
