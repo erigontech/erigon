@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon/common"
 )
 
 type statusFlag uint

@@ -352,10 +352,10 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	var (
 		hash      = header.Hash()
 		number    = header.Number.Uint64()
-		encoded   = hexutil.EncodeTs(number)
 		headerKey = dbutils.HeaderKey(number, hash)
 	)
-	if err := db.Put(kv.HeaderNumber, hash[:], encoded); err != nil {
+
+	if err := WriteHeaderNumber(db, hash, number); err != nil {
 		return fmt.Errorf("HeaderNumber mapping: %w", err)
 	}
 
@@ -376,7 +376,7 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, header
 	if skipIndexing {
 		return nil
 	}
-	if err := db.Put(kv.HeaderNumber, hash[:], hexutil.EncodeTs(number)); err != nil {
+	if err := WriteHeaderNumber(db, hash, number); err != nil {
 		return err
 	}
 	return nil

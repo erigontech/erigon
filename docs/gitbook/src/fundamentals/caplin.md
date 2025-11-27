@@ -24,4 +24,4 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 
 * `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
 
-Caplin can also be used for [block production](staking/caplin.md), aka **staking**.
+Caplin can also be used for [block production](../staking/caplin.md), aka **staking**.

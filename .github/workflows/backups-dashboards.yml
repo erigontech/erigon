@@ -58,7 +58,7 @@ jobs:
       DASHBOARDS_GIT_CONFIG: ${{ secrets.DASHBOARDS_GIT_CONFIG }}
     steps:
     - name: Clone erigon from ${{ env.ERIGON_BRANCH }} branch
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         ref: ${{ env.ERIGON_BRANCH }}
         fetch-depth: 1

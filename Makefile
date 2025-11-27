@@ -13,6 +13,12 @@ GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=*.*.*' --abbrev=7 --dirty)
+
+# Use git tag value for "release/" branches only. Otherwise it make no sense.
+ifeq (,$(findstring release/,$(GIT_BRANCH)))
+  GIT_TAG	:= .
+endif
+
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
