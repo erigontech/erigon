@@ -241,11 +241,13 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 		if !exist {
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
-				return nil, gas, multigas.ZeroGas(), nil
+				return nil, gas, usedMultiGas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		evm.Context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout)
+		if err = evm.Context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout); err != nil {
+			return nil, gas, multigas.ComputationGas(gas), err
+		}
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -286,15 +288,15 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.JumpDestCache)
 		}
 		contract.IsSystemCall = isSystemCall(caller.Address())
-
 		contract.SetCallCode(&addrCopy, codeHash, code)
+
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
 		}
 		ret, err = evm.interpreter.Run(contract, input, readOnly)
 		fmt.Printf("block %d CALLER %s TO %s gas spending %d multigas %s\n",
-			evm.Context.BlockNumber, contract.Caller().String(), contract.self.String(), contract.Gas, contract.GetTotalUsedMultiGas().String())
+			evm.Context.BlockNumber, contract.Caller().String(), contract.self.String(), gas-contract.Gas, contract.GetTotalUsedMultiGas().String())
 		gas = contract.Gas
 
 		usedMultiGas.SaturatingAddInto(contract.GetTotalUsedMultiGas())
