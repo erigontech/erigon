@@ -123,6 +123,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 		defer tx.Rollback()
+		log.Warn("Starting Headers stage with internal tx")
 	}
 	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
@@ -199,6 +200,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		//defer cfg.bodyDownload.ClearBodyCache()
 		cfg.hd.SetSynced()
+		log.Warn("finalising Headers stage")
 		return nil
 	}
 
@@ -212,7 +214,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return fmt.Errorf("commit failed: %w", err)
 		}
 		tx = nil
+		log.Warn("committing Headers stage with internal tx")
 	}
+	log.Info("[Arbitrum] Headers stage completed", "latestProcessedBlock", lastCommittedBlockNum, "tx", tx)
 
 	ethdb.InitialiazeLocalWasmTarget()
 
