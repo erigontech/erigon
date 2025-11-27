@@ -85,20 +85,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader bloc
 
 	if db != nil {
 		err = db.View(ctx, func(tx kv.Tx) error {
-			if false {
-				lastEventId, err := NewSnapshotStore(NewTxStore(tx), snapshots, nil).LastEventId(ctx)
-				if err != nil {
-					return err
-				}
-
-				bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
-				if err != nil {
-					return err
-				}
-
-				log.Info("[integrity] LAST Event", "event", lastEventId, "body-progress", bodyProgress)
-			}
-
+		
 			return nil
 		})
 
