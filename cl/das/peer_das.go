@@ -56,7 +56,7 @@ type peerdas struct {
 	blobStorage       blob_storage.BlobStorage
 	sentinel          sentinelproto.SentinelClient
 	ethClock          eth_clock.EthereumClock
-	gossipManager     *gossipmgr.GossipManager
+	gossipManager     gossipmgr.Gossip
 	recoverBlobsQueue chan recoverBlobsRequest
 
 	recoveringMutex   sync.Mutex
@@ -75,7 +75,7 @@ func NewPeerDas(
 	nodeID enode.ID,
 	ethClock eth_clock.EthereumClock,
 	peerDasState *peerdasstate.PeerDasState,
-	gossipManager *gossipmgr.GossipManager,
+	gossipManager gossipmgr.Gossip,
 ) PeerDas {
 	kzg.InitKZGCtx()
 	p := &peerdas{
