@@ -25,6 +25,29 @@ const (
 	NumResourceKind
 )
 
+func (rk ResourceKind) String() string {
+	switch rk {
+	case ResourceKindUnknown:
+		return "Unknown"
+	case ResourceKindComputation:
+		return "Computation"
+	case ResourceKindHistoryGrowth:
+		return "HistoryGrowth"
+	case ResourceKindStorageAccess:
+		return "StorageAccess"
+	case ResourceKindStorageGrowth:
+		return "StorageGrowth"
+	case ResourceKindL1Calldata:
+		return "L1Calldata"
+	case ResourceKindL2Calldata:
+		return "L2Calldata"
+	case ResourceKindWasmComputation:
+		return "WasmComputation"
+	default:
+		return fmt.Sprintf("ResourceKind(%d)", uint8(rk))
+	}
+}
+
 func CheckResourceKind(id uint8) (ResourceKind, error) {
 	if id <= uint8(ResourceKindUnknown) || id >= uint8(NumResourceKind) {
 		return ResourceKindUnknown, fmt.Errorf("invalid resource id: %v", id)
@@ -532,4 +555,15 @@ func toWordSize(size uint64) uint64 {
 		return math.MaxUint64/32 + 1
 	}
 	return (size + 31) / 32
+}
+
+func (z MultiGas) String() string {
+	s := "MultiGas{"
+	for i := 0; i < int(NumResourceKind); i++ {
+		s += fmt.Sprintf("\t %s: %d,\n", ResourceKind(i).String(), z.gas[ResourceKind(i)])
+	}
+	s += fmt.Sprintf("\t Total: %d,\n", z.total)
+	s += fmt.Sprintf("\t Refund: %d\n", z.refund)
+	s += "}"
+	return s
 }
