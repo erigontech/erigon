@@ -7,6 +7,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 )
 
+//go:generate mockgen -destination=./mock_services/p2p_manager_mock.go -package=mock_services . P2PManager
 type P2PManager interface {
 	Pubsub() *pubsub.PubSub
 	Host() host.Host
