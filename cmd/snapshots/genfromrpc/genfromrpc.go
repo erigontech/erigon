@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"math/big"
 	"strings"
 	"sync/atomic"
@@ -817,10 +818,15 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 	var latest *types.Block
 	var blockNum uint64
+	var firstBlockNum uint64
 	for _, blk := range blocks {
 		blockNum = blk.NumberU64()
+		if firstBlockNum == 0 {
+			firstBlockNum = blockNum
+		}
 
-		if err := rawdb.WriteBlock(tx, blk); err != nil {
+		//if err := rawdb.WriteBlock(tx, blk); err != nil {
+		if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
 			return fmt.Errorf("error writing block %d: %w", blockNum, err)
 		}
 		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
@@ -829,22 +835,36 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, blk.Hash(), blockNum, blk.RawBody()); err != nil {
 			return fmt.Errorf("cannot write body: %s", err)
 		}
-		if err := rawdb.WriteTd(tx, blk.Hash(), blockNum, blk.Difficulty()); err != nil {
+
+		parentTd, err := rawdb.ReadTd(tx, blk.Header().ParentHash, blockNum-1)
+		if err != nil || parentTd == nil {
+			return fmt.Errorf("failed to read parent total difficulty for block %d: %w", blockNum, err)
+		}
+		td := new(big.Int).Add(parentTd, blk.Difficulty())
+		if err := rawdb.WriteTd(tx, blk.Hash(), blockNum, td); err != nil {
 			return fmt.Errorf("failed to write total difficulty %d: %w", blockNum, err)
+		}
+
+		rawdb.WriteHeadBlockHash(tx, latest.Hash())
+		if err := rawdb.WriteHeadHeaderHash(tx, latest.Hash()); err != nil {
+			return err
 		}
 		latest = blk
 	}
 
 	if latest != nil {
-		rawdb.WriteHeadBlockHash(tx, latest.Hash())
-		if err := rawdb.WriteHeadHeaderHash(tx, latest.Hash()); err != nil {
+
+		if err := rawdbv3.TxNums.Truncate(tx, firstBlockNum); err != nil {
+			return err
+		}
+		if err := rawdb.AppendCanonicalTxNums(tx, firstBlockNum); err != nil {
 			return err
 		}
 
 		syncStages := []stages.SyncStage{
-			//stages.Headers, // updated by  cfg.bodyDownload.UpdateFromDb(tx);
-			//stages.Bodies,
-			//stages.BlockHashes,
+			stages.Headers, // updated by  cfg.bodyDownload.UpdateFromDb(tx);
+			stages.Bodies,
+			stages.BlockHashes,
 			stages.Senders,
 		}
 		for _, stage := range syncStages {

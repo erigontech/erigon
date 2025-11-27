@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"runtime"
 	"time"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/arb/ethdb"
 	snapshots "github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/state"
@@ -184,17 +182,17 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		if err != nil {
 			return fmt.Errorf("error reading header progress from db: %w", err)
 		}
-
-		if err = cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), firstBlock, lastCommittedBlockNum+1, ctx, logger); err != nil {
-			return err
-		}
-
-		if err := rawdbv3.TxNums.Truncate(tx, firstBlock); err != nil {
-			return err
-		}
-		if err := cfg.blockWriter.MakeBodiesCanonical(tx, firstBlock); err != nil {
-			return fmt.Errorf("failed to make bodies canonical %d: %w", firstBlock, err)
-		}
+		//
+		//if err = cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), firstBlock, lastCommittedBlockNum+1, ctx, logger); err != nil {
+		//	return err
+		//}
+		//
+		//if err := rawdbv3.TxNums.Truncate(tx, firstBlock); err != nil {
+		//	return err
+		//}
+		//if err := cfg.blockWriter.MakeBodiesCanonical(tx, firstBlock); err != nil {
+		//	return fmt.Errorf("failed to make bodies canonical %d: %w", firstBlock, err)
+		//}
 		// This will update bd.maxProgress
 		if err = cfg.bodyDownload.UpdateFromDb(tx); err != nil {
 			return err
