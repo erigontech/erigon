@@ -295,6 +295,29 @@ var snapshotCommand = cli.Command{
 			),
 		},
 		{
+			Name: "rollback-snapshots-to-block",
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("rollback snapshots to block: could not setup logger: %w", err))
+				}
+				block := cliCtx.Uint64("block")
+				prompt := cliCtx.Bool("prompt")
+				dataDir := cliCtx.String(utils.DataDirFlag.Name)
+				err = doRollbackSnapshotsToBlock(cliCtx.Context, block, prompt, dataDir, logger)
+				if err != nil {
+					logger.Error(err.Error())
+					return err
+				}
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Required: true},
+				&cli.BoolFlag{Name: "prompt", Value: true},
+			}),
+		},
+		{
 			Name:   "diff",
 			Action: doDiff,
 			Flags: joinFlags([]cli.Flag{
@@ -776,6 +799,87 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	dryRun := cliCtx.Bool("dry-run")
 	promptUser := true // CLI should always prompt the user
 	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
+}
+
+func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt bool, dataDir string, logger log.Logger) error {
+	dirs, l, err := datadir.New(dataDir).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err := l.Unlock()
+		if err != nil {
+			logger.Error("failed to unlock datadir", "err", err)
+		}
+	}()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	_, _, _, br, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	reader, _ := br.IO()
+	txNumReader := reader.TxnumReader(ctx)
+	toTxNum, err := txNumReader.Min(tx, blockNum)
+	if err != nil {
+		return err
+	}
+	toStep := toTxNum / agg.StepSize()
+	var toDelete []string
+	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
+		filePaths, err := dir2.ListFiles(dirPath)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		for _, filePath := range filePaths {
+			parsed, isState, ok := snaptype.ParseFileName("", filePath)
+			if !ok {
+				continue
+			}
+			if (isState && parsed.To > toStep) || (!isState && parsed.To > blockNum) {
+				logger.Info("adding for deletion", "file", parsed.Path)
+				toDelete = append(toDelete, parsed.Path)
+			}
+		}
+	}
+	logger.Info("about to delete chaindata and mentioned snapshot files", "toBlock", blockNum, "toTxNum", toTxNum, "toStep", toStep)
+	if prompt {
+		scanner := bufio.NewScanner(os.Stdin)
+		fmt.Print("confirm above? (y/n): ")
+		scanner.Scan()
+		response := strings.ToLower(strings.TrimSpace(scanner.Text()))
+		if response != "y" {
+			logger.Info("rollback aborted")
+			return nil
+		}
+	}
+	err = os.RemoveAll(dirs.Chaindata)
+	if err != nil {
+		return err
+	}
+	for _, filePath := range toDelete {
+		err = os.Remove(filePath)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
