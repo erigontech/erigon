@@ -539,11 +539,13 @@ make docker-compose
 
 _All available options_
 
-The `--help` flag listing is reproduced below for your convenience.
+In order to see all the available options (flags) you must run the command:
 
 ```bash
 ./build/bin/erigon --help
 ```
+
+The flag listing is reproduced below for your convenience:
 
 {% code overflow="wrap" fullWidth="true" %}
 ```bash
