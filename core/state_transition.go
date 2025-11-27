@@ -718,6 +718,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			tracer.CaptureArbitrumTransfer(nil, &tipReceipient, tracingTipAmount, false, "tip")
 		}
 	}
+	fmt.Printf("tx %x used gas: %d\n", st.evm.TxContext.TxHash, st.gasUsed())
 
 	st.evm.ProcessingHook.EndTxHook(st.gasRemaining, vmerr == nil)
 
