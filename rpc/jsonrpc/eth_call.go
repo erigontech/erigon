@@ -232,7 +232,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 		posterCost, _ := state.L1PricingState().PosterDataCost(msg, l1pricing.BatchPosterAddress, brotliCompressionLevel)
 		// Use estimate mode because this is used to raise the gas cap, so we don't want to underestimate.
-		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.MessageGasEstimationMode, posterCost)
+		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.NewMessageGasEstimationContext(), posterCost)
 		api.GasCap += postingGas
 	}
 
