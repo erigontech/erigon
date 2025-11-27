@@ -378,6 +378,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		} else {
 			nonDup++
 		}
+		if nonDup%1_000 == 0 {
+			log.Warn("[dbg] CommitmentDomain DomainPut dup/nondup", "dup", dup, "nondup", nonDup)
+		}
 
 		//noop
 	case kv.RCacheDomain:
