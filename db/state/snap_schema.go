@@ -72,6 +72,8 @@ type E2SnapSchema struct {
 	existenceFileMetadata *_fileMetadata
 }
 
+var E2_FILE_TEMPLATE = "%s-%06d-%06d-%s%s"
+
 type E2SnapSchemaVersion struct {
 	DataFileVersion version.Versions
 	AccessorVersion version.Versions
@@ -180,7 +182,7 @@ func (s *E2SnapSchema) DataFile(filev statecfg.Version, from, to RootNum) (strin
 		filev = s.currentVersion.DataFileVersion.Current
 	}
 	if !filev.IsSearch() {
-		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", filev, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg))), nil
+		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf(E2_FILE_TEMPLATE, filev, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg))), nil
 	}
 
 	pattern := s.fileFormat("*", from, to)
@@ -192,7 +194,7 @@ func (s *E2SnapSchema) AccessorIdxFile(filev statecfg.Version, from, to RootNum,
 		filev = s.currentVersion.AccessorVersion.Current
 	}
 	if !filev.IsSearch() {
-		return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", filev, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx))), nil
+		return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf(E2_FILE_TEMPLATE, filev, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx))), nil
 	}
 
 	// search for index file in directory
@@ -201,12 +203,12 @@ func (s *E2SnapSchema) AccessorIdxFile(filev statecfg.Version, from, to RootNum,
 }
 
 func (s *E2SnapSchema) fileFormat(version string, from, to RootNum) string {
-	basefile := fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg))
+	basefile := fmt.Sprintf(E2_FILE_TEMPLATE, version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg))
 	return filepath.Join(s.dataFileMetadata.folder, basefile)
 }
 
 func (s *E2SnapSchema) idxFileFormat(version string, from, to RootNum, idxPos uint16) string {
-	basefile := fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx))
+	basefile := fmt.Sprintf(E2_FILE_TEMPLATE, version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx))
 	return filepath.Join(s.indexFileMetadata.folder, basefile)
 }
 
