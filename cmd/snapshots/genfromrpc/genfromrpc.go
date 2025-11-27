@@ -845,11 +845,11 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 			return fmt.Errorf("failed to write total difficulty %d: %w", blockNum, err)
 		}
 
+		latest = blk
 		rawdb.WriteHeadBlockHash(tx, latest.Hash())
 		if err := rawdb.WriteHeadHeaderHash(tx, latest.Hash()); err != nil {
 			return err
 		}
-		latest = blk
 	}
 
 	if latest != nil {
