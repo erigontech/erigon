@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 	"unsafe"
 
@@ -445,10 +444,10 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
 		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip = math.MaxInt
-			pruneTimeout = time.Hour
-		}
+		//if s.CurrentSyncCycle.IsInitialCycle {
+		//	pruneDiffsLimitOnChainTip = math.MaxInt
+		//	pruneTimeout = time.Hour
+		//}
 		pruneChangeSetsStartTime := time.Now()
 		if err := rawdb.PruneTable(
 			tx,
@@ -476,23 +475,23 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
 	pruneTimeout := quickPruneTimeout
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 12 * time.Hour
-
-		// allow greedy prune on non-chain-tip
-		greedyPruneCommitmentHistoryStartTime := time.Now()
-		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-			return err
-		}
-		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				"externalTx", useExternalTx,
-			)
-		}
-	}
+	//if s.CurrentSyncCycle.IsInitialCycle {
+	//	pruneTimeout = 12 * time.Hour
+	//
+	//	// allow greedy prune on non-chain-tip
+	//	greedyPruneCommitmentHistoryStartTime := time.Now()
+	//	if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+	//		return err
+	//	}
+	//	if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
+	//		logger.Debug(
+	//			fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
+	//			"duration", duration,
+	//			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+	//			"externalTx", useExternalTx,
+	//		)
+	//	}
+	//}
 
 	pruneSmallBatchesStartTime := time.Now()
 	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {

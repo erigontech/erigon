@@ -153,7 +153,7 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
 
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n\n", rawdbhelpers.IdxStepsCountV3(tx, integStepSize), _lb, _lt)
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, commitment hist steps: %.02f, TxNums_Index(%d,%d)\n\n", rawdbhelpers.IdxStepsCountV3(tx, integStepSize), rawdbhelpers.CommitmentIdxStepsCountV3(tx, integStepSize), _lb, _lt)
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err

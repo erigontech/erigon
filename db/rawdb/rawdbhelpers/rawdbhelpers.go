@@ -33,3 +33,15 @@ func IdxStepsCountV3(tx kv.Tx, stepSize uint64) float64 {
 	}
 	return 0
 }
+
+func CommitmentIdxStepsCountV3(tx kv.Tx, stepSize uint64) float64 {
+	fst, _ := kv.FirstKey(tx, kv.TblCommitmentHistoryKeys)
+	lst, _ := kv.LastKey(tx, kv.TblCommitmentHistoryKeys)
+	if len(fst) > 0 && len(lst) > 0 {
+		fstTxNum := binary.BigEndian.Uint64(fst)
+		lstTxNum := binary.BigEndian.Uint64(lst)
+
+		return float64(lstTxNum-fstTxNum) / float64(stepSize)
+	}
+	return 0
+}
