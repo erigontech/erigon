@@ -111,8 +111,8 @@ func CheckFilesForSchema(schema state.SnapNameSchema, checkLastFileTo int64) (la
 		}
 
 		if accessors.Has(statecfg.AccessorHashMap) {
-			for idxPos := uint8(0); idxPos < uint8(schema.AccessorIdxCount()); idxPos++ {
-				_, err := schema.AccessorIdxFile(version.StrictSearchVersion, from, to, 0)
+			for idxPos := uint16(0); idxPos < schema.AccessorIdxCount(); idxPos++ {
+				_, err := schema.AccessorIdxFile(version.StrictSearchVersion, from, to, idxPos)
 				if err != nil {
 					return 0, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %v", schema.DataTag(), dataFile.Name, idxPos, err)
 				}
