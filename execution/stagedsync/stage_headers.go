@@ -200,7 +200,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		//defer cfg.bodyDownload.ClearBodyCache()
 		cfg.hd.SetSynced()
-		log.Warn("finalising Headers stage")
 		return nil
 	}
 

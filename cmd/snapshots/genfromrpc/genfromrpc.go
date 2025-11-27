@@ -853,7 +853,6 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 	}
 
 	if latest != nil {
-
 		if err := rawdbv3.TxNums.Truncate(tx, firstBlockNum); err != nil {
 			return err
 		}
