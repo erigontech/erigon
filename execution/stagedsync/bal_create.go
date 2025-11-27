@@ -71,6 +71,10 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 			return
 		}
 		account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
+	case state.BalancePath:
+		if val, ok := toUint256(vr.Val); ok {
+			account.setBalanceValue(val)
+		}
 	default:
 		// Only track storage reads for BAL. Balance/nonce/code changes are tracked via writes, others are ignored
 	}
@@ -120,11 +124,24 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 	case state.StoragePath:
 		addStorageUpdate(account.changes, vw, accessIndex)
 	case state.BalancePath:
-		if val, ok := vw.Val.(uint256.Int); ok {
-			account.balance.recordWrite(accessIndex, val, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
-				return a.Eq(&b)
-			})
+		val, ok := toUint256(vw.Val)
+		if !ok {
+			return
 		}
+		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
+		if account.balanceValue == nil && val.IsZero() {
+			account.setBalanceValue(val)
+			return
+		}
+		// Skip no-op writes.
+		if account.balanceValue != nil && val.Eq(account.balanceValue) {
+			account.setBalanceValue(val)
+			return
+		}
+		account.setBalanceValue(val)
+		account.balance.recordWrite(accessIndex, val, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
+			return a.Eq(&b)
+		})
 	case state.NoncePath:
 		if val, ok := vw.Val.(uint64); ok {
 			account.nonce.recordWrite(accessIndex, val, func(v uint64) uint64 { return v }, func(a, b uint64) bool {
@@ -191,10 +208,11 @@ func blockAccessIndex(txIndex int) uint16 {
 }
 
 type accountState struct {
-	changes *types.AccountChanges
-	balance *fieldTracker[uint256.Int]
-	nonce   *fieldTracker[uint64]
-	code    *fieldTracker[[]byte]
+	changes      *types.AccountChanges
+	balance      *fieldTracker[uint256.Int]
+	nonce        *fieldTracker[uint64]
+	code         *fieldTracker[[]byte]
+	balanceValue *uint256.Int // tracks latest seen balance
 }
 
 // check pre- and post-values, add to BAL if different
@@ -365,6 +383,13 @@ func cloneBytes(input []byte) []byte {
 	out := make([]byte, len(input))
 	copy(out, input)
 	return out
+}
+
+func (a *accountState) setBalanceValue(v uint256.Int) {
+	if a.balanceValue == nil {
+		a.balanceValue = &uint256.Int{}
+	}
+	*a.balanceValue = v
 }
 
 // writeBALToFile writes the Block Access List to a text file for debugging/analysis

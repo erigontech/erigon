@@ -1031,11 +1031,9 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 			}
 		}
 
-		if !result.ExecutionResult.FeeTipped.IsZero() {
-			if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-				log.Info("coinbase add err", "err", err)
-				return nil, nil, nil, err
-			}
+		if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+			log.Info("coinbase add err", "err", err)
+			return nil, nil, nil, err
 		}
 
 		if engine != nil {
