@@ -637,15 +637,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// state divergence.
 	usedMultiGas, vmerr = st.handleRevertedTx(msg.(*types.Message), usedMultiGas)
 
+	b := st.gasRemaining
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
 		ret, *deployedContract, st.gasRemaining, multiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		fmt.Printf("deployed contract: %x cost %d\n", deployedContract, b-st.gasRemaining)
 		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	} else {
 		ret, st.gasRemaining, multiGas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		fmt.Printf("call contract: %x cost %d\n", st.to(), b-st.gasRemaining)
 		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	}
 
