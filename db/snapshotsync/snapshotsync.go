@@ -382,11 +382,19 @@ func SyncSnapshots(
 				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
 			}
 			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
-			if _, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader}); err != nil {
+			_, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader})
+			if err != nil {
 				return err
 			}
-			if err = blockReader.Snapshots().Delete(toDeleteSeg...); err != nil {
+			err = blockReader.Snapshots().Delete(toDeleteSeg...)
+			if err != nil {
 				return err
+			}
+			// re-open headers and bodies with alignMin=false after deletes,
+			// otherwise no headers/bodies will be visible since transactions are not downloaded yet
+			err = blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, true, false)
+			if err != nil {
+				return fmt.Errorf("error opening segments after to block filter deletion: %w", err)
 			}
 		}
 
@@ -476,6 +484,7 @@ func SyncSnapshots(
 			}
 
 			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
+				log.Debug("filtering to block", "name", p.Name, "toBlock", toBlock, "toStep", toStep)
 				continue
 			}
 
