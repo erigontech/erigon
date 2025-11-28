@@ -403,11 +403,28 @@ func TestHistoryInconsistentPrune(t *testing.T) {
 		vals = append(vals, fmt.Sprintf("%x", v))
 	}
 
-	require.Equal(t, "010000000000000e", keys[13])
-	require.Equal(t, "", vals[13])
+	db2, h2, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db2, h2, 32, false)
 
-	// fmt.Println(keys)
-	// fmt.Println(vals)
+	roTx2, err := db2.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx2.Rollback()
+	hc2 := h2.BeginFilesRo()
+	defer hc2.Close()
+
+	var keys2, vals2 []string
+	it2, err := hc2.HistoryRange(14, 31, order.Asc, -1, roTx2)
+	require.NoError(t, err)
+
+	for it2.HasNext() {
+		k, v, err := it2.Next()
+		require.NoError(t, err)
+		keys2 = append(keys2, fmt.Sprintf("%x", k))
+		vals2 = append(vals2, fmt.Sprintf("%x", v))
+	}
+
+	require.Equal(t, keys, keys2)
+	require.Equal(t, vals, vals2)
 }
 
 func TestHistoryCanPrune(t *testing.T) {
