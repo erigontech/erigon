@@ -236,7 +236,6 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println("HAVE/WANT", st.msg.From(), &balance, &balanceCheck)
 		if have, want := balance, balanceCheck; have.Cmp(&want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From(), &have, &want)
 		}
@@ -690,12 +689,12 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			}
 
 			// 7. set authority code
-			if auth.Address.IsZero() {
+			if auth.Address == (common.Address{}) {
 				if err := st.state.SetCode(authority, nil); err != nil {
 					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}
 			} else {
-				if err := st.state.SetCode(authority, types.AddressToDelegation(auth.Address)); err != nil {
+				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address))); err != nil {
 					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}
 			}

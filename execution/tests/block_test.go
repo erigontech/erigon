@@ -22,7 +22,6 @@ package executiontests
 import (
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -62,7 +61,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	//t.Parallel()
+	t.Parallel()
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
@@ -87,17 +86,17 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	// Tested in the state test format by TestState
 	bt.skipLoad(`^static/state_tests/`)
 
-	one := false
+	//one := false
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
-		if !strings.Contains(name, "eip7702_set_code_tx/test_invalid_transaction_after_authorization.json") {
-			return
-		}
-		if one {
-			return
-		}
-		one = true
+		//if !strings.Contains(name, "eip7702_set_code_tx/test_invalid_transaction_after_authorization.json") {
+		//	return
+		//}
+		//if one {
+		//	return
+		//}
+		//one = true
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)

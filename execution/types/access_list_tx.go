@@ -441,7 +441,6 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 
 	var err error
 	msg.from, err = tx.Sender(s)
-	fmt.Println("FROM 5", msg.from)
 	return &msg, err
 }
 

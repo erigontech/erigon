@@ -788,7 +788,7 @@ func convertProtoAuthorizations(auths []*typesproto.Authorization) []Authorizati
 		chainID.SetUint64(auth.ChainId)
 		goAuths[i] = Authorization{
 			ChainID: chainID,
-			Address: accounts.InternAddress(common.BytesToAddress(auth.Address)),
+			Address: common.BytesToAddress(auth.Address),
 			Nonce:   auth.Nonce,
 			YParity: uint8(auth.YParity),
 			R:       r,

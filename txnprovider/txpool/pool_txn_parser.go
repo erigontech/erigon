@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
@@ -534,7 +533,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err) //nolint
 			}
-			auth.Address = accounts.InternAddress(common.BytesToAddress(payload[p2 : p2+length.Addr]))
+			auth.Address = common.BytesToAddress(payload[p2 : p2+length.Addr])
 			p2 += length.Addr
 			p2, auth.Nonce, err = rlp.ParseU64(payload, p2) // nonce
 			if err != nil {

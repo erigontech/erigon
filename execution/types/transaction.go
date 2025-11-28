@@ -32,7 +32,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	libcrypto "github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
@@ -104,7 +103,7 @@ type Transaction interface {
 // implementations of different transaction types
 type TransactionMisc struct {
 	// caches
-	hash  atomic.Pointer[common.Hash]
+	hash atomic.Pointer[common.Hash]
 	from accounts.Address
 }
 
@@ -402,7 +401,6 @@ func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
-	fmt.Println("MSG", from, dbg.Stack())
 	m := Message{
 		from:             from,
 		to:               to,

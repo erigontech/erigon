@@ -26,7 +26,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -160,7 +159,6 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	if msg.from, err = tx.Sender(s); err != nil {
 		return nil, err
 	}
-	fmt.Println("FROM 2", msg.from, dbg.Stack())
 	return &msg, nil
 }
 

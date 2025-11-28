@@ -199,7 +199,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
 			ChainID: *tr.RandUint256(),
-			Address: accounts.InternAddress(tr.RandAddress()),
+			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
 			R:       *tr.RandUint256(),

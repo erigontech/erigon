@@ -372,7 +372,6 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 	if msg.from, err = tx.Sender(s); err != nil {
 		return nil, err
 	}
-	fmt.Println("FROM 3", msg.from)
 	return &msg, nil
 }
 

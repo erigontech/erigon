@@ -373,7 +373,6 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 
 	var err error
 	msg.from, err = tx.Sender(s)
-	fmt.Println("FROM 1", msg.from)
 	return &msg, err
 }
 

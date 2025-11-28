@@ -320,7 +320,6 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 	default:
 		return accounts.NilAddress, ErrTxTypeNotSupported
 	}
-	fmt.Println("VRS", &V, R, S)
 	return recoverPlain(context, txn.SigningHash(signChainID), R, S, &V, !sg.malleable)
 }
 
