@@ -791,6 +791,7 @@ func stSstore(_ uint64, scope *ScopeContext) string {
 }
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	fmt.Printf("the stack before jump pop: %s\n", scope.Stack.String())
 	pos := scope.Stack.pop()
 	if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
 		if usedBitmap {

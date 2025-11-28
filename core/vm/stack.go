@@ -20,7 +20,6 @@
 package vm
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -140,5 +139,9 @@ func ReturnNormalStack(s *Stack) {
 }
 
 func (st *Stack) String() string {
-	return fmt.Sprintf("%v", st.data)
+	var s string
+	for _, di := range st.data {
+		s += di.Hex() + ", "
+	}
+	return s
 }
