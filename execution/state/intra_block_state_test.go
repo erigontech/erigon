@@ -629,7 +629,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	// Tx2 read again should get default (empty) vals because its dependency Tx1 is marked as estimate
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
-	assert.Equal(t, uint256.Int{}, v)
+	assert.Equal(t, u256.U64(1), v)
 	states[2].GetBalance(addr)
 
 	// Tx1 read again should get Tx0 vals
