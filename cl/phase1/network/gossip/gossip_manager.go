@@ -168,7 +168,7 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 	}
 	// register all topics and subscribe
 	for _, name := range service.Names() {
-		topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+		topic := composeTopic(forkDigest, name)
 		if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
 			return err
 		}
@@ -214,7 +214,7 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 	if err != nil {
 		return err
 	}
-	topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+	topic := composeTopic(forkDigest, name)
 	if err := g.subscriptions.SubscribeWithExpiry(topic, expiry); err != nil {
 		return err
 	}
@@ -228,7 +228,7 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if err != nil {
 		return err
 	}
-	topic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
+	topic := composeTopic(forkDigest, name)
 	topicHandle := g.subscriptions.Get(topic)
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
@@ -291,7 +291,7 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
 		}
 		prevTopicHandle := g.subscriptions.Get(oldTopic)
 		// register and subscribe new newTopic
-		newTopic := fmt.Sprintf("/eth2/%x/%s/%s", digest, name, gossip.SSZSnappyCodec)
+		newTopic := composeTopic(digest, name)
 		if newTopic == oldTopic {
 			continue
 		}
@@ -403,4 +403,8 @@ func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficP
 			}
 		}
 	}
+}
+
+func composeTopic(forkDigest common.Bytes4, name string) string {
+	return fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
 }
