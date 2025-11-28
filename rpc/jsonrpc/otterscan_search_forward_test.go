@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -199,14 +200,14 @@ func TestSearchTransactionsAfter(t *testing.T) {
 		require.Equal(0, int(results.Txs[0].Nonce))
 		require.Equal(5, int(results.Receipts[0]["blockNumber"].(hexutil.Uint64)))
 		require.Equal(common.HexToHash("0x469bd6281c0a1b1c2225b692752b627e3b935e988d8878925cb7e26e40e3ca14"), results.Receipts[0]["transactionHash"].(common.Hash))
-		require.Equal(common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"), results.Receipts[0]["from"].(common.Address))
+		require.Equal(common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"), results.Receipts[0]["from"].(accounts.Address).Value())
 		require.Equal(addr, *results.Receipts[0]["to"].(*common.Address))
 
 		require.Equal(4, int(results.Txs[1].BlockNumber.ToInt().Uint64()))
 		require.Equal(0, int(results.Txs[1].Nonce))
 		require.Equal(4, int(results.Receipts[1]["blockNumber"].(hexutil.Uint64)))
 		require.Equal(common.HexToHash("0x79491e16fd1b1ceea44c46af850b2ef121683055cd579fd4d877beba22e77c1c"), results.Receipts[1]["transactionHash"].(common.Hash))
-		require.Equal(common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), results.Receipts[1]["from"].(common.Address))
+		require.Equal(common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), results.Receipts[1]["from"].(accounts.Address).Value())
 		require.Equal(addr, *results.Receipts[1]["to"].(*common.Address))
 	})
 }
