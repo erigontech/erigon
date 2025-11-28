@@ -565,6 +565,6 @@ func (z MultiGas) String() string {
 			s += "\n\t"
 		}
 	}
-	s += fmt.Sprintf("\nTotal: %d, Refund: %d", z.total, z.refund)
+	s += fmt.Sprintf("Total: %d, Refund: %d", z.total, z.refund)
 	return s
 }
