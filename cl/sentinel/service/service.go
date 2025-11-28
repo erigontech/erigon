@@ -22,10 +22,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
@@ -81,34 +79,6 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.Gos
 
 func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
 	panic("do not call this")
-}
-
-func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelproto.SubscriptionData) bool {
-	if data.Filter != nil {
-		filter := data.GetFilter()
-		matched, err := path.Match(obj.t, filter)
-		if err != nil || !matched {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration) (ctx context.Context, cn func()) {
-	if dur > 0 {
-		ctx, cn = context.WithTimeout(pctx, 8*time.Second)
-	} else {
-		ctx, cn = context.WithCancel(pctx)
-	}
-	go func() {
-		select {
-		case <-s.ctx.Done():
-			cn()
-		case <-ctx.Done():
-			return
-		}
-	}()
-	return ctx, cn
 }
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
@@ -285,19 +255,6 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelproto.PeersIn
 	}
 	return filtered, nil
 }
-
-/*
-func (s *SentinelServer) ListenToGossip() {
-	for {
-		select {
-		case pkt := <-s.sentinel.RecvGossip():
-			s.handleGossipPacket(pkt)
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
-*/
 
 func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
 	panic("do not call this")
