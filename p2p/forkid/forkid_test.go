@@ -192,7 +192,7 @@ func TestValidation(t *testing.T) {
 		id   ID
 		err  error
 	}{
-		// Local is mainnet Petersburg, remote announces the same. No futureBn fork is announced.
+		// Local is mainnet Petersburg, remote announces the same. No future fork is announced.
 		{7987396, ID{Hash: ChecksumToBytes(0x668db0af), Next: 0}, nil},
 
 		// Local is mainnet Petersburg, remote announces the same. Remote also announces a next fork
@@ -226,7 +226,7 @@ func TestValidation(t *testing.T) {
 		{7279999, ID{Hash: ChecksumToBytes(0x668db0af), Next: 0}, nil},
 
 		// Local is mainnet Spurious, remote announces Byzantium, but is not aware of Petersburg. Local
-		// out of sync. Local also knows about a futureBn fork, but that is uncertain yet.
+		// out of sync. Local also knows about a future fork, but that is uncertain yet.
 		{4369999, ID{Hash: ChecksumToBytes(0xa00bc324), Next: 0}, nil},
 
 		// Local is mainnet Petersburg. remote announces Byzantium but is not aware of further forks.
@@ -244,8 +244,8 @@ func TestValidation(t *testing.T) {
 		// Local is mainnet Petersburg, remote is Rinkeby Petersburg.
 		{7987396, ID{Hash: ChecksumToBytes(0xafec6b27), Next: 0}, ErrLocalIncompatibleOrStale},
 
-		// Local is mainnet Gray Glacier, far in the futureBn. Remote announces Gopherium (non existing fork)
-		// at some futureBn block 88888888, for itself, but past block for local. Local is incompatible.
+		// Local is mainnet Gray Glacier, far in the future. Remote announces Gopherium (non existing fork)
+		// at some future block 88888888, for itself, but past block for local. Local is incompatible.
 		//
 		// This case detects non-upgraded nodes with majority hash power (typical Ropsten mess).
 		{88888888, ID{Hash: ChecksumToBytes(0xf0afd0e3), Next: 88888888}, ErrLocalIncompatibleOrStale},
