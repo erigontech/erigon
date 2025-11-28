@@ -376,7 +376,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 	})
 }
 
-func TestHistoryInconsistentPrune(t *testing.T) {
+func TestHistoryRangeWithPrune(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
