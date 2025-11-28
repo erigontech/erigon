@@ -13,8 +13,6 @@ DISABLED_TEST_LIST=(
   net_listening/test_1.json
   # Erigon2 and Erigon3 never supported this api methods
   trace_rawTransaction
-  # temporary disable waiting sync block 23000000 
-  debug_traceTransaction/test_141.json
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json
@@ -37,10 +35,18 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
+  # START - these tests require commitment history in historical RPC test runner
+  eth_getProof/test_21.json
+  eth_getProof/test_22.json
+  eth_getProof/test_23.json
+  eth_getProof/test_24.json
+  eth_getProof/test_25.json
+  eth_getProof/test_26.json
+  # END - these tests require commitment history in historical RPC test runner
 )
 
 # Transform the array into a comma-separated string
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.100.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.105.1 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

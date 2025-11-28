@@ -46,9 +46,9 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -1133,7 +1133,7 @@ func (c *Bor) fetchAndCommitSpan(newSpanID uint64, syscall rules.SystemCall) err
 		return err
 	}
 	if !ok {
-		return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+		return fmt.Errorf("error fetching span %v", newSpanID)
 	}
 
 	// check if chain id matches with heimdall span

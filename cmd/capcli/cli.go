@@ -206,9 +206,6 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	}
 
 	req.Header.Set("Accept", "application/octet-stream")
-	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync request failed %s", err)
-	}
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -887,9 +884,6 @@ func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 	}
 
 	req.Header.Set("Accept", "application/octet-stream")
-	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync request failed %s", err)
-	}
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

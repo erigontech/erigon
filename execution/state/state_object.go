@@ -218,7 +218,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 	var commited bool
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, _, _, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
+	prev, _, _, _ = versionedRead(so.db, so.address, StoragePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},

@@ -54,7 +54,7 @@ func (h UnprefixedHash) MarshalText() ([]byte, error) {
 
 /////////// Address
 
-var addressT = reflect.TypeOf(Address{})
+var addressT = reflect.TypeFor[Address]()
 
 // UnprefixedAddress allows marshaling an Address without 0x prefix.
 type UnprefixedAddress Address

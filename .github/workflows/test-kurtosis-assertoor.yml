@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
