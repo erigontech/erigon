@@ -1045,6 +1045,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	ogGas := gas
 
 	if !value.IsZero() {
 		if interpreter.readOnly {
@@ -1070,7 +1071,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
-	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
 
 	interpreter.returnData = ret
 	return ret, nil
