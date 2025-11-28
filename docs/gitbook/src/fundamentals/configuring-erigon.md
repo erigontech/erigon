@@ -74,7 +74,7 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`).
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](../fundamentals/sync-modes.md)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
