@@ -870,12 +870,12 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 			return nil
 		}
 	}
-	err = os.RemoveAll(dirs.Chaindata)
+	err = dir2.RemoveAll(dirs.Chaindata)
 	if err != nil {
 		return err
 	}
 	for _, filePath := range toDelete {
-		err = os.Remove(filePath)
+		err = dir2.RemoveFile(filePath)
 		if err != nil {
 			return err
 		}
