@@ -107,7 +107,7 @@ func (stx *BlobTx) Sender(signer Signer) (accounts.Address, error) {
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
-		return accounts.NilAddress, err
+		return accounts.ZeroAddress, err
 	}
 	stx.from = addr
 	return addr, nil

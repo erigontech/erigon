@@ -453,7 +453,7 @@ func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return accounts.NilAddress, err
+		return accounts.ZeroAddress, err
 	}
 	tx.from = addr
 	return addr, nil
