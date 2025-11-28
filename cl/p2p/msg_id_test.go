@@ -14,10 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package sentinel
+package p2p
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -32,9 +31,8 @@ import (
 
 func TestMsgID(t *testing.T) {
 	n := clparams.NetworkConfigs[chainspec.MainnetChainID]
-	s := &Sentinel{
-		ctx: context.TODO(),
-		cfg: &SentinelConfig{
+	s := &p2pManager{
+		cfg: &P2PConfig{
 			BeaconConfig:  &clparams.MainnetBeaconConfig,
 			NetworkConfig: &n,
 		},

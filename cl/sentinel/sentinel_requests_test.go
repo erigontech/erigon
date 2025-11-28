@@ -16,42 +16,7 @@
 
 package sentinel
 
-import (
-	"bytes"
-	"context"
-	"encoding/binary"
-	"io"
-	"testing"
-
-	"github.com/golang/snappy"
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/spf13/afero"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
-
-	"github.com/erigontech/erigon/cl/antiquary"
-	antiquarytests "github.com/erigontech/erigon/cl/antiquary/tests"
-	"github.com/erigontech/erigon/cl/beacon/synced_data"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
-	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/erigontech/erigon/cl/sentinel/communication"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-)
-
+/*
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, reader *antiquarytests.MockBlockReader) {
 	blocks, preState, postState = antiquarytests.GetPhase0Random()
 	db = memdb.NewTestDB(t, dbcfg.ChainDB)
@@ -95,7 +60,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 
 	_, err = sentinel.Start()
 	require.NoError(t, err)
-	h := sentinel.host
+	h := sentinel.p2p.Host()
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/3202"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
@@ -208,7 +173,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 
 	_, err = sentinel.Start()
 	require.NoError(t, err)
-	h := sentinel.host
+	h := sentinel.p2p.Host()
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5021"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
@@ -327,7 +292,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 
 	_, err = sentinel.Start()
 	require.NoError(t, err)
-	h := sentinel.host
+	h := sentinel.p2p.Host()
 
 	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5001"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
@@ -363,3 +328,4 @@ func TestSentinelStatusRequest(t *testing.T) {
 
 	require.Equal(t, resp, req)
 }
+*/

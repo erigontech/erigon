@@ -21,21 +21,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
-	"time"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/pion/randutil"
-	"github.com/prysmaticlabs/go-bitfield"
 
-	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
@@ -109,90 +102,4 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 		multiAddrs = append(multiAddrs, multiAddr)
 	}
 	return multiAddrs
-}
-
-var shuffleSource = randutil.NewMathRandomGenerator()
-
-func (s *Sentinel) oneSlotDuration() time.Duration {
-	return time.Duration(s.cfg.BeaconConfig.SecondsPerSlot) * time.Second
-}
-
-func (s *Sentinel) oneEpochDuration() time.Duration {
-	return s.oneSlotDuration() * time.Duration(s.cfg.BeaconConfig.SlotsPerEpoch)
-}
-
-// the cap for `inMesh` time scoring.
-func (s *Sentinel) inMeshCap() float64 {
-	return float64((3600 * time.Second) / s.oneSlotDuration())
-}
-
-// updateENRAttSubnets calls the ENR to notify other peers their attnets preferences.
-func (s *Sentinel) updateENRAttSubnets(subnetIndex int, on bool) {
-	subnetField := bitfield.NewBitvector64()
-	if err := s.listener.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField)); err != nil {
-		log.Error("[Sentinel] Could not load attSubnetKey", "err", err)
-		return
-	}
-	subnetField = common.Copy(subnetField)
-	if len(subnetField) <= subnetIndex/8 {
-		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
-		return
-	}
-	if on {
-		subnetField[subnetIndex/8] |= 1 << (subnetIndex % 8)
-	} else {
-		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
-	}
-	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField))
-}
-
-// updateENRSyncNets calls the ENR to notify other peers their attnets preferences.
-func (s *Sentinel) updateENRSyncNets(subnetIndex int, on bool) {
-	subnetField := bitfield.NewBitvector4()
-	if err := s.listener.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField)); err != nil {
-		log.Error("[Sentinel] Could not load syncCommsSubnetKey", "err", err)
-		return
-	}
-	subnetField = common.Copy(subnetField)
-	if len(subnetField) <= subnetIndex/8 {
-		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
-		return
-	}
-	if on {
-		subnetField[subnetIndex/8] |= 1 << (subnetIndex % 8)
-	} else {
-		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
-	}
-	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField))
-}
-
-// updateENROnSubscription updates the ENR based on the subscription status to subnets/syncnets.
-func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
-	s.metadataLock.Lock()
-	defer s.metadataLock.Unlock()
-	//. topic: /eth2/d31f6191/beacon_attestation_45/ssz_snappy
-	// extract third part of the topic name
-	parts := strings.Split(topicName, "/")
-	if len(parts) < 4 {
-		return
-	}
-	part := parts[3]
-	if !strings.Contains(part, "beacon_attestation") &&
-		!strings.Contains(part, "sync_committee") {
-		return
-	}
-	for i := 0; i < int(s.cfg.NetworkConfig.AttestationSubnetCount); i++ {
-		if part == gossip.TopicNameBeaconAttestation(uint64(i)) {
-			log.Info("[Sentinel] Update ENR on subscription", "subnet", i, "subscribe", subscribe, "type", "attestation")
-			s.updateENRAttSubnets(i, subscribe)
-			return
-		}
-	}
-	for i := 0; i < int(s.cfg.BeaconConfig.SyncCommitteeSubnetCount); i++ {
-		if part == gossip.TopicNameSyncCommittee(i) {
-			log.Info("[Sentinel] Update ENR on subscription", "subnet", i, "subscribe", subscribe, "type", "syncnets")
-			s.updateENRSyncNets(i, subscribe)
-			return
-		}
-	}
 }
