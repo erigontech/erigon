@@ -251,12 +251,12 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 		msg := types.NewMessage(
 			state.SystemAddress, // from
 			stateReceiverContract,
-			0,         // nonce
+			0,          // nonce
 			&u256.Num0, // amount
 			gasLimit,
 			&u256.Num0, // gasPrice
-			nil,       // feeCap
-			nil,       // tip
+			nil,        // feeCap
+			nil,        // tip
 			event,
 			nil,   // accessList
 			false, // checkNonce
