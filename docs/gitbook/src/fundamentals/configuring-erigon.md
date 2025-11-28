@@ -567,8 +567,8 @@ COMMANDS:
    help, h                                      Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --datadir value                                                                                                         Data directory for the databases (default: /home/bloxster/.local/share/erigon)
-   --ethash.dagdir value                                                                                                   Directory to store the ethash mining DAGs (default: /home/bloxster/.local/share/erigon-ethash)
+   --datadir value                                                                                                         Data directory for the databases (default: /home/user/.local/share/erigon)
+   --ethash.dagdir value                                                                                                   Directory to store the ethash mining DAGs (default: /home/user/.local/share/erigon-ethash)
    --externalcl                                                                                                            Enables the external consensus layer (default: false)
    --txpool.disable                                                                                                        External pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer. (default: false)
    --txpool.pricelimit value                                                                                               Minimum gas price (fee cap) limit to enforce for acceptance into the pool (default: 1)
