@@ -791,7 +791,7 @@ func stSstore(_ uint64, scope *ScopeContext) string {
 }
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	fmt.Printf("the stack before jump pop: %s\n", scope.Stack.String())
+	//fmt.Printf("the stack before jump pop: %s\n", scope.Stack.String())
 	pos := scope.Stack.pop()
 	if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
 		if usedBitmap {
@@ -807,8 +807,8 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 				)
 			}
 		}
-		fmt.Printf("Invalid jump to %s\n", pos.Hex())
-		fmt.Printf("Rest of the stack: %s\n", scope.Stack.String())
+		//fmt.Printf("Invalid jump to %s\n", pos.Hex())
+		//fmt.Printf("Rest of the stack: %s\n", scope.Stack.String())
 		return nil, ErrInvalidJump
 	}
 	*pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
@@ -984,7 +984,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	} else {
 		stackvalue.SetBytes(addr.Bytes())
 	}
-	//scope.Stack.push(stackvalue)
+	//scope.Stack.push(stackvalue) // TODO arbiturm does thtat but we get stack corruption if we do that here
 
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
