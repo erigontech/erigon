@@ -484,7 +484,6 @@ func SyncSnapshots(
 			}
 
 			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
-				log.Debug("filtering to block", "name", p.Name, "toBlock", toBlock, "toStep", toStep)
 				continue
 			}
 
