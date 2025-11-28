@@ -57,7 +57,7 @@ These flags control database performance and memory usage.
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
-* `--db.read.concurrency value`: Limits the number of parallel database reads.
+* `--db.read.concurrency value`: Limits the number of parallel database reads. Default: equal to GOMAXPROCS (or number of CPU)
   * Default: `1408`
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
@@ -132,7 +132,7 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--port value`: The main network listening port.
   * Default: `30303`
 * `--p2p.protocol value`: The version of the `eth` P2P protocol.
-  * Default: `68`, `67`
+  * Default: `68`, `69`
 * `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
   * Default: `30303, 30304, 30305, 30306, 30307`
 * `--nat value`: The NAT port mapping mechanism.
@@ -354,8 +354,9 @@ These flags control the block synchronization and data downloading process, incl
 * `--torrent.trackers.disable`: Disables conventional BitTorrent trackers.
   * Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
-  * Default: `32mb`
+  * Default: `16mb`
 * `--torrent.download.rate value`: The download rate in bytes per second.
+  * Default: `512mb`
 * `--torrent.webseed.download.rate value`: The download rate for webseeds.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs.
   * Default: `1`
