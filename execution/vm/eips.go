@@ -26,8 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var activators = map[int]func(*JumpTable){

@@ -23,9 +23,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura/contracts"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func callBlockRewardAbi(contractAddr common.Address, syscall rules.SystemCall, beneficiaries []common.Address, rewardKind []rules.RewardKind) ([]common.Address, []*uint256.Int) {
