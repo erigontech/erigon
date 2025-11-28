@@ -71,7 +71,9 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          submodules: recursive
+          lfs: true
 
       - name: Cleanup space
         if: runner.os == 'Linux'
