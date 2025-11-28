@@ -29,7 +29,7 @@ import (
 )
 
 type bundle struct {
-	domain, history, ii *state.E3SnapSchema
+	domain, history, ii state.SnapNameSchema
 }
 
 type RootNum = kv.RootNum
@@ -46,17 +46,20 @@ func Test_DeleteLatestStateSnaps(t *testing.T) {
 
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.ReceiptDomain, dirs, 10)
 
-	confirmExist(t, b.domain.DataFile(version.V1_0, 90, 100))
+	file, _ := b.domain.DataFile(version.V1_0, 90, 100)
+	confirmExist(t, file)
 
 	// delete 9-10
 	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
 	require.NoError(t, err)
-	confirmDoesntExist(t, b.domain.DataFile(version.V1_0, 90, 100))
+	file, _ = b.domain.DataFile(version.V1_0, 90, 100)
+	confirmDoesntExist(t, file)
 
 	// should delete 8-9
 	err = DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
 	require.NoError(t, err)
-	confirmDoesntExist(t, b.domain.DataFile(version.V1_0, 80, 90))
+	file, _ = b.domain.DataFile(version.V1_0, 80, 90)
+	confirmDoesntExist(t, file)
 }
 
 func confirmExist(t *testing.T, filename string) {
@@ -84,17 +87,21 @@ func createFiles(t *testing.T, dirs datadir.Dirs, from, to int, b *bundle) {
 		file.Close()
 	}
 
-	genFile := func(schema *state.E3SnapSchema) {
-		touchFile(schema.DataFile(version.V1_0, rootFrom, rootTo))
+	genFile := func(schema state.SnapNameSchema) {
+		file, _ := schema.DataFile(version.V1_0, rootFrom, rootTo)
+		touchFile(file)
 		acc := schema.AccessorList()
 		if acc.Has(statecfg.AccessorBTree) {
-			touchFile(schema.BtIdxFile(version.V1_0, rootFrom, rootTo))
+			file, _ := schema.BtIdxFile(version.V1_0, rootFrom, rootTo)
+			touchFile(file)
 		}
 		if acc.Has(statecfg.AccessorExistence) {
-			touchFile(schema.ExistenceFile(version.V1_0, rootFrom, rootTo))
+			file, _ := schema.ExistenceFile(version.V1_0, rootFrom, rootTo)
+			touchFile(file)
 		}
 		if acc.Has(statecfg.AccessorHashMap) {
-			touchFile(schema.AccessorIdxFile(version.V1_0, rootFrom, rootTo, 0))
+			file, _ := schema.AccessorIdxFile(version.V1_0, rootFrom, rootTo, 0)
+			touchFile(file)
 		}
 	}
 
