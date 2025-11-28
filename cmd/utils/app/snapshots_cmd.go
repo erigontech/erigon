@@ -880,6 +880,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 			return err
 		}
 	}
+	logger.Info("rollback completed - deleted chaindata and files", "deletedFiles", toDelete)
 	return nil
 }
 
