@@ -133,7 +133,7 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
 	if overflow || udest >= uint64(len(c.Code)) {
-		fmt.Printf("invalid jump dest: %s (code size: %d)\n", dest.String(), len(c.Code))
+		fmt.Printf("invalid jump dest: %s (code size: %d)\n", dest.Hex(), len(c.Code))
 		return false, false
 	}
 	// Only JUMPDESTs allowed for destinations
