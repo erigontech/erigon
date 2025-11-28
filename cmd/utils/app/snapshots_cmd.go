@@ -840,7 +840,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	}
 	toStep := toTxNum / agg.StepSize()
 	var toDelete []string
-	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
