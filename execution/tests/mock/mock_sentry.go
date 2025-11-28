@@ -612,16 +612,8 @@ func mockDownloader(ctrl *gomock.Controller) *downloaderproto.MockDownloaderClie
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
-		Add(gomock.Any(), gomock.Any(), gomock.Any()).
+		Download(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		SetLogPrefix(gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		Completed(gomock.Any(), gomock.Any()).
-		Return(&downloaderproto.CompletedReply{Completed: true}, nil).
 		AnyTimes()
 
 	return snapDownloader

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -362,6 +363,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
+			debug.PrintStack()
 			return false, common.ErrStopped
 		}
 
@@ -457,6 +459,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
+			debug.PrintStack()
 			return false, common.ErrStopped
 		}
 

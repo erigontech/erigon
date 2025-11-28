@@ -91,22 +91,13 @@ const (
 	AlsoCaplin CaplinMode = 3
 )
 
-func BuildProtoRequest(downloadRequest []services.DownloadRequest) *downloaderproto.AddRequest {
-	req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
+func BuildDownloadRequest(downloadRequest []services.DownloadRequest) *downloaderproto.DownloadRequest {
+	req := &downloaderproto.DownloadRequest{Items: make([]*downloaderproto.DownloadItem, 0, len(snaptype2.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
-		if r.Path == "" {
-			continue
-		}
-		if r.TorrentHash != "" {
-			req.Items = append(req.Items, &downloaderproto.AddItem{
-				TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
-				Path:        r.Path,
-			})
-		} else {
-			req.Items = append(req.Items, &downloaderproto.AddItem{
-				Path: r.Path,
-			})
-		}
+		req.Items = append(req.Items, &downloaderproto.DownloadItem{
+			TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
+			Path:        r.Path,
+		})
 	}
 	return req
 }
@@ -118,11 +109,9 @@ func RequestSnapshotsDownload(
 	downloader downloaderproto.DownloaderClient,
 	logPrefix string,
 ) error {
-	preq := &downloaderproto.SetLogPrefixRequest{Prefix: logPrefix}
-	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
-	req := BuildProtoRequest(downloadRequest)
-	if _, err := downloader.Add(ctx, req, grpc.WaitForReady(true)); err != nil {
+	req := BuildDownloadRequest(downloadRequest)
+	if _, err := downloader.Download(ctx, req, grpc.WaitForReady(true)); err != nil {
 		return err
 	}
 	return nil

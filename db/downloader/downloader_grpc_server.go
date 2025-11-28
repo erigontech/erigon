@@ -47,82 +47,72 @@ type GrpcServer struct {
 	d *Downloader
 }
 
+func (s *GrpcServer) checkNamesAndLogCall(names []string, callName string) error {
+	for _, name := range names {
+		if name == "" {
+			return errors.New("field 'path' is required")
+		}
+		if filepath.IsAbs(name) {
+			return fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %q, please use filepath.Rel(dirs.Snap, filePath)", name)
+		}
+	}
+	s.d.logger.Debug(fmt.Sprintf("[snapshots] Downloader.%s", callName), "files", names)
+	return nil
+}
+
+// Add existing files to the downloader.
+// Erigon will produce and seed new files
+// Downloader will be able: seed new files (already existing on FS).
+func (s *GrpcServer) Download(ctx context.Context, request *downloaderproto.DownloadRequest) (_ *emptypb.Empty, err error) {
+	var preverifiedSnapshots []PreverifiedSnapshot
+	names := make([]string, 0, len(request.Items))
+	for _, it := range request.Items {
+		if it.TorrentHash == nil {
+			err = fmt.Errorf("request for %q missing required torrent hash", it.Path)
+			return
+		}
+		ih := Proto2InfoHash(it.TorrentHash)
+		preverifiedSnapshots = append(preverifiedSnapshots, PreverifiedSnapshot{
+			InfoHash: ih,
+			Name:     it.Path,
+		})
+		names = append(names, it.Path)
+	}
+	err = s.checkNamesAndLogCall(names, "Download")
+	if err != nil {
+		return
+	}
+	return &emptypb.Empty{}, s.d.DownloadSnapshots(ctx, preverifiedSnapshots, request.LogTarget)
+}
+
 // Add files to the downloader. Existing/New files - both ok.
 // "download once" invariant: means after initial download finish - future restart/upgrade/downgrade will not download files (our "fast restart" feature)
 // After "download once": Erigon will produce and seed new files
 // Downloader will be able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (s *GrpcServer) Add(ctx context.Context, request *downloaderproto.AddRequest) (*emptypb.Empty, error) {
-	{
-		var names []string
-		for _, name := range request.Items {
-			if filepath.IsAbs(name.Path) {
-				return nil, fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", name.Path)
-			}
-			names = append(names, name.Path)
-		}
-		s.d.logger.Debug("[snapshots] Downloader.Add", "files", names)
+func (s *GrpcServer) Seed(ctx context.Context, request *downloaderproto.SeedRequest) (_ *emptypb.Empty, err error) {
+	names := request.Paths
+	err = s.checkNamesAndLogCall(names, "Seed")
+	if err != nil {
+		return
 	}
-
-	var preverifiedSnapshots []PreverifiedSnapshot
-
-	for _, it := range request.Items {
-		if it.Path == "" {
-			return nil, errors.New("field 'path' is required")
-		}
-		if it.TorrentHash == nil {
-			// if we don't have the torrent hash then we seed a new snapshot
-			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
-				return nil, err
-			}
-		} else {
-			// TODO: Handle this case as a separate call to avoid mistakes.
-			ih := Proto2InfoHash(it.TorrentHash)
-			preverifiedSnapshots = append(preverifiedSnapshots, PreverifiedSnapshot{
-				InfoHash: ih,
-				Name:     it.Path,
-			})
+	for _, name := range names {
+		err = s.d.AddNewSeedableFile(ctx, name)
+		if err != nil {
+			return
 		}
 	}
-
-	return &emptypb.Empty{}, s.d.DownloadSnapshots(ctx, preverifiedSnapshots, request.LogTarget)
+	return
 }
 
 // Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *downloaderproto.DeleteRequest) (_ *emptypb.Empty, err error) {
-	{
-		var names []string
-		for _, relPath := range request.Paths {
-			if filepath.IsAbs(relPath) {
-				return nil, fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", relPath)
-			}
-			names = append(names, relPath)
-		}
-		s.d.logger.Debug("[snapshots] Downloader.Delete", "files", names)
-	}
-
+	err = s.checkNamesAndLogCall(request.Paths, "Delete")
 	for _, name := range request.Paths {
-		if name == "" {
-			err = errors.Join(err, errors.New("field 'path' is required"))
-			continue
-		}
 		err = errors.Join(err, s.d.Delete(name))
-	}
-	if err == nil {
-		return &emptypb.Empty{}, nil
 	}
 	return
 }
 
 func Proto2InfoHash(in *typesproto.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
-}
-
-func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *downloaderproto.SetLogPrefixRequest) (*emptypb.Empty, error) {
-	s.d.SetLogPrefix(request.Prefix)
-
-	return &emptypb.Empty{}, nil
-}
-
-func (s *GrpcServer) Completed(ctx context.Context, request *downloaderproto.CompletedRequest) (*downloaderproto.CompletedReply, error) {
-	return &downloaderproto.CompletedReply{Completed: s.d.Completed()}, nil
 }

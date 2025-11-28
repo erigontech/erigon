@@ -338,15 +338,9 @@ func (a *Antiquary) antiquate() error {
 	}
 
 	paths := a.sn.SegFileNames(from, to)
-	downloadItems := make([]*downloaderproto.AddItem, len(paths))
-	for i, path := range paths {
-		downloadItems[i] = &downloaderproto.AddItem{
-			Path: path,
-		}
-	}
 	if a.downloader != nil {
 		// Notify bittorent to seed the new snapshots
-		if _, err := a.downloader.Add(a.ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
+		if _, err := a.downloader.Seed(a.ctx, &downloaderproto.SeedRequest{Paths: paths}); err != nil {
 			a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 		}
 	}
@@ -419,15 +413,9 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 
 	paths := a.sn.SegFileNames(currentBlobsProgress, to)
-	downloadItems := make([]*downloaderproto.AddItem, len(paths))
-	for i, path := range paths {
-		downloadItems[i] = &downloaderproto.AddItem{
-			Path: path,
-		}
-	}
 	if a.downloader != nil {
 		// Notify bittorent to seed the new snapshots
-		if _, err := a.downloader.Add(a.ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
+		if _, err := a.downloader.Seed(a.ctx, &downloaderproto.SeedRequest{Paths: paths}); err != nil {
 			a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 		}
 	}

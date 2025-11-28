@@ -1280,14 +1280,8 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(frozenFileNames))}
-		for _, fName := range frozenFileNames {
-			req.Items = append(req.Items, &downloaderproto.AddItem{
-				Path: fName,
-			})
-		}
-		if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-			s.logger.Warn("[snapshots] downloader.Add", "err", err)
+		if _, err := s.downloaderClient.Seed(ctx, &downloaderproto.SeedRequest{Paths: frozenFileNames}); err != nil {
+			s.logger.Warn("[snapshots] downloader.Seed", "err", err)
 		}
 	}, func(deletedFiles []string) {
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
@@ -1339,7 +1333,7 @@ func (s *Ethereum) setUpSnapDownloader(
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
-		s.downloader.MainLoopInBackground(true)
+		s.downloader.InitIdleLogger(true)
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
