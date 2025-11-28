@@ -3,7 +3,7 @@ name: Hive EEST tests
 on:
   push:
     branches:
-        - 'release/**'
+      - 'release/**'
         - main
   workflow_dispatch:
 
@@ -41,7 +41,7 @@ jobs:
           repository: ethereum/hive
           ref: master
           path: hive
-    
+
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't

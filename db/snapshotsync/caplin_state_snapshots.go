@@ -605,7 +605,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	segName = strings.ReplaceAll(segName, "beaconblocks", snapName)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
-	compressCfg := seg.DefaultCfg
+	compressCfg := seg.DefaultWordLvlCfg
 	compressCfg.Workers = workers
 	sn, err := seg.NewCompressor(ctx, "Snapshots "+snapName, f.Path, tmpDir, compressCfg, lvl, logger)
 	if err != nil {

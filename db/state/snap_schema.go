@@ -36,7 +36,8 @@ type SnapNameSchema interface {
 
 	AccessorIdxCount() uint64
 	DataDirectory() string
-	DataFileCompression() seg.FileCompression
+	DataFileCompression() seg.WordLevelCompression
+	DataFileCompression2() seg.Cfg
 }
 
 type _fileMetadata struct {
@@ -48,7 +49,7 @@ func (f *_fileMetadata) Folder() string  { return f.folder }
 func (f *_fileMetadata) Supported() bool { return f.supported }
 
 type BtIdxParams struct {
-	Compression seg.FileCompression
+	Compression seg.WordLevelCompression
 }
 
 // per entity schema for e2 entities
@@ -194,18 +195,23 @@ func (s *E2SnapSchema) DataDirectory() string {
 	return s.dataFileMetadata.folder
 }
 
-func (s *E2SnapSchema) DataFileCompression() seg.FileCompression {
+func (s *E2SnapSchema) DataFileCompression() seg.WordLevelCompression {
 	return seg.CompressNone
+}
+
+func (s *E2SnapSchema) DataFileCompression2() seg.Cfg {
+	return seg.Cfg{}
 }
 
 // E3 Schema
 type E3SnapSchema struct {
 	stepSize uint64
 
-	dataExtension       DataExtension
-	dataFileTag         string
-	dataFileCompression seg.FileCompression
-	accessors           statecfg.Accessors
+	dataExtension          DataExtension
+	dataFileTag            string
+	dataFileCompression    seg.WordLevelCompression
+	dataFileCompressionCfg seg.Cfg
+	accessors              statecfg.Accessors
 
 	accessorIdxExtension AccessorExtension
 	// caches
@@ -258,10 +264,11 @@ func NewE3SnapSchemaBuilder(accessors statecfg.Accessors, stepSize uint64) *E3Sn
 	return &eschema
 }
 
-func (b *E3SnapSchemaBuilder) Data(dataFolder string, dataFileTag string, dataExtension DataExtension, compression seg.FileCompression) *E3SnapSchemaBuilder {
+func (b *E3SnapSchemaBuilder) Data(dataFolder string, dataFileTag string, dataExtension DataExtension, compression seg.WordLevelCompression) *E3SnapSchemaBuilder {
 	b.e.dataFileTag = dataFileTag
 	b.e.dataExtension = dataExtension
 	b.e.dataFileCompression = compression
+	b.e.dataFileCompressionCfg = seg.Cfg{WordLvl: compression, WordLvlCfg: seg.DefaultWordLvlCfg}
 	b.e.dataFileMetadata = &_fileMetadata{
 		folder:    dataFolder,
 		supported: true,
@@ -438,8 +445,11 @@ func (s *E3SnapSchema) DataDirectory() string {
 	return s.dataFileMetadata.folder
 }
 
-func (s *E3SnapSchema) DataFileCompression() seg.FileCompression {
+func (s *E3SnapSchema) DataFileCompression() seg.WordLevelCompression {
 	return s.dataFileCompression
+}
+func (s *E3SnapSchema) DataFileCompression2() seg.Cfg {
+	return s.dataFileCompressionCfg
 }
 
 // debug method for getting all file extensions for this schema

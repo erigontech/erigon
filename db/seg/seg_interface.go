@@ -16,24 +16,24 @@
 
 package seg
 
-type FileCompression uint8
+type WordLevelCompression uint8
 
 const (
-	CompressNone FileCompression = 0b1
-	CompressKeys FileCompression = 0b10
-	CompressVals FileCompression = 0b100
+	CompressNone WordLevelCompression = 0b1
+	CompressKeys WordLevelCompression = 0b10
+	CompressVals WordLevelCompression = 0b100
 )
 
-func ParseFileCompression(s string) (FileCompression, error) {
+func ParseFileCompression(s string) (WordLevelCompression, error) {
 	// Implementation would be here
 	return CompressNone, nil
 }
 
-func (c FileCompression) Has(flag FileCompression) bool {
+func (c WordLevelCompression) Has(flag WordLevelCompression) bool {
 	return c&flag != 0
 }
 
-func (c FileCompression) String() string {
+func (c WordLevelCompression) String() string {
 	return "none" // Simplified implementation
 }
 

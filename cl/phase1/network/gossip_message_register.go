@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/net/context"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"golang.org/x/net/context"
 )
 
 type gossipService struct {

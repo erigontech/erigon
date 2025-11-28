@@ -114,7 +114,7 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 }
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver version.Version, logger log.Logger) {
-	compressCfg := seg.DefaultCfg
+	compressCfg := seg.DefaultWordLvlCfg
 	compressCfg.MinPatternScore = 100
 	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 }
 
 func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir string, logger log.Logger) {
-	compressCfg := seg.DefaultCfg
+	compressCfg := seg.DefaultWordLvlCfg
 	compressCfg.MinPatternScore = 100
 	compressor, err := seg.NewCompressor(
 		context.Background(),

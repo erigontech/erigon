@@ -19,12 +19,13 @@ package sync
 import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
+	"github.com/jellydator/ttlcache/v3"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/jellydator/ttlcache/v3"
 )
 
 const InMemorySignatures = 4096 // Number of recent block signatures to keep in memory
