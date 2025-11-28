@@ -22,16 +22,15 @@ package vm
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/arb/multigas"
 	"math"
-
-	"github.com/erigontech/erigon/core/state"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/multigas"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -792,6 +791,7 @@ func stSstore(_ uint64, scope *ScopeContext) string {
 }
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	//fmt.Printf("the stack before jump pop: %s\n", scope.Stack.String())
 	pos := scope.Stack.pop()
 	if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
 		if usedBitmap {
@@ -807,6 +807,8 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 				)
 			}
 		}
+		//fmt.Printf("Invalid jump to %s\n", pos.Hex())
+		//fmt.Printf("Rest of the stack: %s\n", scope.Stack.String())
 		return nil, ErrInvalidJump
 	}
 	*pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
@@ -982,7 +984,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	} else {
 		stackvalue.SetBytes(addr.Bytes())
 	}
-	scope.Stack.push(stackvalue)
+	//scope.Stack.push(stackvalue) // TODO arbiturm does thtat but we get stack corruption if we do that here
 
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
@@ -1021,8 +1023,8 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	} else {
 		stackValue.SetBytes(addr.Bytes())
 	}
-
 	scope.Stack.push(&stackValue)
+
 	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
@@ -1046,6 +1048,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	ogGas := gas
 
 	if !value.IsZero() {
 		if interpreter.readOnly {
@@ -1071,7 +1074,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
-	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -1098,6 +1101,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	toAddr := common.Address(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	ogGas := gas
 
 	if !value.IsZero() {
 		gas += params.CallStipend
@@ -1119,7 +1123,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
-	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
 
 	interpreter.returnData = ret
 	return ret, nil
