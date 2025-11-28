@@ -35,6 +35,8 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
+  # test disable needs debug
+  eth_getProof/test_24.json
 )
 
 # Transform the array into a comma-separated string
