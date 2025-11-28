@@ -695,11 +695,8 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		if !test {
 			hasMore, err := stateSync.RunNoInterrupt(nil, sd, tx)
 			if err != nil {
-				if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
-					return err
-
-				}
-				return err
+				// Don't lose the original error, like cancellation or common.ErrStopped.
+				return errors.Join(err, cleanupProgressIfNeeded(tx, currentHeader))
 			}
 			if hasMore {
 				// should not ever happen since we exec blocks 1 by 1
