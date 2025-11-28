@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -136,4 +137,8 @@ func (st *Stack) len() int {
 func ReturnNormalStack(s *Stack) {
 	s.data = s.data[:0]
 	stackPool.Put(s)
+}
+
+func (st *Stack) String() string {
+	return fmt.Sprintf("%v", st.data)
 }
