@@ -653,55 +653,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	if refunds && !gasBailout {
-		//refund := st.calcGasRefund(rules)
-		//usedMultiGas = st.reimburseGas(rules, refund, floorGas7623, usedMultiGas)
-		refundQuotient := params.RefundQuotient
-		if rules.IsLondon {
-			refundQuotient = params.RefundQuotientEIP3529
-		}
-
-		// Refund the gas that was held to limit the amount of computation done.
-		st.gasRemaining += st.calcHeldGasRefund()
-
-		if st.evm.ProcessingHook.IsArbitrum() {
-			st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
-			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
-			var refund uint64
-			if nonrefundable < st.gasUsed() {
-				// Apply refund counter, capped to a refund quotient
-				refund = (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
-				if refund > st.state.GetRefund() {
-					refund = st.state.GetRefund()
-				}
-				st.gasRemaining += refund
-			}
-
-			// Arbitrum: set the multigas refunds
-			usedMultiGas = usedMultiGas.WithRefund(refund)
-			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
-				// After EIP-7623: Data-heavy transactions pay the floor gas.
-				if st.gasUsed() < floorGas7623 {
-					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
-					prev := st.gasRemaining
-					st.gasRemaining = st.initialGas - floorGas7623
-					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
-						t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
-					}
-				}
-			}
-
-		} else { // Other networks
-			gasUsed := st.gasUsed()
-			refund := min(gasUsed/refundQuotient, st.state.GetRefund())
-			gasUsed = gasUsed - refund
-
-			if rules.IsPrague {
-				gasUsed = max(floorGas7623, gasUsed)
-			}
-			st.gasRemaining = st.initialGas - gasUsed
-		}
-
-		st.refundGas()
+		refund := st.calcGasRefund(rules)
+		usedMultiGas = st.reimburseGas(rules, refund, floorGas7623, usedMultiGas)
 	} else if rules.IsPrague {
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
@@ -768,7 +721,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			tracer.CaptureArbitrumTransfer(nil, &tipReceipient, tracingTipAmount, false, "tip")
 		}
 	}
-	fmt.Printf("tx from %x used gas: %d %s\n", st.msg.From(), st.gasUsed(), usedMultiGas)
+	fmt.Printf("tx from %x used gas: %d, initGas %d remain %d %s\n", st.msg.From(), st.gasUsed(), st.initialGas, st.gasRemaining, usedMultiGas)
 
 	st.evm.ProcessingHook.EndTxHook(st.gasRemaining, vmerr == nil)
 
