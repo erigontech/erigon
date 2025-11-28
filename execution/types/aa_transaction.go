@@ -40,7 +40,7 @@ type AccountAbstractionTransaction struct {
 	GasLimit   uint64
 	AccessList AccessList
 
-	SenderAddress               *common.Address
+	SenderAddress               accounts.Address
 	SenderValidationData        []byte
 	ExecutionData               []byte
 	Paymaster                   *common.Address
@@ -73,19 +73,19 @@ func (tx *AccountAbstractionTransaction) Protected() bool {
 	return true
 }
 
-func (tx *AccountAbstractionTransaction) Sender(signer Signer) (common.Address, error) {
-	return *tx.SenderAddress, nil
+func (tx *AccountAbstractionTransaction) Sender(signer Signer) (accounts.Address, error) {
+	return tx.SenderAddress, nil
 }
 
-func (tx *AccountAbstractionTransaction) cachedSender() (common.Address, bool) {
-	return *tx.SenderAddress, true
+func (tx *AccountAbstractionTransaction) cachedSender() (accounts.Address, bool) {
+	return tx.SenderAddress, true
 }
 
-func (tx *AccountAbstractionTransaction) GetSender() (common.Address, bool) {
-	return *tx.SenderAddress, true
+func (tx *AccountAbstractionTransaction) GetSender() (accounts.Address, bool) {
+	return tx.SenderAddress, true
 }
 
-func (tx *AccountAbstractionTransaction) SetSender(address common.Address) {
+func (tx *AccountAbstractionTransaction) SetSender(address accounts.Address) {
 }
 
 func (tx *AccountAbstractionTransaction) IsContractDeploy() bool {
@@ -232,7 +232,7 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
 
 	payloadSize++
-	if tx.SenderAddress != nil {
+	if !tx.SenderAddress.IsNil() {
 		payloadSize += 20
 	}
 
@@ -330,7 +330,13 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.SenderAddress, w, b); err != nil {
+	var senderAddress *common.Address
+	if !tx.SenderAddress.IsNil() {
+		senderValue := tx.SenderAddress.Value()
+		senderAddress = &senderValue
+
+	}
+	if err := rlp.EncodeOptionalAddress(senderAddress, w, b); err != nil {
 		return err
 	}
 
@@ -434,9 +440,9 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for SenderAddress: %d", len(b))
 	}
-	tx.SenderAddress = &common.Address{}
-	copy((*tx.SenderAddress)[:], b)
-
+	var senderAddress common.Address
+	copy(senderAddress[:], b)
+	tx.SenderAddress = accounts.InternAddress(senderAddress)
 	if tx.SenderValidationData, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -570,14 +576,8 @@ func (tx *AccountAbstractionTransaction) DeployerFrame(rules *chain.Rules, hasEI
 }
 
 func (tx *AccountAbstractionTransaction) ExecutionFrame() *Message {
-	var to accounts.Address
-	if tx.SenderAddress == nil {
-		to = accounts.NilAddress
-	} else {
-		to = accounts.InternAddress(*tx.SenderAddress)
-	}
 	return &Message{
-		to:       to,
+		to:       tx.SenderAddress,
 		from:     AA_ENTRY_POINT,
 		gasLimit: tx.GasLimit,
 		data:     tx.ExecutionData,
@@ -647,23 +647,17 @@ func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deplo
 
 	intrinsicGas, _ := tx.PreTransactionGasCost(rules, hasEIP3860)
 	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentGasUsed
-	var to accounts.Address
-	if tx.SenderAddress == nil {
-		to = accounts.NilAddress
-	} else {
-		to = accounts.InternAddress(*tx.SenderAddress)
-	}
 	return &Message{
-		to:       to,
+		to:       tx.SenderAddress,
 		from:     AA_ENTRY_POINT,
 		gasLimit: accountGasLimit,
 		data:     validateTransactionData,
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) GasPayer() *common.Address {
+func (tx *AccountAbstractionTransaction) GasPayer() accounts.Address {
 	if tx.Paymaster != nil && tx.Paymaster.Cmp(common.Address{}) != 0 {
-		return tx.Paymaster
+		return accounts.InternAddress(*tx.Paymaster)
 	}
 
 	return tx.SenderAddress
@@ -703,7 +697,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 	}
 
 	record := &ABIAccountAbstractTxn{
-		Sender:                      *tx.SenderAddress,
+		Sender:                      tx.SenderAddress.Value(),
 		NonceKey:                    tx.NonceKey.ToBig(),
 		Nonce:                       big.NewInt(int64(tx.Nonce)),
 		ValidationGasLimit:          big.NewInt(int64(tx.ValidationGasLimit)),
@@ -769,7 +763,7 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 		Tip:                         uint256.NewInt(0).SetBytes(tx.Tip),
 		FeeCap:                      uint256.NewInt(0).SetBytes(tx.FeeCap),
 		GasLimit:                    tx.Gas,
-		SenderAddress:               &senderAddress,
+		SenderAddress:               accounts.InternAddress(senderAddress),
 		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
 		Paymaster:                   paymasterAddress,

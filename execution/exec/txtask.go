@@ -66,7 +66,7 @@ type Task interface {
 	Tx() types.Transaction
 	TxType() uint8
 	TxHash() common.Hash
-	TxSender() (*common.Address, error)
+	TxSender() (accounts.Address, error)
 	TxMessage() (*types.Message, error)
 
 	BlockNumber() uint64
@@ -188,7 +188,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		if err != nil {
 			return nil, err
 		}
-		receipt.ContractAddress = types.CreateAddress(*txSender, r.Tx().GetNonce())
+		receipt.ContractAddress = types.CreateAddress(txSender.Value(), r.Tx().GetNonce())
 	}
 
 	return receipt, nil
@@ -226,7 +226,7 @@ type TxTask struct {
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 
 	gasPool      *protocol.GasPool
-	sender       *common.Address
+	sender       accounts.Address
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -266,15 +266,15 @@ func (t *TxTask) TxHash() common.Hash {
 	return t.Tx().Hash()
 }
 
-func (t *TxTask) TxSender() (*common.Address, error) {
-	if t.sender != nil {
+func (t *TxTask) TxSender() (accounts.Address, error) {
+	if !t.sender.IsNil() {
 		return t.sender, nil
 	}
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
-		return nil, nil
+		return accounts.NilAddress, nil
 	}
 	if sender, ok := t.Tx().GetSender(); ok {
-		t.sender = &sender
+		t.sender = sender
 		return t.sender, nil
 	}
 	if t.signer == nil {
@@ -282,9 +282,9 @@ func (t *TxTask) TxSender() (*common.Address, error) {
 	}
 	sender, err := t.signer.Sender(t.Tx())
 	if err != nil {
-		return nil, err
+		return accounts.NilAddress, err
 	}
-	t.sender = &sender
+	t.sender = sender
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
 	return t.sender, nil
 }
@@ -365,7 +365,7 @@ func (t *TxTask) Rules() *chain.Rules {
 func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 	t.TxNum = txNum
 	t.TxIndex = txIndex
-	t.sender = nil
+	t.sender = accounts.NilAddress
 	t.message = nil
 	t.signer = nil
 	t.dependencies = nil

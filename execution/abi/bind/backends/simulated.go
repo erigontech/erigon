@@ -761,7 +761,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
-	nonce, err := b.pendingState.GetNonce(accounts.InternAddress(sender))
+	nonce, err := b.pendingState.GetNonce(sender)
 	if err != nil {
 		return err
 	}

@@ -236,6 +236,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if err != nil {
 			return err
 		}
+		fmt.Println("HAVE/WANT", st.msg.From(), &balance, &balanceCheck)
 		if have, want := balance, balanceCheck; have.Cmp(&want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From(), &have, &want)
 		}

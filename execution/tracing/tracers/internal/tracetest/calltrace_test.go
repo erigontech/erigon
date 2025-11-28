@@ -252,7 +252,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	origin, _ := signer.Sender(tx)
 	baseFee := uint256.MustFromBig((*big.Int)(test.Context.BaseFee))
 	txContext := evmtypes.TxContext{
-		Origin:   accounts.InternAddress(origin),
+		Origin:   origin,
 		GasPrice: *tx.GetEffectiveGasTip(baseFee),
 	}
 	context := evmtypes.BlockContext{
@@ -313,7 +313,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	origin, _ := signer.Sender(tx)
 	txContext := evmtypes.TxContext{
-		Origin:   accounts.InternAddress(origin),
+		Origin:   origin,
 		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
@@ -335,7 +335,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Nonce: 1,
 			Code:  code,
 		},
-		origin: types.GenesisAccount{
+		origin.Value(): types.GenesisAccount{
 			Nonce:   0,
 			Balance: big.NewInt(500000000000000),
 		},

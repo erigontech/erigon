@@ -68,15 +68,15 @@ func (ct *CommonTx) GetData() []byte {
 	return ct.Data
 }
 
-func (ct *CommonTx) GetSender() (common.Address, bool) {
-	if sc := ct.from.Load(); sc != nil {
-		return *sc, true
+func (ct *CommonTx) GetSender() (accounts.Address, bool) {
+	if sc := ct.from; !sc.IsNil() {
+		return sc, true
 	}
-	return common.Address{}, false
+	return accounts.NilAddress, false
 }
 
-func (ct *CommonTx) SetSender(addr common.Address) {
-	ct.from.Store(&addr)
+func (ct *CommonTx) SetSender(addr accounts.Address) {
+	ct.from = addr
 }
 
 func (ct *CommonTx) Protected() bool {
@@ -371,12 +371,10 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		checkGas:         true,
 	}
 
-	if msgFrom, err := tx.Sender(s); err != nil {
-		return nil, err
-	} else {
-		msg.from = accounts.InternAddress(msgFrom)
-	}
-	return &msg, nil
+	var err error
+	msg.from, err = tx.Sender(s)
+	fmt.Println("FROM 1", msg.from)
+	return &msg, err
 }
 
 func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -441,24 +439,23 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender common.Address, ok bool) {
-	s := tx.from.Load()
-	if s == nil {
+func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
-func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }

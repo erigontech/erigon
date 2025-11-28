@@ -28,7 +28,7 @@ func ValidateAATransaction(
 	evm *vm.EVM,
 	chainConfig *chain.Config,
 ) (paymasterContext []byte, validationGasUsed uint64, err error) {
-	senderCodeSize, err := ibs.GetCodeSize(accounts.InternAddress(*tx.SenderAddress))
+	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -78,7 +78,7 @@ func ValidateAATransaction(
 	// TODO: Nonce manager frame
 	// applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 
-	senderNonce, _ := ibs.GetNonce(accounts.InternAddress(*tx.SenderAddress))
+	senderNonce, _ := ibs.GetNonce(tx.SenderAddress)
 	if tx.Nonce > senderNonce+1 { // ibs returns last used nonce
 		return nil, 0, errors.New("nonce too low")
 	}
@@ -177,7 +177,7 @@ func validateValidityTimeRange(time uint64, validAfter uint64, validUntil uint64
 }
 
 func deployValidation(tx *types.AccountAbstractionTransaction, ibs *state.IntraBlockState) error {
-	senderCodeSize, err := ibs.GetCodeSize(accounts.InternAddress(*tx.SenderAddress))
+	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return wrapError(fmt.Errorf(
 			"error getting code for sender:%s err:%s",
@@ -201,7 +201,8 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 		return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
 	}
 	fromValue := ept.From.Value()
-	if !bytes.Equal(fromValue[:], tx.SenderAddress[:]) {
+	senderAddress := tx.SenderAddress.Value()
+	if !bytes.Equal(fromValue[:], senderAddress[:]) {
 		return fmt.Errorf("invalid call to EntryPoint contract from a wrong account address, wanted %s got %s", tx.SenderAddress.String(), ept.From)
 	}
 
@@ -255,11 +256,11 @@ func ExecuteAATransaction(
 ) (executionStatus uint64, gasUsed uint64, err error) {
 	executionStatus = types.ExecutionStatusSuccess
 
-	nonce, err := ibs.GetNonce(accounts.InternAddress(*tx.SenderAddress))
+	nonce, err := ibs.GetNonce(tx.SenderAddress)
 	if err != nil {
 		return 0, 0, err
 	}
-	if err = ibs.SetNonce(accounts.InternAddress(*tx.SenderAddress), nonce+1); err != nil {
+	if err = ibs.SetNonce(tx.SenderAddress, nonce+1); err != nil {
 		return 0, 0, err
 	}
 

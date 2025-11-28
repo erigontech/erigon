@@ -660,7 +660,7 @@ func (s *simulator) simulateCall(
 	}
 	// Set the sender just to make it appear in the result if it was provided in the request.
 	if call.From != nil {
-		txn.SetSender(*call.From)
+		txn.SetSender(accounts.InternAddress(*call.From))
 	}
 	return &callResult, txn, receipt, nil
 }

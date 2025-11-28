@@ -754,7 +754,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	prevSenderTx := map[common.Address]int{}
+	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 
@@ -807,13 +807,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			if err != nil {
 				return err
 			}
-			if sender != nil {
-				if tx, ok := prevSenderTx[*sender]; ok {
+			if !sender.IsNil() {
+				if tx, ok := prevSenderTx[sender]; ok {
 					executor.execTasks.addDependency(tx, i)
 					executor.execTasks.clearPending(i)
 				}
 
-				prevSenderTx[*sender] = i
+				prevSenderTx[sender] = i
 			}
 		}
 

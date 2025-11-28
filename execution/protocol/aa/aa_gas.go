@@ -30,16 +30,16 @@ func chargeGas(
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 
 	chargeFrom := tx.GasPayer()
-	balance, err := ibs.GetBalance(accounts.InternAddress(*chargeFrom))
+	balance, err := ibs.GetBalance(chargeFrom)
 	if err != nil {
 		return err
 	}
 
 	if balance.Cmp(preCharge) < 0 {
-		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", protocol.ErrInsufficientFunds, chargeFrom.Hex(), &balance, preCharge)
+		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", protocol.ErrInsufficientFunds, chargeFrom.String(), &balance, preCharge)
 	}
 
-	if err := ibs.SubBalance(accounts.InternAddress(*chargeFrom), *preCharge, 0); err != nil {
+	if err := ibs.SubBalance(chargeFrom, *preCharge, 0); err != nil {
 		return err
 	}
 
@@ -68,7 +68,7 @@ func refundGas(
 
 	chargeFrom := tx.GasPayer()
 
-	if err := ibs.AddBalance(accounts.InternAddress(*chargeFrom), *refund, tracing.BalanceIncreaseGasReturn); err != nil {
+	if err := ibs.AddBalance(chargeFrom, *refund, tracing.BalanceIncreaseGasReturn); err != nil {
 		return err
 	}
 

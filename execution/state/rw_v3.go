@@ -405,7 +405,7 @@ func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *Bu
 		rs:          rs,
 		writeSet:    newStateUpdates(),
 		accumulator: accumulator,
-		//trace:       true,
+		trace:       true,
 	}
 }
 
@@ -579,7 +579,7 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 		tx:          tx,
 		accumulator: accumulator,
 		txNum:       txNum,
-		//trace: true,
+		trace: true,
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -155,25 +156,24 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	}
 	msg.authorizations = tx.Authorizations
 
-	if msgFrom, err := tx.Sender(s); err != nil {
+	var err error
+	if msg.from, err = tx.Sender(s); err != nil {
 		return nil, err
-	} else {
-		msg.from = accounts.InternAddress(msgFrom)
 	}
+	fmt.Println("FROM 2", msg.from, dbg.Stack())
 	return &msg, nil
 }
 
-func (tx *SetCodeTransaction) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (tx *SetCodeTransaction) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }
 

@@ -330,8 +330,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 			noSenderCnt++
 			continue
 		}
-		sender := accounts.InternAddress(senderAddress)
-		account, err := simStateReader.ReadAccountData(sender)
+		account, err := simStateReader.ReadAccountData(senderAddress)
 		if err != nil {
 			return nil, err
 		}
@@ -357,7 +356,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
-				code, err := simStateReader.ReadAccountCode(sender)
+				code, err := simStateReader.ReadAccountCode(senderAddress)
 				if err != nil {
 					return nil, err
 				}
@@ -380,7 +379,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 			}
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
-				if err := protocol.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
+				if err := protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
 					transactions = transactions[1:]
 					feeTooLowCnt++
 					continue
@@ -418,7 +417,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Updates account in the simulation
 		newAccount.Nonce++
 		newAccount.Balance.Sub(&account.Balance, want)
-		if err := simStateWriter.UpdateAccountData(sender, account, newAccount); err != nil {
+		if err := simStateWriter.UpdateAccountData(senderAddress, account, newAccount); err != nil {
 			return nil, err
 		}
 		// Mark transaction as valid

@@ -368,11 +368,11 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		msg.gasPrice.Set(tx.FeeCap)
 	}
 
-	if msgFrom, err := tx.Sender(s); err != nil {
+	var err error
+	if msg.from, err = tx.Sender(s); err != nil {
 		return nil, err
-	} else {
-		msg.from = accounts.InternAddress(msgFrom)
 	}
+	fmt.Println("FROM 3", msg.from)
 	return &msg, nil
 }
 
@@ -424,24 +424,23 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *DynamicFeeTransaction) cachedSender() (sender common.Address, ok bool) {
-	s := tx.from.Load()
-	if s == nil {
+func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
-func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (tx *DynamicFeeTransaction) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }
 

@@ -472,12 +472,12 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
 
-	senderCodeSize, err := ibs.GetCodeSize(accounts.InternAddress(*aaTxn.SenderAddress))
+	senderCodeSize, err := ibs.GetCodeSize(aaTxn.SenderAddress)
 	if err != nil {
 		return nil, err
 	}
 
-	validationTracer := aa.NewValidationRulesTracer(accounts.InternAddress(*aaTxn.SenderAddress), senderCodeSize != 0)
+	validationTracer := aa.NewValidationRulesTracer(aaTxn.SenderAddress, senderCodeSize != 0)
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
 	ibs.SetHooks(validationTracer.Hooks())
 

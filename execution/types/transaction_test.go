@@ -287,7 +287,7 @@ func TestEIP2930Signer(t *testing.T) {
 		if !errors.Is(err, test.wantSenderErr) {
 			t.Errorf("test %d: wrong Sender error %q", i, err)
 		}
-		if err == nil && sender != keyAddr {
+		if err == nil && sender.Value() != keyAddr {
 			t.Errorf("test %d: wrong sender address %x", i, sender)
 		}
 		signedTx, err := SignTx(test.tx, *test.signer, key)
@@ -372,7 +372,7 @@ func TestRecipientEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if addr != from {
+	if addr != from.Value() {
 		t.Fatal("derived address doesn't match")
 	}
 }
@@ -390,7 +390,7 @@ func TestRecipientNormal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if addr != from {
+	if addr != from.Value() {
 		t.Fatal("derived address doesn't match")
 	}
 }

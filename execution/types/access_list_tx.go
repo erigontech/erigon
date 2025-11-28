@@ -439,12 +439,10 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 		return nil, errors.New("eip-2930 transactions require Berlin")
 	}
 
-	if msgFrom, err := tx.Sender(s); err != nil {
-		return nil, err
-	} else {
-		msg.from = accounts.InternAddress(msgFrom)
-	}
-	return &msg, nil
+	var err error
+	msg.from, err = tx.Sender(s)
+	fmt.Println("FROM 5", msg.from)
+	return &msg, err
 }
 
 func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -505,27 +503,25 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cachedSender() (sender common.Address, ok bool) {
-	s := tx.from.Load()
-	if s == nil {
+func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
 
-var zeroAddr = common.Address{}
-
-func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
+func (tx *AccessListTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() {
+		if !from.IsZero() { // Sender address can never be zero in a transaction with a valid signer
+			return from, nil
 		}
 	}
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }

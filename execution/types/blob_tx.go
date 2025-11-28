@@ -83,35 +83,34 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 	if msg.gasPrice.Gt(stx.FeeCap) {
 		msg.gasPrice.Set(stx.FeeCap)
 	}
-	if msgFrom, err := stx.Sender(s); err != nil {
+	var err error
+	if msg.from, err = stx.Sender(s); err != nil {
 		return nil, err
-	} else {
-		msg.from = accounts.InternAddress(msgFrom)
 	}
+	fmt.Println("FROM 4", msg.from)
 	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
 	return &msg, nil
 }
 
-func (stx *BlobTx) cachedSender() (sender common.Address, ok bool) {
-	s := stx.from.Load()
-	if s == nil {
+func (stx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := stx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
 
-func (stx *BlobTx) Sender(signer Signer) (common.Address, error) {
-	if from := stx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (stx *BlobTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := stx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
-	stx.from.Store(&addr)
+	stx.from = addr
 	return addr, nil
 }
 

@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	libcrypto "github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
@@ -91,10 +92,10 @@ type Transaction interface {
 	// Sender may cache the address, allowing it to be used regardless of
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
-	Sender(Signer) (common.Address, error)
-	cachedSender() (common.Address, bool)
-	GetSender() (common.Address, bool)
-	SetSender(common.Address)
+	Sender(Signer) (accounts.Address, error)
+	cachedSender() (accounts.Address, bool)
+	GetSender() (accounts.Address, bool)
+	SetSender(accounts.Address)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
@@ -103,8 +104,8 @@ type Transaction interface {
 // implementations of different transaction types
 type TransactionMisc struct {
 	// caches
-	hash atomic.Pointer[common.Hash]
-	from atomic.Pointer[common.Address]
+	hash  atomic.Pointer[common.Hash]
+	from accounts.Address
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -401,6 +402,7 @@ func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
+	fmt.Println("MSG", from, dbg.Stack())
 	m := Message{
 		from:             from,
 		to:               to,

@@ -244,7 +244,7 @@ func TestDeriveFields(t *testing.T) {
 				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.Address{}).String())
 			}
 			from, _ := txs[i].Sender(*signer)
-			contractAddress := CreateAddress(from, txs[i].GetNonce())
+			contractAddress := CreateAddress(from.Value(), txs[i].GetNonce())
 			if txs[i].GetTo() == nil && r.ContractAddress != contractAddress {
 				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), contractAddress.String())
 			}

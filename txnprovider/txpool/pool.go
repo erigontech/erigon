@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -938,7 +939,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 
 		var sender common.Address
 		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(sender)
+		txn.SetSender(accounts.InternAddress(sender))
 		txns = append(txns, txn)
 	}
 

@@ -844,7 +844,8 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 				if err != nil {
 					return err
 				}
-				if !bytes.Equal(from[:], senders[j][:]) {
+				fromValue := from.Value()
+				if !bytes.Equal(fromValue[:], senders[j][:]) {
 					logger.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
 				}
 			}

@@ -1299,6 +1299,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address) (*stateObject,
 				return nil, err
 			}
 		} else {
+			fmt.Println("NIL ADDR", addr)
 			sdb.nilAccounts[addr] = struct{}{}
 			if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
 				return sdb.createObject(addr, nil), nil
