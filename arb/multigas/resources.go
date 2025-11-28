@@ -558,11 +558,13 @@ func toWordSize(size uint64) uint64 {
 }
 
 func (z MultiGas) String() string {
-	s := "{"
+	s := "mG:\n\t"
 	for i := 0; i < int(NumResourceKind); i++ {
 		s += fmt.Sprintf("%s: %d, ", ResourceKind(i).String(), z.gas[ResourceKind(i)])
+		if i%4 == 0 && i > 0 {
+			s += "\n\t"
+		}
 	}
-	s += fmt.Sprintf("Total: %d, Refund: %d", z.total, z.refund)
-	s += "}"
+	s += fmt.Sprintf("\nTotal: %d, Refund: %d", z.total, z.refund)
 	return s
 }

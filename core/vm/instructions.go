@@ -1098,6 +1098,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	toAddr := common.Address(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	ogGas := gas
 
 	if !value.IsZero() {
 		gas += params.CallStipend
@@ -1119,7 +1120,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
-	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
 
 	interpreter.returnData = ret
 	return ret, nil
