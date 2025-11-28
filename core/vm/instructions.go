@@ -806,7 +806,7 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 				)
 			}
 		}
-		fmt.Printf("Invalid jump to %d\n", pos.Uint64())
+		fmt.Printf("Invalid jump to %x\n", pos.String())
 		return nil, ErrInvalidJump
 	}
 	*pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
