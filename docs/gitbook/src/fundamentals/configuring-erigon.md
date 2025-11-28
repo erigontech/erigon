@@ -357,8 +357,8 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `16mb`
 * `--torrent.download.rate value`: The download rate in bytes per second.
   * Default: `512mb`
-* `--torrent.webseed.download.rate value`: The download rate for webseeds.
-* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs.
+* `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
+* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
 
 ### Caplin (Consensus Layer)
