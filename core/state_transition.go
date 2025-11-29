@@ -674,10 +674,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 
 		// Refund the gas that was held to limit the amount of computation done.
-		st.gasRemaining += st.calcHeldGasRefund()
+		st.gasRemaining += st.calcHeldGasRefund() // affects .gasUsed()
 
 		if st.evm.ProcessingHook.IsArbitrum() {
-			st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
+			frg := st.evm.ProcessingHook.ForceRefundGas()
+			fmt.Printf("b %d gas used %d force refund gas: %d, remains %d\n",
+				st.evm.Context.BlockNumber, st.gasUsed(), frg, st.gasRemaining)
+			st.gasRemaining += frg
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
 			var refund uint64
 			if nonrefundable < st.gasUsed() {
