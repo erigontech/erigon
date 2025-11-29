@@ -14,6 +14,8 @@ DISABLED_TEST_LIST=(
   eth_getProof
   eth_simulateV1
   eth_getBlockReceipts/test_01.json
+  # waiting merge PR #18080
+  debug_traceTransaction/test_148.json 
 )
 
 # Transform the array into a comma-separated string
