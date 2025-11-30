@@ -162,6 +162,13 @@ jobs:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
+    - name: Upload FD Leak Analysis
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      uses: actions/upload-artifact@v5
+      with:
+        name: fd-leak-analysis
+        path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+
     - name: Delete Erigon Testbed Data Directory
       if: ${{ always() && steps.save_chaindata_step.outputs.chaindata_saved == 'true' }}
       run: |
