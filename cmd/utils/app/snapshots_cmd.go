@@ -1622,7 +1622,10 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max)
+		stepSize := agg.StepSize()
+		minStep := min / stepSize
+		maxStep := max / stepSize
+		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
 	} else {
 		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
 		if err != nil {
