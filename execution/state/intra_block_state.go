@@ -21,6 +21,7 @@
 package state
 
 import (
+	"container/list"
 	"errors"
 	"fmt"
 	"slices"
@@ -28,8 +29,8 @@ import (
 	"strings"
 	"time"
 
-	"os"
-	"sync"
+	// "os"
+	// "sync"
 
 	"github.com/holiman/uint256"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -81,6 +83,10 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
+	// LRU Cache for State Objects
+	lruList *list.List
+	lruMap  map[common.Address]*list.Element
+
 	txIndex  int
 	blockNum uint64
 	logs     []types.Logs
@@ -117,6 +123,8 @@ type IntraBlockState struct {
 	dep                 int
 }
 
+const MaxStateObjectsCacheSize = 10000
+
 // Create a new state from a given trie
 func New(stateReader StateReader) *IntraBlockState {
 	return &IntraBlockState{
@@ -124,6 +132,8 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[common.Address]*stateObject{},
 		stateObjectsDirty: map[common.Address]struct{}{},
 		nilAccounts:       map[common.Address]struct{}{},
+		lruList:           list.New(),
+		lruMap:            map[common.Address]*list.Element{},
 		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
@@ -146,12 +156,17 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 	state := New(sdb.stateReader)
 	state.stateObjects = make(map[common.Address]*stateObject, len(sdb.stateObjectsDirty))
 	state.stateObjectsDirty = make(map[common.Address]struct{}, len(sdb.stateObjectsDirty))
+	state.lruList = list.New()
+	state.lruMap = make(map[common.Address]*list.Element)
 
 	for addr := range sdb.journal.dirties {
 		if object, exist := sdb.stateObjects[addr]; exist {
 			state.stateObjects[addr] = object.deepCopy(state)
 
 			state.stateObjectsDirty[addr] = struct{}{} // Mark the copy dirty to force internal (code/state) commits
+			// Add to LRU
+			elem := state.lruList.PushFront(addr)
+			state.lruMap[addr] = elem
 		}
 	}
 
@@ -161,6 +176,11 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 	for addr := range sdb.stateObjectsDirty {
 		if _, exist := state.stateObjects[addr]; !exist {
 			state.stateObjects[addr] = sdb.stateObjects[addr].deepCopy(state)
+			// Add to LRU if not already present
+			if _, ok := state.lruMap[addr]; !ok {
+				elem := state.lruList.PushFront(addr)
+				state.lruMap[addr] = elem
+			}
 		}
 		state.stateObjectsDirty[addr] = struct{}{}
 	}
@@ -280,9 +300,17 @@ func (sdb *IntraBlockState) HasStorage(addr common.Address) (bool, error) {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
+	// 就在清空的前一刻，统计到底攒了多少的内容。
+	// if len(sdb.stateObjects) > 0 {
+	// 	log.Info("IntraBlockState Reset Stats", "object_count", len(sdb.stateObjects), "dirty_count", len(sdb.stateObjectsDirty))
+	// }
+	// log.Info("IntraBlockState Reset DEBUG", "msg", "I am here")
+	// 上面的代码一直不起作用，我也不知道怎么回事，可能需要在FinalizeTx中埋点了。
 	sdb.nilAccounts = map[common.Address]struct{}{}
 	sdb.stateObjects = map[common.Address]*stateObject{}
 	sdb.stateObjectsDirty = map[common.Address]struct{}{}
+	sdb.lruList = list.New()
+	sdb.lruMap = map[common.Address]*list.Element{}
 	for i := range sdb.logs {
 		clear(sdb.logs[i]) // free p¬ointers
 		sdb.logs[i] = sdb.logs[i][:0]
@@ -673,9 +701,9 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr common.Address) (common
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr common.Address, key common.Hash, value *uint256.Int) error {
 	// --- 埋点开始 ---
-    sdb.logAccess(addr, key, "READ")
-    // --- 埋点结束 ---
-	
+	// sdb.logAccess(addr, key, "READ")
+	// --- 埋点结束 ---
+
 	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
@@ -1074,8 +1102,8 @@ func (sdb *IntraBlockState) Incarnation() int {
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr common.Address, key common.Hash, value uint256.Int) error {
 	// --- 埋点开始 ---
-    sdb.logAccess(addr, key, "WRITE")
-    // --- 埋点结束 ---
+	// sdb.logAccess(addr, key, "WRITE")
+	// --- 埋点结束 ---
 	return sdb.setState(addr, key, value, false)
 }
 
@@ -1231,6 +1259,10 @@ func (sdb *IntraBlockState) stateObjectForAccount(addr common.Address, account *
 
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, error) {
 	if so, ok := sdb.stateObjects[addr]; ok {
+		// On Hit: Move to front of LRU list
+		if elem, ok := sdb.lruMap[addr]; ok {
+			sdb.lruList.MoveToFront(elem)
+		}
 		return so, nil
 	}
 
@@ -1313,6 +1345,27 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 		obj.code = code
 	}
 	sdb.setStateObject(addr, obj)
+
+	// On Miss: Evict if necessary
+	if sdb.lruList.Len() >= MaxStateObjectsCacheSize {
+		// Eviction Logic: Remove from Back
+		back := sdb.lruList.Back()
+		if back != nil {
+			evictAddr := back.Value.(common.Address)
+			// Check: Ensure not in stateObjectsDirty
+			if _, dirty := sdb.stateObjectsDirty[evictAddr]; !dirty {
+				// Action: Delete from stateObjects, lruMap, and lruList
+				delete(sdb.stateObjects, evictAddr)
+				delete(sdb.lruMap, evictAddr)
+				sdb.lruList.Remove(back)
+			}
+		}
+	}
+
+	// Add new object to Front
+	elem := sdb.lruList.PushFront(addr)
+	sdb.lruMap[addr] = elem
+
 	return obj, nil
 }
 
@@ -1601,6 +1654,18 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			delete(sdb.versionedReads, addr)
 		}
 	}
+	// =========== 日志代码开始 ============
+	// currentSize := len(sdb.stateObjects)
+	// // 如果缓存内容很长，就输出看看。
+	// if currentSize > 100 {
+	// 	log.Info("Baseline Memory Stats",
+	// 		"tx_index", sdb.txIndex,
+	// 		"object_count", currentSize,
+	// 		"dirty_count", len(sdb.stateObjectsDirty),
+	// 		"caller", "FinalizeTx",
+	// 	)
+	// }
+	// =========== 日志代码结束 ============
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
@@ -2012,42 +2077,42 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 
 // =================== 科研实验代码开始 ===================
 
-var (
-	// 定义全局文件句柄和锁
-	researchLogFile *os.File
-	researchOnce    sync.Once
-	researchLock    sync.Mutex
-)
+// var (
+// 	// 定义全局文件句柄和锁
+// 	researchLogFile *os.File
+// 	researchOnce    sync.Once
+// 	researchLock    sync.Mutex
+// )
 
-// logAccess 是我们用来记录日志的辅助函数
-func (sdb *IntraBlockState) logAccess(addr common.Address, key common.Hash, opType string) {
-	// 1. 懒加载：只在第一次调用时创建文件
-	researchOnce.Do(func() {
-		// 注意：这里硬编码了你的路径，实验代码没关系
-		filePath := "/home/tianyumao/workspace/transaction-replay/access_log.csv"
-		
-		// 打开文件，追加模式 | 创建模式 | 只写模式
-		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Printf("❌ [Experiment Error] Cannot create log file: %v\n", err)
-			return
-		}
-		researchLogFile = f
-		
-		// 写入 CSV 表头
-		researchLogFile.WriteString("BlockNum,TxIndex,Address,SlotKey,Type\n")
-		fmt.Printf("✅ [Experiment] Logging started at: %s\n", filePath)
-	})
+// // logAccess 是我们用来记录日志的辅助函数
+// func (sdb *IntraBlockState) logAccess(addr common.Address, key common.Hash, opType string) {
+// 	// 1. 懒加载：只在第一次调用时创建文件
+// 	researchOnce.Do(func() {
+// 		// 注意：这里硬编码了你的路径，实验代码没关系
+// 		filePath := "/home/tianyumao/workspace/transaction-replay/access_log.csv"
 
-	if researchLogFile != nil {
-		researchLock.Lock()
-		defer researchLock.Unlock()
+// 		// 打开文件，追加模式 | 创建模式 | 只写模式
+// 		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+// 		if err != nil {
+// 			fmt.Printf("❌ [Experiment Error] Cannot create log file: %v\n", err)
+// 			return
+// 		}
+// 		researchLogFile = f
 
-		// 格式：区块号, 交易索引, 合约地址, 存储槽Key, 操作类型(READ/WRITE)
-		// 注意：sdb.blockNum 和 sdb.txIndex 是 IntraBlockState 的字段
-		fmt.Fprintf(researchLogFile, "%d,%d,%s,%s,%s\n", 
-			sdb.blockNum, sdb.txIndex, addr.Hex(), key.Hex(), opType)
-	}
-}
+// 		// 写入 CSV 表头
+// 		researchLogFile.WriteString("BlockNum,TxIndex,Address,SlotKey,Type\n")
+// 		fmt.Printf("✅ [Experiment] Logging started at: %s\n", filePath)
+// 	})
+
+// 	if researchLogFile != nil {
+// 		researchLock.Lock()
+// 		defer researchLock.Unlock()
+
+// 		// 格式：区块号, 交易索引, 合约地址, 存储槽Key, 操作类型(READ/WRITE)
+// 		// 注意：sdb.blockNum 和 sdb.txIndex 是 IntraBlockState 的字段
+// 		fmt.Fprintf(researchLogFile, "%d,%d,%s,%s,%s\n",
+// 			sdb.blockNum, sdb.txIndex, addr.Hex(), key.Hex(), opType)
+// 	}
+// }
+
 // =================== 科研实验代码结束 ===================
-
