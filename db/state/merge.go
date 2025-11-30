@@ -359,26 +359,48 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64) ([]byte, error) {
+func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64, dedupEF map[uint64]struct{}) ([]byte, error) {
 	preSeq := multiencseq.ReadMultiEncSeq(preBaseNum, preval)
 	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
 	preIt := preSeq.Iterator(0)
 	efIt := seq.Iterator(0)
-	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max())
+
+	var toInsert []uint64
+
 	for preIt.HasNext() {
 		v, err := preIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newSeq.AddOffset(v)
+
+		if dedupEF != nil {
+			if _, ok := dedupEF[v]; ok {
+				continue
+			}
+		}
+
+		toInsert = append(toInsert, v)
 	}
 	for efIt.HasNext() {
 		v, err := efIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newSeq.AddOffset(v)
+
+		if dedupEF != nil {
+			if _, ok := dedupEF[v]; ok {
+				continue
+			}
+		}
+
+		toInsert = append(toInsert, v)
 	}
+
+	newSeq := multiencseq.NewBuilder(outBaseNum, uint64(len(toInsert)), seq.Max())
+	for i := range toInsert {
+		newSeq.AddOffset(toInsert[i])
+	}
+
 	newSeq.Build()
 	return newSeq.AppendBytes(buf), nil
 }
@@ -584,7 +606,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*FilesItem, error) {
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet, dedupKeyEFs map[string]map[uint64]struct{}) (*FilesItem, error) {
 	if startTxNum == endTxNum {
 		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
 	}
@@ -660,13 +682,27 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		// Pre-rebase the first sequence
 		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
 		preIt := preSeq.Iterator(0)
-		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max())
+
+		var toInsert []uint64
+
 		for preIt.HasNext() {
 			v, err := preIt.Next()
 			if err != nil {
 				return nil, err
 			}
-			newSeq.AddOffset(v)
+
+			if dedupKeyEFs != nil && dedupKeyEFs[string(lastKey)] != nil {
+				if _, ok := dedupKeyEFs[string(lastKey)][v]; ok {
+					continue
+				}
+			}
+
+			toInsert = append(toInsert, v)
+		}
+
+		newSeq := multiencseq.NewBuilder(startTxNum, uint64(len(toInsert)), preSeq.Max())
+		for i := range toInsert {
+			newSeq.AddOffset(toInsert[i])
 		}
 		newSeq.Build()
 		lastVal = newSeq.AppendBytes(nil)
@@ -676,7 +712,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
-				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum); err != nil {
+				var dedupEF map[uint64]struct{}
+
+				if dedupKeyEFs != nil {
+					dedupEF = dedupKeyEFs[string(lastKey)]
+				}
+
+				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum, dedupEF); err != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, err)
 				}
 			} else {
@@ -750,7 +792,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}()
 
-	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
+	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps, nil); err != nil {
 		return nil, nil, err
 	}
 	if r.history.needMerge {
@@ -787,7 +829,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			comp.DisableFsync()
 		}
-		pagedWr := ht.datarWriter(comp)
+		pagedWr := ht.datarWriter(comp, ht.h.HistoryValuesOnCompressedPage)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -865,7 +907,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps, OverrideCompactOpts{}); err != nil {
 			return nil, nil, err
 		}
 
