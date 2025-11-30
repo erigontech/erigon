@@ -41,6 +41,7 @@ import (
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -321,7 +322,7 @@ func (s *simulator) sanitizeCall(
 	if args.Nonce == nil {
 		nonce, err := intraBlockState.GetNonce(args.FromOrEmpty())
 		if err != nil {
-			return fmt.Errorf("failed to get nonce for %s: %w", args.FromOrEmpty().Hex(), err)
+			return fmt.Errorf("failed to get nonce for %s: %w", args.FromOrEmpty(), err)
 		}
 		args.Nonce = (*hexutil.Uint64)(&nonce)
 	}
@@ -468,7 +469,7 @@ func (s *simulator) simulateBlock(
 	if !ok {
 		return nil, nil, errors.New("rules engine reader does not support full rules.Engine")
 	}
-	systemCallCustom := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+	systemCallCustom := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
 	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
@@ -503,7 +504,7 @@ func (s *simulator) simulateBlock(
 	if s.chainConfig.IsShanghai(header.Time) {
 		withdrawals = types.Withdrawals{}
 	}
-	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
+	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
@@ -659,7 +660,7 @@ func (s *simulator) simulateCall(
 	}
 	// Set the sender just to make it appear in the result if it was provided in the request.
 	if call.From != nil {
-		txn.SetSender(*call.From)
+		txn.SetSender(accounts.InternAddress(*call.From))
 	}
 	return &callResult, txn, receipt, nil
 }

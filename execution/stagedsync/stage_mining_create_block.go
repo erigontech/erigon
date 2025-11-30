@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type MiningBlock struct {
@@ -162,9 +163,9 @@ func StageMiningCreateBlockCfg(
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
-	*current = MiningBlock{}          // always start with a clean state
-	var txPoolLocals []common.Address //txPoolV2 has no concept of local addresses (yet?)
-	coinbase := cfg.miner.MiningConfig.Etherbase
+	*current = MiningBlock{}            // always start with a clean state
+	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
+	coinbase := accounts.InternAddress(cfg.miner.MiningConfig.Etherbase)
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -190,7 +191,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 			return errors.New("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
-		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient
+		coinbase = accounts.InternAddress(cfg.blockBuilderParameters.SuggestedFeeRecipient)
 	}
 
 	blockNum := executionAt + 1
@@ -248,7 +249,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 		header.GasLimit = parent.GasLimit
 	}
 
-	header.Coinbase = coinbase
+	header.Coinbase = coinbase.Value()
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
@@ -357,7 +358,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 	return nil
 }
 
-func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coinbase accounts.Address, txPoolLocals []accounts.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
 	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {

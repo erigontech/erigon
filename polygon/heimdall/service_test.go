@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 )
@@ -349,8 +350,8 @@ func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
 		require.Len(t, haveProducers.Validators, len(wantProducers.Signers), errInfoMsgArgs...)
 		for _, signer := range wantProducers.Signers {
 			wantDifficulty := signer.Difficulty
-			_, producer := haveProducers.GetByAddress(signer.Signer)
-			haveDifficulty, err := haveProducers.Difficulty(producer.Address)
+			_, producer := haveProducers.GetByAddress(accounts.InternAddress(signer.Signer))
+			haveDifficulty, err := haveProducers.Difficulty(accounts.InternAddress(producer.Address))
 			require.NoError(t, err)
 
 			errInfoMsgArgs = []interface{}{

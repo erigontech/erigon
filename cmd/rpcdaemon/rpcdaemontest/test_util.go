@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -435,7 +436,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
-			u256.Num0, 50000, u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 50000, &u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {
@@ -502,8 +503,8 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := crypto.Keccak256Hash(initCode)
-	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash)
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
@@ -534,14 +535,14 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to BB, to recreate AA
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		tx, _ = types.SignTx(types.NewTransaction(2, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {

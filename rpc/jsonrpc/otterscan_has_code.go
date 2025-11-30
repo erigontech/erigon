@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -41,7 +42,7 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 	if err != nil {
 		return false, err
 	}
-	acc, err := reader.ReadAccountData(address)
+	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
 	if acc == nil || err != nil {
 		return false, err
 	}

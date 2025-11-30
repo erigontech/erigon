@@ -26,8 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -204,8 +204,8 @@ func enable1153(jt *JumpTable) {
 // opTload implements TLOAD opcode
 func opTload(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
-	hash := common.Hash(loc.Bytes32())
-	val := interpreter.evm.IntraBlockState().GetTransientState(scope.Contract.Address(), hash)
+	key := accounts.InternKey(loc.Bytes32())
+	val := interpreter.evm.IntraBlockState().GetTransientState(scope.Contract.Address(), key)
 	loc.SetBytes(val.Bytes())
 	return pc, nil, nil
 }
@@ -217,7 +217,7 @@ func opTstore(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 	}
 	loc := scope.Stack.pop()
 	val := scope.Stack.pop()
-	interpreter.evm.IntraBlockState().SetTransientState(scope.Contract.Address(), loc.Bytes32(), val)
+	interpreter.evm.IntraBlockState().SetTransientState(scope.Contract.Address(), accounts.InternKey(loc.Bytes32()), val)
 	return pc, nil, nil
 }
 

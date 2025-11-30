@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 )
 
@@ -34,21 +35,21 @@ type journalEntry interface {
 	revert(*IntraBlockState) error
 
 	// dirtied returns the Ethereum address modified by this journal entry.
-	dirtied() (common.Address, bool)
+	dirtied() (accounts.Address, bool)
 }
 
 // journal contains the list of state modifications applied since the last state
 // commit. These are tracked to be able to be reverted in case of an execution
 // exception or revertal request.
 type journal struct {
-	entries []journalEntry         // Current changes tracked by the journal
-	dirties map[common.Address]int // Dirty accounts and the number of changes
+	entries []journalEntry           // Current changes tracked by the journal
+	dirties map[accounts.Address]int // Dirty accounts and the number of changes
 }
 
 // newJournal create a new initialized journal.
 func newJournal() *journal {
 	return &journal{
-		dirties: make(map[common.Address]int),
+		dirties: make(map[accounts.Address]int),
 	}
 }
 func (j *journal) Reset() {
@@ -84,7 +85,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 // dirty explicitly sets an address to dirty, even if the change entries would
 // otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
 // precompile consensus exception.
-func (j *journal) dirty(addr common.Address) {
+func (j *journal) dirty(addr accounts.Address) {
 	j.dirties[addr]++
 }
 
@@ -96,14 +97,14 @@ func (j *journal) length() int {
 type (
 	// Changes to the account trie.
 	createObjectChange struct {
-		account common.Address
+		account accounts.Address
 	}
 	resetObjectChange struct {
-		account common.Address
+		account accounts.Address
 		prev    *stateObject
 	}
 	selfdestructChange struct {
-		account     common.Address
+		account     accounts.Address
 		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 		wasCommited bool
@@ -111,37 +112,37 @@ type (
 
 	// Changes to individual accounts.
 	balanceChange struct {
-		account     common.Address
+		account     accounts.Address
 		prev        uint256.Int
 		wasCommited bool
 	}
 	balanceIncrease struct {
-		account  common.Address
+		account  accounts.Address
 		increase uint256.Int
 	}
 	balanceIncreaseTransfer struct {
 		bi *BalanceIncrease
 	}
 	nonceChange struct {
-		account     common.Address
+		account     accounts.Address
 		prev        uint64
 		wasCommited bool
 	}
 	storageChange struct {
-		account     common.Address
-		key         common.Hash
+		account     accounts.Address
+		key         accounts.StorageKey
 		prevalue    uint256.Int
 		wasCommited bool
 	}
 	fakeStorageChange struct {
-		account  common.Address
-		key      common.Hash
+		account  accounts.Address
+		key      accounts.StorageKey
 		prevalue uint256.Int
 	}
 	codeChange struct {
-		account     common.Address
+		account     accounts.Address
 		prevcode    []byte
-		prevhash    common.Hash
+		prevhash    accounts.CodeHash
 		wasCommited bool
 	}
 
@@ -153,21 +154,21 @@ type (
 		txIndex int
 	}
 	touchChange struct {
-		account common.Address
+		account accounts.Address
 	}
 
 	// Changes to the access list
 	accessListAddAccountChange struct {
-		address common.Address
+		address accounts.Address
 	}
 	accessListAddSlotChange struct {
-		address common.Address
-		slot    common.Hash
+		address accounts.Address
+		slot    accounts.StorageKey
 	}
 
 	transientStorageChange struct {
-		account  common.Address
-		key      common.Hash
+		account  accounts.Address
+		key      accounts.StorageKey
 		prevalue uint256.Int
 	}
 )
@@ -184,7 +185,7 @@ func (ch createObjectChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch createObjectChange) dirtied() (common.Address, bool) {
+func (ch createObjectChange) dirtied() (accounts.Address, bool) {
 	return ch.account, true
 }
 
@@ -193,8 +194,8 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch resetObjectChange) dirtied() (common.Address, bool) {
-	return common.Address{}, false
+func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
@@ -203,7 +204,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 		return err
 	}
 	if obj != nil {
-		trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+		trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 		var tracePrefix string
 		if trace {
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
@@ -242,17 +243,17 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch selfdestructChange) dirtied() (common.Address, bool) {
+func (ch selfdestructChange) dirtied() (accounts.Address, bool) {
 	return ch.account, true
 }
 
-var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
+var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
 func (ch touchChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch touchChange) dirtied() (common.Address, bool) { return ch.account, true }
+func (ch touchChange) dirtied() (accounts.Address, bool) { return ch.account, true }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(ch.account)
@@ -260,7 +261,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 		return err
 	}
 
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
@@ -290,7 +291,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch balanceChange) dirtied() (common.Address, bool) {
+func (ch balanceChange) dirtied() (accounts.Address, bool) {
 	return ch.account, true
 }
 
@@ -305,12 +306,12 @@ func (ch balanceIncrease) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch balanceIncrease) dirtied() (common.Address, bool) {
+func (ch balanceIncrease) dirtied() (accounts.Address, bool) {
 	return ch.account, true
 }
 
-func (ch balanceIncreaseTransfer) dirtied() (common.Address, bool) {
-	return common.Address{}, false
+func (ch balanceIncreaseTransfer) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
@@ -323,7 +324,7 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 		return err
 	}
 
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
@@ -351,7 +352,7 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch nonceChange) dirtied() (common.Address, bool) {
+func (ch nonceChange) dirtied() (accounts.Address, bool) {
 	return ch.account, true
 }
 
@@ -361,7 +362,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		return err
 	}
 
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
@@ -405,7 +406,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch codeChange) dirtied() (common.Address, bool) {
+func (ch codeChange) dirtied() (accounts.Address, bool) {
 	return ch.account, true
 }
 
@@ -415,14 +416,13 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		return err
 	}
 
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account))
+	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
 	var val uint256.Int
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		var commited uint256.Int
-		obj.GetState(ch.key, &val)
-		obj.GetCommittedState(ch.key, &commited)
+		val, _ = obj.GetState(ch.key)
+		commited, _ := obj.GetCommittedState(ch.key)
 		fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
 	}
 	if s.versionMap != nil {
@@ -448,7 +448,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch storageChange) dirtied() (common.Address, bool) {
+func (ch storageChange) dirtied() (accounts.Address, bool) {
 	return ch.account, true
 }
 
@@ -461,7 +461,7 @@ func (ch fakeStorageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch fakeStorageChange) dirtied() (common.Address, bool) {
+func (ch fakeStorageChange) dirtied() (accounts.Address, bool) {
 	return ch.account, true
 }
 
@@ -470,8 +470,8 @@ func (ch transientStorageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch transientStorageChange) dirtied() (common.Address, bool) {
-	return common.Address{}, false
+func (ch transientStorageChange) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 func (ch refundChange) revert(s *IntraBlockState) error {
@@ -479,8 +479,8 @@ func (ch refundChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch refundChange) dirtied() (common.Address, bool) {
-	return common.Address{}, false
+func (ch refundChange) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) error {
@@ -496,8 +496,8 @@ func (ch addLogChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch addLogChange) dirtied() (common.Address, bool) {
-	return common.Address{}, false
+func (ch addLogChange) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
@@ -514,8 +514,8 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch accessListAddAccountChange) dirtied() (common.Address, bool) {
-	return common.Address{}, false
+func (ch accessListAddAccountChange) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
@@ -523,6 +523,6 @@ func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch accessListAddSlotChange) dirtied() (common.Address, bool) {
-	return common.Address{}, false
+func (ch accessListAddSlotChange) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }

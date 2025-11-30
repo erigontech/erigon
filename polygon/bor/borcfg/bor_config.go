@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // BorConfig is the rules engine configs for Matic bor based sealing.
@@ -190,16 +191,16 @@ func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.StateSyncConfirmationDelay), number)
 }
 
-func (c *BorConfig) CalculateCoinbase(number uint64) common.Address {
+func (c *BorConfig) CalculateCoinbase(number uint64) accounts.Address {
 	if c.Coinbase != nil {
-		return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.Coinbase), number)
+		return accounts.InternAddress(chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.Coinbase), number))
 	} else {
-		return common.Address{}
+		return accounts.ZeroAddress
 	}
 }
 
-func (c *BorConfig) StateReceiverContractAddress() common.Address {
-	return common.HexToAddress(c.StateReceiverContract)
+func (c *BorConfig) StateReceiverContractAddress() accounts.Address {
+	return accounts.InternAddress(common.HexToAddress(c.StateReceiverContract))
 }
 
 type sprint struct {

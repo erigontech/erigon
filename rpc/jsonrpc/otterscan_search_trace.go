@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -97,7 +98,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, err
 	}
 	header := block.Header()
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, nil, chainConfig)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, chainConfig)
 	rules := blockContext.Rules(chainConfig)
 	found := false
 	for idx, txn := range block.Transactions() {
@@ -110,7 +111,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 
-		tracer := NewTouchTracer(searchAddr)
+		tracer := NewTouchTracer(accounts.InternAddress(searchAddr))
 		ibs.SetHooks(tracer.TracingHooks())
 		txContext := protocol.NewEVMTxContext(msg)
 

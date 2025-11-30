@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader services.FullBlockReader) (chan uint64, context.CancelFunc) {
@@ -76,36 +77,37 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 	senders := block.Body().SendersFromTxs()
 
 	for _, sender := range senders {
-		a, _ := stateReader.ReadAccountData(sender)
+		a, _ := stateReader.ReadAccountData(accounts.InternAddress(sender))
 		if a == nil {
 			continue
 		}
 
 		//Code domain using .bt index - means no false-positives
-		if code, _ := stateReader.ReadAccountCode(sender); len(code) > 0 {
+		if code, _ := stateReader.ReadAccountCode(accounts.InternAddress(sender)); len(code) > 0 {
 			_, _ = code[0], code[len(code)-1]
 		}
 	}
 
 	for _, txn := range block.Transactions() {
-		to := txn.GetTo()
-		if to != nil {
-			a, _ := stateReader.ReadAccountData(*to)
+		toaddr := txn.GetTo()
+		if toaddr != nil {
+			to := accounts.InternAddress(*toaddr)
+			a, _ := stateReader.ReadAccountData(to)
 			if a == nil {
 				continue
 			}
 			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
 			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
 			//}
-			if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
+			if code, _ := stateReader.ReadAccountCode(to); len(code) > 0 {
 				_, _ = code[0], code[len(code)-1]
 			}
 
 			for _, list := range txn.GetAccessList() {
-				stateReader.ReadAccountData(list.Address)
+				stateReader.ReadAccountData(accounts.InternAddress(list.Address))
 				if len(list.StorageKeys) > 0 {
 					for _, slot := range list.StorageKeys {
-						stateReader.ReadAccountStorage(list.Address, slot)
+						stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), accounts.InternKey(slot))
 					}
 				}
 			}
@@ -113,7 +115,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 		}
 
 	}
-	_, _ = stateReader.ReadAccountData(block.Coinbase())
+	_, _ = stateReader.ReadAccountData(accounts.InternAddress(block.Coinbase()))
 
 	return nil
 }

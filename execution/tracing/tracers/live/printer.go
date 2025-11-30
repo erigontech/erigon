@@ -7,12 +7,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func init() {
@@ -58,11 +58,11 @@ func (p *Printer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpCont
 	fmt.Printf("OnFault: pc=%v, op=%v, gas=%v, cost=%v, depth=%v, err=%v\n", pc, op, gas, cost, depth, err)
 }
 
-func (p *Printer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (p *Printer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	fmt.Printf("CaptureEnter: depth=%v, typ=%v from=%v, to=%v, input=%s, gas=%v, value=%v\n", depth, typ, from, to, hexutil.Bytes(input), gas, value)
 }
 
-func (p *Printer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (p *Printer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	buf, err := json.Marshal(tx)
 	if err != nil {
 		fmt.Printf("err: %v\n", err)
@@ -101,19 +101,19 @@ func (p *Printer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 	fmt.Printf("OnGenesisBlock: b=%v, allocLength=%d\n", b.NumberU64(), len(alloc))
 }
 
-func (p *Printer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
+func (p *Printer) OnBalanceChange(a accounts.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	fmt.Printf("OnBalanceChange: a=%v, prev=%v, new=%v\n", a, prev, new)
 }
 
-func (p *Printer) OnNonceChange(a common.Address, prev, new uint64) {
+func (p *Printer) OnNonceChange(a accounts.Address, prev, new uint64) {
 	fmt.Printf("OnNonceChange: a=%v, prev=%v, new=%v\n", a, prev, new)
 }
 
-func (p *Printer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
+func (p *Printer) OnCodeChange(a accounts.Address, prevCodeHash accounts.CodeHash, prev []byte, codeHash accounts.CodeHash, code []byte) {
 	fmt.Printf("OnCodeChange: a=%v, prevCodeHash=%v, prev=%s, codeHash=%v, code=%s\n", a, prevCodeHash, hexutil.Bytes(prev), codeHash, hexutil.Bytes(code))
 }
 
-func (p *Printer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {
+func (p *Printer) OnStorageChange(a accounts.Address, k accounts.StorageKey, prev, new uint256.Int) {
 	fmt.Printf("OnStorageChange: a=%v, k=%v, prev=%v, new=%v\n", a, k, prev, new)
 }
 

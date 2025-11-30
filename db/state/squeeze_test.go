@@ -138,7 +138,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -380,7 +380,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     *uint256.NewInt(rnd.Uint64()),
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -481,7 +481,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -526,7 +526,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -573,7 +573,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)

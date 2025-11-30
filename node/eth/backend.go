@@ -97,6 +97,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
@@ -868,7 +869,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 
-	var signatures *lru.ARCCache[common.Hash, common.Address]
+	var signatures *lru.ARCCache[common.Hash, accounts.Address]
 
 	if bor, ok := backend.engine.(*bor.Bor); ok {
 		signatures = bor.Signatures

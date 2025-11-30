@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -59,7 +60,7 @@ func (l *JSONLogger) Tracer() *tracers.Tracer {
 	}
 }
 
-func (l *JSONLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (l *JSONLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	l.env = env
 }
 
