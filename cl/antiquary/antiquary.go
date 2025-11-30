@@ -139,13 +139,9 @@ func (a *Antiquary) Loop() error {
 		for !time.Now().Add(completionEpoch).Before(progress) && !a.backfilled.Load() {
 			select {
 			case <-reCheckTicker.C:
-				completedReply, err := a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
-				if err != nil {
-					return err
-				}
-				if !completedReply.Completed {
-					progress = time.Now() // reset the progress if we are not completed
-				}
+				// We were waiting here previously for torrents to be completed, but they should be already
+				// completed when added.
+				progress = time.Now() // reset the progress if we are not completed
 			case <-a.ctx.Done():
 			}
 		}

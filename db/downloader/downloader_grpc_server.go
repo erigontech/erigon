@@ -21,13 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sync/atomic"
-	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -50,23 +47,11 @@ type GrpcServer struct {
 	d *Downloader
 }
 
-func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *downloaderproto.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	return &emptypb.Empty{}, nil
-}
-
 // Add files to the downloader. Existing/New files - both ok.
-// "download once" invariant: means after initial download finiwh - future restart/upgrade/downgrade will not download files (our "fast restart" feature)
+// "download once" invariant: means after initial download finish - future restart/upgrade/downgrade will not download files (our "fast restart" feature)
 // After "download once": Erigon will produce and seed new files
 // Downloader will be able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *downloaderproto.AddRequest) (*emptypb.Empty, error) {
-	if len(request.Items) == 0 {
-		// Avoid logging initializing 0 torrents.
-		return nil, nil
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	defer s.d.ResetLogInterval()
-
 	{
 		var names []string
 		for _, name := range request.Items {
@@ -78,55 +63,28 @@ func (s *GrpcServer) Add(ctx context.Context, request *downloaderproto.AddReques
 		s.d.logger.Debug("[snapshots] Downloader.Add", "files", names)
 	}
 
-	var progress atomic.Int32
+	var preverifiedSnapshots []PreverifiedSnapshot
 
-	go func() {
-		logProgress := func() {
-			log.Info("[snapshots] initializing downloads", "torrents", fmt.Sprintf("%d/%d", progress.Load(), len(request.Items)))
-		}
-		defer logProgress()
-		interval := time.Second
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(interval):
-				if interval < time.Minute {
-					interval *= 2
-				}
-			}
-			logProgress()
-		}
-	}()
-
-	for i, it := range request.Items {
-		progress.Store(int32(i))
+	for _, it := range request.Items {
 		if it.Path == "" {
 			return nil, errors.New("field 'path' is required")
 		}
-
 		if it.TorrentHash == nil {
 			// if we don't have the torrent hash then we seed a new snapshot
-			// TODO: Make the torrent in place then call addPreverifiedTorrent.
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
 			}
 		} else {
-			// There's no circuit breaker in Downloader.RequestSnapshot.
-			if ctx.Err() != nil {
-				return nil, context.Cause(ctx)
-			}
+			// TODO: Handle this case as a separate call to avoid mistakes.
 			ih := Proto2InfoHash(it.TorrentHash)
-			if err := s.d.RequestSnapshot(ih, it.Path); err != nil {
-				err = fmt.Errorf("requesting snapshot %s with infohash %v: %w", it.Path, ih, err)
-				return nil, err
-			}
+			preverifiedSnapshots = append(preverifiedSnapshots, PreverifiedSnapshot{
+				InfoHash: ih,
+				Name:     it.Path,
+			})
 		}
 	}
-	s.d.afterAdd()
-	progress.Store(int32(len(request.Items)))
 
-	return &emptypb.Empty{}, nil
+	return &emptypb.Empty{}, s.d.DownloadSnapshots(ctx, preverifiedSnapshots, request.LogTarget)
 }
 
 // Delete - stop seeding, remove file, remove .torrent

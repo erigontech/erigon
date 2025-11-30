@@ -1072,11 +1072,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if !config.Snapshot.NoDownloader && backend.downloaderClient == nil {
 			panic("expect to have non-nil downloaderClient")
 		}
-		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
-			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-				backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
-				blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
-			)), nil, nil, backend.logger, stages.ModeApplyingBlocks)
+		backend.polygonDownloadSync = stagedsync.New(
+			backend.config.Sync,
+			stagedsync.DownloadSyncStages(
+				backend.sentryCtx, stagedsync.StageSnapshotsCfg(
+					backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
+					blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
+				)),
+			nil,
+			nil,
+			backend.logger,
+			stages.ModeApplyingBlocks,
+		)
 
 		// these range extractors set the db to the local db instead of the chain db
 		// TODO this needs be refactored away by having a retire/merge component per
@@ -1312,8 +1319,6 @@ func (s *Ethereum) setUpSnapDownloader(
 		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
 			return nil
 		}
-		// Always disable the asynchronous adder. We will do it here to support downloader.verify.
-		downloaderCfg.AddTorrentsFromDisk = false
 
 		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
 		if err != nil {
@@ -1322,6 +1327,9 @@ func (s *Ethereum) setUpSnapDownloader(
 		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
 		// start embedded Downloader
+		// TODO: Not sure if we want to add only the completed here, or add after we finish initial
+		// sync checks. Looks like we'd need to pass this or a callback all the way up into the sync
+		// stage somewhere?
 		err = s.downloader.AddTorrentsFromDisk(ctx)
 		if err != nil {
 			return fmt.Errorf("adding torrents from disk: %w", err)
