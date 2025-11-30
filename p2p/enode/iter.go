@@ -207,17 +207,16 @@ func (m *FairMix) Close() {
 // Next returns a node from a random source.
 func (m *FairMix) Next() bool {
 	m.cur = nil
-
-	var timeout <-chan time.Time
-	if m.timeout >= 0 {
-		timer := time.NewTimer(m.timeout)
-		timeout = timer.C
-		defer timer.Stop()
-	}
 	for {
 		source := m.pickSource()
 		if source == nil {
 			return m.nextFromAny()
+		}
+		var timeout <-chan time.Time
+		if source.timeout >= 0 {
+			timer := time.NewTimer(source.timeout)
+			timeout = timer.C
+			defer timer.Stop()
 		}
 		select {
 		case n, ok := <-source.next:
