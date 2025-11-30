@@ -37,8 +37,6 @@ DISABLED_TEST_LIST=(
   web3_clientVersion/test_1.json
   # test disable needs debug
   eth_getProof/test_24.json
-  # waiting merge PR #18080
-  debug_traceTransaction/test_148.json 
 )
 
 # Transform the array into a comma-separated string
