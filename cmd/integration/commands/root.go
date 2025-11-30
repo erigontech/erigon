@@ -64,7 +64,7 @@ var rootCmd = &cobra.Command{
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
-		defer debug.Exit()
+		debug.Exit()
 	},
 }
 
