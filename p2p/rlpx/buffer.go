@@ -96,8 +96,17 @@ func (b *writeBuffer) reset() {
 
 func (b *writeBuffer) appendZero(n int) []byte {
 	offset := len(b.data)
+	newLen := offset + n
+	if cap(b.data) >= newLen {
+		// Grow in place and ensure the new region is zero-filled.
+		b.data = b.data[:newLen]
+		for i := offset; i < newLen; i++ {
+			b.data[i] = 0
+		}
+		return b.data[offset:newLen]
+	}
 	b.data = append(b.data, make([]byte, n)...)
-	return b.data[offset : offset+n]
+	return b.data[offset:newLen]
 }
 
 func (b *writeBuffer) Write(data []byte) (int, error) {
