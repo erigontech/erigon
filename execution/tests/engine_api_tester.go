@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -41,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -193,6 +196,15 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	require.NoError(t, err)
 	chainDB.Close()
 
+	spec := chainspec.Spec{
+		Name:             networkname.Test,
+		GenesisHash:      genesisBlock.Hash(),
+		GenesisStateRoot: empty.RootHash,
+		Config:           chain.TestChainConfig,
+		Genesis:          genesis,
+	}
+	chainspec.RegisterChainSpec(networkname.Test, spec)
+
 	// note we need to create jwt secret before calling ethBackend.Init to avoid race conditions
 	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
 	require.NoError(t, err)
@@ -242,6 +254,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
+		EthereumBackend:      ethBackend,
 	}
 }
 
@@ -266,6 +279,7 @@ type EngineApiTester struct {
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
+	EthereumBackend      *eth.Ethereum
 }
 
 func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *testing.T, eat EngineApiTester)) {
