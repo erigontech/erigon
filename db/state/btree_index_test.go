@@ -55,6 +55,37 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	bt.Close()
 }
 
+func Test_BtreeIndex_GetNilReturnsFirstKey(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	logger := log.New()
+	keyCount, M := 128, uint64(16)
+	compressFlags := seg.CompressKeys | seg.CompressVals
+
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compressFlags, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+	// Expected value and offset from the first record (di == 0)
+	_, expectedV, expectedOff, err := bt.dataLookup(0, getter)
+	require.NoError(t, err)
+
+	// Act: Get(nil) should return the first key
+	_, v, off, found, err := bt.Get(nil, getter)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, expectedV, v)
+	require.Equal(t, expectedOff, off)
+}
+
 func Test_BtreeIndex_Seek(t *testing.T) {
 	t.Parallel()
 
