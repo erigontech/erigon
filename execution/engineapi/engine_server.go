@@ -725,12 +725,7 @@ func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayl
 		return nil
 	}
 
-	bdTxs := make([]hexutil.Bytes, len(body.Transactions))
-	for idx := range body.Transactions {
-		bdTxs[idx] = body.Transactions[idx]
-	}
-
-	ret := &engine_types.ExecutionPayloadBody{Transactions: bdTxs, Withdrawals: body.Withdrawals}
+	ret := &engine_types.ExecutionPayloadBody{Transactions: body.Transactions, Withdrawals: body.Withdrawals}
 	return ret
 }
 
