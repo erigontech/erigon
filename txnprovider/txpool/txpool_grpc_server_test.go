@@ -197,7 +197,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 		defer allTasks.Done()
 		flip := false
 		for !panicObserved.Load() {
-			bf := pendingBaseFee
+			var bf uint64
 			if flip {
 				bf = pendingBaseFee * 20 // very high to push below fee cap
 			} else {
