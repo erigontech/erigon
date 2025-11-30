@@ -131,7 +131,12 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 			b.logger.Warn("bad blocks segment received", "err", err)
 			return err
 		}
-		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
+		inclusionListTxs, err := types.ConvertInclusionListToTransactions(body.InclusionListTransactions)
+		if err != nil {
+			b.logger.Warn("bad blocks segment received", "err", err)
+			return err
+		}
+		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals, inclusionListTxs))
 		if len(blocksBatch) >= batchSize {
 			b.logger.Info("[Caplin] Inserting blocks", "from", blocksBatch[0].NumberU64(), "to", blocksBatch[len(blocksBatch)-1].NumberU64())
 			if err := b.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {

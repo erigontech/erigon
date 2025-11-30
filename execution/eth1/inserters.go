@@ -55,6 +55,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
 		}
 		body, err := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
+		e.logger.Debug("[FOCIL] in.InclusionList", len(body.InclusionListTransactions))
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
 		}
@@ -86,10 +87,15 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if err := rawdb.WriteTd(tx, header.Hash(), height, td); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeTd: %s", err)
 		}
-		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
+		e.logger.Debug("[FOCIL] InsertBlocks - writing body",
+			"block", height,
+			"hash", header.Hash().Hex()[:16],
+			"inclusionListTxns", len(body.InclusionListTransactions))
+		foundBlockBody, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body)
+		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
-		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
+		e.logger.Debug("[FOCIL] InsertBlocks - write result", "block", height, "foundBlockBody", foundBlockBody)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not commit: %s", err)

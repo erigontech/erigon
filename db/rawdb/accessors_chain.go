@@ -627,6 +627,7 @@ func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *
 	if err != nil {
 		return false, err
 	}
+	log.Debug("[FOCIL] write body", "exists", exists, "stack", dbg.Stack())
 	if exists {
 		return false, nil
 	}
@@ -799,7 +800,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.InclusionListTransactions)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.

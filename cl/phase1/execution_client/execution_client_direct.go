@@ -78,7 +78,11 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startInsertBlockAndWait := time.Now()
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	inclusionListTxs, err := types.ConvertInclusionListToTransactions(body.InclusionListTransactions)
+	if err != nil {
+		return PayloadStatusInvalidated, err
+	}
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, inclusionListTxs)); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}

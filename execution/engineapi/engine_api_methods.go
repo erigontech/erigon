@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var ourCapabilities = []string{
@@ -215,80 +214,38 @@ func (e *EngineServer) GetInclusionListV1(ctx context.Context, parentHash common
 	}
 	e.logger.Debug("[GetInclusionListV1] Getting inclusion list from txnProvider", "parentHash", parentHash.Hex()[:16])
 
-	// Use ProvideTxns if available, otherwise fall back to txpool.Pending
-	if e.txnProvider != nil {
-		parentBlock := e.chainRW.GetHeaderByHash(ctx, parentHash)
-		if parentBlock == nil {
-			return nil, errors.New("parent block not found")
-		}
-		transactions, err := e.txnProvider.ProvideTxns(ctx,
-			txnprovider.WithParentBlockNum(parentBlock.Number.Uint64()),
-			txnprovider.WithAvailableRlpSpace(engine_helpers.MaxBytesPerInclusionList),
-		)
-		if err != nil {
-			return nil, err
-		}
-		e.logger.Debug("[GetInclusionListV1] Got transactions from txnProvider", "transactions", len(transactions))
-		// Filter out blob transactions (ProvideTxns may include them, but inclusion lists don't)
-		var filteredTransactions types.Transactions
-		for _, tx := range transactions {
-			if tx.Type() != types.BlobTxType {
-				filteredTransactions = append(filteredTransactions, tx)
-			}
-		}
-		e.logger.Debug("[GetInclusionListV1] Filtered transactions", "transactions", len(filteredTransactions))
-
-		result, err := types.ConvertTransactionstoInclusionList(filteredTransactions)
-		if err != nil {
-			return nil, err
-		}
-
-		return &result, nil
+	// Use ProvideTxns
+	parentBlock := e.chainRW.GetHeaderByHash(ctx, parentHash)
+	if parentBlock == nil {
+		return nil, errors.New("parent block not found")
 	}
-
-	// Fallback to old method if txnProvider is not available
-	res, err := e.txpool.Pending(ctx, &emptypb.Empty{})
+	transactions, err := e.txnProvider.ProvideTxns(ctx,
+		txnprovider.WithParentBlockNum(parentBlock.Number.Uint64()),
+	)
 	if err != nil {
 		return nil, err
 	}
-
-	var transactions types.Transactions
-	inclusionListSize := 0
-	for _, replyTx := range res.Txs {
-		rlpTx := replyTx.GetRlpTx()
-		tx, err := types.DecodeTransaction(rlpTx)
-		if err != nil {
-			continue
-		}
-
+	inclusionListTxs := make(types.Transactions, 0)
+	inclusionListSize := uint64(0)
+	for _, tx := range transactions {
 		if tx.Type() == types.BlobTxType {
 			continue
 		}
-
-		if inclusionListSize+len(rlpTx) > engine_helpers.MaxBytesPerInclusionList {
+		if inclusionListSize+uint64(tx.EncodingSize()) > engine_helpers.MaxBytesPerInclusionList {
 			continue
 		}
-		transactions = append(transactions, tx)
-		inclusionListSize += len(rlpTx)
+		inclusionListSize += uint64(tx.EncodingSize())
+		inclusionListTxs = append(inclusionListTxs, tx)
 	}
 
-	result, err := types.ConvertTransactionstoInclusionList(transactions)
+	e.logger.Debug("[GetInclusionListV1] Got transactions from txnProvider", "transactions", len(inclusionListTxs), "il size", inclusionListSize)
+
+	result, err := types.ConvertTransactionstoInclusionList(inclusionListTxs)
 	if err != nil {
 		return nil, err
 	}
 
 	return &result, nil
-}
-
-func (e *EngineServer) addInclusionList(parentHash common.Hash, inclusionList types.InclusionList) {
-	e.inclusionListItemsLock.Lock()
-	defer e.inclusionListItemsLock.Unlock()
-
-	copy(e.inclusionListItems[1:], e.inclusionListItems)
-	e.inclusionListItems[0] = &inclusionListItem{
-		parentHash,
-		inclusionList,
-	}
 }
 
 func (e *EngineServer) getInclusionList(parentHash common.Hash) types.InclusionList {

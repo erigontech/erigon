@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -164,20 +165,11 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 
 			if len(txns) > 0 {
-				txCountBefore := current.Txns.Len()
-
 				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, interrupt, cfg.payloadId, logger)
 				if err != nil {
 					return err
 				}
 				NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-
-				txCountAfter := current.Txns.Len()
-				addedCount := txCountAfter - txCountBefore
-				for i := 0; i < addedCount && i < len(txns); i++ {
-					addedTxHashes.Add(txns[i].Hash())
-				}
-
 				if stop {
 					break
 				}
@@ -197,6 +189,11 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 		}
 
+		// handle already added transactions after adding them to mining block
+		for i := 0; i < len(current.Txns); i++ {
+			addedTxHashes.Add(current.Txns[i].Hash())
+		}
+
 		// After processing normal transactions, add inclusion list transactions if they exist
 		if len(cfg.inclusionList) > 0 {
 			inclusionTxns, err := types.ConvertInclusionListToTransactions(cfg.inclusionList)
@@ -209,6 +206,18 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 				var uniqueInclusionTxns []types.Transaction
 				duplicateCount := 0
 				for _, txn := range inclusionTxns {
+					// skip blob transaction if any
+					if txn.Type() == types.BlobTxType {
+						continue
+					}
+
+					if txn.EncodingSize() > engine_helpers.MaxBytesPerInclusionList {
+						continue
+					}
+					// if txn.GetTipCap().ToBig().Cmp(cfg.miningState.MiningConfig.GasPrice) < 0 {
+					// 	continue
+					// }
+					// skip if transaction was already added
 					if !addedTxHashes.Contains(txn.Hash()) {
 						signer := *types.MakeSigner(cfg.chainConfig, executionAt+1, current.Header.Time)
 						sender, err := signer.Sender(txn)
@@ -238,42 +247,46 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 						"gas_used", current.Header.GasUsed,
 						"gas_limit", current.Header.GasLimit,
 						"gas_remaining", current.Header.GasLimit-current.Header.GasUsed)
-					filteredTxns, err := filterBadTransactions(uniqueInclusionTxns, chainID, cfg.chainConfig, executionAt+1, current.Header, simStateReader, simStateWriter, logger)
+					blockNum := executionAt + 1
+					filteredTxns, err := filterBadTransactions(uniqueInclusionTxns, chainID, cfg.chainConfig, blockNum, current.Header, simStateReader, simStateWriter, logger)
 					if err != nil {
 						logger.Error("[FOCIL] Failed to filter inclusion list transactions", "err", err)
-					} else {
-						if len(filteredTxns) > 0 {
-							logger.Debug("[FOCIL] Attempting to add inclusion list transactions to block",
-								"count", len(filteredTxns),
-								"gas_used", current.Header.GasUsed,
-								"gas_limit", current.Header.GasLimit,
-								"gas_remaining", current.Header.GasLimit-current.Header.GasUsed,
-								"rlp_space", current.AvailableRlpSpace(cfg.chainConfig))
-							logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, filteredTxns, cfg.miningState.MiningConfig.Etherbase, ibs, interrupt, cfg.payloadId, logger)
-							if err != nil {
-								logger.Error("[FOCIL] Failed to add inclusion list transactions to block", "err", err)
-							} else {
-								NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-								txCountAfterInclusion := current.Txns.Len()
-								addedCount := txCountAfterInclusion - txCountBeforeInclusion
-								logger.Debug("[FOCIL] Inclusion list transactions processing complete",
-									"attempted", len(filteredTxns),
-									"added_to_block", addedCount,
-									"total_block_txns", current.Txns.Len(),
-									"gas_used", current.Header.GasUsed,
-									"gas_limit", current.Header.GasLimit)
-								if addedCount < len(filteredTxns) {
-									logger.Warn("[FOCIL] Not all inclusion list transactions were added",
-										"attempted", len(filteredTxns),
-										"added", addedCount,
-										"missing", len(filteredTxns)-addedCount)
-								}
-							}
-						} else {
-							logger.Warn("[FOCIL] All inclusion list transactions were filtered out",
-								"total", len(uniqueInclusionTxns))
-						}
+						return err
 					}
+
+					if len(filteredTxns) > 0 {
+						logger.Debug("[FOCIL] Attempting to add inclusion list transactions to block",
+							"count", len(filteredTxns),
+							"gas_used", current.Header.GasUsed,
+							"gas_limit", current.Header.GasLimit,
+							"gas_remaining", current.Header.GasLimit-current.Header.GasUsed,
+							"rlp_space", current.AvailableRlpSpace(cfg.chainConfig))
+						logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, filteredTxns, cfg.miningState.MiningConfig.Etherbase, ibs, interrupt, cfg.payloadId, logger)
+						if err != nil {
+							logger.Error("[FOCIL] Failed to add inclusion list transactions to block", "err", err)
+							return err
+						}
+						NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+						txCountAfterInclusion := current.Txns.Len()
+						addedCount := txCountAfterInclusion - txCountBeforeInclusion
+						logger.Debug("[FOCIL] Inclusion list transactions processing complete",
+							"attempted", len(filteredTxns),
+							"added_to_block", addedCount,
+							"total_block_txns", current.Txns.Len(),
+							"gas_used", current.Header.GasUsed,
+							"gas_limit", current.Header.GasLimit)
+						if addedCount < len(filteredTxns) {
+							logger.Warn("[FOCIL] Not all inclusion list transactions were added",
+								"attempted", len(filteredTxns),
+								"added", addedCount,
+								"missing", len(filteredTxns)-addedCount)
+						}
+
+					} else {
+						logger.Warn("[FOCIL] All inclusion list transactions were filtered out",
+							"total", len(uniqueInclusionTxns))
+					}
+
 				} else {
 					logger.Debug("[FOCIL] No unique inclusion list transactions to add after deduplication")
 				}
@@ -304,14 +317,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
-
-	inclusionListTxns, err := types.ConvertInclusionListToTransactions(cfg.inclusionList)
-	if err != nil {
-		return fmt.Errorf("failed to convert inclusion list to transactions: %s", err)
-	}
-	block = block.WithInclusionListTransactions(inclusionListTxns)
-
-	log.Debug("[FOCIL] FinalizeBlockExecution", "block", block.Header().Number, "txn", block.Transactions().Len(), "inclusionList", len(block.InclusionListTransactions()))
 
 	// Simulate the block execution to get the final state root
 	if err = rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
@@ -346,6 +351,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
 	// ExecBlockV3 will now handle inclusion list validation internally
+	// when isMining not true
 	if err = ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger, true); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err

@@ -863,7 +863,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen int) {
+func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, inclusionListLen int) {
 	baseTxnIDLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxnID.U64())
 	txCountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxCount))
 
@@ -880,11 +880,19 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	return payloadSize, unclesLen, withdrawalsLen
+	// size of InclusionList (EIP-7805)
+	if bfs.InclusionList != nil {
+		for _, tx := range bfs.InclusionList {
+			inclusionListLen += rlp.StringLen(tx)
+		}
+		payloadSize += rlp.ListPrefixLen(inclusionListLen) + inclusionListLen
+	}
+
+	return payloadSize, unclesLen, withdrawalsLen, inclusionListLen
 }
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
-	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
+	payloadSize, unclesLen, withdrawalsLen, inclusionListLen := bfs.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 
@@ -915,6 +923,19 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 		}
 	}
 
+	// encode InclusionList (EIP-7805)
+	// nil if pre-EIP7805, otherwise encoded as list of raw transaction bytes
+	if bfs.InclusionList != nil {
+		if err := rlp.EncodeStructSizePrefix(inclusionListLen, w, b[:]); err != nil {
+			return err
+		}
+		for _, tx := range bfs.InclusionList {
+			if err := rlp.EncodeString(tx, w, b[:]); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -939,6 +960,12 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	// decode Withdrawals
 	bfs.Withdrawals = []*Withdrawal{}
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
+		return err
+	}
+	// decode InclusionList (EIP-7805)
+	bfs.InclusionList = InclusionList{}
+	inclusionList := (*[][]byte)(&bfs.InclusionList)
+	if err := decodeInclusionList(inclusionList, s); err != nil {
 		return err
 	}
 	return s.ListEnd()
@@ -1080,9 +1107,9 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
+func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, inclusionListTxs Transactions) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, inclusionListTransactions: inclusionListTxs}
 	return b
 }
 
@@ -1609,6 +1636,25 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 			break
 		}
 		*appendList = append(*appendList, &w)
+	}
+	return checkErrListEnd(s, err)
+}
+
+func decodeInclusionList(appendList *[][]byte, s *rlp.Stream) error {
+	var err error
+	if _, err = s.List(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			*appendList = nil
+			return nil // EOL, check for ListEnd is in calling function
+		}
+		return fmt.Errorf("read InclusionList: %w", err)
+	}
+	for err == nil {
+		var tx []byte
+		if tx, err = s.Bytes(); err != nil {
+			break
+		}
+		*appendList = append(*appendList, tx)
 	}
 	return checkErrListEnd(s, err)
 }

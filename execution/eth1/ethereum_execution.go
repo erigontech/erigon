@@ -258,6 +258,12 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		if err != nil {
 			return err
 		}
+		if body != nil {
+			e.logger.Debug("[FOCIL] ValidateChain - body read from blockReader",
+				"block", req.Number,
+				"hash", common.Hash(blockHash).Hex()[:16],
+				"inclusionListTxns", len(body.InclusionListTransactions))
+		}
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
 		return nil
 	}); err != nil {
@@ -289,7 +295,13 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer tx.Rollback()
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
+	rawBody := body.RawBody()
+	e.logger.Debug("[FOCIL] ValidateChain - passing to ValidatePayload",
+		"block", req.Number,
+		"hash", common.Hash(blockHash).Hex()[:16],
+		"inclusionListInRawBody", len(rawBody.InclusionListTransactions))
+
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, rawBody, e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
