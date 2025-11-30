@@ -2694,6 +2694,8 @@ func (p *TxPool) logStats() {
 func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 	var txns []*metaTxn
 	var senders []common.Address
+	var subPoolTypes []SubPoolType
+	var rlpValues [][]byte
 
 	p.lock.Lock()
 
@@ -2701,6 +2703,8 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
 			txns = append(txns, mt)
 			senders = append(senders, sender)
+			subPoolTypes = append(subPoolTypes, mt.currentSubPool)
+			rlpValues = append(rlpValues, mt.TxnSlot.Rlp)
 		}
 
 		return true
@@ -2709,7 +2713,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 	p.lock.Unlock()
 
 	for i := range txns {
-		slotRlp := txns[i].TxnSlot.Rlp
+		slotRlp := rlpValues[i]
 		if slotRlp == nil {
 			v, err := tx.GetOne(kv.PoolTransaction, txns[i].TxnSlot.IDHash[:])
 			if err != nil {
@@ -2723,7 +2727,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 			slotRlp = v[20:]
 		}
 
-		f(slotRlp, senders[i], txns[i].currentSubPool)
+		f(slotRlp, senders[i], subPoolTypes[i])
 	}
 }
 
