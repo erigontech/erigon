@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -579,7 +580,7 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 		tx:          tx,
 		accumulator: accumulator,
 		txNum:       txNum,
-		//trace:       true,
+		//trace: true,
 	}
 }
 
@@ -653,8 +654,14 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if original == value {
 		return nil
 	}
-	addressValue := address.Value()
-	keyValue := key.Value()
+	var addressValue common.Address
+	if !address.IsNil() {
+		addressValue = address.Value()
+	}
+	var keyValue common.Hash
+	if !key.IsNil() {
+		keyValue = key.Value()
+	}
 	composite := append(addressValue[:], keyValue[:]...)
 	v := value.Bytes()
 	if w.trace {
@@ -712,7 +719,10 @@ func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 }
 
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	value := address.Value()
+	var value common.Address
+	if !address.IsNil() {
+		value = address.Value()
+	}
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
 	return hasStorage, err
 }
@@ -723,7 +733,10 @@ func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account,
 }
 
 func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
-	value := address.Value()
+	var value common.Address
+	if !address.IsNil() {
+		value = address.Value()
+	}
 	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:])
 	if err != nil {
 		return nil, nil, err
@@ -751,8 +764,14 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	var composite [20 + 32]byte
-	addressValue := address.Value()
-	keyValue := key.Value()
+	var addressValue common.Address
+	if !address.IsNil() {
+		addressValue = address.Value()
+	}
+	var keyValue common.Hash
+	if !key.IsNil() {
+		keyValue = key.Value()
+	}
 	copy(composite[0:20], addressValue[0:20])
 	copy(composite[20:], keyValue[:])
 	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
@@ -778,7 +797,10 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 }
 
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	addressValue := address.Value()
+	var addressValue common.Address
+	if !address.IsNil() {
+		addressValue = address.Value()
+	}
 	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return nil, err
@@ -790,7 +812,10 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	addressValue := address.Value()
+	var addressValue common.Address
+	if !address.IsNil() {
+		addressValue = address.Value()
+	}
 	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return 0, err
