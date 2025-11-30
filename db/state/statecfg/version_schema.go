@@ -79,19 +79,19 @@ func InitSchemas() {
 			".efi": Schema.TracesToIdx.FileVersion.AccessorEFI.MinSupported,
 		},
 		"headers": {
-			".seg": Schema.HeadersBlock.Version.DataSeg.MinSupported,
-			".idx": Schema.HeadersBlock.Version.AccessorIdx.MinSupported,
+			".seg": Schema.HeadersBlock.FileVersion.DataSeg.MinSupported,
+			".idx": Schema.HeadersBlock.FileVersion.AccessorIdx.MinSupported,
 		},
 		"transactions": {
-			".seg": Schema.TransactionsBlock.Version.DataSeg.MinSupported,
-			".idx": Schema.TransactionsBlock.Version.AccessorIdx.MinSupported,
+			".seg": Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported,
+			".idx": Schema.TransactionsBlock.FileVersion.AccessorIdx.MinSupported,
 		},
 		"bodies": {
-			".seg": Schema.BodiesBlock.Version.DataSeg.MinSupported,
-			".idx": Schema.BodiesBlock.Version.AccessorIdx.MinSupported,
+			".seg": Schema.BodiesBlock.FileVersion.DataSeg.MinSupported,
+			".idx": Schema.BodiesBlock.FileVersion.AccessorIdx.MinSupported,
 		},
 		"transaction-to-block": {
-			".idx": Schema.TxnHash2BlockNumBlock.Version.AccessorIdx.MinSupported,
+			".idx": Schema.TxnHash2BlockNumBlock.FileVersion.AccessorIdx.MinSupported,
 		},
 	}
 }
