@@ -357,6 +357,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
 	ks := string(k)
+	sd.sdCtx.TouchKey(domain, ks, v)
 
 	if prevVal == nil {
 		var err error
@@ -366,19 +367,17 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 	switch domain {
-	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain:
+	case kv.CodeDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-	case kv.RCacheDomain, kv.CommitmentDomain:
+	case kv.StorageDomain, kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
 		//noop
 	default:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
 	}
-	sd.sdCtx.TouchKey(domain, ks, v)
-
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
 }
 
