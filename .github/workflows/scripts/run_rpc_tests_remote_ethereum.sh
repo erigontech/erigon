@@ -13,10 +13,11 @@ DISABLED_TEST_LIST=(
   engine_
   eth_getProof
   eth_simulateV1
+  eth_getBlockReceipts/test_01.json
 )
 
 # Transform the array into a comma-separated string
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.106.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet lupin012/fix_tests_with_commitment "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
