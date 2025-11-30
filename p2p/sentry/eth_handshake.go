@@ -42,7 +42,9 @@ func readAndValidatePeerStatus[T StatusPacket](
 	if err != nil {
 		return zero, p2p.NewPeerError(p2p.PeerErrorStatusReceive, p2p.DiscNetworkError, err, "readAndValidatePeerStatus rw.ReadMsg error")
 	}
-	defer msg.Discard()
+	defer func() {
+		_ = msg.Discard()
+	}()
 	if msg.Code != eth.StatusMsg {
 		return zero, p2p.NewPeerError(p2p.PeerErrorStatusDecode, p2p.DiscProtocolError, fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.StatusMsg), "readAndValidatePeerStatus wrong code")
 	}

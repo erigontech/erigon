@@ -357,7 +357,9 @@ func (p *Peer) readLoop(errc chan<- error) {
 func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
-		msg.Discard()
+		if err := msg.Discard(); err != nil {
+			return NewPeerError(PeerErrorInvalidMessage, DiscNetworkError, err, "failed to discard ping payload")
+		}
 		select {
 		case p.pingRecv <- struct{}{}:
 		case <-p.closed:
@@ -372,7 +374,9 @@ func (p *Peer) handle(msg Msg) error {
 		return reason
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages
-		msg.Discard()
+		if err := msg.Discard(); err != nil {
+			return NewPeerError(PeerErrorInvalidMessage, DiscNetworkError, err, "failed to discard base protocol payload")
+		}
 		return nil
 	default:
 		// it's a subprotocol message
