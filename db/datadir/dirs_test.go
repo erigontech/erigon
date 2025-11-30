@@ -78,7 +78,7 @@ func Test_RenameNewVersions(t *testing.T) {
 	mustExist(t, oldName2)
 	mustExist(t, unsupported)
 
-	require.NoError(t, d.RenameNewVersions())
+	require.NoError(t, d.RenameNewVersionsToOldFormat())
 
 	mustNotExist(t, oldName)
 	mustNotExist(t, oldName2)
