@@ -483,7 +483,7 @@ func SyncSnapshots(
 				continue
 			}
 
-			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
+			if filterToBlock(p.Name, toBlock, toStep, headerchain, syncCfg.SnapshotDownloadToBlockWithRebuildCommitment) {
 				continue
 			}
 
@@ -533,7 +533,7 @@ func SyncSnapshots(
 	return nil
 }
 
-func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
+func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool, rebuildCommitment bool) bool {
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
 	}
@@ -546,6 +546,9 @@ func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool)
 	}
 	if strings.HasPrefix(name, "caplin/") {
 		return false // not applicable, caplin files are slot-based
+	}
+	if rebuildCommitment && strings.Contains(name, kv.CommitmentDomain.String()) && strings.HasPrefix(name, "domain") {
+		return true
 	}
 	if stateFile {
 		return fileInfo.To > toStep

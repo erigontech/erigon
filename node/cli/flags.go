@@ -294,6 +294,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	if ctx.IsSet(utils.SnapDownloadToBlockFlag.Name) {
 		cfg.Sync.SnapshotDownloadToBlock = ctx.Uint64(utils.SnapDownloadToBlockFlag.Name)
+		cfg.Sync.SnapshotDownloadToBlockWithRebuildCommitment = ctx.Bool(utils.SnapDownloadToBlockWithRebuildCommitmentFlag.Name)
 	}
 
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
