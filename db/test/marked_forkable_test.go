@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -32,12 +33,13 @@ type UnmarkedTxI = state.UnmarkedTxI
 
 func registerEntity(dirs datadir.Dirs, name string, id ForkableId) *state.SnapshotConfig {
 	stepSize := uint64(10)
+	ver := version.V1_0_standart
 	snapCfg := state.NewSnapshotConfig(&state.SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{20, 40},
 		MinimumSize:    10,
 		SafetyMargin:   5,
-	}, state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize))
+	}, state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, state.NewE2SnapSchemaVersion(ver, ver)))
 	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 	return snapCfg
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -27,6 +28,7 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 	id := kv.ForkableId(2)
 	stepSize := uint64(10)
 	name := "borspans"
+	ver := version.V1_0_standart
 	snapCfg := state.NewSnapshotConfig(
 		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
@@ -34,7 +36,7 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
-		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, state.NewE2SnapSchemaVersion(ver, ver)),
 	)
 	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 
@@ -374,6 +376,7 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 	id := kv.ForkableId(3)
 	stepSize := uint64(50)
 	name := "random_paged_data"
+	ver := version.V1_0_standart
 	snapCfg := state.NewSnapshotConfig(
 		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
@@ -381,7 +384,7 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 			MinimumSize:    50,
 			SafetyMargin:   5,
 		},
-		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, state.NewE2SnapSchemaVersion(ver, ver)),
 	)
 	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 

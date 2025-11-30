@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"path"
 	"path/filepath"
 
 	"golang.org/x/sync/errgroup"
@@ -102,7 +101,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	}
 
 	log.Debug(fmt.Sprintf("freezing %s from step %d to %d", Registry.Name(a.id), calcFrom.Uint64()/a.StepSize(), calcTo.Uint64()/a.StepSize()))
-	path := a.fschema.DataFile(version.V1_0, calcFrom, calcTo)
+	path, _ := a.fschema.DataFile(version.V1_0, calcFrom, calcTo)
 
 	var exists bool
 	exists, err = dir.FileExist(path)
@@ -188,7 +187,7 @@ func (a *ProtoForkable) BuildIndexes(ctx context.Context, decomp *seg.Decompress
 		}
 	}()
 	for i, ib := range a.builders {
-		filename := path.Base(a.snaps.schema.AccessorIdxFile(version.V1_0, from, to, uint64(i)))
+		filename, _ := a.snaps.schema.AccessorIdxFile(version.V1_0, from, to, uint16(i))
 		p := ps.AddNew("build_index_"+filename, 1)
 		defer ps.Delete(p)
 		recsplitIdx, err := ib.Build(ctx, decomp, from, to, p)
@@ -209,7 +208,8 @@ func (a *ProtoForkable) BuildIndexes2(ctx context.Context, from, to RootNum, ps 
 	if found && file.decompressor != nil {
 		decomp = file.decompressor
 	} else {
-		decomp, err = seg.NewDecompressorWithMetadata(a.fschema.DataFile(version.V1_0, from, to), a.snapCfg.HasMetadata)
+		file, _ := a.fschema.DataFile(version.V1_0, from, to)
+		decomp, err = seg.NewDecompressorWithMetadata(file, a.snapCfg.HasMetadata)
 		if err != nil {
 			return nil, err
 		}

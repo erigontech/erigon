@@ -6,7 +6,7 @@ description: >-
 
 # RPC Service
 
-The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../../../get-started/fundamentals/modules/rpc-daemon.md), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../fundamentals/modules/rpc-daemon.md), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
 * [`eth`](eth.md): Standard Ethereum API.
 * [`erigon`](erigon.md): Erigon-specific extensions.

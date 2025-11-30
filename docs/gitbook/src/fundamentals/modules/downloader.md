@@ -70,7 +70,7 @@ Flags:
       --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
       --diagnostics.speedtest              Enable speed test
       --downloader.api.addr string         external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface (default "127.0.0.1:9093")
-      --downloader.disable.ipv4            Turns off ipv6 for the downloader
+      --downloader.disable.ipv4            Turns off ipv4 for the downloader
       --downloader.disable.ipv6            Turns off ipv6 for the downloader
   -h, --help                               help for this command
       --log.console.json                   Format console logs with JSON
