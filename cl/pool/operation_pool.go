@@ -17,62 +17,75 @@
 package pool
 
 import (
-	"sync"
-	"time"
-
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/blake2b"
 )
 
-const lifeSpan = 30 * time.Minute
-
-var operationsMultiplier = 20 // Cap the amount of cached element to max_operations_per_block * operations_multiplier
-
-type OperationPool[K comparable, T any] struct {
-	pool         *lru.Cache[K, T] // Map the Signature to the underlying object
-	recentlySeen sync.Map         // map from K to time.Time
-	lastPruned   time.Time
+// DoubleSignatureKey uses blake2b algorithm to merge two signatures together. blake2 is faster than sha3.
+func doubleSignatureKey(one, two common.Bytes96) (out common.Bytes96) {
+	res := blake2b.Sum256(append(one[:], two[:]...))
+	copy(out[:], res[:])
+	return
 }
 
-func NewOperationPool[K comparable, T any](maxOperationsPerBlock int, matricName string) *OperationPool[K, T] {
-	pool, err := lru.New[K, T](matricName, maxOperationsPerBlock*operationsMultiplier)
-	if err != nil {
-		panic(err)
+func ComputeKeyForProposerSlashing(slashing *cltypes.ProposerSlashing) common.Bytes96 {
+	return doubleSignatureKey(slashing.Header1.Signature, slashing.Header2.Signature)
+}
+
+func ComputeKeyForAttesterSlashing(slashing *cltypes.AttesterSlashing) common.Bytes96 {
+	return doubleSignatureKey(slashing.Attestation_1.Signature, slashing.Attestation_2.Signature)
+}
+
+// OperationsPool is the collection of all gossip-collectable operations.
+type OperationsPool struct {
+	AttestationsPool          *OperationPool[common.Bytes96, *solid.Attestation]
+	AttesterSlashingsPool     *OperationPool[common.Bytes96, *cltypes.AttesterSlashing]
+	ProposerSlashingsPool     *OperationPool[common.Bytes96, *cltypes.ProposerSlashing]
+	BLSToExecutionChangesPool *OperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange]
+	VoluntaryExitsPool        *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
+}
+
+func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
+	maxAttestations := int(beaconCfg.MaxAttestations)
+	if v := int(beaconCfg.MaxAttestationsElectra); v > maxAttestations {
+		maxAttestations = v
 	}
-	return &OperationPool[K, T]{
-		pool:         pool,
-		recentlySeen: sync.Map{},
+	maxAttesterSlashings := int(beaconCfg.MaxAttesterSlashings)
+	if v := int(beaconCfg.MaxAttesterSlashingsElectra); v > maxAttesterSlashings {
+		maxAttesterSlashings = v
+	}
+	maxProposerSlashings := int(beaconCfg.MaxProposerSlashings)
+	maxBlsToExecChanges := int(beaconCfg.MaxBlsToExecutionChanges)
+	maxVoluntaryExits := int(beaconCfg.MaxVoluntaryExits)
+
+	return OperationsPool{
+		AttestationsPool:          NewOperationPool[common.Bytes96, *solid.Attestation](maxAttestations, "attestationsPool"),
+		AttesterSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.AttesterSlashing](maxAttesterSlashings, "attesterSlashingsPool"),
+		ProposerSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](maxProposerSlashings, "proposerSlashingsPool"),
+		BLSToExecutionChangesPool: NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](maxBlsToExecChanges, "blsExecutionChangesPool"),
+		VoluntaryExitsPool:        NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](maxVoluntaryExits, "voluntaryExitsPool"),
 	}
 }
 
-func (o *OperationPool[K, T]) Insert(k K, operation T) {
-	if _, ok := o.recentlySeen.Load(k); ok {
-		return
-	}
-	o.pool.Add(k, operation)
-	o.recentlySeen.Store(k, time.Now())
-	if time.Since(o.lastPruned) > lifeSpan {
-		o.recentlySeen.Range(func(k, v interface{}) bool {
-			if time.Since(v.(time.Time)) > lifeSpan {
-				o.recentlySeen.Delete(k)
-			}
-			return true
-		})
-		o.lastPruned = time.Now()
-	}
-}
-
-func (o *OperationPool[K, T]) DeleteIfExist(k K) (removed bool) {
-	return o.pool.Remove(k)
-}
-
-func (o *OperationPool[K, T]) Has(k K) (hash bool) {
-	return o.pool.Contains(k)
-}
-
-func (o *OperationPool[K, T]) Raw() []T {
-	return o.pool.Values()
-}
-
-func (o *OperationPool[K, T]) Get(k K) (T, bool) {
-	return o.pool.Get(k)
+func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
+	blk.Body.VoluntaryExits.Range(func(_ int, exit *cltypes.SignedVoluntaryExit, _ int) bool {
+		o.VoluntaryExitsPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
+		return true
+	})
+	blk.Body.AttesterSlashings.Range(func(_ int, att *cltypes.AttesterSlashing, _ int) bool {
+		o.AttesterSlashingsPool.DeleteIfExist(ComputeKeyForAttesterSlashing(att))
+		return true
+	})
+	blk.Body.ProposerSlashings.Range(func(_ int, ps *cltypes.ProposerSlashing, _ int) bool {
+		o.ProposerSlashingsPool.DeleteIfExist(ComputeKeyForProposerSlashing(ps))
+		return true
+	})
+	blk.Body.ExecutionChanges.Range(func(_ int, c *cltypes.SignedBLSToExecutionChange, _ int) bool {
+		o.BLSToExecutionChangesPool.DeleteIfExist(c.Signature)
+		return true
+	})
+	o.BLSToExecutionChangesPool.pool.Purge()
 }
