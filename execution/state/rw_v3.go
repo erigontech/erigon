@@ -765,7 +765,8 @@ func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 		return nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountCode [%x] => [%x], txNum: %d\n", r.tracePrefix, address, enc, r.txNum)
+		lenc, cs := printCode(enc)
+		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d\n", r.tracePrefix, address, lenc, cs, r.txNum)
 	}
 	return enc, nil
 }

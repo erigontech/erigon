@@ -120,16 +120,14 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 }
 
 func ExecV3(ctx context.Context,
-	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg,
+	execStage *StageState, u Unwinder, cfg ExecuteBlockCfg,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
 	parallel bool, //nolint
 	maxBlockNum uint64,
-	logger log.Logger,
-	hooks *tracing.Hooks,
-	initialCycle bool,
-	isMining bool,
-) (execErr error) {
+	logger log.Logger) (execErr error) {
 	inMemExec := doms != nil
+	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
+	hooks := cfg.vmConfig.Tracer
 
 	useExternalTx := rwTx != nil
 	var applyTx kv.TemporalRwTx
@@ -138,11 +136,7 @@ func ExecV3(ctx context.Context,
 		applyTx = rwTx
 	} else {
 		var err error
-		temporalDb, ok := cfg.db.(kv.TemporalRwDB)
-		if !ok {
-			return errors.New("cfg.db is not a temporal db")
-		}
-		applyTx, err = temporalDb.BeginTemporalRw(ctx) //nolint
+		applyTx, err = cfg.db.BeginTemporalRw(ctx) //nolint
 		if err != nil {
 			return err
 		}
@@ -152,7 +146,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	if !inMemExec && !isMining {
+	if !inMemExec && !cfg.blockProduction {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	} else {
@@ -163,7 +157,7 @@ func ExecV3(ctx context.Context,
 	var err error
 	if !inMemExec {
 		var err error
-		doms, err = execctx.NewSharedDomains(applyTx, log.New())
+		doms, err = execctx.NewSharedDomains(ctx, applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
@@ -176,9 +170,8 @@ func ExecV3(ctx context.Context,
 	}
 
 	var (
-		stageProgress = execStage.BlockNumber
-		blockNum      = doms.BlockNum()
-		initialTxNum  = doms.TxNum()
+		blockNum     = doms.BlockNum()
+		initialTxNum = doms.TxNum()
 	)
 
 	if maxBlockNum < blockNum {
@@ -212,7 +205,7 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
+	shouldReportToTxPool := cfg.notifications != nil && !cfg.blockProduction && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator
@@ -272,7 +265,7 @@ func ExecV3(ctx context.Context,
 				rs:                    rs,
 				doms:                  doms,
 				agg:                   agg,
-				isMining:              isMining,
+				isMining:              cfg.blockProduction,
 				inMemExec:             inMemExec,
 				logger:                logger,
 				logPrefix:             execStage.LogPrefix(),
@@ -282,18 +275,15 @@ func ExecV3(ctx context.Context,
 				lastCommittedTxNum:    doms.TxNum(),
 				lastCommittedBlockNum: blockNum,
 			},
-			workerCount: workerCount,
+			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
 		}()
 
-		flushEvery := time.NewTicker(2 * time.Second)
-		defer flushEvery.Stop()
-
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery, flushEvery)
+			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum
 		lastCommittedTxNum = pe.lastCommittedTxNum
@@ -305,7 +295,7 @@ func ExecV3(ctx context.Context,
 				doms:                  doms,
 				agg:                   agg,
 				u:                     u,
-				isMining:              isMining,
+				isMining:              cfg.blockProduction,
 				inMemExec:             inMemExec,
 				applyTx:               applyTx,
 				logger:                logger,
@@ -328,7 +318,7 @@ func ExecV3(ctx context.Context,
 			if lastHeader != nil {
 				switch {
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
-					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, inMemExec)
 					if err != nil {
 						return err
 					}
@@ -345,11 +335,11 @@ func ExecV3(ctx context.Context,
 					}
 
 					if !useExternalTx {
-						se.LogCommitted(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
-						lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, maxBlockNum, logger, u)
+						lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, logger, u)
 				default:
 					return execErr
 				}
@@ -398,7 +388,7 @@ func ExecV3(ctx context.Context,
 		agg.BuildFilesInBackground(doms.TxNum())
 	}
 
-	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && lastHeader != nil {
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !cfg.blockProduction && lastHeader != nil {
 		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
@@ -593,6 +583,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 		lastFrozenStep := tx.StepsInFiles(kv.CommitmentDomain)
 
+		var lastFrozenTxNum uint64
+		if lastFrozenStep > 0 {
+			lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(te.doms.StepSize())) - 1
+		}
+
 		for blockNum := startBlockNum; blockNum <= maxBlockNum; blockNum++ {
 			select {
 			case readAhead <- blockNum:
@@ -648,7 +643,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
 					// use history reader instead of state reader to catch up to the tx where we left off
-					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+					HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
 					Trace:            dbg.TraceTx(blockNum, txIndex),
@@ -700,12 +695,6 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 
 	if err != nil {
 		return nil, 0, err
-	}
-
-	_, err = rawdb.IncrementStateVersion(tx)
-
-	if err != nil {
-		return nil, 0, fmt.Errorf("writing plain state version: %w", err)
 	}
 
 	tx.CollectMetrics()
@@ -802,15 +791,15 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
 	}
 }
 
-func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) error {
+func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
 	}
 	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(blockHash, parentHash)
 	}
-	minBlockNum := e.BlockNumber
-	if maxBlockNum <= minBlockNum {
+	minBlockNum := s.BlockNumber
+	if blockNumber <= minBlockNum {
 		return nil
 	}
 
@@ -821,8 +810,8 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, par
 	minBlockNum = max(minBlockNum, unwindToLimit)
 
 	// Binary search, but not too deep
-	jump := cmp.InRange(1, maxUnwindJumpAllowance, (maxBlockNum-minBlockNum)/2)
-	unwindTo := maxBlockNum - jump
+	jump := cmp.InRange(1, maxUnwindJumpAllowance, (blockNumber-minBlockNum)/2)
+	unwindTo := blockNumber - jump
 
 	// protect from too far unwind
 	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx)
@@ -847,12 +836,16 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+	if header == nil {
+		return false, times, errors.New("header is nil")
+	}
+
 	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
-		if err := e.Update(applyTx, maxBlockNum); err != nil {
+		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
 		}
 		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
@@ -870,10 +863,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 			}
 		}
 		return true, times, nil
-	}
-
-	if header == nil {
-		return false, times, errors.New("header is nil")
 	}
 
 	if dbg.DiscardCommitment() {
@@ -896,8 +885,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash,
-			applyTx, cfg, e, maxBlockNum, logger, u)
+		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
 		return false, times, err
 	}
 	return domsFlushFn()

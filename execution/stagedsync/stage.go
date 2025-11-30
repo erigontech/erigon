@@ -89,8 +89,13 @@ func (s *StageState) SyncMode() stages.Mode {
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
-	return stages.SaveStageProgress(db, s.ID, newBlockNum)
+	if err := stages.SaveStageProgress(db, s.ID, newBlockNum); err != nil {
+		return err
+	}
+	s.BlockNumber = newBlockNum
+	return nil
 }
+
 func (s *StageState) UpdatePrune(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
 }

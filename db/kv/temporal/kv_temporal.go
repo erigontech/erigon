@@ -235,8 +235,7 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	tb.Helper()
 	db := memdb.NewTestDB(tb, label)
 	dirs := datadir.New(tb.TempDir())
-	stepSize := uint64(1000)
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(context.Background(), db)
+	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
 	tb.Cleanup(agg.Close)
 	tdb, _ := New(db, agg)
 	return tdb
