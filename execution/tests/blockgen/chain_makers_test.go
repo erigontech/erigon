@@ -135,7 +135,7 @@ func TestGenerateChain(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if fmt.Sprintf("%s", &balance) != "19687500000000001000" { //nolint
+	if balance.String() != "19687500000000001000" { //nolint
 		t.Errorf("wrong balance of addr3: %s", &balance)
 	}
 
