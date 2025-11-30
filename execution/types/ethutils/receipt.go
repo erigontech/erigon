@@ -92,9 +92,9 @@ func MarshalReceipt(
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
-		baseFee, _ := uint256.FromBig(header.BaseFee)
-		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
-		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice)
+		baseFee := header.BaseFee
+		gasPrice := new(uint256.Int).Add(baseFee, txn.GetEffectiveGasTip(baseFee))
+		fields["effectiveGasPrice"] = gasPrice
 	}
 
 	// Assign status if postState is empty.

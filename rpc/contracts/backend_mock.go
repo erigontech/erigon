@@ -17,6 +17,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	common "github.com/erigontech/erigon/common"
 	types "github.com/erigontech/erigon/execution/types"
+	"github.com/holiman/uint256"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -45,7 +46,7 @@ func (m *MockBackend) EXPECT() *MockBackendMockRecorder {
 }
 
 // CallContract mocks base method.
-func (m *MockBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+func (m *MockBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CallContract", ctx, callMsg, blockNumber)
 	ret0, _ := ret[0].([]byte)

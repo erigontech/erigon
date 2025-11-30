@@ -28,8 +28,9 @@ import (
 	"math/bits"
 	"reflect"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/
@@ -590,6 +591,7 @@ func Uint256LenExcludingHead(i uint256.Int) int {
 }
 
 // precondition: len(buffer) >= 9
+// TODO(yperbasis): rename to EncodeUint64
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
 	if 0 < i && i < 0x80 {
 		buffer[0] = byte(i)

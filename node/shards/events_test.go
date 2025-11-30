@@ -17,39 +17,40 @@
 package shards
 
 import (
-	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/types"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestRecentLogs(t *testing.T) {
 	t.Parallel()
 	t.Run("Evict", func(t *testing.T) {
 		e := NewRecentLogs(3)
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(11)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(21)}})
 		require.Len(t, e.receipts, 3)
 
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(31)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(31)}})
 		require.Len(t, e.receipts, 1)
 	})
 	t.Run("Nil", func(t *testing.T) {
 		e := NewRecentLogs(3)
-		e.Add(types.Receipts{nil, {BlockNumber: big.NewInt(1)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}, nil})
-		e.Add(types.Receipts{nil, nil, {BlockNumber: big.NewInt(31)}})
+		e.Add(types.Receipts{nil, {BlockNumber: uint256.NewInt(1)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(21)}, nil})
+		e.Add(types.Receipts{nil, nil, {BlockNumber: uint256.NewInt(31)}})
 		require.Len(t, e.receipts, 3)
 	})
 	t.Run("Order", func(t *testing.T) {
 		e := NewRecentLogs(3)
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(11)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}})
 		require.Len(t, e.receipts, 2)
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
+		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(11)}})
 		require.Len(t, e.receipts, 2)
 	})
 }

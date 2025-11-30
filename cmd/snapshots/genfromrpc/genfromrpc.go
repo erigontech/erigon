@@ -59,8 +59,8 @@ type BlockJson struct {
 	TxHash      common.Hash      `json:"transactionsRoot" gencodec:"required"`
 	ReceiptHash common.Hash      `json:"receiptsRoot"     gencodec:"required"`
 	Bloom       types.Bloom      `json:"logsBloom"        gencodec:"required"`
-	Difficulty  *hexutil.Big     `json:"difficulty"       gencodec:"required"`
-	Number      *hexutil.Big     `json:"number"           gencodec:"required"`
+	Difficulty  uint256.Int      `json:"difficulty"       gencodec:"required"`
+	Number      uint256.Int      `json:"number"           gencodec:"required"`
 	GasLimit    hexutil.Uint64   `json:"gasLimit"         gencodec:"required"`
 	GasUsed     hexutil.Uint64   `json:"gasUsed"          gencodec:"required"`
 	Time        hexutil.Uint64   `json:"timestamp"        gencodec:"required"`
@@ -68,7 +68,7 @@ type BlockJson struct {
 	MixDigest   common.Hash      `json:"mixHash"` // prevRandao after EIP-4399
 	Nonce       types.BlockNonce `json:"nonce"`
 
-	BaseFee         *hexutil.Big    `json:"baseFeePerGas"`   // EIP-1559
+	BaseFee         *uint256.Int    `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *common.Hash    `json:"withdrawalsRoot"` // EIP-4895
 	BlobGasUsed     *hexutil.Uint64 `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64 `json:"excessBlobGas"`
@@ -359,15 +359,15 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 		TxHash:          block.TxHash,
 		ReceiptHash:     block.ReceiptHash,
 		Bloom:           block.Bloom,
-		Difficulty:      (*big.Int)(block.Difficulty),
-		Number:          (*big.Int)(block.Number),
+		Difficulty:      block.Difficulty,
+		Number:          block.Number,
 		GasLimit:        block.GasLimit.Uint64(),
 		GasUsed:         block.GasUsed.Uint64(),
 		Time:            block.Time.Uint64(),
 		Extra:           block.Extra,
 		MixDigest:       block.MixDigest,
 		Nonce:           block.Nonce,
-		BaseFee:         (*big.Int)(block.BaseFee),
+		BaseFee:         block.BaseFee,
 		WithdrawalsHash: block.WithdrawalsHash,
 		BlobGasUsed:     (*uint64)(block.BlobGasUsed),
 		ExcessBlobGas:   (*uint64)(block.ExcessBlobGas),

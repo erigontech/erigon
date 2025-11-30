@@ -20,7 +20,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -82,7 +83,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		blockHash := header.Hash()
 
 		// Add GasPrice for the DynamicFeeTransaction
-		var baseFee *big.Int
+		var baseFee *uint256.Int
 		if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
 			baseFee = header.BaseFee
 		}

@@ -106,15 +106,15 @@ func (tr *TRand) RandHeader() *Header {
 		TxHash:                tr.RandHash(),                              // common.Hash
 		ReceiptHash:           tr.RandHash(),                              // common.Hash
 		Bloom:                 tr.RandBloom(),                             // Bloom
-		Difficulty:            tr.RandBig(),                               // *big.Int
-		Number:                tr.RandBig(),                               // *big.Int
+		Difficulty:            *tr.RandUint256(),                          // uint256.Int
+		Number:                *tr.RandUint256(),                          // uint256.Int
 		GasLimit:              *tr.RandUint64(),                           // uint64
 		GasUsed:               *tr.RandUint64(),                           // uint64
 		Time:                  *tr.RandUint64(),                           // uint64
 		Extra:                 tr.RandBytes(tr.RandIntInRange(128, 1024)), // []byte
 		MixDigest:             tr.RandHash(),                              // common.Hash
 		Nonce:                 BlockNonce(tr.RandBytes(8)),                // BlockNonce
-		BaseFee:               tr.RandBig(),                               // *big.Int
+		BaseFee:               tr.RandUint256(),                           // *uint256.Int
 		WithdrawalsHash:       &wHash,                                     // *common.Hash
 		BlobGasUsed:           tr.RandUint64(),                            // *uint64
 		ExcessBlobGas:         tr.RandUint64(),                            // *uint64

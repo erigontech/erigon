@@ -22,7 +22,7 @@ func chargeGas(
 	ibs *state.IntraBlockState,
 	preTxCost uint64,
 ) error {
-	baseFee := uint256.MustFromBig(header.BaseFee)
+	baseFee := header.BaseFee
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
 
 	totalGasLimit := preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
@@ -56,7 +56,7 @@ func refundGas(
 	ibs *state.IntraBlockState,
 	gasUsed uint64,
 ) error {
-	baseFee := uint256.MustFromBig(header.BaseFee)
+	baseFee := header.BaseFee
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
 	actualGasCost := new(uint256.Int).Mul(effectiveGasPrice, new(uint256.Int).SetUint64(gasUsed))
 
@@ -82,7 +82,7 @@ func payCoinbase(
 	gasUsed uint64,
 	coinbase common.Address,
 ) error {
-	baseFee := uint256.MustFromBig(header.BaseFee)
+	baseFee := header.BaseFee
 	effectiveTip := u256.Num0
 
 	if tx.FeeCap.Gt(baseFee) {

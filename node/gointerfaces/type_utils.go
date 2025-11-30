@@ -113,6 +113,9 @@ func ConvertH256ToUint256Int(h256 *typesproto.H256) *uint256.Int {
 }
 
 func ConvertUint256IntToH256(i *uint256.Int) *typesproto.H256 {
+	if i == nil {
+		return nil
+	}
 	// Note: uint256.Int is an array of 4 uint64 in little-endian order, i.e. most significant word is [3]
 	return &typesproto.H256{
 		Lo: &typesproto.H128{Lo: i[0], Hi: i[1]},
