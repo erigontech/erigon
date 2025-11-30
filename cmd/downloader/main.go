@@ -94,9 +94,7 @@ var (
 	natSetting                     string
 	torrentVerbosity               int
 	downloadRateStr, uploadRateStr string
-	// How do I mark this deprecated with cobra?
-	torrentDownloadSlots int
-	staticPeersStr       string
+	staticPeersStr                  string
 	torrentPort          int
 	torrentMaxPeers      int
 	torrentConnsPerFile  int
