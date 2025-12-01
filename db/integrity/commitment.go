@@ -587,7 +587,7 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 			continue
 		}
 		eg.Go(func() error {
-			valCount, err := checkCommitmentHistVal(ctx, db, br, file, failFast, logger)
+			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, failFast, logger)
 			if err == nil {
 				totalVals.Add(valCount)
 				return nil
@@ -609,16 +609,11 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	return integrityErr
 }
 
-func checkCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, file state.VisibleFile, failFast bool, logger log.Logger) (uint64, error) {
+func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, failFast bool, logger log.Logger) (uint64, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
 	txCount := endTxNum - startTxNum
 	// cover 5% by doing random bucket sampling from each file
 	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 20)
