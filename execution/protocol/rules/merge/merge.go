@@ -363,21 +363,37 @@ func (s *Merge) IsServiceTransaction(sender common.Address, syscall rules.System
 
 func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
-) {
-	auraEngine, isAura := s.eth1Engine.(*aura.AuRa)
+) error {
 	if !misc.IsPoSHeader(header) {
-		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
-	} else if isAura {
-		auraEngine.RewriteBytecode(header, state)
+		return s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
-	if chain.Config().IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+
+	cfg := chain.Config()
+
+	// See https://hackmd.io/@filoozom/rycoQITlWl
+	if cfg.BalancerTime != nil && header.Time >= *cfg.BalancerTime {
+		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		if parent == nil {
+			return rules.ErrUnknownAncestor
+		}
+		if parent.Time < *cfg.BalancerTime { // first Balancer HF block
+			for address, rewrittenCode := range cfg.BalancerRewriteBytecode {
+				state.SetCode(address, rewrittenCode)
+			}
+		}
+	}
+
+	if cfg.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr common.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if chain.Config().IsPrague(header.Time) {
-		_ = misc.StoreBlockHashesEip2935(header, state)
+	if cfg.IsPrague(header.Time) {
+		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (s *Merge) APIs(chain rules.ChainHeaderReader) []rpc.API {

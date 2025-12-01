@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
@@ -86,6 +88,10 @@ type Config struct {
 	Bpo5Time              *big.Int                      `json:"bpo5Time,omitempty"`
 	parseBlobScheduleOnce sync.Once                     `copier:"-"`
 	parsedBlobSchedule    map[uint64]*params.BlobConfig
+
+	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
+	BalancerTime            *uint64                          `json:"balancerTime,omitempty"`
+	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -189,11 +195,8 @@ type BorConfig interface {
 	CalculateCoinbase(number uint64) common.Address
 }
 
-func timestampToTime(unixTime *big.Int) *time.Time {
-	if unixTime == nil {
-		return nil
-	}
-	t := time.Unix(unixTime.Int64(), 0).UTC()
+func timestampToTime(unixSec int64) *time.Time {
+	t := time.Unix(unixSec, 0).UTC()
 	return &t
 }
 
@@ -212,20 +215,40 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
-		c.ChainID,
-		c.TerminalTotalDifficulty,
-		timestampToTime(c.ShanghaiTime),
-		timestampToTime(c.CancunTime),
-		timestampToTime(c.PragueTime),
-		timestampToTime(c.OsakaTime),
-		timestampToTime(c.Bpo1Time),
-		timestampToTime(c.Bpo2Time),
-		timestampToTime(c.Bpo3Time),
-		timestampToTime(c.Bpo4Time),
-		timestampToTime(c.Bpo5Time),
-		engine,
-	)
+	var b strings.Builder
+	fmt.Fprintf(&b, "{ChainID: %v, Terminal Total Difficulty: %v", c.ChainID, c.TerminalTotalDifficulty)
+	if c.ShanghaiTime != nil {
+		fmt.Fprintf(&b, ", Shapella: %v", timestampToTime(c.ShanghaiTime.Int64()))
+	}
+	if c.CancunTime != nil {
+		fmt.Fprintf(&b, ", Dencun: %v", timestampToTime(c.CancunTime.Int64()))
+	}
+	if c.PragueTime != nil {
+		fmt.Fprintf(&b, ", Pectra: %v", timestampToTime(c.PragueTime.Int64()))
+	}
+	if c.OsakaTime != nil {
+		fmt.Fprintf(&b, ", Fusaka: %v", timestampToTime(c.OsakaTime.Int64()))
+	}
+	if c.Bpo1Time != nil {
+		fmt.Fprintf(&b, ", BPO1: %v", timestampToTime(c.Bpo1Time.Int64()))
+	}
+	if c.Bpo2Time != nil {
+		fmt.Fprintf(&b, ", BPO2: %v", timestampToTime(c.Bpo2Time.Int64()))
+	}
+	if c.Bpo3Time != nil {
+		fmt.Fprintf(&b, ", BPO3: %v", timestampToTime(c.Bpo3Time.Int64()))
+	}
+	if c.Bpo4Time != nil {
+		fmt.Fprintf(&b, ", BPO4: %v", timestampToTime(c.Bpo4Time.Int64()))
+	}
+	if c.Bpo5Time != nil {
+		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(c.Bpo5Time.Int64()))
+	}
+	if c.BalancerTime != nil {
+		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime((int64)(*c.BalancerTime)))
+	}
+	fmt.Fprintf(&b, ", Engine: %v}", engine)
+	return b.String()
 }
 
 func (c *Config) getEngine() string {
