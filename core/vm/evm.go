@@ -296,8 +296,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 
 		ret, err = evm.interpreter.Run(contract, input, readOnly)
-		fmt.Printf("block %d CALLER %s TO %s gas spending %d multigas %s\n",
-			evm.Context.BlockNumber, contract.Caller().String(), contract.self.String(), gas-contract.Gas, contract.GetTotalUsedMultiGas().String())
+		//fmt.Printf("block %d CALLER %s TO %s gas spending %d multigas %s\n",
+		//	evm.Context.BlockNumber, contract.Caller().String(), contract.self.String(), gas-contract.Gas, contract.GetTotalUsedMultiGas().String())
 		gas = contract.Gas
 
 		usedMultiGas.SaturatingAddInto(contract.GetTotalUsedMultiGas())

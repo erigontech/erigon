@@ -273,6 +273,10 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		tracer.CaptureArbitrumTransfer(&from, nil, gasVal, true, "feePayment")
 	}
 
+	// Check for overflow before adding gas
+	if st.gasRemaining > math.MaxUint64-st.msg.Gas() {
+		panic(fmt.Sprintf("gasRemaining overflow in buyGas: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas()))
+	}
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	st.evm.BlobFee = blobGasVal
@@ -400,6 +404,10 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	msg := st.msg
+	// Check for overflow before adding gas
+	if st.gasRemaining > math.MaxUint64-st.msg.Gas() {
+		panic(fmt.Sprintf("gasRemaining overflow in ApplyFrame: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas()))
+	}
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	sender := vm.AccountRef(msg.From())
@@ -593,6 +601,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 		t.OnGasChange(st.gasRemaining, st.gasRemaining-gas, tracing.GasChangeTxIntrinsicGas)
 	}
+	// Check for underflow before subtracting intrinsic gas (should be caught by earlier check, but be safe)
+	if st.gasRemaining < gas {
+		panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (intrinsic gas): gasRemaining=%d, gas=%d", st.gasRemaining, gas))
+	}
 	st.gasRemaining -= gas
 
 	tipReceipient, multiGas, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining, gas)
@@ -653,10 +665,65 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	if refunds && !gasBailout {
-		refund := st.calcGasRefund(rules)
-		usedMultiGas = st.reimburseGas(rules, refund, floorGas7623, usedMultiGas)
+		//refund := st.calcGasRefund(rules)
+		//usedMultiGas = st.reimburseGas(rules, refund, floorGas7623, usedMultiGas)
+
+		refundQuotient := params.RefundQuotient
+		if rules.IsLondon {
+			refundQuotient = params.RefundQuotientEIP3529
+		}
+
+		// Refund the gas that was held to limit the amount of computation done.
+		st.gasRemaining += st.calcHeldGasRefund() // affects .gasUsed()
+
+		if st.evm.ProcessingHook.IsArbitrum() {
+			frg := st.evm.ProcessingHook.ForceRefundGas()
+			fmt.Printf("b %d gas used %d force refund gas: %d, remains %d\n",
+				st.evm.Context.BlockNumber, st.gasUsed(), frg, st.gasRemaining)
+			st.gasRemaining += frg
+			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
+			var refund uint64
+			if nonrefundable < st.gasUsed() {
+				// Apply refund counter, capped to a refund quotient
+				refund = (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
+				if refund > st.state.GetRefund() {
+					refund = st.state.GetRefund()
+				}
+				st.gasRemaining += refund
+			}
+
+			// Arbitrum: set the multigas refunds
+			usedMultiGas = usedMultiGas.WithRefund(refund)
+			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
+				// After EIP-7623: Data-heavy transactions pay the floor gas.
+				if st.gasUsed() < floorGas7623 {
+					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
+					prev := st.gasRemaining
+					st.gasRemaining = st.initialGas - floorGas7623
+					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
+						t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+					}
+				}
+			}
+
+		} else { // Other networks
+			gasUsed := st.gasUsed()
+			refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+			gasUsed = gasUsed - refund
+
+			if rules.IsPrague {
+				gasUsed = max(floorGas7623, gasUsed)
+			}
+			st.gasRemaining = st.initialGas - gasUsed
+		}
+
+		st.refundGas()
 	} else if rules.IsPrague {
-		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
+		floorOrUsed := max(floorGas7623, st.gasUsed())
+		if st.initialGas < floorOrUsed {
+			panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (Prague floor): initialGas=%d, floorOrUsed=%d", st.initialGas, floorOrUsed))
+		}
+		st.gasRemaining = st.initialGas - floorOrUsed
 	}
 
 	effectiveTip := st.gasPrice
@@ -803,7 +870,13 @@ func (st *StateTransition) handleRevertedTx(msg *types.Message, usedMultiGas mul
 		}
 
 		// Calculate adjusted gas since l2GasUsed contains params.TxGas
+		if l2GasUsed < params.TxGas {
+			panic(fmt.Sprintf("adjustedGas underflow in handleRevertedTx: l2GasUsed=%d, params.TxGas=%d", l2GasUsed, params.TxGas))
+		}
 		adjustedGas := l2GasUsed - params.TxGas
+		if st.gasRemaining < adjustedGas {
+			panic(fmt.Sprintf("gasRemaining underflow in handleRevertedTx: gasRemaining=%d, adjustedGas=%d", st.gasRemaining, adjustedGas))
+		}
 		st.gasRemaining -= adjustedGas
 
 		// Update multigas and return ErrExecutionReverted error
@@ -902,6 +975,54 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 }
 
 func (st *StateTransition) calcGasRefund(rules *chain.Rules) uint64 {
+	//
+	//refundQuotient := params.RefundQuotient
+	//if rules.IsLondon {
+	//	refundQuotient = params.RefundQuotientEIP3529
+	//}
+	//
+	//// Refund the gas that was held to limit the amount of computation done.
+	//st.gasRemaining += st.calcHeldGasRefund()
+	//
+	//if st.evm.ProcessingHook.IsArbitrum() {
+	//	st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
+	//	nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
+	//	var refund uint64
+	//	if nonrefundable < st.gasUsed() {
+	//		// Apply refund counter, capped to a refund quotient
+	//		refund = (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
+	//		if refund > st.state.GetRefund() {
+	//			refund = st.state.GetRefund()
+	//		}
+	//		st.gasRemaining += refund
+	//	}
+	//
+	//	// Arbitrum: set the multigas refunds
+	//	usedMultiGas = usedMultiGas.WithRefund(refund)
+	//	if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
+	//		// After EIP-7623: Data-heavy transactions pay the floor gas.
+	//		if st.gasUsed() < floorGas7623 {
+	//			usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
+	//			prev := st.gasRemaining
+	//			st.gasRemaining = st.initialGas - floorGas7623
+	//			if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
+	//				t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+	//			}
+	//		}
+	//	}
+	//
+	//} else { // Other networks
+	//	gasUsed := st.gasUsed()
+	//	refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+	//	gasUsed = gasUsed - refund
+	//
+	//	if rules.IsPrague {
+	//		gasUsed = max(floorGas7623, gasUsed)
+	//	}
+	//	st.gasRemaining = st.initialGas - gasUsed
+	//}
+	//
+	//st.refundGas()
 	refundQuotient := params.RefundQuotient
 	if rules.IsLondon {
 		refundQuotient = params.RefundQuotientEIP3529
@@ -922,18 +1043,39 @@ func (st *StateTransition) calcGasRefund(rules *chain.Rules) uint64 {
 	}
 
 	// Refund the gas that was held to limit the amount of computation done.
-	return refund + st.calcHeldGasRefund()
+	heldRefund := st.calcHeldGasRefund()
+	totalRefund := refund + heldRefund
+	if totalRefund < refund || totalRefund < heldRefund {
+		panic(fmt.Sprintf("calcGasRefund overflow: refund=%d, heldRefund=%d", refund, heldRefund))
+	}
+	return totalRefund
 }
 
 func (st *StateTransition) reimburseGas(rules *chain.Rules, refund, floorGas7623 uint64, usedMultiGas multigas.MultiGas) multigas.MultiGas {
 	if !st.evm.ProcessingHook.IsArbitrum() {
+		if st.gasUsed() < refund {
+			panic(fmt.Sprintf("gasUsed underflow in reimburseGas: gasUsed=%d, refund=%d", st.gasUsed(), refund))
+		}
 		gasUsed := st.gasUsed() - refund
 		if rules.IsPrague {
 			gasUsed = max(floorGas7623, gasUsed)
 		}
+		if st.initialGas < gasUsed {
+			panic(fmt.Sprintf("gasRemaining underflow in reimburseGas (non-Arbitrum): initialGas=%d, gasUsed=%d", st.initialGas, gasUsed))
+		}
 		st.gasRemaining = st.initialGas - gasUsed
 	} else { // Arbitrum: set the multigas refunds
-		st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas() + refund
+		forceRefund := st.evm.ProcessingHook.ForceRefundGas()
+		totalRefund := forceRefund + refund
+		// Check for overflow in refund addition
+		if totalRefund < forceRefund || totalRefund < refund {
+			panic(fmt.Sprintf("refund overflow in reimburseGas: forceRefund=%d, refund=%d", forceRefund, refund))
+		}
+		// Check for overflow when adding to gasRemaining
+		if st.gasRemaining > math.MaxUint64-totalRefund {
+			panic(fmt.Sprintf("gasRemaining overflow in reimburseGas (Arbitrum): gasRemaining=%d, totalRefund=%d", st.gasRemaining, totalRefund))
+		}
+		st.gasRemaining += totalRefund
 
 		usedMultiGas = usedMultiGas.WithRefund(refund)
 		if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
@@ -941,6 +1083,9 @@ func (st *StateTransition) reimburseGas(rules *chain.Rules, refund, floorGas7623
 			if st.gasUsed() < floorGas7623 {
 				usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
 				prev := st.gasRemaining
+				if st.initialGas < floorGas7623 {
+					panic(fmt.Sprintf("gasRemaining underflow in reimburseGas (Arbitrum Prague floor): initialGas=%d, floorGas7623=%d", st.initialGas, floorGas7623))
+				}
 				st.gasRemaining = st.initialGas - floorGas7623
 
 				if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
@@ -978,6 +1123,9 @@ func (st *StateTransition) refundGas() {
 
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
+	if st.initialGas < st.gasRemaining {
+		panic(fmt.Sprintf("gasUsed underflow: initialGas=%d, gasRemaining=%d", st.initialGas, st.gasRemaining))
+	}
 	return st.initialGas - st.gasRemaining
 }
 
