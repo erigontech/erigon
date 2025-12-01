@@ -100,13 +100,7 @@ func collectInfo(cliCtx *cli.Context) error {
 	writeCPUInfoToStringBuilder(data.CPU, cpuusage, &builder)
 
 	writeProcessesToStringBuilder(processes, cpuusage.Total, totalMemory, &builder)
-
-	// Save data to file
-	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
-	if err != nil {
-		util.RenderError(err)
-	}
-
+	fmt.Println(builder.String())
 	return nil
 }
 
