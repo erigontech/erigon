@@ -1866,6 +1866,10 @@ func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, ma
 	return
 }
 
+func (at *AggregatorRoTx) DebugKeyTrace(ctx context.Context, domain kv.Domain, key []byte, fromTxNum uint64, toTxNum uint64, tx kv.Tx) stream.U64V {
+	return at.d[domain].DebugKeyTrace(ctx, key, fromTxNum, toTxNum, tx)
+}
+
 func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()

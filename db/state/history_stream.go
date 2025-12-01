@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -658,4 +659,230 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	}
 	order.Asc.Assert(hi.k, hi.nextKey)
 	return hi.k, hi.v, nil
+}
+
+////
+
+type HistoryKeyTraceFiles struct {
+	hc *HistoryRoTx
+
+	fromTxNum, toTxNum uint64
+	key                []byte
+
+	logger log.Logger
+	ctx    context.Context
+
+	// private
+	fileIdx             int
+	efbuf, buf, histKey []byte
+	seqItr              stream.U64 // stores iterator returned by multiencseq.SequenceReader#Iterator
+	histReader          *seg.Reader
+}
+
+func (ht *HistoryKeyTraceFiles) init() error {
+	ht.efbuf = make([]byte, 256)
+	ht.buf = make([]byte, 256)
+	ht.histKey = make([]byte, 0, len(ht.key)+8)
+	return nil
+}
+
+func (ht *HistoryKeyTraceFiles) Close() {}
+
+func (ht *HistoryKeyTraceFiles) HasNext() bool {
+	return ht.fileIdx < len(ht.hc.iit.files) && ht.fromTxNum < ht.hc.files[ht.fileIdx].endTxNum
+}
+
+func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
+	select {
+	case <-ht.ctx.Done():
+		return 0, nil, ht.ctx.Err()
+	default:
+	}
+
+	moveToNextFileFn := func() {
+		ht.fileIdx++
+		ht.seqItr.Close()
+		ht.seqItr = nil
+		ht.histReader = nil
+	}
+
+	for ht.fileIdx < len(ht.hc.iit.files) {
+		item := ht.hc.iit.files[ht.fileIdx]
+		if ht.toTxNum < item.startTxNum {
+			moveToNextFileFn()
+			continue
+		}
+		if ht.fromTxNum >= item.endTxNum {
+			// shouldn't happen
+			return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: inconsistent fromTxNum %d >= file endTxNum %d; probably HasNext ignored", ht.fromTxNum, item.endTxNum)
+		}
+
+		if ht.seqItr == nil {
+			idxReader := ht.hc.iit.statelessIdxReader(ht.fileIdx)
+			getter := ht.hc.iit.statelessGetter(ht.fileIdx)
+
+			offset, ok := idxReader.TwoLayerLookup(ht.key)
+			if !ok {
+				ht.logger.Debug("weird thing - no offset found for %s in file %s", hexutil.Encode(ht.key), item.src.decompressor.FileName())
+				moveToNextFileFn()
+				continue
+			}
+			getter.Reset(offset)
+			ht.efbuf, _ = getter.Next(ht.efbuf[:0])
+			currSeq := multiencseq.ReadMultiEncSeq(item.startTxNum, ht.efbuf)
+			ht.seqItr = currSeq.Iterator(int(ht.fromTxNum))
+		}
+
+		if !ht.seqItr.HasNext() {
+			moveToNextFileFn()
+			continue
+		}
+
+		txNum, err := ht.seqItr.Next()
+		if err != nil {
+			return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: seqItr.Next() error: %w", err)
+		}
+		if txNum >= ht.toTxNum {
+			moveToNextFileFn()
+			continue
+		}
+
+		if ht.histReader == nil {
+			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)
+			ht.histReader = ht.hc.statelessGetter(ht.fileIdx)
+			ht.histKey = historyKey(txNum, ht.key, ht.histKey[:0])
+			offset, ok := idxReader.TwoLayerLookup(ht.histKey)
+			if !ok {
+				// shouldn't since key/txNum in ef
+				return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+			}
+
+			ht.histReader.Reset(offset)
+		}
+
+		if !ht.histReader.HasNext() {
+			// shouldn't happen since key/txNum in ef
+			return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: no history value found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+		}
+
+		ht.buf, _ = ht.histReader.Next(ht.buf[:])
+		return txNum, common.Copy(ht.buf), nil
+	}
+
+	return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: no more files to read; probably HasNext ignored")
+}
+
+type HistoryKeyTraceDB struct {
+	largeValues bool
+	roTx        kv.Tx
+	valsTable   string
+
+	fromTxNum, toTxNum uint64
+	key                []byte
+
+	logger log.Logger
+	ctx    context.Context
+
+	// private
+	txNum                 uint64
+	startTxNumBytes, k, v []byte
+	valsC                 kv.Cursor
+	valsCDup              kv.CursorDupSort
+}
+
+func (ht *HistoryKeyTraceDB) init() error {
+	return ht.advance()
+}
+
+func (ht *HistoryKeyTraceDB) Close() {}
+
+func (ht *HistoryKeyTraceDB) HasNext() bool {
+	return ht.k != nil
+}
+
+func (ht *HistoryKeyTraceDB) Next() (uint64, []byte, error) {
+	select {
+	case <-ht.ctx.Done():
+		return 0, nil, ht.ctx.Err()
+	default:
+	}
+	txNum, v := ht.txNum, common.Copy(ht.v)
+	if err := ht.advance(); err != nil {
+		return 0, nil, err
+	}
+	return txNum, v, nil
+}
+
+func (ht *HistoryKeyTraceDB) advance() error {
+	if ht.largeValues {
+		return ht.advanceLargeVals()
+	}
+	return ht.advanceSmallVals()
+}
+
+func (ht *HistoryKeyTraceDB) advanceSmallVals() error {
+	var err error
+	if ht.valsCDup == nil {
+		if ht.valsCDup, err = ht.roTx.CursorDupSort(ht.valsTable); err != nil {
+			return err
+		}
+		ht.startTxNumBytes = make([]byte, 8)
+		binary.BigEndian.PutUint64(ht.startTxNumBytes, ht.fromTxNum)
+		k, _, err := ht.valsCDup.Seek(ht.key)
+		if err != nil {
+			return err
+		}
+		if k == nil {
+			ht.k = nil
+			return nil
+		}
+		ht.k = ht.key
+		ht.v, err = ht.valsCDup.SeekBothRange(ht.key, ht.startTxNumBytes[:])
+		if err != nil {
+			return err
+		}
+		if ht.v == nil {
+			ht.k = nil
+			return nil
+		}
+	}
+	binary.BigEndian.PutUint64(ht.v, ht.fromTxNum)
+	ht.k, ht.v, err = ht.valsCDup.NextDup()
+	return err
+}
+
+func (ht *HistoryKeyTraceDB) advanceLargeVals() error {
+	var err error
+	if ht.valsC == nil {
+		if ht.valsC, err = ht.roTx.Cursor(ht.valsTable); err != nil {
+			return err
+		}
+		startTxNumBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(startTxNumBytes, ht.fromTxNum)
+		seek := append([]byte{}, append(ht.key, startTxNumBytes[:]...)...)
+		firstKey, _, err := ht.valsC.Seek(seek)
+		if err != nil {
+			return err
+		}
+		if firstKey == nil || !bytes.Equal(firstKey[:len(firstKey)-8], ht.key) {
+			ht.k = nil
+			return nil
+		}
+	}
+
+	ht.k, ht.v, err = ht.valsC.Next()
+	if err != nil {
+		return err
+	}
+	if ht.k == nil || !bytes.Equal(ht.k[:len(ht.k)-8], ht.key) {
+		ht.k = nil
+		return nil
+	}
+	foundTxNum := binary.BigEndian.Uint64(ht.k[len(ht.k)-8:])
+	if foundTxNum >= ht.toTxNum {
+		ht.k = nil
+		return nil
+	}
+
+	return nil
 }

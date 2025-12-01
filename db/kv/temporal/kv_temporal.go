@@ -623,12 +623,20 @@ func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.S
 	return tx.getLatestFromDB(domain, tx.RwTx, k)
 }
 
+func (tx *RwTx) KeyTrace(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) stream.U64V {
+	return tx.aggtx.DebugKeyTrace(tx.ctx, domain, k, fromTxNum, toTxNum, tx.RwTx)
+}
+
 func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	return tx.aggtx.DebugGetLatestFromDB(domain, k, dbTx)
 }
 
 func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
+}
+
+func (tx *Tx) KeyTrace(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) stream.U64V {
+	return tx.aggtx.DebugKeyTrace(domain, k, fromTxNum, toTxNum, tx.Tx)
 }
 
 func (db *DB) DomainTables(domain ...kv.Domain) []string {
