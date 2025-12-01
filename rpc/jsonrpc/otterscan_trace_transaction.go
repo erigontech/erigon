@@ -85,7 +85,7 @@ func (t *TransactionTracer) TracingHooks() *tracing.Hooks {
 func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.depth = depth
 	typ := vm.OpCode(typRaw)
-	
+
 	inputCopy := make([]byte, len(input))
 	copy(inputCopy, input)
 	_value := new(big.Int)
