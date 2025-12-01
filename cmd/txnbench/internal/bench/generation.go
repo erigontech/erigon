@@ -33,7 +33,7 @@ func GenerateBenchData(ctx context.Context, c *rpcclient.Client) (BenchData, err
 		num, hashes, err := findBlockWithTxs(ctx, c, t)
 		if err != nil {
 			continue
-			return BenchData{}, err
+			// return BenchData{}, err
 		}
 
 		take := min(len(hashes), 100)
