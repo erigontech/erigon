@@ -567,8 +567,7 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 		return err
 	}
 	defer tx.Rollback()
-	aggTx := state.AggTx(tx)
-	files := aggTx.Files(kv.CommitmentDomain)
+	files := tx.Debug().DomainFiles(kv.CommitmentDomain)
 	var eg *errgroup.Group
 	if failFast {
 		// if 1 goroutine fails, fail others
