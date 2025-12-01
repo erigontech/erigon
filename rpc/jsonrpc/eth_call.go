@@ -785,7 +785,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
 	}
 	witnessBufBytes := witnessBuffer.Bytes()
-	witnessBufBytesCopy := common.CopyBytes(witnessBufBytes)
+	witnessBufBytesCopy := common.Copy(witnessBufBytes)
 	return witnessBufBytesCopy, nil
 }
 
