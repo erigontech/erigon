@@ -105,18 +105,22 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				log.Debug("[peerSelector] empty cgc", "peer", pid)
 				continue
 			}
-
+			custodyIndices := map[cltypes.CustodyIndex]bool{}
 			if peer.EnodeId == "" {
-				log.Debug("[peerSelector] empty enodeId", "peer", pid)
-				continue
+				// fill all custody indices
+				for i := cltypes.CustodyIndex(0); i < c.beaconConfig.NumberOfCustodyGroups; i++ {
+					custodyIndices[i] = true
+				}
+			} else {
+				// get custody indices
+				enodeId := enode.HexID(peer.EnodeId)
+				custodyIndices, err = peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
+				if err != nil {
+					log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
+					continue
+				}
 			}
-			// get custody indices
-			enodeId := enode.HexID(peer.EnodeId)
-			custodyIndices, err := peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
-			if err != nil {
-				log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
-				continue
-			}
+
 			data := &peerData{pid: pid, mask: custodyIndices}
 			c.peerMetaCache.Add(peerKey, data)
 			newPeers = append(newPeers, *data)
