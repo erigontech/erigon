@@ -478,6 +478,7 @@ type TemporalMemBatch interface {
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
+	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 }
 
 type WithFreezeInfo interface {
