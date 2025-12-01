@@ -65,7 +65,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				TransactionMisc: TransactionMisc{},
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
-				Data:            common.CopyBytes(tx.Data),
+				Data:            common.Copy(tx.Data),
 				GasLimit:        tx.GasLimit,
 				// These are copied below.
 				Value: new(uint256.Int),

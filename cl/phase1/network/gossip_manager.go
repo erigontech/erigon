@@ -118,7 +118,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinelproto.GossipDa
 		Name:     data.Name,
 		Peer:     data.Peer,
 		SubnetId: data.SubnetId,
-		Data:     common.CopyBytes(data.Data),
+		Data:     common.Copy(data.Data),
 	}
 	monitor.ObserveGossipTopicSeen(data.Name, len(data.Data))
 
