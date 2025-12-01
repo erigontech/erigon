@@ -30,24 +30,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/sysutils"
 )
 
-var (
-	ExportPathFlag = cli.StringFlag{
-		Name:     "export.path",
-		Aliases:  []string{"ep"},
-		Usage:    "Path to folder for export result",
-		Required: true,
-		Value:    "",
-	}
-
-	ExportFileNameFlag = cli.StringFlag{
-		Name:     "export.file",
-		Aliases:  []string{"ef"},
-		Usage:    "File name to export result default is sysinfo.txt",
-		Required: false,
-		Value:    "sysinfo.txt",
-	}
-)
-
 var Command = cli.Command{
 	Name:      "sysinfo",
 	Aliases:   []string{"sinfo"},
@@ -55,8 +37,6 @@ var Command = cli.Command{
 	Action:    collectInfo,
 	Flags: []cli.Flag{
 		&flags.DebugURLFlag,
-		&ExportPathFlag,
-		&ExportFileNameFlag,
 	},
 	Description: "Collect information about system and save it to file in order to provide to support person",
 }
