@@ -278,7 +278,11 @@ func (c *Codec) encodeRandom(toID enode.ID) (Header, []byte, error) {
 	head.AuthData = c.headbuf.Bytes()
 
 	// Fill message ciphertext buffer with random bytes.
-	c.msgctbuf = append(c.msgctbuf[:0], make([]byte, randomPacketMsgSize)...)
+	if cap(c.msgctbuf) < randomPacketMsgSize {
+		c.msgctbuf = make([]byte, randomPacketMsgSize)
+	} else {
+		c.msgctbuf = c.msgctbuf[:randomPacketMsgSize]
+	}
 	crand.Read(c.msgctbuf) //nolint:errcheck
 	return head, c.msgctbuf, nil
 }
