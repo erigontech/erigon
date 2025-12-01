@@ -297,6 +297,11 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "rollback-snapshots-to-block",
+			Description: "Rollback the node back to a given block by deleting chaindata and all corresponding " +
+				"snapshots that contain data related to the given block and blocks after it. It deletes block " +
+				"related seg files and also state files that contain data of its first tx num and later." +
+				"It is useful for shadowforks, recovering broken nodes or chains, and/or for doing experiments that " +
+				"involve replaying certain blocks.",
 			Action: func(cliCtx *cli.Context) error {
 				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 				if err != nil {
