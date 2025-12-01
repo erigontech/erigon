@@ -161,6 +161,7 @@ jobs:
             echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
             echo "RpcDaemon stopped"
+            cp -f ${{ runner.workspace }}/build/bin/rpcdaemon.log $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon-run.log
           else
             echo "RpcDaemon has already terminated"
           fi
