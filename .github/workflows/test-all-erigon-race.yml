@@ -5,6 +5,9 @@ on:
     branches:
       - 'release/**'
       - main
+  pull_request:
+    branches:
+      - 'release/**'
   workflow_dispatch:
 
 jobs:
@@ -19,7 +22,7 @@ jobs:
       changed_files: ${{ steps.filter.outputs.changed_files }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Check for changes within out-of-scope dirs or files
         id: filter
@@ -66,11 +69,20 @@ jobs:
           
       - name: "Checkout code with submodules and large files (lfs)"
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
           submodules: recursive
           lfs: true
+
+      - name: Cleanup space
+        if: runner.os == 'Linux'
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
 
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'

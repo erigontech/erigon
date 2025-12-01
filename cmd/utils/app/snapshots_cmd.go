@@ -60,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -608,7 +609,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 	}
 
 	// Step 2: Process each candidate file (already parsed)
-	doesRmCommitment := len(domainNames) != 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
+	doesRmCommitment := len(domainNames) == 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
@@ -890,7 +891,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	checkStr := cliCtx.String("check")
 	var requestedChecks []integrity.Check
 	if len(checkStr) > 0 {
-		for _, split := range strings.Split(checkStr, ",") {
+		for split := range strings.SplitSeq(checkStr, ",") {
 			requestedChecks = append(requestedChecks, integrity.Check(split))
 		}
 
@@ -1066,6 +1067,33 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 
 func CheckBorChain(chainName string) bool {
 	return slices.Contains([]string{networkname.BorMainnet, networkname.Amoy, networkname.BorE2ETestChain2Val, networkname.BorDevnet}, chainName)
+}
+
+func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs) error {
+	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
+	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
+
+	to := int64(-1)
+	for _, snapt := range snaptype.CaplinSnapshotTypes {
+		uto, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), to)
+		if err != nil {
+			return err
+		}
+
+		to = int64(uto)
+	}
+
+	for table := range stateSnapTypes.KeyValueGetters {
+		uto, err := CheckFilesForSchema(caplinSchema.GetState(table), to)
+		if err != nil {
+			return err
+		}
+
+		to = int64(uto)
+	}
+
+	return nil
+
 }
 
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
@@ -1458,6 +1486,9 @@ func doPublishable(cliCtx *cli.Context) error {
 	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
 		return err
 	}
+	if err := checkIfCaplinSnapshotsPublishable(dat); err != nil {
+		return err
+	}
 	// check if salt-state.txt and salt-blocks.txt exist
 	exists, err := dir2.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
 	if err != nil {
@@ -1591,7 +1622,10 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max)
+		stepSize := agg.StepSize()
+		minStep := min / stepSize
+		maxStep := max / stepSize
+		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
 	} else {
 		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
 		if err != nil {
