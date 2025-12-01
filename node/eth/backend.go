@@ -1333,7 +1333,7 @@ func (s *Ethereum) setUpSnapDownloader(
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
-		s.downloader.InitIdleLogger(true)
+		s.downloader.InitBackgroundLogger(true)
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}

@@ -60,11 +60,10 @@ func (s *GrpcServer) checkNamesAndLogCall(names []string, callName string) error
 	return nil
 }
 
-// Add existing files to the downloader.
-// Erigon will produce and seed new files
-// Downloader will be able: seed new files (already existing on FS).
+// "download once" invariant: means after initial download finish - future restart/upgrade/downgrade will not download files (our "fast restart" feature)
+// After "download once": Erigon will produce and seed new files
 func (s *GrpcServer) Download(ctx context.Context, request *downloaderproto.DownloadRequest) (_ *emptypb.Empty, err error) {
-	var preverifiedSnapshots []PreverifiedSnapshot
+	preverifiedSnapshots := make([]PreverifiedSnapshot, 0, len(request.Items))
 	names := make([]string, 0, len(request.Items))
 	for _, it := range request.Items {
 		if it.TorrentHash == nil {
@@ -85,10 +84,9 @@ func (s *GrpcServer) Download(ctx context.Context, request *downloaderproto.Down
 	return &emptypb.Empty{}, s.d.DownloadSnapshots(ctx, preverifiedSnapshots, request.LogTarget)
 }
 
-// Add files to the downloader. Existing/New files - both ok.
-// "download once" invariant: means after initial download finish - future restart/upgrade/downgrade will not download files (our "fast restart" feature)
-// After "download once": Erigon will produce and seed new files
-// Downloader will be able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
+// Add existing files to the downloader.
+// Erigon will produce and seed new files
+// Downloader will be able: seed new files (already existing on FS).
 func (s *GrpcServer) Seed(ctx context.Context, request *downloaderproto.SeedRequest) (_ *emptypb.Empty, err error) {
 	names := request.Paths
 	err = s.checkNamesAndLogCall(names, "Seed")

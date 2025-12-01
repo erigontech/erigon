@@ -332,7 +332,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 
 	// I'm kinda curious... but it was false before.
-	d.InitIdleLogger(true)
+	d.InitBackgroundLogger(true)
 	if seedbox {
 		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)

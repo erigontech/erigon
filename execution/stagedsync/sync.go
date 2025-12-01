@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"runtime/debug"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -341,10 +341,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopBeforeStage(stage)
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
@@ -361,11 +358,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 			hasMore = true
 		}
 
-		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			debug.PrintStack()
-			return false, common.ErrStopped
-		}
+		s.checkStopAfterStage(stage)
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
@@ -439,10 +432,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopBeforeStage(stage)
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
@@ -457,11 +447,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 			hasMore = true
 		}
 
-		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			debug.PrintStack()
-			return false, common.ErrStopped
-		}
+		s.checkStopAfterStage(stage)
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
@@ -679,5 +665,24 @@ func (s *Sync) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 		if s.stages[i].ID == id {
 			s.stages[i].Forward = f
 		}
+	}
+}
+
+// We're duplicating constants around env naming, and it isn't 100% because there can be ERIGON_
+// prefixing applied in dbg, but this is a minor feature. Abstracted out to avoid drifting on
+// implementation in separate areas.
+
+func (s *Sync) checkStopBeforeStage(stage *Stage) {
+	s.checkStopStage(stage, "STOP_BEFORE_STAGE", dbg.StopBeforeStage())
+}
+func (s *Sync) checkStopAfterStage(stage *Stage) {
+	s.checkStopStage(stage, "STOP_AFTER_STAGE", dbg.StopAfterStage())
+}
+func (s *Sync) checkStopStage(stage *Stage, envName, value string) {
+	if string(stage.ID) == value { // stop process for debugging reasons
+		s.logger.Warn("env flag forced to stop app", "env", envName, "value", value)
+		// None of the wrappers check the stop error reason anymore, and so they ignore this.
+		debug.PrintStack()
+		os.Exit(0)
 	}
 }

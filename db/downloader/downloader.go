@@ -18,7 +18,6 @@ package downloader
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -106,12 +105,15 @@ type Downloader struct {
 
 	torrentFS *AtomicTorrentFS
 
-	logPrefix string
+	// The background logger only runs when there are no active downloads.
+	activeDownloadRequestsLock sync.Mutex
+	activeDownloadRequests     int
+	zeroActiveDownloadRequests sync.Cond
 
 	// This protects adding/removing torrents from the client and...?
-	lock           sync.RWMutex
-	idleLogging    bool
-	torrentsByName map[snapshotName]*torrent.Torrent
+	lock                   sync.RWMutex
+	initedBackgroundLogger bool
+	torrentsByName         map[snapshotName]*torrent.Torrent
 }
 
 type AggStats struct {
@@ -328,6 +330,8 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		torrentFS:      &AtomicTorrentFS{dir: cfg.Dirs.Snap},
 	}
 
+	d.zeroActiveDownloadRequests.L = &d.activeDownloadRequestsLock
+
 	d.logTorrentClientParams()
 
 	if len(cfg.WebSeedUrls) == 0 {
@@ -354,9 +358,8 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
 		}
 	}()
 	var newTorrents []*torrent.Torrent
-	// Can we lock inside the walk instead?
-	d.lock.Lock()
-	// Does WalkDir do path or filepath?
+	// The fs module should use forward slash style paths only. We need this guarantee for how we use
+	// the metainfo.Info.Name field for nested snapshot names.
 	err = fs.WalkDir(
 		os.DirFS(d.snapDir()),
 		".",
@@ -376,7 +379,9 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
 			if !ok {
 				return nil
 			}
+			d.lock.Lock()
 			t, complete, new, err := d.addTorrentIfComplete(name)
+			d.lock.Unlock()
 			if err != nil {
 				err = fmt.Errorf("adding torrent for %v: %w", path, err)
 				return err
@@ -392,7 +397,6 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
 			return nil
 		},
 	)
-	d.lock.Unlock()
 	if err != nil {
 		return
 	}
@@ -403,14 +407,14 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
 }
 
 // I haven't removed logSeeding yet because I think Alex will want it back at some point.
-func (d *Downloader) InitIdleLogger(logSeeding bool) {
+func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	if d.idleLogging {
+	if d.initedBackgroundLogger {
 		return
 	}
-	d.idleLogging = true
-	d.spawn(d.idleLogger)
+	d.initedBackgroundLogger = true
+	d.spawn(d.backgroundLogger)
 }
 
 func (d *Downloader) snapDir() string { return d.cfg.Dirs.Snap }
@@ -794,7 +798,9 @@ func (d *Downloader) DownloadSnapshots(ctx context.Context, items []PreverifiedS
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	torrents := make([]*torrent.Torrent, 0, len(items))
-	// This can be moved earlier to include the initialization.
+	// Before we start logging the download
+	d.incDownloadRequests()
+	defer d.decDownloadRequests()
 	go d.logDownload(ctx, items, target)
 	for _, it := range items {
 		t, err := d.downloadPreverifiedSnapshot(it.InfoHash, it.Name)
@@ -811,6 +817,21 @@ func (d *Downloader) DownloadSnapshots(ctx context.Context, items []PreverifiedS
 		}
 	}
 	return nil
+}
+
+func (d *Downloader) incDownloadRequests() {
+	d.activeDownloadRequestsLock.Lock()
+	d.activeDownloadRequests++
+	d.activeDownloadRequestsLock.Unlock()
+}
+
+func (d *Downloader) decDownloadRequests() {
+	d.activeDownloadRequestsLock.Lock()
+	d.activeDownloadRequests--
+	d.activeDownloadRequestsLock.Unlock()
+	if d.activeDownloadRequests == 0 {
+		d.zeroActiveDownloadRequests.Broadcast()
+	}
 }
 
 // Errors if any metainfos are not written. We expect this so that all snapshots have their torrents
@@ -845,18 +866,45 @@ func (d *Downloader) allActiveSnapshots() (ret []Snapshot) {
 	return
 }
 
-func (d *Downloader) idleLogger() {
+func (d *Downloader) backgroundLogger() {
 	ctx := d.ctx
+	for ctx.Err() == nil {
+		d.activeDownloadRequestsLock.Lock()
+		for d.activeDownloadRequests > 0 {
+			// This goes to zero when Downloader closes, so we won't get stuck.
+			d.zeroActiveDownloadRequests.Wait()
+		}
+		d.activeDownloadRequestsLock.Unlock()
+		d.backgroundLogging(ctx)
+	}
+}
+
+func (d *Downloader) backgroundLogging(ctx context.Context) {
+	// Reset stats when we start background logging.
 	stats := d.newStats(AggStats{}, d.allActiveSnapshots())
+	// TODO: Start longer after testing.
 	interval := time.Second
 	for {
+		// Ensure no download requests start while we log, it looks spammy in the logs.
+		d.activeDownloadRequestsLock.Lock()
+		if d.activeDownloadRequests > 0 {
+			d.activeDownloadRequestsLock.Unlock()
+			return
+		}
 		stats = d.newStats(stats, d.allActiveSnapshots())
-		d.logStatsInner(stats, "Idle", nil)
+		// Flexibility to add seeding and warn on unexpected behaviour in torrent client here.
+		d.logStatsInner(stats, "Idle", nil, false)
+		d.activeDownloadRequestsLock.Unlock()
+		// Log at least once before leaving.
+		if ctx.Err() != nil {
+			return
+		}
 		select {
 		case <-ctx.Done():
+			// Allow logging before leaving, looks tidy.
 		case <-time.After(interval):
+			interval = min(interval*2, 5*time.Minute)
 		}
-		interval = min(interval*2, 5*time.Minute)
 	}
 }
 
@@ -1289,16 +1337,16 @@ func (d *Downloader) logSyncStats(startTime time.Time, stats AggStats, target st
 		"total-time", time.Since(startTime).Truncate(time.Second).String(),
 	)
 
-	d.logStatsInner(stats, fmt.Sprintf("Syncing %v", target), logCtx)
+	d.logStatsInner(stats, fmt.Sprintf("Syncing %v", target), logCtx, true)
 }
 
 // Currently only called if not all torrents are complete.
-func (d *Downloader) idleLog(stats AggStats) {
-	d.logStatsInner(stats, "Idle", nil)
-}
-
-// Currently only called if not all torrents are complete.
-func (d *Downloader) logStatsInner(stats AggStats, msg string, logCtx []any) {
+func (d *Downloader) logStatsInner(
+	stats AggStats,
+	msg string,
+	logCtx []any,
+	zeroDownload bool, // Log if download rates are zero.
+) {
 	bytesDone := stats.BytesCompleted
 	percentDone := float32(100) * (float32(bytesDone) / float32(stats.BytesTotal))
 
@@ -1334,10 +1382,16 @@ func (d *Downloader) logStatsInner(stats AggStats, msg string, logCtx []any) {
 				return common.ByteCount(bytesDone)
 			}
 		}(),
-		"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(stats.ClientWebseedBytesDownloadRate)),
-		"peer-download", fmt.Sprintf("%s/s", common.ByteCount(stats.PeerConnBytesDownloadRate)),
 		"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
 	)
+
+	if zeroDownload || (stats.ClientWebseedBytesDownloadRate != 0 || stats.PeerConnBytesDownloadRate != 0) {
+		// If these were happening without active download requests it would be unusual.
+		addCtx(
+			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(stats.ClientWebseedBytesDownloadRate)),
+			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(stats.PeerConnBytesDownloadRate)),
+		)
+	}
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -1350,7 +1404,7 @@ func (d *Downloader) logStatsInner(stats AggStats, msg string, logCtx []any) {
 		"sys", common.ByteCount(m.Sys),
 	)
 
-	log.Info(fmt.Sprintf("[%s] %s", cmp.Or(d.logPrefix, "snapshots"), msg), logCtx...)
+	log.Info(fmt.Sprintf("[Downloader] %s", msg), logCtx...)
 }
 
 func calculateTime(amountLeft, rate uint64) string {
@@ -1490,7 +1544,8 @@ func (d *Downloader) delayedGotInfoHandler(t *torrent.Torrent) {
 	t.DownloadAll()
 }
 
-// After adding a new torrent that should already be completed.
+// After adding a new torrent that should already be completed. This is safe to call without
+// Downloader.lock.
 func (d *Downloader) afterAdd(t *torrent.Torrent) {
 	// Should be disabled by no download rate or the disable trackers flag.
 	t.AddTrackers(Trackers)

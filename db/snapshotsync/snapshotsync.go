@@ -91,8 +91,14 @@ const (
 	AlsoCaplin CaplinMode = 3
 )
 
-func BuildDownloadRequest(downloadRequest []services.DownloadRequest) *downloaderproto.DownloadRequest {
-	req := &downloaderproto.DownloadRequest{Items: make([]*downloaderproto.DownloadItem, 0, len(snaptype2.BlockSnapshotTypes))}
+func BuildDownloadRequest(
+	downloadRequest []services.DownloadRequest,
+	logTarget string,
+) *downloaderproto.DownloadRequest {
+	req := &downloaderproto.DownloadRequest{
+		Items:     make([]*downloaderproto.DownloadItem, 0, len(snaptype2.BlockSnapshotTypes)),
+		LogTarget: logTarget,
+	}
 	for _, r := range downloadRequest {
 		req.Items = append(req.Items, &downloaderproto.DownloadItem{
 			TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
@@ -107,10 +113,10 @@ func RequestSnapshotsDownload(
 	ctx context.Context,
 	downloadRequest []services.DownloadRequest,
 	downloader downloaderproto.DownloaderClient,
-	logPrefix string,
+	logTarget string,
 ) error {
 	// start seed large .seg of large size
-	req := BuildDownloadRequest(downloadRequest)
+	req := BuildDownloadRequest(downloadRequest, logTarget)
 	if _, err := downloader.Download(ctx, req, grpc.WaitForReady(true)); err != nil {
 		return err
 	}
@@ -486,7 +492,7 @@ func SyncSnapshots(
 
 		log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
 		for {
-			err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix)
+			err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, task)
 			if err == nil {
 				break
 			}

@@ -409,11 +409,20 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			minBlockNumber,
 			s.ForwardProgress,
 			log.LvlDebug,
+			// Not sure why we include the possibility to download new items here. We should only be
+			// seeding? Changing this interface would require a lot of refactoring.
 			func(downloadRequest []services.DownloadRequest) error {
 				if noDl {
 					return nil
 				}
-				return snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, "")
+				paths := make([]string, 0, len(downloadRequest))
+				for _, req := range downloadRequest {
+					paths = append(paths, req.Path)
+				}
+				_, err := cfg.snapshotDownloader.Seed(ctx, &downloaderproto.SeedRequest{
+					Paths: paths,
+				})
+				return err
 			}, func(l []string) error {
 				if noDl {
 					return nil
