@@ -531,6 +531,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		mmsg.SetGasPrice(st.evm.Context.BaseFee)
 		// mmsg.SetFeeCap(common.Num0)
 		mmsg.SetTip(common.Num0)
+		mmsg.TxRunContext = types.NewMessageCommitContext(nil)
 
 		st.gasPrice = st.evm.Context.BaseFee
 		// st.feeCap = common.Num0
