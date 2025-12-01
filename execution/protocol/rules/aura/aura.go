@@ -647,8 +647,7 @@ func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, stat
 	//return nil
 }
 
-func (c *AuRa) RewriteBytecode(header *types.Header, state *state.IntraBlockState) {
-	blockNum := header.Number.Uint64()
+func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) {
 	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		state.SetCode(address, rewrittenCode)
 	}
@@ -656,13 +655,16 @@ func (c *AuRa) RewriteBytecode(header *types.Header, state *state.IntraBlockStat
 
 func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscallCustom rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
-) {
+) error {
 	blockNum := header.Number.Uint64()
 
 	//Check block gas limit from smart contract, if applicable
-	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
+	err := c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
+	if err != nil {
+		return err
+	}
 
-	c.RewriteBytecode(header, state)
+	c.rewriteBytecode(blockNum, state)
 
 	syscall := func(addr common.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)
@@ -693,19 +695,19 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 	epoch, err := c.e.GetEpoch(header.ParentHash, blockNum-1)
 	if err != nil {
 		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
-		return
+		return err
 	}
 	isEpochBegin := epoch != nil
 	if !isEpochBegin {
-		return
+		return nil
 	}
 	err = c.cfg.Validators.onEpochBegin(isEpochBegin, header, syscall)
 	if err != nil {
 		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
-		return
+		return err
 	}
 	// check_and_lock_block -> check_epoch_end_signal END (before enact)
-
+	return nil
 }
 
 func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, syscall rules.SystemCall) error {

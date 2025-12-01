@@ -558,10 +558,13 @@ func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Heade
 }
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
 	if config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(state)
+		if err := misc.ApplyDAOHardFork(state); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // Finalize implements rules.Engine, accumulating the block and uncle rewards,
