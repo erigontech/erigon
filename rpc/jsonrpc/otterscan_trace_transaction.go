@@ -92,7 +92,7 @@ func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from accounts.Addres
 	typ := vm.OpCode(typRaw)
 	// t.captureStartOrEnter(vm.OpCode(typ), from, to, precompile, input, value)
 
-	inputCopy := common.CopyBytes(input)
+	inputCopy := common.Copy(input)
 	_value := new(big.Int)
 	_value.Set(value.ToBig())
 
@@ -134,5 +134,5 @@ func (t *TransactionTracer) OnExit(depth int, output []byte, gasUsed uint64, err
 	pop := t.stack[lastIdx]
 	t.stack = t.stack[:lastIdx]
 
-	pop.Output = common.CopyBytes(output)
+	pop.Output = common.Copy(output)
 }

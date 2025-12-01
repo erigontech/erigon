@@ -373,7 +373,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 			vmTrace = ot.r.VmTrace
 		}
 		if create {
-			vmTrace.Code = common.CopyBytes(input)
+			vmTrace.Code = common.Copy(input)
 			if ot.lastVmOp != nil {
 				ot.lastVmOp.Cost += int(gas)
 			}
@@ -426,7 +426,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
 		action.Gas.ToInt().SetUint64(gas)
-		action.Init = common.CopyBytes(input)
+		action.Init = common.Copy(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	} else if typ == vm.SELFDESTRUCT {
@@ -452,7 +452,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action.From = from.Value()
 		action.To = to.Value()
 		action.Gas.ToInt().SetUint64(gas)
-		action.Input = common.CopyBytes(input)
+		action.Input = common.Copy(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	}
@@ -488,7 +488,7 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 		}
 	}
 	if !deep {
-		ot.r.Output = common.CopyBytes(output)
+		ot.r.Output = common.Copy(output)
 	}
 	ignoreError := false
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
@@ -502,11 +502,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
 				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
-				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+				topTrace.Result.(*TraceResult).Output = common.Copy(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
 				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
-				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
+				topTrace.Result.(*CreateTraceResult).Code = common.Copy(output)
 			}
 		} else {
 			topTrace.Result = nil
@@ -516,9 +516,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 		if len(output) > 0 {
 			switch topTrace.Type {
 			case CALL:
-				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+				topTrace.Result.(*TraceResult).Output = common.Copy(output)
 			case CREATE:
-				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
+				topTrace.Result.(*CreateTraceResult).Code = common.Copy(output)
 			}
 		}
 		switch topTrace.Type {
@@ -1170,7 +1170,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 	}
-	traceResult.Output = common.CopyBytes(execResult.ReturnData)
+	traceResult.Output = common.Copy(execResult.ReturnData)
 	if traceTypeStateDiff {
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
@@ -1476,7 +1476,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)
-		traceResult.Output = common.CopyBytes(execResult.ReturnData)
+		traceResult.Output = common.Copy(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
 			if !txFinalized {
@@ -1676,7 +1676,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 
 	chainRules := blockCtx.Rules(chainConfig)
-	traceResult.Output = common.CopyBytes(execResult.ReturnData)
+	traceResult.Output = common.Copy(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
 		if !txFinalized {

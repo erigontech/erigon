@@ -92,7 +92,7 @@ func (result *ExecutionResult) Return() []byte {
 	if result.Err != nil {
 		return nil
 	}
-	return common.CopyBytes(result.ReturnData)
+	return common.Copy(result.ReturnData)
 }
 
 // Revert returns the concrete revert reason if the execution is aborted by `REVERT`
@@ -101,7 +101,7 @@ func (result *ExecutionResult) Revert() []byte {
 	if !result.Reverted {
 		return nil
 	}
-	return common.CopyBytes(result.ReturnData)
+	return common.Copy(result.ReturnData)
 }
 
 type (

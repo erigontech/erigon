@@ -25,12 +25,12 @@ func NewRetainListBuilder() *RetainListBuilder {
 
 // AddTouch adds a key (in KEY encoding) into the read/change set of account keys
 func (rlb *RetainListBuilder) AddTouch(touch []byte) {
-	rlb.touches = append(rlb.touches, common.CopyBytes(touch))
+	rlb.touches = append(rlb.touches, common.Copy(touch))
 }
 
 // AddStorageTouch adds a key (in KEY encoding) into the read/change set of storage keys
 func (rlb *RetainListBuilder) AddStorageTouch(touch []byte) {
-	rlb.storageTouches = append(rlb.storageTouches, common.CopyBytes(touch))
+	rlb.storageTouches = append(rlb.storageTouches, common.Copy(touch))
 }
 
 // ExtractTouches returns accumulated read/change sets and clears them for the next block's execution

@@ -1093,7 +1093,7 @@ func opCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64,
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.CopyBytes(ret)
+		ret = common.Copy(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -1137,7 +1137,7 @@ func opCallCode(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uin
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.CopyBytes(ret)
+		ret = common.Copy(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -1177,7 +1177,7 @@ func opDelegateCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.CopyBytes(ret)
+		ret = common.Copy(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 

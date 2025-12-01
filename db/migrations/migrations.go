@@ -88,9 +88,9 @@ func AppliedMigrations(tx kv.Tx, withPayload bool) (map[string][]byte, error) {
 			return nil
 		}
 		if withPayload {
-			applied[string(common.CopyBytes(k))] = common.CopyBytes(v)
+			applied[string(common.Copy(k))] = common.Copy(v)
 		} else {
-			applied[string(common.CopyBytes(k))] = []byte{}
+			applied[string(common.Copy(k))] = []byte{}
 		}
 		return nil
 	})

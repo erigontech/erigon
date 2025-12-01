@@ -77,7 +77,7 @@ func (f *callFrame) failed() bool {
 }
 
 func (f *callFrame) processOutput(output []byte, err error) {
-	output = common.CopyBytes(output)
+	output = common.Copy(output)
 	if err == nil {
 		f.Output = output
 		return
@@ -170,7 +170,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to account
 		Type:  vm.CALL,
 		From:  from.Value(),
 		To:    toValue,
-		Input: common.CopyBytes(input),
+		Input: common.Copy(input),
 		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
@@ -216,7 +216,7 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 		Type:  vm.OpCode(typ),
 		From:  from.Value(),
 		To:    toValue,
-		Input: common.CopyBytes(input),
+		Input: common.Copy(input),
 		Gas:   gas,
 	}
 
