@@ -770,9 +770,14 @@ func (d *Downloader) backgroundLogger() {
 func (d *Downloader) backgroundLogging(ctx context.Context) {
 	// Reset stats when we start background logging.
 	stats := d.newStats(AggStats{}, d.allActiveSnapshots())
-	// TODO: Start longer after testing.
-	interval := time.Second
+	interval := time.Minute
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+			interval = min(interval*2, 5*time.Minute)
+		}
 		// Ensure no download requests start while we log, it looks spammy in the logs.
 		d.activeDownloadRequestsLock.Lock()
 		if d.activeDownloadRequests > 0 {
@@ -783,16 +788,6 @@ func (d *Downloader) backgroundLogging(ctx context.Context) {
 		// Flexibility to add seeding and warn on unexpected behaviour in torrent client here.
 		d.logStatsInner(stats, "Idle", nil, false)
 		d.activeDownloadRequestsLock.Unlock()
-		// Log at least once before leaving.
-		if ctx.Err() != nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			// Allow logging before leaving, looks tidy.
-		case <-time.After(interval):
-			interval = min(interval*2, 5*time.Minute)
-		}
 	}
 }
 
