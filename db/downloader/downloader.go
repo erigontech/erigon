@@ -28,7 +28,6 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -65,7 +64,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 var debugWebseed = false
@@ -419,16 +417,6 @@ func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
 
 func (d *Downloader) snapDir() string { return d.cfg.Dirs.Snap }
 
-// Might want to maintain a list of incomplete torrents to optimize this. Will be lazy for now.
-func (d *Downloader) allTorrentsComplete() bool {
-	for _, t := range d.torrentClient.Torrents() {
-		if !t.Complete().Bool() {
-			return false
-		}
-	}
-	return true
-}
-
 // Check snapshot data looks right.
 func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
 	for f := range info.UpvertedFilesIter() {
@@ -542,68 +530,6 @@ func calculateRate(current, previous uint64, prevRate uint64, interval time.Dura
 	}
 	// TODO: Probably assert and find out what is wrong.
 	return 0
-}
-
-// Adds segment peer fields common to Peer instances.
-func setCommonPeerSegmentFields(peer *torrent.Peer, stats *torrent.PeerStats, segment *diaglib.SegmentPeer) {
-	segment.DownloadRate = uint64(stats.DownloadRate)
-	segment.UploadRate = uint64(stats.LastWriteUploadRate)
-	segment.PiecesCount = uint64(stats.RemotePieceCount)
-	segment.RemoteAddr = peer.RemoteAddr.String()
-}
-
-func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diaglib.SegmentPeer) {
-	seeds := make([]diaglib.SegmentPeer, 0, len(weebseedPeersOfThisFile))
-	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
-	webseedRates = append(webseedRates, "file", fName)
-	for _, peer := range weebseedPeersOfThisFile {
-		if peerUrl, err := webPeerUrl(peer); err == nil {
-			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
-				stats := peer.Stats()
-				if !finished {
-					seed := diaglib.SegmentPeer{
-						Url:         peerUrl.Host,
-						TorrentName: fName,
-					}
-					setCommonPeerSegmentFields(peer, &stats, &seed)
-					seeds = append(seeds, seed)
-				}
-				webseedRates = append(
-					webseedRates,
-					strings.TrimSuffix(shortUrl, "/"),
-					common.ByteCount(uint64(stats.DownloadRate))+"/s",
-				)
-			}
-		}
-	}
-
-	return webseedRates, seeds
-}
-
-func webPeerUrl(peer *torrent.Peer) (*url.URL, error) {
-	root, _ := path.Split(strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\""))
-	return url.Parse(root)
-}
-
-func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diaglib.SegmentPeer) {
-	peers := make([]diaglib.SegmentPeer, 0, len(peersOfThisFile))
-	rates := make([]interface{}, 0, len(peersOfThisFile)*2)
-	rates = append(rates, "file", fName)
-
-	for _, peer := range peersOfThisFile {
-		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
-		stats := peer.Stats()
-		segPeer := diaglib.SegmentPeer{
-			Url:         url,
-			PeerId:      peer.PeerID,
-			TorrentName: fName,
-		}
-		setCommonPeerSegmentFields(&peer.Peer, &stats, &segPeer)
-		peers = append(peers, segPeer)
-		rates = append(rates, url, common.ByteCount(uint64(stats.DownloadRate))+"/s")
-	}
-
-	return rates, peers
 }
 
 // Check all loaded torrents by forcing a new verification then checking if the client considers
@@ -752,22 +678,6 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 
 // Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
 // errors.
-func (d *Downloader) loadSpecFromDiskErr(name string) (spec g.Option[*torrent.TorrentSpec], err error) {
-	miPath := d.filePathForName(name) + ".torrent"
-	mi, err := metainfo.LoadFromFile(miPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return
-	}
-	if err != nil {
-		return
-	}
-	// Defer checking the metainfo is correct to the caller.
-	spec.Set(torrent.TorrentSpecFromMetaInfo(mi))
-	return
-}
-
-// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
-// errors.
 func (d *Downloader) loadMetainfoFromDisk(name string) (mi *metainfo.MetaInfo, err error) {
 	miPath := d.metainfoFilePathForName(name)
 	return metainfo.LoadFromFile(miPath)
@@ -832,28 +742,6 @@ func (d *Downloader) decDownloadRequests() {
 	if d.activeDownloadRequests == 0 {
 		d.zeroActiveDownloadRequests.Broadcast()
 	}
-}
-
-// Errors if any metainfos are not written. We expect this so that all snapshots have their torrents
-// alongside when we write the preverified.toml to commit to an initial snapshot set.
-func (d *Downloader) saveMissingMetainfos(ts iter.Seq[snapshotName]) (err error) {
-	for name := range ts {
-		t := d.torrentsByName[name]
-		if t.Info() == nil {
-			// Try both logging and return huge error for now.
-			d.logger.Debug("missing snapshot torrent info", "snapshot", name)
-			err = errors.Join(err, fmt.Errorf("missing info for %q", name))
-		}
-		saveErr := d.saveMetainfoFromTorrent(t)
-		if err != nil {
-			// Nobody else should be writing this.
-			d.logger.Warn("error saving previously missing metainfo", "snapshot", name, "err", saveErr)
-			if !errors.Is(err, fs.ErrExist) {
-				err = errors.Join(err, saveErr)
-			}
-		}
-	}
-	return
 }
 
 func (d *Downloader) allActiveSnapshots() (ret []Snapshot) {
