@@ -71,7 +71,7 @@ jobs:
         run: |
           echo "Starting Erigon..."
           
-          ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR  --ethash.dagdir $ERIGON_REFERENCE_DATA_DIR --nodiscover --maxpeers 0 --no-downloader --prune.mode=archive --http=false > erigon.log 2>&1 &
+          ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR --persist.receipts --prune.experimental.include-commitment-history --nodiscover --maxpeers 0 --no-downloader --prune.mode=archive --http=false > erigon.log 2>&1 &
 
           ERIGON_PID=$!          
           ERIGON_EXIT_STATUS=$?
