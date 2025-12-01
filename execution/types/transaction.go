@@ -273,7 +273,7 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[i] = common.CopyBytes(buf.Bytes())
+		result[i] = common.Copy(buf.Bytes())
 	}
 	return result, nil
 }
