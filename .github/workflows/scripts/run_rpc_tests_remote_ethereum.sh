@@ -13,7 +13,6 @@ DISABLED_TEST_LIST=(
   engine_
   eth_getProof
   eth_simulateV1
-  eth_getBlockReceipts/test_01.json
 )
 
 # Transform the array into a comma-separated string
