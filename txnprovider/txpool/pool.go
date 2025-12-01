@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1718,6 +1719,13 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
+	now := time.Now().Unix()
+	censoring := chain.ConfigValueLookup(p.chainConfig.CensoringSchedule, uint64(now))
+	if censoring != nil && slices.Contains(censoring.From, senderAddr) {
+		p.logger.Info("discarding transaction from a bad sender", "sender", senderAddr)
+		return txpoolcfg.InvalidSender
+	}
+
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
@@ -1729,6 +1737,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
 				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "at nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.ErrAuthorityReserved
+			}
+			if censoring != nil && censoring.Is7702Enabled && slices.Contains(censoring.From, a.authority) {
+				p.logger.Info("discarding transaction from a bad sender", "authority", a.authority)
+				return txpoolcfg.InvalidSender
 			}
 		}
 		for _, a := range mt.TxnSlot.AuthAndNonces {
