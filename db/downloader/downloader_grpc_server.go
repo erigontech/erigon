@@ -63,7 +63,7 @@ func (s *GrpcServer) checkNamesAndLogCall(names []string, callName string) error
 // "download once" invariant: means after initial download finish - future restart/upgrade/downgrade will not download files (our "fast restart" feature)
 // After "download once": Erigon will produce and seed new files
 func (s *GrpcServer) Download(ctx context.Context, request *downloaderproto.DownloadRequest) (_ *emptypb.Empty, err error) {
-	preverifiedSnapshots := make([]PreverifiedSnapshot, 0, len(request.Items))
+	preverifiedSnapshots := make([]preverifiedSnapshot, 0, len(request.Items))
 	names := make([]string, 0, len(request.Items))
 	for _, it := range request.Items {
 		if it.TorrentHash == nil {
@@ -71,7 +71,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *downloaderproto.Down
 			return
 		}
 		ih := Proto2InfoHash(it.TorrentHash)
-		preverifiedSnapshots = append(preverifiedSnapshots, PreverifiedSnapshot{
+		preverifiedSnapshots = append(preverifiedSnapshots, preverifiedSnapshot{
 			InfoHash: ih,
 			Name:     it.Path,
 		})

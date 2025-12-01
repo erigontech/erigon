@@ -77,12 +77,14 @@ func init() {
 
 type snapshotName = string
 
-type Snapshot struct {
+// Just a pair of name and known infohash.
+type snapshot struct {
 	Name     string
 	InfoHash metainfo.Hash
 }
 
-type PreverifiedSnapshot = Snapshot
+// Snapshot pair with valid name.
+type preverifiedSnapshot = snapshot
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
 type Downloader struct {
@@ -436,9 +438,9 @@ func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
 	return true
 }
 
-// We take PreverifiedSnapshot because it's convenient. We want to log torrents that potentially
+// We take preverifiedSnapshot because it's convenient. We want to log torrents that potentially
 // aren't initialized yet.
-func (d *Downloader) newStats(prevStats AggStats, torrents []Snapshot) AggStats {
+func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats {
 	torrentClient := d.torrentClient
 	peers := make(map[torrent.PeerID]struct{}, 16)
 	stats := prevStats
@@ -704,7 +706,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Download the provided snapshots in their entirety. No consumers should do this asynchronously.
 // Now we can log properly. Target is a name for what we're syncing.
-func (d *Downloader) DownloadSnapshots(ctx context.Context, items []PreverifiedSnapshot, target string) error {
+func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedSnapshot, target string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	torrents := make([]*torrent.Torrent, 0, len(items))
@@ -744,9 +746,11 @@ func (d *Downloader) decDownloadRequests() {
 	}
 }
 
-func (d *Downloader) allActiveSnapshots() (ret []Snapshot) {
+// Returns all torrents, with names, because if a Torrent info isn't available, we can't just yank
+// the name from there.
+func (d *Downloader) allActiveSnapshots() (ret []snapshot) {
 	for name, t := range d.torrentsByName {
-		ret = append(ret, Snapshot{
+		ret = append(ret, snapshot{
 			Name:     name,
 			InfoHash: t.InfoHash(),
 		})
@@ -791,9 +795,9 @@ func (d *Downloader) backgroundLogging(ctx context.Context) {
 	}
 }
 
-// We take PreverifiedSnapshot because it's convenient. We want to log torrents that potentially
+// We take preverifiedSnapshot because it's convenient. We want to log torrents that potentially
 // aren't initialized yet.
-func (d *Downloader) logDownload(ctx context.Context, ts []PreverifiedSnapshot, target string) {
+func (d *Downloader) logDownload(ctx context.Context, ts []preverifiedSnapshot, target string) {
 	startTime := time.Now()
 	stats := d.newStats(AggStats{}, ts)
 	interval := time.Second
@@ -826,6 +830,21 @@ func (d *Downloader) addPreverifiedUnlocked(
 	return nil
 }
 
+func (d *Downloader) invalidateData(name snapshotName, infoHash metainfo.Hash) (err error) {
+	_, ok := d.torrentClient.Torrent(infoHash)
+	// Torrent in use, bad idea to proceed. This shouldn't happen since we should have found
+	// the existing name earlier.
+	panicif.True(ok)
+	// Ensure the data isn't reused. We're presuming the storage in use, but we can't afford
+	// to wait until another torrent is fetched, and then we mistake a non-partial file with
+	// the correct size as being complete.
+	err = os.Rename(d.filePathForName(name), d.filePathForName(name+".part"))
+	if err != nil && errors.Is(err, os.ErrNotExist) {
+		err = nil
+	}
+	return
+}
+
 // Download a preverified file. That means it has a published manifest (metainfo), and a known info
 // hash. Caller is responsible for flushing missing metainfos to disk when complete.
 func (d *Downloader) downloadPreverifiedSnapshot(
@@ -842,29 +861,34 @@ func (d *Downloader) downloadPreverifiedSnapshot(
 	miOpt, err := d.maybeLoadMetainfoFromDisk(name)
 	if err != nil {
 		d.logger.Error("error loading metainfo from disk", "err", err, "name", name)
+		err = nil
 	}
-	if miOpt.Ok {
-		loadedIh := miOpt.Value.HashInfoBytes()
-		if loadedIh != infoHash {
-			// This is fine if we're doing initial sync. If we're not we shouldn't be here.
-			d.logger.Warn("preverified snapshot hash has changed",
-				"expected", infoHash,
-				"actual", loadedIh,
-				"name", name)
-			_, ok := d.torrentClient.Torrent(infoHash)
-			// Torrent in use, bad idea to proceed. This shouldn't happen since we should have found
-			// the existing name earlier.
-			panicif.True(ok)
-			// Ensure the data isn't reused. We're presuming the storage in use, but we can't afford
-			// to wait until another torrent is fetched and then we mistake a non-partial file with
-			// the correct size as being complete.
-			err = os.Rename(d.filePathForName(name), d.filePathForName(name+".part"))
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				err = fmt.Errorf("invalidating old torrent data: %w", err)
+	{
+		// Don't trust the data by default. This corresponds to adding .part to the data to ensure
+		// the torrent client checks it.
+		checkData := true
+		if miOpt.Ok {
+			loadedIh := miOpt.Value.HashInfoBytes()
+			if loadedIh == infoHash {
+				checkData = false
+			} else {
+				// This is fine if we're doing initial sync. If we're not we shouldn't be here.
+				d.logger.Warn("preverified snapshot hash has changed",
+					"expected", infoHash,
+					"actual", loadedIh,
+					"name", name)
+				// Forget the metainfo we loaded, it's wrong (probably changed hash but not name...)
+				miOpt.SetNone()
+			}
+		} else {
+			d.logger.Debug("snapshot metainfo missing", "name", name)
+		}
+		if checkData {
+			err = d.invalidateData(name, infoHash)
+			if err != nil {
+				err = fmt.Errorf("invalidating old snapshot data: %w", err)
 				return
 			}
-			// Forget the metainfo we loaded, it's wrong (probably changed hash but not name...)
-			miOpt.SetNone()
 		}
 	}
 	// Try again, we would have invalidated data for changed infohashes now.
@@ -885,7 +909,8 @@ func (d *Downloader) downloadPreverifiedSnapshot(
 	}
 
 	if miOpt.Ok {
-		// Good case: We have the metainfo in hand, hot from the webseed.
+		// Good case: We have a metainfo with the right infohash, either just fetched from a
+		// webseed, or it was cached on disk.
 		t, err = d.addNewTorrentFromMetainfo(miOpt.Value, name, infoHash)
 		if err != nil {
 			return
