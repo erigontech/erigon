@@ -1001,7 +1001,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	checkStr := cliCtx.String("check")
 	var requestedChecks []integrity.Check
 	if len(checkStr) > 0 {
-		for _, split := range strings.Split(checkStr, ",") {
+		for split := range strings.SplitSeq(checkStr, ",") {
 			requestedChecks = append(requestedChecks, integrity.Check(split))
 		}
 
@@ -1732,7 +1732,10 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max)
+		stepSize := agg.StepSize()
+		minStep := min / stepSize
+		maxStep := max / stepSize
+		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
 	} else {
 		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
 		if err != nil {
