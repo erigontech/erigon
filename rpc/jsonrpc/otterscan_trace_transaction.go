@@ -86,8 +86,7 @@ func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from common.Address,
 	t.depth = depth
 	typ := vm.OpCode(typRaw)
 
-	inputCopy := make([]byte, len(input))
-	copy(inputCopy, input)
+	inputCopy := common.CopyBytes(input)
 	_value := new(big.Int)
 	_value.Set(value.ToBig())
 
@@ -129,7 +128,5 @@ func (t *TransactionTracer) OnExit(depth int, output []byte, gasUsed uint64, err
 	pop := t.stack[lastIdx]
 	t.stack = t.stack[:lastIdx]
 
-	outputCopy := make([]byte, len(output))
-	copy(outputCopy, output)
-	pop.Output = outputCopy
+	pop.Output = common.CopyBytes(output)
 }

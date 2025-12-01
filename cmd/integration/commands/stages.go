@@ -374,47 +374,6 @@ var cmdPrintTableSizes = &cobra.Command{
 	},
 }
 
-var cmdPrintBlockTxNumsInfo = &cobra.Command{
-	Use:   "print_block_tx_nums_info",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := cmd.Context()
-		logger := debug.SetupCobra(cmd, "integration")
-		err := doPrintBlockTxNumsInfo(ctx, logger)
-		if err != nil {
-			logger.Error("issue reading block tx nums info", "err", err)
-		}
-	},
-}
-
-func doPrintBlockTxNumsInfo(ctx context.Context, logger log.Logger) error {
-	db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	br, _ := blocksIO(db, logger)
-	txNumReader := br.TxnumReader(ctx)
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	minTxNum, err := txNumReader.Min(tx, block)
-	if err != nil {
-		return err
-	}
-	maxTxNum, err := txNumReader.Max(tx, block)
-	if err != nil {
-		return err
-	}
-	aggTx := dbstate.AggTx(tx)
-	minStep := minTxNum / aggTx.StepSize()
-	maxStep := maxTxNum / aggTx.StepSize()
-	logger.Info("block tx nums", "minTxNum", minTxNum, "maxTxNum", maxTxNum, "minStep", minStep, "maxStep", maxStep)
-	return nil
-}
-
 var cmdPrintMigrations = &cobra.Command{
 	Use:   "print_migrations",
 	Short: "",
@@ -510,10 +469,6 @@ func init() {
 	withDataDir(cmdPrintTableSizes)
 	withOutputCsvFile(cmdPrintTableSizes)
 	rootCmd.AddCommand(cmdPrintTableSizes)
-
-	withDataDir2(cmdPrintBlockTxNumsInfo)
-	withBlock(cmdPrintBlockTxNumsInfo)
-	rootCmd.AddCommand(cmdPrintBlockTxNumsInfo)
 
 	withConfig(cmdStageSenders)
 	withIntegrityChecks(cmdStageSenders)
@@ -924,7 +879,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, nil, genesis, syncCfg, nil)
+		dirs, br, nil, genesis, syncCfg, nil /*experimentalBAL=*/, false)
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {

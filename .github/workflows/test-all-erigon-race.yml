@@ -5,6 +5,9 @@ on:
     branches:
       - 'release/**'
       - main
+  pull_request:
+    branches:
+      - 'release/**'
   workflow_dispatch:
 
 jobs:
@@ -71,6 +74,15 @@ jobs:
           fetch-depth: 1
           submodules: recursive
           lfs: true
+
+      - name: Cleanup space
+        if: runner.os == 'Linux'
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
 
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'

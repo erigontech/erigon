@@ -893,13 +893,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					&vm.Config{},
 					backend.notifications,
 					config.StateStream,
-					/*stateStream=*/ false,
+					/*badBlockHalt*/ false,
 					dirs,
 					blockReader,
 					backend.sentriesClient.Hd,
 					config.Genesis,
 					config.Sync,
 					stageloop.SilkwormForExecutionStage(backend.silkworm, config),
+					config.ExperimentalBAL,
 				),
 				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
@@ -1755,6 +1756,5 @@ func (e *engineAPISwitcher) SetConsuming(consuming bool) {
 	if e.backend.engineBackendRPC == nil {
 		return
 	}
-
 	e.backend.engineBackendRPC.SetConsuming(consuming)
 }
