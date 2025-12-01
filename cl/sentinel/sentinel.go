@@ -133,9 +133,6 @@ func New(
 	}
 
 	signal.Reset(syscall.SIGINT)
-	if err != nil {
-		return nil, err
-	}
 	s.peers = peers.NewPool(s.p2p.Host())
 
 	mux := chi.NewRouter()
