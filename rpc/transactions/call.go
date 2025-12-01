@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -242,12 +243,14 @@ func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services
 }
 
 type ReusableCaller struct {
-	evm         *vm.EVM
-	gasCap      uint64
-	baseFee     *uint256.Int
-	stateReader state.StateReader
-	callTimeout time.Duration
-	message     *types.Message
+	evm            *vm.EVM
+	gasCap         uint64
+	baseFee        *uint256.Int
+	stateReader    state.StateReader
+	stateOverrides *ethapi2.StateOverrides
+	rules          *chain.Rules
+	callTimeout    time.Duration
+	message        *types.Message
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
@@ -269,8 +272,13 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	// reset the EVM so that we can continue to use it with the new context
 	txCtx := protocol.NewEVMTxContext(r.message)
-
-	r.evm.Reset(txCtx, state.New(r.stateReader))
+	ibs := state.New(r.stateReader)
+	if r.stateOverrides != nil {
+		if err := r.stateOverrides.OverrideAndCommit(ibs, r.rules); err != nil {
+			return nil, err
+		}
+	}
+	r.evm.Reset(txCtx, ibs)
 
 	timedOut := false
 	go func() {
@@ -280,6 +288,9 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
+	dbg.TraceInstructions = true
+	dbg.TraceTransactionIO = true
+	r.evm.IntraBlockState().SetTrace(true)
 	result, err := protocol.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
@@ -325,11 +336,6 @@ func NewReusableCaller(
 	}
 
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
-	if stateOverrides != nil {
-		if err := stateOverrides.OverrideAndCommit(ibs, blockCtx.Rules(chainConfig)); err != nil {
-			return nil, err
-		}
-	}
 
 	if blockOverrides != nil {
 		blockOverrides.Override(&blockCtx)
@@ -339,11 +345,13 @@ func NewReusableCaller(
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 
 	return &ReusableCaller{
-		evm:         evm,
-		baseFee:     baseFee,
-		gasCap:      gasCap,
-		callTimeout: callTimeout,
-		stateReader: stateReader,
-		message:     msg,
+		evm:            evm,
+		baseFee:        baseFee,
+		gasCap:         gasCap,
+		callTimeout:    callTimeout,
+		stateReader:    stateReader,
+		stateOverrides: stateOverrides,
+		rules:          blockCtx.Rules(chainConfig),
+		message:        msg,
 	}, nil
 }
