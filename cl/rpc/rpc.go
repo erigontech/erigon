@@ -96,7 +96,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 	return responsePacket, pid, nil
 }
 
-func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.BlobSidecar, string, error) {
+func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte) ([]*cltypes.BlobSidecar, string, error) {
 	responses, pid, err := b.sendRequest(ctx, topic, reqData)
 	if err != nil {
 		return nil, pid, err
@@ -188,7 +188,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req 
 	}
 
 	data := buffer.Bytes()
-	blobs, pid, err := b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, uint64(req.Len()))
+	blobs, pid, err := b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid request") {
 			b.BanPeer(pid)
@@ -209,7 +209,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, c
 	}
 
 	data := buffer.Bytes()
-	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, count*b.beaconConfig.MaxBlobsPerBlock)
+	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data)
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
