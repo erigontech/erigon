@@ -167,7 +167,6 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 }
 
 func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
-	// See https://github.com/erigontech/erigon/issues/17624
 	logLvl := log.LvlDebug
 	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
 	var b2Side *MockClPayload
