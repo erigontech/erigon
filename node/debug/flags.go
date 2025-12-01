@@ -111,13 +111,23 @@ var (
 		Usage: "Pyroscope tags (list of key=value pairs)",
 		Value: nil,
 	}
+	pyroscopeAuthUsernameFlag = cli.StringFlag{
+		Name:  "pyroscope.username",
+		Usage: "Pyroscope authentication username",
+		Value: "",
+	}
+	pyroscopeAuthPasswordFlag = cli.StringFlag{
+		Name:  "pyroscope.password",
+		Usage: "Pyroscope authentication password",
+		Value: "",
+	}
 )
 
 // Flags holds all command-line flags required for debugging.
 var Flags = []cli.Flag{
 	&pprofFlag, &pprofAddrFlag, &pprofPortFlag,
 	&cpuprofileFlag, &traceFlag, &vmTraceFlag, &vmTraceJsonConfigFlag,
-	&pyroscopeFlag, &pyroscopeServerFlag, &pyroscopeTagsFlag,
+	&pyroscopeFlag, &pyroscopeServerFlag, &pyroscopeTagsFlag, &pyroscopeAuthUsernameFlag, &pyroscopeAuthPasswordFlag,
 }
 
 // SetupCobra sets up logging, profiling and tracing for cobra commands
@@ -288,6 +298,8 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	pyroscopeEnabled := ctx.Bool(pyroscopeFlag.Name)
 	pyroscopeServer := ctx.String(pyroscopeServerFlag.Name)
 	pyroscopeTags := ctx.StringSlice(pyroscopeTagsFlag.Name)
+	pyroscopeAuthUsername := ctx.String(pyroscopeAuthUsernameFlag.Name)
+	pyroscopeAuthPassword := ctx.String(pyroscopeAuthPasswordFlag.Name)
 
 	if pyroscopeEnabled {
 		tags := make(map[string]string)
@@ -297,7 +309,12 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 				tags[parts[0]] = parts[1]
 			}
 		}
-		if err := Handler.StartPyroscopeProfiler(pyroscopeServer, tags); err != nil {
+		if err := Handler.StartPyroscopeProfiler(
+			pyroscopeServer,
+			pyroscopeAuthUsername,
+			pyroscopeAuthPassword,
+			tags,
+		); err != nil {
 			log.Error("failed starting pyroscope profiler", "err", err)
 			panic(err)
 		}
