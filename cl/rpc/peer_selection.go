@@ -106,6 +106,10 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				continue
 			}
 
+			if peer.EnodeId == "" {
+				log.Debug("[peerSelector] empty enodeId", "peer", pid)
+				continue
+			}
 			// get custody indices
 			enodeId := enode.HexID(peer.EnodeId)
 			custodyIndices, err := peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
