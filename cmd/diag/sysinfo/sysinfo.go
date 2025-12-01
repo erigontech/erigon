@@ -53,7 +53,6 @@ type SortType int
 const (
 	SortByCPU SortType = iota
 	SortByMemory
-	SortByPID
 )
 
 func collectInfo(cliCtx *cli.Context) error {
@@ -166,14 +165,6 @@ func sortProcesses(prcInfo []*sysutils.ProcessInfo, sorting SortType) []*sysutil
 
 func sortProcessesByCPU(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
 	return sortProcesses(prcInfo, SortByCPU)
-}
-
-func sortProcessesByMemory(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
-	return sortProcesses(prcInfo, SortByMemory)
-}
-
-func sortProcessesByPID(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
-	return sortProcesses(prcInfo, SortByPID)
 }
 
 func getData(cliCtx *cli.Context) (diaglib.HardwareInfo, error) {
