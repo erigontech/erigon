@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -193,6 +193,9 @@ func (evm *EVM) call(typ OpCode, caller common.Address, callerAddress common.Add
 			return nil, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 	}
+
+	// BAL: record address access even if call fails due to gas/call depth and to precompiles
+	evm.intraBlockState.MarkAddressAccess(addr)
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if evm.Config().Tracer != nil {
@@ -382,6 +385,9 @@ func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemai
 	}
 
 	depth := evm.interpreter.Depth()
+
+	// BAL: record target address even on failed CREATE/CREATE2 calls
+	evm.intraBlockState.MarkAddressAccess(address)
 
 	if evm.Config().Tracer != nil {
 		evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gasRemaining, value, nil)

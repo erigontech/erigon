@@ -22,13 +22,13 @@ package testforks
 import (
 	"fmt"
 	"math/big"
-	"sort"
+	"slices"
 
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // See BPO1 and so on in
@@ -235,7 +235,7 @@ func AvailableForks() []string {
 	for k := range Forks {
 		availableForks = append(availableForks, k)
 	}
-	sort.Strings(availableForks)
+	slices.Sort(availableForks)
 	return availableForks
 }
 

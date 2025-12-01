@@ -159,7 +159,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 	}
 	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
 	if errBegin != nil {
-		return fmt.Errorf("kvserver: %w", err)
+		return fmt.Errorf("kvserver: %w", errBegin)
 	}
 	s.txs[id] = &threadSafeTx{TemporalTx: newTx}
 	return nil
@@ -260,8 +260,8 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 				if err != nil {
 					return fmt.Errorf("kvserver: %w", err)
 				}
-				c.k = common.CopyBytes(k)
-				c.v = common.CopyBytes(v)
+				c.k = common.Copy(k)
+				c.v = common.Copy(v)
 			}
 
 			if err := s.renew(stream.Context(), id); err != nil {
@@ -656,8 +656,8 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRange
 			if err != nil {
 				return err
 			}
-			key := common.CopyBytes(k)
-			value := common.CopyBytes(v)
+			key := common.Copy(k)
+			value := common.Copy(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 		}
@@ -697,8 +697,8 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 			if err != nil {
 				return err
 			}
-			key := common.CopyBytes(k)
-			value := common.CopyBytes(v)
+			key := common.Copy(k)
+			value := common.Copy(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 			limit--

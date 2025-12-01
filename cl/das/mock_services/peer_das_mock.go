@@ -348,6 +348,44 @@ func (c *MockPeerDasStateReaderCall) DoAndReturn(f func() peerdasstate.PeerDasSt
 	return c
 }
 
+// SyncColumnDataLater mocks base method.
+func (m *MockPeerDas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SyncColumnDataLater", block)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SyncColumnDataLater indicates an expected call of SyncColumnDataLater.
+func (mr *MockPeerDasMockRecorder) SyncColumnDataLater(block any) *MockPeerDasSyncColumnDataLaterCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SyncColumnDataLater", reflect.TypeOf((*MockPeerDas)(nil).SyncColumnDataLater), block)
+	return &MockPeerDasSyncColumnDataLaterCall{Call: call}
+}
+
+// MockPeerDasSyncColumnDataLaterCall wrap *gomock.Call
+type MockPeerDasSyncColumnDataLaterCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasSyncColumnDataLaterCall) Return(arg0 error) *MockPeerDasSyncColumnDataLaterCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasSyncColumnDataLaterCall) Do(f func(*cltypes.SignedBeaconBlock) error) *MockPeerDasSyncColumnDataLaterCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasSyncColumnDataLaterCall) DoAndReturn(f func(*cltypes.SignedBeaconBlock) error) *MockPeerDasSyncColumnDataLaterCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // TryScheduleRecover mocks base method.
 func (m *MockPeerDas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	m.ctrl.T.Helper()

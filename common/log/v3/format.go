@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -62,10 +63,19 @@ func TerminalFormat() Format {
 
 		b := &bytes.Buffer{}
 		lvl := strings.ToUpper(r.Lvl.String())
-		if color > 0 {
-			fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m[%s] %s ", color, lvl, r.Time.Format(termTimeFormat), r.Msg)
+		logNoTimestamps := logEnvBool("ERIGON_LOG_NO_TIMESTAMPS", false)
+		if logNoTimestamps {
+			if color > 0 {
+				fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m %s ", color, lvl, r.Msg)
+			} else {
+				fmt.Fprintf(b, "[%s] %s ", lvl, r.Msg)
+			}
 		} else {
-			fmt.Fprintf(b, "[%s] [%s] %s ", lvl, r.Time.Format(termTimeFormat), r.Msg)
+			if color > 0 {
+				fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m[%s] %s ", color, lvl, r.Time.Format(termTimeFormat), r.Msg)
+			} else {
+				fmt.Fprintf(b, "[%s] [%s] %s ", lvl, r.Time.Format(termTimeFormat), r.Msg)
+			}
 		}
 
 		// try to justify the log output for short messages
@@ -295,4 +305,16 @@ func escapeString(s string) string {
 	e.Reset()
 	stringBufPool.Put(e)
 	return ret
+}
+
+// EnvBool from dbg uses log many times so don't want to make a cycle.
+func logEnvBool(envVarName string, defaultVal bool) bool {
+	v, _ := os.LookupEnv(envVarName)
+	if strings.EqualFold(v, "true") {
+		return true
+	}
+	if strings.EqualFold(v, "false") {
+		return false
+	}
+	return defaultVal
 }

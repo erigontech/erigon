@@ -82,17 +82,11 @@ func (t *TransactionTracer) TracingHooks() *tracing.Hooks {
 	return t.hooks
 }
 
-func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to common.Address, precompile bool, input []byte, value *uint256.Int) {
-
-}
-
 func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.depth = depth
 	typ := vm.OpCode(typRaw)
-	// t.captureStartOrEnter(vm.OpCode(typ), from, to, precompile, input, value)
 
-	inputCopy := make([]byte, len(input))
-	copy(inputCopy, input)
+	inputCopy := common.Copy(input)
 	_value := new(big.Int)
 	_value.Set(value.ToBig())
 
@@ -134,7 +128,5 @@ func (t *TransactionTracer) OnExit(depth int, output []byte, gasUsed uint64, err
 	pop := t.stack[lastIdx]
 	t.stack = t.stack[:lastIdx]
 
-	outputCopy := make([]byte, len(output))
-	copy(outputCopy, output)
-	pop.Output = outputCopy
+	pop.Output = common.Copy(output)
 }

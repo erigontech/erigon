@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -181,7 +181,7 @@ type HasDiff interface {
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
 // if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
@@ -266,15 +266,18 @@ func (fv *ForkValidator) ValidatePayload(tx kv.TemporalRwTx, header *types.Heade
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()
 	}
+	fv.sharedDom = sd
+	fv.extendingForkNotifications = shards.NewNotifications(nil)
+	status, latestValidHash, validationError, criticalError =
+		fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
 
-	fv.sharedDom, criticalError = execctx.NewSharedDomains(tx, logger)
-	if criticalError != nil {
-		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
-		return
+	if fv.sharedDom != nil &&
+		(criticalError != nil || status == engine_types.InvalidStatus) {
+		fv.sharedDom.Close()
+		fv.sharedDom = nil
 	}
 
-	fv.extendingForkNotifications = shards.NewNotifications(nil)
-	return fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
+	return
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
@@ -303,7 +306,7 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	headersChain = append(headersChain, header)
 	bodiesChain = append(bodiesChain, body)
 	if err := fv.validatePayload(sd, tx, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
-		if errors.Is(err, consensus.ErrInvalidBlock) {
+		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
 		} else {
 			criticalError = fmt.Errorf("validateAndStorePayload: %w", err)
@@ -332,10 +335,6 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 			return
 		}
 		status = engine_types.InvalidStatus
-		if fv.sharedDom != nil {
-			fv.sharedDom.Close()
-		}
-		fv.sharedDom = nil
 		fv.extendingForkHeadHash = common.Hash{}
 		fv.extendingForkNumber = 0
 		return

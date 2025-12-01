@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -101,12 +101,8 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID: 1,
-	Prune:     prune.DefaultMode,
-	Miner: buildercfg.MiningConfig{
-		GasPrice: big.NewInt(common.GWei),
-		Recommit: 3 * time.Second,
-	},
+	NetworkID:   1,
+	Prune:       prune.DefaultMode,
 	TxPool:      txpoolcfg.DefaultConfig,
 	RPCGasCap:   50000000,
 	GPO:         FullNodeGPO,
@@ -241,6 +237,8 @@ type Config struct {
 	RPCTxFeeCap float64 `toml:",omitempty"`
 
 	StateStream bool
+
+	ExperimentalBAL bool
 
 	// URL to connect to Heimdall node
 	HeimdallURL string

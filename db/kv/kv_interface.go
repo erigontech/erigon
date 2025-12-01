@@ -468,7 +468,7 @@ type TemporalDebugDB interface {
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
-	GetLatest(table Domain, key []byte) (v []byte, prevStep Step, ok bool)
+	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
@@ -478,6 +478,7 @@ type TemporalMemBatch interface {
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
+	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 }
 
 type WithFreezeInfo interface {

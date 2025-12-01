@@ -231,7 +231,7 @@ func (sc *StateCache) SetAccountHashesRead(prefix []byte, hasState, hasTree, has
 	cpy := make([]common.Hash, len(hashes))
 	copy(cpy, hashes)
 	ai := AccountHashItem{
-		addrHashPrefix: common.CopyBytes(prefix),
+		addrHashPrefix: common.Copy(prefix),
 		hasState:       hasState,
 		hasTree:        hasTree,
 		hasHash:        hasHash,
@@ -247,7 +247,7 @@ func (sc *StateCache) SetAccountHashWrite(prefix []byte, hasState, hasTree, hasH
 	assertSubset(hasTree, hasState)
 	assertSubset(hasHash, hasState)
 	ai := AccountHashItem{
-		addrHashPrefix: common.CopyBytes(prefix),
+		addrHashPrefix: common.Copy(prefix),
 		hasState:       hasState,
 		hasTree:        hasTree,
 		hasHash:        hasHash,
@@ -273,7 +273,7 @@ func (sc *StateCache) SetStorageHashRead(addrHash common.Hash, incarnation uint6
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
-		locHashPrefix: common.CopyBytes(locHashPrefix),
+		locHashPrefix: common.Copy(locHashPrefix),
 		hasState:      hasState,
 		hasTree:       hasTree,
 		hasHash:       hasHash,
@@ -288,7 +288,7 @@ func (sc *StateCache) SetStorageHashWrite(addrHash common.Hash, incarnation uint
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
-		locHashPrefix: common.CopyBytes(locHashPrefix),
+		locHashPrefix: common.Copy(locHashPrefix),
 		hasState:      hasState,
 		hasTree:       hasTree,
 		hasHash:       hasHash,
@@ -305,7 +305,7 @@ func (sc *StateCache) SetStorageHashDelete(addrHash common.Hash, incarnation uin
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
-		locHashPrefix: common.CopyBytes(locHashPrefix),
+		locHashPrefix: common.Copy(locHashPrefix),
 		hasState:      hasState,
 		hasTree:       hasTree,
 		hasHash:       hasHash,

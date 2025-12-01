@@ -86,6 +86,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
+	startTime := time.Now()
 	blockRoot := cfg.startingRoot
 	currentSlot := cfg.startingSlot
 
@@ -185,7 +186,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				(slot <= destinationSlotForEL || isInElSnapshots),
 			tx.Commit()
 	})
-	prevProgress := cfg.downloader.Progress()
 
 	finishCh := make(chan struct{})
 	// Start logging thread
@@ -193,13 +193,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	isBackfilling := atomic.Bool{}
 
 	go func() {
+		initialProgress := cfg.downloader.Progress()
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
 		for {
 			select {
 			case <-logInterval.C:
-				logTime := logIntervalTime
-
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					if ready, err := cfg.engine.Ready(ctx); !ready {
 						if err != nil {
@@ -211,10 +210,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
-				blockProgress := float64(prevProgress - currProgress)
-				ratio := float64(logTime / time.Second)
-				speed := blockProgress / ratio
-				prevProgress = currProgress
+				speed := float64(initialProgress-currProgress) / time.Since(startTime).Seconds()
 
 				if speed == 0 || initialBeaconBlock == nil {
 					continue
@@ -260,9 +256,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					remaining := float64(highestBlockSeen - lowestBlockToReach)
+					toprocess := highestBlockSeen - lowestBlockToReach
+					processed := highestBlockSeen - uint64(currEth1Progress.Load())
+					remaining := float64(toprocess - processed)
 					log.Info("Downloading Execution History", "progress",
-						fmt.Sprintf("%d/%d", highestBlockSeen-uint64(currEth1Progress.Load()), highestBlockSeen-lowestBlockToReach),
+						fmt.Sprintf("%d/%d", processed, toprocess),
 						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {

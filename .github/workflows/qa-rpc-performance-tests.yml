@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout Erigon repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           fetch-depth: "0"
@@ -55,6 +55,7 @@ jobs:
           rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
           echo "Backup chaindata"
           cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+          rm -f $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon.log || true
 
       - name: Run RpcDaemon
         id: rpcdaemon_running_step
@@ -225,6 +226,13 @@ jobs:
           else
             echo "RpcDaemon has already terminated"
           fi
+
+      - name: Upload RpcDaemon logs
+        if: steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: rpcdaemon-logs
+          path: $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon.log
 
       - name: Restore Erigon Chaindata Directory
         if: ${{ always() }}

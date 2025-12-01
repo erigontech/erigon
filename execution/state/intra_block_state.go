@@ -97,6 +97,8 @@ type IntraBlockState struct {
 	trace          bool
 	tracingHooks   *tracing.Hooks
 	balanceInc     map[common.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	addressAccess  map[common.Address]struct{}
+	recordAccess   bool
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
@@ -126,6 +128,8 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[common.Address]*BalanceIncrease{},
+		addressAccess:     nil,
+		recordAccess:      false,
 		txIndex:           0,
 		trace:             false,
 		dep:               UnknownDep,
@@ -582,7 +586,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 			if s.data.CodeHash == empty.CodeHash {
 				return 0, nil
 			}
-			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr))) {
 				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			}
 			readStart := time.Now()
@@ -669,7 +673,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr common.Address) (common
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr common.Address, key common.Hash, value *uint256.Int) error {
-	versionedValue, source, _, err := versionedRead(sdb, addr, StatePath, key, false, *u256.N0,
+	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -693,7 +697,7 @@ func (sdb *IntraBlockState) GetState(addr common.Address, key common.Hash, value
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key common.Hash, value *uint256.Int) error {
-	versionedValue, source, _, err := versionedRead(sdb, addr, StatePath, key, true, *u256.N0,
+	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, true, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -758,7 +762,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 				// TODO: discuss if we should ignore error
 				prev := new(uint256.Int)
 				amount := amount
-				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr))) {
 					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 				}
 				readStart := time.Now()
@@ -797,6 +801,8 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 			sdb.touch(addr)
 		}
 
+		// BAL: record coinbase/selfdestruct recipients even with 0 value
+		sdb.MarkAddressAccess(addr)
 		return nil
 	}
 
@@ -851,7 +857,7 @@ func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage
 
 	if readAccount == nil {
 		if readStorage {
-			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr))) {
 				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			}
 			readStart := time.Now()
@@ -1079,7 +1085,7 @@ func (sdb *IntraBlockState) setState(addr common.Address, key common.Hash, value
 		return err
 	}
 	if stateObject.SetState(key, value, force) {
-		sdb.versionWritten(addr, StatePath, key, value)
+		sdb.versionWritten(addr, StoragePath, key, value)
 	}
 	return nil
 }
@@ -1241,7 +1247,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 		return sdb.stateObjectForAccount(addr, account), nil
 	}
 
-	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr))) {
 		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 	}
 	readStart := time.Now()
@@ -1447,7 +1453,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	// creation clashes between trnascations get detected
 	sdb.versionRead(addr, BalancePath, common.Hash{}, source, version, newObj.Balance())
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
-
 	return nil
 }
 
@@ -1509,8 +1514,10 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
 			tracingHooks.OnBalanceChange(stateObject.address, balance, uint256.Int{}, tracing.BalanceDecreaseSelfdestructBurn)
 		}
-		if dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed)
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr))) {
+			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
+				fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed)
+			}
 		}
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
@@ -1533,9 +1540,11 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if err := stateObject.updateStorage(stateWriter); err != nil {
 			return err
 		}
-		if dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) Update Account Data (%T): %x balance:%d,nonce:%d,codehash:%x\n",
-				stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr))) {
+			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
+				fmt.Printf("%d (%d.%d) Update Account Data (%T): %x balance:%d,nonce:%d,codehash:%x\n",
+					stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
+			}
 		}
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
@@ -1784,6 +1793,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.
 	}
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
+	sdb.addressAccess = make(map[common.Address]struct{})
+	sdb.recordAccess = true
 	return nil
 }
 
@@ -1824,6 +1835,29 @@ func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Ha
 	return sdb.accessList.Contains(addr, slot)
 }
 
+func (sdb *IntraBlockState) MarkAddressAccess(addr common.Address) {
+	if !sdb.recordAccess || sdb.addressAccess == nil {
+		return
+	}
+	sdb.addressAccess[addr] = struct{}{}
+}
+
+// AccessedAddresses returns and resets the set of addresses touched during the current transaction.
+func (sdb *IntraBlockState) AccessedAddresses() map[common.Address]struct{} {
+	if len(sdb.addressAccess) == 0 {
+		sdb.recordAccess = false
+		sdb.addressAccess = nil
+		return nil
+	}
+	out := make(map[common.Address]struct{}, len(sdb.addressAccess))
+	for addr := range sdb.addressAccess {
+		out[addr] = struct{}{}
+	}
+	sdb.recordAccess = false
+	sdb.addressAccess = nil
+	return out
+}
+
 func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
@@ -1832,6 +1866,7 @@ func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.A
 }
 
 func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath, key common.Hash, val any) {
+	sdb.MarkAddressAccess(addr)
 	if sdb.versionMap != nil {
 		if sdb.versionedWrites == nil {
 			sdb.versionedWrites = WriteSet{}
@@ -1854,6 +1889,7 @@ func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath
 }
 
 func (sdb *IntraBlockState) versionRead(addr common.Address, path AccountPath, key common.Hash, source ReadSource, version Version, val any) {
+	sdb.MarkAddressAccess(addr)
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}
@@ -1962,7 +1998,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			switch path {
 			case AddressPath:
 				continue
-			case StatePath:
+			case StoragePath:
 				stateKey := writes[i].Key
 				state := val.(uint256.Int)
 				if err := sdb.setState(addr, stateKey, state, true); err != nil {

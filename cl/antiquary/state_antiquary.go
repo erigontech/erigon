@@ -370,7 +370,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 					return err
 				}
 				if s.currentState.Version() >= clparams.ElectraVersion {
-					fmt.Println("not-found dumping electra queues", "slot", slot, "pendingDeposits", s.currentState.PendingDeposits().Len(), "pendingConsolidations", s.currentState.PendingConsolidations().Len(), "pendingWithdrawals", s.currentState.PendingPartialWithdrawals().Len())
 					if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
 						return err
 					}

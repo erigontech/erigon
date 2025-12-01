@@ -49,7 +49,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *ShortNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.CopyBytes(rlp))
+					proof = append(proof, common.Copy(rlp))
 				} else {
 					return nil, err
 				}
@@ -71,7 +71,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *DuoNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.CopyBytes(rlp))
+					proof = append(proof, common.Copy(rlp))
 				} else {
 					return nil, err
 				}
@@ -93,7 +93,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *FullNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.CopyBytes(rlp))
+					proof = append(proof, common.Copy(rlp))
 				} else {
 					return nil, err
 				}
@@ -392,5 +392,35 @@ func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proo
 		return fmt.Errorf("storage value from proof (%x) does not match expected (%x)", value, expected)
 	}
 
+	return nil
+}
+
+type proofNode struct {
+	hash common.Hash
+	node Node
+}
+
+// proofMap creates a map from hash to proof node
+func orderedProofNodes(proof []hexutil.Bytes) (res []proofNode, err error) {
+	for _, proofB := range proof {
+		hash := crypto.Keccak256Hash(proofB)
+		node, err := decodeNode(proofB)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, proofNode{hash, node})
+	}
+	return res, nil
+}
+
+// Print proof to human readable format
+func PrintProof(proof []hexutil.Bytes) error {
+	proofNodes, err := orderedProofNodes(proof)
+	if err != nil {
+		return err
+	}
+	for i, proofNode := range proofNodes {
+		fmt.Printf("Level %d: hash=%x -> %s\n", i, proofNode.hash, proofNode.node.String())
+	}
 	return nil
 }

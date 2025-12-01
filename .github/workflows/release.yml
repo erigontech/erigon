@@ -7,8 +7,8 @@ env:
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.24-bookworm"
-  DOCKER_BASE_IMAGE: "debian:12-slim"
+  BUILDER_IMAGE: "golang:1.25-bookworm"
+  TARGET_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   BINARIES: "erigon downloader evm caplin capcli integration rpcdaemon sentry txpool"
@@ -65,7 +65,7 @@ jobs:
           docker buildx prune --verbose -f -a
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## v5.0.0
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
@@ -139,9 +139,11 @@ jobs:
             --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short-commit-id }} \
             --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
             --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
-            --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
+            --label org.opencontainers.image.base.name="${{ env.TARGET_BASE_IMAGE }}" \
             --build-arg VERSION=${RELEASE_VERSION} \
             --build-arg BINARIES='${{ env.BINARIES }}' \
+            --build-arg BUILDER_IMAGE='${{ env.BUILDER_IMAGE }}' \
+            --build-arg TARGET_BASE_IMAGE='${{ env.TARGET_BASE_IMAGE }}' \
             --tag ${DOCKER_URL}:${RELEASE_VERSION} \
             --push \
             .
@@ -243,7 +245,7 @@ jobs:
           ls -lR
 
       - name: Fast checkout git repository erigontech/erigon-qa
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## 5.0.0
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
           repository: erigontech/erigon-qa
@@ -316,7 +318,7 @@ jobs:
     steps:
 
     - name: Fast checkout just ${{ env.DOCKERFILE_PATH }} from git repository ${{ env.APP_REPO }}
-      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## v5.0.0
+      uses: actions/checkout@v6
       with:
         repository: ${{ env.APP_REPO }}
         sparse-checkout: ${{ env.DOCKERFILE_PATH }}
@@ -429,7 +431,7 @@ jobs:
       RELEASE_VERSION: ${{ inputs.release_version }}
     steps:
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## 4.2.2 release
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
