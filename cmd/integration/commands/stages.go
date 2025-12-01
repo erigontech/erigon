@@ -607,7 +607,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
-	domains, err := execctx.NewSharedDomains(tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
@@ -894,26 +894,24 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}); err != nil {
 			return err
 		}
+
+		if unwind < pruneTo {
+			return fmt.Errorf("can't prune beyond unwind: unwind=%d, prune=%d", unwind, pruneTo)
+		}
 	}
 
-	var tx kv.TemporalRwTx //nil - means lower-level code (each stage) will manage transactions
-	if noCommit {
-		var err error
-		tx, err = db.BeginTemporalRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
+	tx, err := db.BeginTemporalRw(ctx) //nolint
+	if err != nil {
+		return err
 	}
 
-	if unwind > 0 {
-		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		err := stagedsync.UnwindExecutionStage(u, s, nil, tx, ctx, cfg, logger)
-		if err != nil {
-			return err
+	defer func() {
+		if noCommit {
+			tx.Rollback()
+		} else {
+			tx.Commit()
 		}
-		return nil
-	}
+	}()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, db, true)
@@ -928,25 +926,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	var sendersProgress, execProgress uint64
-	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		var err error
-		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-			return err
-		}
-		if execProgress == 0 {
-			doms, err := execctx.NewSharedDomains(tx, log.New())
-			if err != nil {
-				panic(err)
-			}
-			execProgress = doms.BlockNum()
-			doms.Close()
-		}
 
-		if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
-			return err
+	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		return err
+	}
+	if execProgress == 0 {
+		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			panic(err)
 		}
-		return nil
-	}); err != nil {
+		execProgress = doms.BlockNum()
+		doms.Close()
+	}
+
+	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
 	}
 
@@ -954,32 +947,59 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
+	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	if err != nil {
+		return err
+	}
+
 	if chainTipMode {
 		//if chainTip = true, forced noCommit = false
 		for bn := execProgress; bn < block; bn++ {
-			if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-				err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger)
-				var errExhausted *stagedsync.ErrLoopExhausted
-				if errors.As(err, &errExhausted) {
-					return nil
+			if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger); err != nil {
+				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+					return err
 				}
-				return err
-			}); err != nil {
-				return err
+				if err := doms.Flush(ctx, tx); err != nil {
+					return err
+				}
+				doms.ClearRam(true)
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				if tx, err = db.BeginTemporalRw(ctx); err != nil {
+					return err
+				}
 			}
 		}
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
+		doms.ClearRam(true)
 		return nil
 	}
 
 	for {
 		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, block, ctx, cfg, logger); err != nil {
-			var errExhausted *stagedsync.ErrLoopExhausted
-			if errors.As(err, &errExhausted) {
-				continue // has more blocks to exec
+			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+				return err
 			}
-			return err // fail
+			if !noCommit {
+				if err := doms.Flush(ctx, tx); err != nil {
+					return err
+				}
+				doms.ClearRam(true)
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				if tx, err = db.BeginTemporalRw(ctx); err != nil {
+					return err
+				}
+			}
 		}
-		return nil // Exec finished
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
+		doms.ClearRam(true)
 	}
 }
 

@@ -149,7 +149,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomains(tx, api.logger)
+	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger)
 	if err != nil {
 		return nil, err
 	}

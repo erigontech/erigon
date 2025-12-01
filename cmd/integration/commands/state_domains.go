@@ -534,7 +534,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := execctx.NewSharedDomains(temporalTx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, temporalTx, logger)
 	if err != nil {
 		return err
 	}

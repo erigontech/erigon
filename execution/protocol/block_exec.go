@@ -393,8 +393,7 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 		stateWriter = state.NewNoopWriter()
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
-	return nil
+	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 }
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)

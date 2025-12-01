@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -66,7 +67,7 @@ type NoopWriter struct {
 var noopWriter = &NoopWriter{}
 
 func NewNoopWriter(trace ...bool) *NoopWriter {
-	if len(trace) == 0 {
+	if !dbg.TraceNoopIO || len(trace) == 0 {
 		return noopWriter
 	}
 	return &NoopWriter{trace[0]}
