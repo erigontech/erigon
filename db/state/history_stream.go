@@ -872,22 +872,23 @@ func (ht *HistoryKeyTraceDB) advanceSmallVals() error {
 		if err != nil {
 			return err
 		}
-		if ht.v == nil {
-			ht.k = nil
-			return nil
+	} else {
+		ht.k, ht.v, err = ht.valsCDup.NextDup()
+		if err != nil {
+			return err
 		}
-		binary.BigEndian.PutUint64(ht.v, ht.fromTxNum)
+	}
+
+	if ht.v == nil {
+		ht.k = nil
 		return nil
 	}
-	ht.k, ht.v, err = ht.valsCDup.NextDup()
-	if err != nil {
-		return err
-	}
-	if ht.v != nil {
-		binary.BigEndian.PutUint64(ht.v, ht.fromTxNum)
-	} else {
+
+	ht.txNum = binary.BigEndian.Uint64(ht.v)
+	if ht.txNum >= ht.toTxNum {
 		ht.k = nil
 	}
+	ht.v = ht.v[8:]
 	return nil
 }
 

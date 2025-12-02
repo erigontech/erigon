@@ -500,13 +500,21 @@ func TestHistoryRange2(t *testing.T) {
 	})
 }
 
-func TestHistoryKeyTrace(t *testing.T) {
+func TestHistoryKeyTrace_SmallVals(t *testing.T) {
+	testHistoryKeyTrace(t, false)
+}
+
+func TestHistoryKeyTrace_LargeVals(t *testing.T) {
+	testHistoryKeyTrace(t, true)
+}
+
+func testHistoryKeyTrace(t *testing.T, largeVals bool) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
 
-	db, h, _ := filledHistory(t, true, logger)
+	db, h, _ := filledHistory(t, largeVals, logger)
 	collateAndMergeHistory(t, db, h, 32, true)
 
 	roTx, err := db.BeginRo(ctx)
@@ -517,7 +525,7 @@ func TestHistoryKeyTrace(t *testing.T) {
 	defer hc.Close()
 
 	hc2 := h.BeginFilesRo()
-	defer hc2.Close() // need to have different HistoryFilesRo for HistorySeek
+	defer hc2.Close() // need to have different HistoryFilesRo for HistorySeek (because it changes internal state)
 
 	randfn := func(till uint64) uint64 { return 1 + (rand.Uint64() % till) } // [1,till]
 
@@ -527,15 +535,16 @@ func TestHistoryKeyTrace(t *testing.T) {
 	keyBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(keyBytes, key)
 	keyBytes[0] = 1
-	var from, to uint64
-	for from > to {
+	from, to := uint64(1), uint64(0)
+	for from >= to {
 		from, to = randfn(100), randfn(1000)
 	}
 
-	//from, to := uint64(4), uint64(61)
+	// from, to := uint64(10), uint64(21)
 	t.Logf("from: %d, to: %d", from, to)
 	it, err := hc.DebugHistoryKeyTrace(ctx, keyBytes, from, to, roTx)
 	require.NoError(t, err)
+	defer it.Close()
 
 	i := uint64(math.Ceil(float64(from)/float64(key))) * key
 	count := uint64(0)
@@ -547,13 +556,11 @@ func TestHistoryKeyTrace(t *testing.T) {
 		sval, ok, err := hc2.HistorySeek(keyBytes, txNum, roTx)
 		require.NoError(t, err)
 		require.True(t, ok)
-		fmt.Println(hexutil.Encode(val), hexutil.Encode(sval))
+		//fmt.Println(hexutil.Encode(val), hexutil.Encode(sval))
 		require.Equal(t, sval, val)
 		i += key
 		count++
 	}
 
-	if from <= to {
-		require.Equal(t, (to-1)/key-(from-1)/key, count)
-	}
+	require.Equal(t, (to-1)/key-(from-1)/key, count)
 }
