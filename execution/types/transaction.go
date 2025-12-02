@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -449,6 +450,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
+	localTarget := wasmdb.LocalTarget()
 	m := Message{
 		from:       from,
 		to:         to,
@@ -461,7 +463,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		checkGas:   checkGas,
 		isFree:     isFree,
 
-		TxRunContext: new(MessageRunContext),
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{localTarget}),
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)

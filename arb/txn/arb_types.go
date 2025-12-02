@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -159,7 +160,7 @@ func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 func (tx *ArbitrumUnsignedTx) AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules) (*types.Message, error) {
 	msg := &types.Message{
 		Tx:           tx,
-		TxRunContext: new(types.MessageRunContext),
+		TxRunContext: types.NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	// if baseFee != nil {
 	// 	msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -556,7 +557,7 @@ func (tx *ArbitrumContractTx) AsMessage(s types.Signer, baseFee *big.Int, rules 
 	msg := &types.Message{
 		Tx: tx,
 
-		TxRunContext: new(types.MessageRunContext),
+		TxRunContext: types.NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -992,7 +993,7 @@ func (tx *ArbitrumRetryTx) AsMessage(s types.Signer, baseFee *big.Int, rules *ch
 	msg := &types.Message{
 		Tx: tx,
 
-		TxRunContext: new(types.MessageRunContext),
+		TxRunContext: types.NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -1711,7 +1712,7 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s types.Signer, baseFee *big.Int,
 		Tx:           tx,
 		EffectiveGas: tx.EffectiveGasUsed,
 
-		TxRunContext: new(types.MessageRunContext),
+		TxRunContext: types.NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -2067,7 +2068,7 @@ func (tx *ArbitrumDepositTx) AsMessage(s types.Signer, baseFee *big.Int, rules *
 	msg := &types.Message{
 		Tx: tx,
 
-		TxRunContext: new(types.MessageRunContext),
+		TxRunContext: types.NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
@@ -2396,7 +2397,7 @@ func (tx *ArbitrumInternalTx) AsMessage(s types.Signer, baseFee *big.Int, rules 
 	msg := &types.Message{
 		Tx: tx,
 
-		TxRunContext: new(types.MessageRunContext),
+		TxRunContext: types.NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	msg.SetGasPrice(tx.GetPrice())
 	msg.SetTip(tx.GetTipCap())
