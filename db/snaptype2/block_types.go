@@ -23,8 +23,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/db/state/statecfg"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/crypto"
