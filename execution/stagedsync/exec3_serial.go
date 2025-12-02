@@ -101,7 +101,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 										"block", txTask.BlockNum,
 										"hash", block.Hash().Hex()[:16],
 										"validation_time_ms", time.Since(validationStart).Milliseconds())
-									return fmt.Errorf("%w: block %d does not satisfy inclusion list constraints", consensus.ErrInvalidBlock, txTask.BlockNum)
+									return consensus.ErrInclusionListUnsatisfied
 								}
 								se.logger.Debug("[FOCIL] Inclusion list validation passed during sync",
 									"block", txTask.BlockNum,

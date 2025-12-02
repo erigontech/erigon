@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -892,8 +893,14 @@ func (e *EngineServer) HandleNewPayload(
 		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
 	}
 
+	// check if the validation error is due to inclusion list unsatisfied
+	engineStatus := convertGrpcStatusToEngineStatus(status)
+	if validationErr != nil && strings.Contains(*validationErr, consensus.ErrInclusionListUnsatisfied.Error()) {
+		engineStatus = engine_types.InclusionListUnsatisfiedStatus
+	}
+
 	resp := &engine_types.PayloadStatus{
-		Status:          convertGrpcStatusToEngineStatus(status),
+		Status:          engineStatus,
 		LatestValidHash: &latestValidHash,
 	}
 	if validationErr != nil {

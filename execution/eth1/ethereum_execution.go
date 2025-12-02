@@ -318,7 +318,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if status == engine_types.AcceptedStatus {
 		validationStatus = execution.ExecutionStatus_MissingSegment
 	}
-	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || status == engine_types.InclusionListUnsatisfiedStatus || validationError != nil
 	if isInvalidChain && (lvh != common.Hash{}) && lvh != blockHash {
 		if err := e.purgeBadChain(ctx, tx, lvh, blockHash); err != nil {
 			return nil, err

@@ -234,16 +234,34 @@ func (e *EngineServer) GetInclusionListV1(ctx context.Context, parentHash common
 		if inclusionListSize+uint64(tx.EncodingSize()) > engine_helpers.MaxBytesPerInclusionList {
 			continue
 		}
-		inclusionListSize += uint64(tx.EncodingSize())
 		inclusionListTxs = append(inclusionListTxs, tx)
+		inclusionListSize += uint64(tx.EncodingSize())
 	}
-
-	e.logger.Debug("[GetInclusionListV1] Got transactions from txnProvider", "transactions", len(inclusionListTxs), "il size", inclusionListSize)
 
 	result, err := types.ConvertTransactionstoInclusionList(inclusionListTxs)
 	if err != nil {
 		return nil, err
 	}
+
+	// this is a temp fix to ensure the inclusion list is not too large
+	// for some reason encoding size is not the same as the actual size
+	// TODO: make sure Encoding size has no bug
+	actualSize := uint64(0)
+	for _, txBytes := range result {
+		actualSize += uint64(len(txBytes))
+	}
+
+	// if actual size exceeds limit, remove transactions from end until it fits
+	for actualSize > engine_helpers.MaxBytesPerInclusionList {
+		lastTxSize := uint64(len(result[len(result)-1]))
+		result = result[:len(result)-1]
+		actualSize -= lastTxSize
+	}
+
+	e.logger.Debug("[GetInclusionListV1] Got transactions from txnProvider",
+		"transactions", len(result),
+		"encodingSize", inclusionListSize,
+		"actualSize", actualSize)
 
 	return &result, nil
 }

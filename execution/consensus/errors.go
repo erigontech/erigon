@@ -52,4 +52,7 @@ var (
 
 	// ErrUnexpectedRequests is returned if a pre-Prague block has EIP-7685 requests.
 	ErrUnexpectedRequests = errors.New("unexpected requests")
+
+	// ErrInclusionListUnsatisfied is returned when a block does not satisfy the inclusion list constraints used in EIP-7805.
+	ErrInclusionListUnsatisfied = errors.New("inclusion list unsatisfied")
 )

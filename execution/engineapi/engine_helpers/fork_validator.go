@@ -304,7 +304,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	start := time.Now()
 	if err := fv.validatePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
-		if errors.Is(err, consensus.ErrInvalidBlock) {
+		if errors.Is(err, consensus.ErrInvalidBlock) || errors.Is(err, consensus.ErrInclusionListUnsatisfied) {
 			validationError = err
 		} else {
 			criticalError = fmt.Errorf("validateAndStorePayload: %w", err)
@@ -332,7 +332,12 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			criticalError = fmt.Errorf("canonical hash not found: %d", latestValidNumber)
 			return
 		}
-		status = engine_types.InvalidStatus
+		// return IL unsatisfied status error for EIP-7805
+		if errors.Is(validationError, consensus.ErrInclusionListUnsatisfied) {
+			status = engine_types.InclusionListUnsatisfiedStatus
+		} else {
+			status = engine_types.InvalidStatus
+		}
 		if fv.sharedDom != nil {
 			fv.sharedDom.Close()
 		}
