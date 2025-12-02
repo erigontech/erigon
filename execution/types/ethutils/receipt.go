@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func MarshalReceipt(
@@ -48,7 +49,7 @@ func MarshalReceipt(
 		chainId = txn.GetChainID().ToBig()
 	}
 
-	var from common.Address
+	var from accounts.Address
 	if signed {
 		signer := types.LatestSignerForChainID(chainId)
 		from, _ = txn.Sender(*signer)

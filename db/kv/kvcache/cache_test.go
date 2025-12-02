@@ -185,7 +185,7 @@ func TestAPI(t *testing.T) {
 	acc := accounts.Account{
 		Nonce:       1,
 		Balance:     *uint256.NewInt(11),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 2,
 	}
 	account1Enc := accounts.SerialiseV3(&acc)

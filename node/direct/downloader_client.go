@@ -33,16 +33,14 @@ func NewDownloaderClient(server downloaderproto.DownloaderServer) *DownloaderCli
 	return &DownloaderClient{server: server}
 }
 
-func (c *DownloaderClient) Add(ctx context.Context, in *downloaderproto.AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.Add(ctx, in)
+func (c *DownloaderClient) Download(ctx context.Context, in *downloaderproto.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.Download(ctx, in)
+}
+
+func (c *DownloaderClient) Seed(ctx context.Context, in *downloaderproto.SeedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.Seed(ctx, in)
 }
 
 func (c *DownloaderClient) Delete(ctx context.Context, in *downloaderproto.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)
-}
-func (c *DownloaderClient) SetLogPrefix(ctx context.Context, in *downloaderproto.SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.SetLogPrefix(ctx, in)
-}
-func (c *DownloaderClient) Completed(ctx context.Context, in *downloaderproto.CompletedRequest, opts ...grpc.CallOption) (*downloaderproto.CompletedReply, error) {
-	return c.server.Completed(ctx, in)
 }

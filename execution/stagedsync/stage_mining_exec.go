@@ -110,7 +110,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
 	//	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
 	//}
-	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
+	execCfg.author = accounts.InternAddress(cfg.miningState.MiningConfig.Etherbase)
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		if execCfg.blockReader == nil {
@@ -133,8 +133,10 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	protocol.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
 
+	coinbase := accounts.InternAddress(cfg.miningState.MiningConfig.Etherbase)
+
 	if len(preparedTxns) > 0 {
-		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, coinbase, ibs, cfg.interrupt, cfg.payloadId, logger)
 		if err != nil {
 			return err
 		}
@@ -162,7 +164,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 			}
 
 			if len(txns) > 0 {
-				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, interrupt, cfg.payloadId, logger)
+				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, interrupt, cfg.payloadId, logger)
 				if err != nil {
 					return err
 				}
@@ -324,13 +326,13 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 			badChainId++
 			continue
 		}
-		sender, ok := transaction.GetSender()
+		senderAddress, ok := transaction.GetSender()
 		if !ok {
 			transactions = transactions[1:]
 			noSenderCnt++
 			continue
 		}
-		account, err := simStateReader.ReadAccountData(sender)
+		account, err := simStateReader.ReadAccountData(senderAddress)
 		if err != nil {
 			return nil, err
 		}
@@ -356,7 +358,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
-				code, err := simStateReader.ReadAccountCode(sender)
+				code, err := simStateReader.ReadAccountCode(senderAddress)
 				if err != nil {
 					return nil, err
 				}
@@ -379,7 +381,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 			}
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
-				if err := protocol.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
+				if err := protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
 					transactions = transactions[1:]
 					feeTooLowCnt++
 					continue
@@ -417,7 +419,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Updates account in the simulation
 		newAccount.Nonce++
 		newAccount.Balance.Sub(&account.Balance, want)
-		if err := simStateWriter.UpdateAccountData(sender, account, newAccount); err != nil {
+		if err := simStateWriter.UpdateAccountData(senderAddress, account, newAccount); err != nil {
 			return nil, err
 		}
 		// Mark transaction as valid
@@ -437,7 +439,7 @@ func addTransactionsToMiningBlock(
 	getHeader func(hash common.Hash, number uint64) (*types.Header, error),
 	engine rules.Engine,
 	txns types.Transactions,
-	coinbase common.Address,
+	coinbase accounts.Address,
 	ibs *state.IntraBlockState,
 	interrupt *atomic.Bool,
 	payloadId uint64,
@@ -454,15 +456,16 @@ func addTransactionsToMiningBlock(
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
-		snap := ibs.Snapshot()
+		snap := ibs.PushSnapshot()
+		defer ibs.PopSnapshot(snap)
 
 		if txn.Type() == types.AccountAbstractionTxType {
 			aaTxn := txn.(*types.AccountAbstractionTransaction)
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, &coinbase, chainConfig)
+			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, coinbase, chainConfig)
 			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
 			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
 			if err != nil {
@@ -487,7 +490,7 @@ func addTransactionsToMiningBlock(
 			return receipt.Logs, nil
 		}
 
-		receipt, _, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
+		receipt, _, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs

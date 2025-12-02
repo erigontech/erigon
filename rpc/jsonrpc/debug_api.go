@@ -375,7 +375,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	result := &AccountResult{}
 	result.Balance.ToInt().Set(a.Balance.ToBig())
 	result.Nonce = hexutil.Uint64(a.Nonce)
-	result.CodeHash = a.CodeHash
+	result.CodeHash = a.CodeHash.Value()
 
 	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], minTxNum+txIndex)
 	if err != nil {
@@ -617,6 +617,6 @@ func (api *DebugAPIImpl) SetGCPercent(v int) int {
 //   - Geth also allocates memory off-heap, particularly for fastCache and Pebble,
 //     which can be non-trivial (a few gigabytes by default).
 func (api *DebugAPIImpl) SetMemoryLimit(limit int64) int64 {
-	log.Info("Setting memory limit", "size", common.PrettyDuration(limit))
+	log.Info("Setting memory limit", "size", common.StorageSize(limit))
 	return debug.SetMemoryLimit(limit)
 }

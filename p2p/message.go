@@ -24,11 +24,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/event"
@@ -72,7 +72,7 @@ func (msg Msg) String() string {
 func (msg Msg) Discard() {
 	_, err := io.Copy(io.Discard, msg.Payload)
 	if err != nil {
-		log.Fatal(err)
+		log.Error("[p2p] discard msg", "code", msg.Code, "size", msg.Size, "err", err)
 	}
 }
 

@@ -44,14 +44,14 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
 	defer d.Close()
-	err = d.RequestSnapshot(snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 	tt, ok := d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 
 	// adding same file twice is ok
-	err = d.RequestSnapshot(snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 
 	// adding same file with another infoHash - is ok, must be skipped
@@ -59,7 +59,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//	- release of re-compressed version of same file,
 	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
-	err = d.RequestSnapshot(snaptype.Hex2InfoHash("bb"), "a.seg")
+	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
 	//require.Error(err)
 	_ = err
@@ -128,56 +128,56 @@ func TestAddDel(t *testing.T) {
 	_, _ = os.Create(f1Abs)
 	_, _ = os.Create(f2Abs)
 
-	srever, _ := NewGrpcServer(d)
-	// Add: epxect relative paths
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f1Abs}}})
+	server, _ := NewGrpcServer(d)
+	// Add: expect relative paths
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1Abs}})
 	require.Error(err)
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f2Abs}}})
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2Abs}})
 	require.Error(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	f1, _ := filepath.Rel(dirs.Snap, f1Abs)
 	f2, _ := filepath.Rel(dirs.Snap, f2Abs)
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f1}}})
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1}})
 	require.NoError(err)
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f2}}})
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2}})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// add idempotency
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f1}}})
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1}})
 	require.NoError(err)
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f2}}})
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2}})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
-	// Del: epxect relative paths
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs}})
+	// Del: expect relative paths
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs}})
 	require.Error(err)
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2Abs}})
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2Abs}})
 	require.Error(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// Del: idempotency
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
 
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	// Batch
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f1}, {Path: f2}}})
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1, f2}})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1, f2}})
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1, f2}})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 

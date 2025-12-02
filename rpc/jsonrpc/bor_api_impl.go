@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -81,18 +82,18 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 }
 
 // GetAuthor retrieves the author a block.
-func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error) {
+func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Address, error) {
 	// init rules engine
 	borEngine, err := api.bor()
 
 	if err != nil {
-		return nil, err
+		return accounts.NilAddress, err
 	}
 
 	ctx := context.Background()
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return nil, err
+		return accounts.NilAddress, err
 	}
 	defer tx.Rollback()
 
@@ -103,7 +104,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 	if blockNrOrHash == nil {
 		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(tx)
 		if err2 != nil {
-			return nil, err2
+			return accounts.NilAddress, err2
 		}
 		header, err = api._blockReader.HeaderByNumber(ctx, tx, latestBlockNum)
 	} else {
@@ -118,12 +119,12 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 
 	// Ensure we have an actually valid block and return its snapshot
 	if header == nil || err != nil {
-		return nil, errUnknownBlock
+		return accounts.NilAddress, errUnknownBlock
 	}
 
 	author, err := borEngine.Author(header)
 
-	return &author, err
+	return author, err
 }
 
 // GetSnapshotAtHash retrieves the state snapshot at a given block.
@@ -378,7 +379,7 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 	var difficulties = make(map[common.Address]uint64)
 
-	proposer := validatorSet.GetProposer().Address
+	proposer := accounts.InternAddress(validatorSet.GetProposer().Address)
 	proposerIndex, _ := validatorSet.GetByAddress(proposer)
 
 	signers := validatorSet.Signers()

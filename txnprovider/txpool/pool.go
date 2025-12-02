@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -939,7 +940,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 
 		var sender common.Address
 		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(sender)
+		txn.SetSender(accounts.InternAddress(sender))
 		txns = append(txns, txn)
 	}
 
@@ -1651,10 +1652,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		//Regular txn threshold checks
 		tipThreshold := uint256.NewInt(0)
 		tipThreshold = tipThreshold.Mul(&found.TxnSlot.Tip, uint256.NewInt(100+priceBump))
-		tipThreshold.Div(tipThreshold, u256.N100)
+		tipThreshold.Div(tipThreshold, &u256.N100)
 		feecapThreshold := uint256.NewInt(0)
 		feecapThreshold.Mul(&found.TxnSlot.FeeCap, uint256.NewInt(100+priceBump))
-		feecapThreshold.Div(feecapThreshold, u256.N100)
+		feecapThreshold.Div(feecapThreshold, &u256.N100)
 
 		if mt.TxnSlot.Value.Cmp(&found.TxnSlot.Value) > 0 {
 			//Potential latent overdraft attack

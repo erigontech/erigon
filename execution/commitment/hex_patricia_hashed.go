@@ -1167,7 +1167,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	account.Balance = accountUpdate.Balance
 	account.Initialised = true
 	account.Root = accountUpdate.Storage
-	account.CodeHash = accountUpdate.CodeHash
+	account.CodeHash = accounts.InternCodeHash(accountUpdate.CodeHash)
 
 	addrHash, err := CompactKey(hashedKey[:64])
 	if err != nil {

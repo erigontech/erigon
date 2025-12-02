@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -31,7 +32,7 @@ import (
 // BorAPI Bor specific routines
 type BorAPI interface {
 	GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error)
-	GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error)
+	GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Address, error)
 	GetSnapshotAtHash(hash common.Hash) (*Snapshot, error)
 	GetSigners(number *rpc.BlockNumber) ([]common.Address, error)
 	GetSignersAtHash(hash common.Hash) ([]common.Address, error)

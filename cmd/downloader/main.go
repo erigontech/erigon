@@ -289,8 +289,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	// Called manually to ensure all torrents are present before verification.
-	cfg.AddTorrentsFromDisk = false
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
@@ -334,17 +332,17 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 
 	// I'm kinda curious... but it was false before.
-	d.MainLoopInBackground(true)
+	d.InitBackgroundLogger(true)
 	if seedbox {
-		var downloadItems []*downloaderproto.AddItem
+		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)
 		for _, it := range snapCfg.Preverified.Items {
-			downloadItems = append(downloadItems, &downloaderproto.AddItem{
+			downloadItems = append(downloadItems, &downloaderproto.DownloadItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
 			})
 		}
-		if _, err := bittorrentServer.Add(ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
+		if _, err := bittorrentServer.Download(ctx, &downloaderproto.DownloadRequest{Items: downloadItems}); err != nil {
 			return err
 		}
 	}

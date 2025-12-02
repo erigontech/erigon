@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -55,7 +56,7 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 	}
 
 	if overrides.FeeRecipient != nil {
-		context.Coinbase = common.Address(overrides.FeeRecipient.Bytes())
+		context.Coinbase = accounts.InternAddress(*overrides.FeeRecipient)
 	}
 
 	if overrides.BaseFeePerGas != nil {
