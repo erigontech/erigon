@@ -2154,7 +2154,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	// Discard worst transactions from pending pool until it is within capacity limit
 	for p.pending.Len() > p.pending.limit {
 		tx := p.pending.PopWorst()
-		p.discardLocked(p.pending.PopWorst(), txpoolcfg.PendingPoolOverflow)
+		p.discardLocked(tx, txpoolcfg.PendingPoolOverflow)
 		sendChangeBatchEventToDiagnostics("Pending", "remove", []diaglib.TxnHashOrder{
 			{
 				OrderMarker: uint8(tx.subPool),
