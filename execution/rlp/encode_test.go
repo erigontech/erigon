@@ -156,7 +156,7 @@ var encTests = []encTest{
 	{val: *big.NewInt(0xFFFFFF), output: "83FFFFFF"},
 
 	// negative ints are not supported
-	{val: big.NewInt(-1), error: "rlp: cannot encode negative *big.Int"},
+	{val: big.NewInt(-1), error: "rlp: cannot encode negative big.Int"},
 
 	// uint256 integers (should match uint for small values)
 	{val: uint256.NewInt(0), output: "80"},
@@ -533,7 +533,7 @@ func TestStringLen56(t *testing.T) {
 // Any buffer of 32 bytes or more should be fine for EncodeUint256.
 // See https://github.com/erigontech/erigon/pull/13574
 func TestEncodeUint256Buffer(t *testing.T) {
-	i := uint256.NewInt(128)
+	i := *uint256.NewInt(128)
 	output := "8180"
 
 	var writer1 bytes.Buffer
@@ -558,7 +558,7 @@ func TestEncodeUint256Random(t *testing.T) {
 			_, err := rand.Read(randomBytes)
 			require.NoError(t, err)
 
-			i := new(uint256.Int).SetBytes(randomBytes)
+			i := *new(uint256.Int).SetBytes(randomBytes)
 			var writer bytes.Buffer
 			var buf [32]byte
 			require.NoError(t, EncodeUint256(i, &writer, buf[:]))
@@ -567,7 +567,7 @@ func TestEncodeUint256Random(t *testing.T) {
 			s := NewStream(encoded, 0)
 			decoded, err := s.Uint256Bytes()
 			require.NoError(t, err)
-			assert.Equal(t, i, uint256.NewInt(0).SetBytes(decoded))
+			assert.Equal(t, i, *uint256.NewInt(0).SetBytes(decoded))
 		})
 	}
 }

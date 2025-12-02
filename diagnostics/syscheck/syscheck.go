@@ -124,5 +124,4 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 	if len(hints) == 0 {
 		log.Info("kernel allocation settings look sane for mmap/fork workloads")
 	}
-	return
 }

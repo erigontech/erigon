@@ -295,7 +295,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 			defer pend.Done()
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
-				log.Error("Error", "error", err.Error())
+				log.Error("Error", "error", err)
 				return
 			}
 			defer tx.Rollback()
@@ -315,7 +315,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				statedb := state.New(stateReader)
 
 				if stateOverride != nil {
-					err = stateOverride.Override(statedb, rules)
+					err = stateOverride.Override(statedb)
 					if err != nil {
 						results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 						continue
