@@ -143,6 +143,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RPCGasCap                           *uint64  `toml:",omitempty"`
 		RPCTxFeeCap                         *float64 `toml:",omitempty"`
 		StateStream                         *bool
+		ExperimentalBAL                     *bool
 		HeimdallURL                         *string
 		WithoutHeimdall                     *bool
 		Ethstats                            *string
@@ -237,6 +238,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.StateStream != nil {
 		c.StateStream = *dec.StateStream
+	}
+	if dec.ExperimentalBAL != nil {
+		c.ExperimentalBAL = *dec.ExperimentalBAL
 	}
 	if dec.HeimdallURL != nil {
 		c.HeimdallURL = *dec.HeimdallURL

@@ -19,9 +19,9 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -36,8 +36,8 @@ type Generator struct {
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
-	// "Requesting near-chain-tip block receipts" - is very common RPC request, means we facing many similar parallel requrest
-	blockExecMutex *loaderMutex[common.Hash] // only
+	// "Requesting near-chain-tip block receipts" - is very common RPC request, means we're facing many similar parallel requests
+	blockExecMutex *loaderMutex[common.Hash]
 	txnExecMutex   *loaderMutex[common.Hash] // only 1 txn with current hash executed at a time - same parallel requests are waiting for results
 
 	receiptsCacheTrace bool
@@ -258,7 +258,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState {
-
 			sharedDomains, err = execctx.NewSharedDomains(tx, log.Root())
 			if err != nil {
 				return nil, err
@@ -308,7 +307,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 
 			genEnv.ibs.SetTxContext(blockNum, index)
-
 		} else {
 			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
 			if err != nil {
@@ -344,7 +342,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 			receipt.PostState = stateRoot
 		}
-
 	}
 
 	if evm.Cancelled() {
@@ -384,7 +381,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	defer func() {
 		if dbg.Enabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipts",
-				"blockNum", block.NumberU64(),
+				"blockNum", blockNum,
 				"nil receipts in db", receiptsFromDB == nil)
 		}
 	}()
@@ -509,17 +506,27 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}
 
+	// When assertions are enabled, receipts are *always* computed (i.e. receipt cache V2 is skipped)
+	// Hence, we need commitment history to correctly compute the `root` field for pre-Byzantium receipts
+	if dbg.AssertEnabled && (commitmentHistory || cfg.IsByzantium(blockNum)) {
+		computedReceiptsRoot := types.DeriveSha(receipts)
+		blockReceiptsRoot := block.Header().ReceiptHash
+		if computedReceiptsRoot != blockReceiptsRoot {
+			panic(fmt.Sprintf("assert: computedReceiptsRoot=%s, blockReceiptsRoot=%s", computedReceiptsRoot.Hex(), blockReceiptsRoot.Hex()))
+		}
+	}
+
 	g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
 	return receipts, nil
 }
 
 func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
-	toJson := func(a interface{}) string {
-		aa, err := json.Marshal(a)
+	toJson := func(v any) string {
+		b, err := json.Marshal(v)
 		if err != nil {
 			panic(err)
 		}
-		return string(aa)
+		return string(b)
 	}
 
 	generated := fromExecution.Copy()

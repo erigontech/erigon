@@ -27,12 +27,12 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/shards"
@@ -198,6 +198,21 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 						if blockUpdateCount != applyResult.ApplyCount {
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
+						}
+
+						if pe.cfg.experimentalBAL {
+							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
+							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
+
+							if pe.cfg.chainConfig.IsGlamsterdam(applyResult.BlockTime) {
+								headerBALHash := *lastHeader.BlockAccessListHash
+								if headerBALHash != b.BlockAccessList().Hash() {
+									return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, headerBALHash, b.BlockAccessList().Hash())
+								}
+								if headerBALHash != bal.Hash() {
+									return fmt.Errorf("block %d: block access list mismatch: got %s expected %s", applyResult.BlockNum, headerBALHash, bal.Hash())
+								}
+							}
 						}
 
 						if err := protocol.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
@@ -631,13 +646,18 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if blockResult.BlockNum > 0 {
 					result := blockExecutor.results[len(blockExecutor.results)-1]
 
+					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
+					finalVersion := finalTask.Version()
 					stateUpdates, err := func() (state.StateUpdates, error) {
 						pe.RLock()
 						defer pe.RUnlock()
 
-						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))))
-						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
-						ibs.SetVersion(result.Version().Incarnation)
+						reader := state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
+						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+						ibs.SetVersion(finalVersion.Incarnation)
+						localVersionMap := state.NewVersionMap(nil)
+						ibs.SetVersionMap(localVersionMap)
+						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 
 						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
@@ -668,11 +688,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						if err != nil {
-							return state.StateUpdates{}, fmt.Errorf("can't finalize block: %w", err)
+							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
+						}
+
+						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
+						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
+
+						finalWrites := ibs.VersionedWrites(true)
+						if len(finalWrites) > 0 {
+							blockExecutor.blockIO.RecordWrites(finalVersion, finalWrites)
+							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
 						stateWriter := state.NewBufferedWriter(pe.rs, nil)
-
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
@@ -743,7 +771,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.applyResults, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.profile, execRequest.exhausted)
 			}
 		}
 
@@ -759,12 +787,21 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execTasks.pushPending(i)
 		executor.validateTasks.pushPending(i)
 
-		if len(t.Dependencies()) > 0 {
+		switch {
+		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
 				executor.execTasks.addDependency(depTxIndex+1, i)
 			}
 			executor.execTasks.clearPending(i)
-		} else {
+		case len(execRequest.accessList) != 0:
+			// if we have an access list we can assume that all
+			// writes are already in the shared memory map so
+			// we can go ahead and schedule all tx jobs
+			// optimistically without needing to worry about
+			// clashes, this should signifigatly improve tx
+			// concurrency
+			break
+		default:
 			sender, err := t.TxSender()
 			if err != nil {
 				return err
@@ -1150,6 +1187,7 @@ type execRequest struct {
 	blockNum     uint64
 	blockHash    common.Hash
 	gasPool      *protocol.GasPool
+	accessList   types.BlockAccessList
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
@@ -1220,7 +1258,7 @@ type blockExecutor struct {
 	exhausted   *ErrLoopExhausted
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
 		blockHash:    blockHash,
@@ -1230,7 +1268,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		estimateDeps: map[int][]int{},
 		preValidated: map[int]bool{},
 		blockIO:      &state.VersionedIO{},
-		versionMap:   state.NewVersionMap(),
+		versionMap:   state.NewVersionMap(accessList),
 		profile:      profile,
 		applyResults: applyResults,
 		gasPool:      gasPool,
@@ -1258,15 +1296,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			if res.Version().Incarnation > len(be.tasks) {
 				if execErr.OriginError != nil {
-					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
+					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))
 				} else {
-					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation)
+					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation, len(be.tasks))
 				}
 			}
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.blockNum, "err", execErr)
 			}
 			be.blockIO.RecordReads(res.Version(), res.TxIn)
+			be.blockIO.RecordAccesses(res.Version(), res.AccessedAddresses)
 			var addedDependencies bool
 			if execErr.DependencyTxIndex >= 0 {
 				dependency := execErr.DependencyTxIndex + 1
@@ -1317,6 +1356,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txVersion := res.Version()
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
+		be.blockIO.RecordAccesses(txVersion, res.AccessedAddresses)
 
 		if res.Version().Incarnation == 0 {
 			be.blockIO.RecordWrites(txVersion, res.TxOut)

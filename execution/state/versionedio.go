@@ -169,7 +169,7 @@ type VersionedWrite struct {
 }
 
 func (vr VersionedWrite) String() string {
-	return fmt.Sprintf("%x %s: %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("%x %s: %s (%v)", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val), vr.Path.String())
 }
 
 func valueString(path AccountPath, value any) string {
@@ -182,7 +182,7 @@ func valueString(path AccountPath, value any) string {
 	case BalancePath:
 		num := value.(uint256.Int)
 		return (&num).String()
-	case StatePath:
+	case StoragePath:
 		num := value.(uint256.Int)
 		return fmt.Sprintf("%x", &num)
 	case NoncePath:
@@ -285,7 +285,7 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (
 }
 
 func (vr versionedStateReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: key}]; ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: StoragePath, Key: key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
 		return val, true, nil
 	}
@@ -300,7 +300,7 @@ func (vr versionedStateReader) ReadAccountStorage(address common.Address, key co
 func (vr versionedStateReader) HasStorage(address common.Address) (bool, error) {
 	if r, ok := vr.reads[address]; ok {
 		for k := range r {
-			if k.Path == StatePath {
+			if k.Path == StoragePath {
 				return true, nil
 			}
 		}
@@ -594,6 +594,7 @@ type VersionedIO struct {
 	inputs     []versionedReadSet
 	outputs    []VersionedWrites // write sets that should be checked during validation
 	outputsSet []map[common.Address]map[AccountKey]struct{}
+	accessed   []map[common.Address]struct{}
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
@@ -675,6 +676,7 @@ func NewVersionedIO(numTx int) *VersionedIO {
 		inputs:     make([]versionedReadSet, numTx+1),
 		outputs:    make([]VersionedWrites, numTx+1),
 		outputsSet: make([]map[common.Address]map[AccountKey]struct{}, numTx+1),
+		accessed:   make([]map[common.Address]struct{}, numTx+1),
 	}
 }
 
@@ -706,6 +708,27 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
 		}
 		keys[AccountKey{v.Path, v.Key}] = struct{}{}
 	}
+}
+
+func (io *VersionedIO) RecordAccesses(txVersion Version, addresses map[common.Address]struct{}) {
+	if len(addresses) == 0 {
+		return
+	}
+	if len(io.accessed) <= txVersion.TxIndex+1 {
+		io.accessed = append(io.accessed, make([]map[common.Address]struct{}, txVersion.TxIndex+2-len(io.accessed))...)
+	}
+	dest := make(map[common.Address]struct{}, len(addresses))
+	for addr := range addresses {
+		dest[addr] = struct{}{}
+	}
+	io.accessed[txVersion.TxIndex+1] = dest
+}
+
+func (io *VersionedIO) AccessedAddresses(txIndex int) map[common.Address]struct{} {
+	if len(io.accessed) <= txIndex+1 {
+		return nil
+	}
+	return io.accessed[txIndex+1]
 }
 
 type DAG struct {

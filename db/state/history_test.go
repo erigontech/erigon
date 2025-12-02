@@ -376,6 +376,113 @@ func TestHistoryAfterPrune(t *testing.T) {
 	})
 }
 
+func TestHistoryRangeWithPrune(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	db, h, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, 32, true)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+
+	var keys, vals []string
+	it, err := hc.HistoryRange(14, 31, order.Asc, -1, roTx)
+	require.NoError(t, err)
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		keys = append(keys, fmt.Sprintf("%x", k))
+		vals = append(vals, fmt.Sprintf("%x", v))
+	}
+
+	db2, h2, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db2, h2, 32, false)
+
+	roTx2, err := db2.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx2.Rollback()
+	hc2 := h2.BeginFilesRo()
+	defer hc2.Close()
+
+	var keys2, vals2 []string
+	it2, err := hc2.HistoryRange(14, 31, order.Asc, -1, roTx2)
+	require.NoError(t, err)
+
+	for it2.HasNext() {
+		k, v, err := it2.Next()
+		require.NoError(t, err)
+		keys2 = append(keys2, fmt.Sprintf("%x", k))
+		vals2 = append(vals2, fmt.Sprintf("%x", v))
+	}
+
+	require.Equal(t, keys, keys2)
+	require.Equal(t, vals, vals2)
+}
+
+func TestHistoryAsOfWithPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	db, h, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, 200, false)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+
+	var keys, vals []string
+
+	from, to := hexutil.MustDecode("0x0100000000000009"), hexutil.MustDecode("0x0100000000000014") // 9, 20
+	it, err := hc.RangeAsOf(ctx, 14, from, to, order.Asc, -1, roTx)
+	require.NoError(t, err)
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		keys = append(keys, fmt.Sprintf("%x", k))
+		vals = append(vals, fmt.Sprintf("%x", v))
+	}
+
+	db2, h2, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db2, h2, 200, true)
+
+	roTx2, err := db2.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx2.Rollback()
+	hc2 := h2.BeginFilesRo()
+	defer hc2.Close()
+
+	var keys2, vals2 []string
+	it2, err := hc2.RangeAsOf(ctx, 14, from, to, order.Asc, -1, roTx2)
+	require.NoError(t, err)
+
+	for it2.HasNext() {
+		k, v, err := it2.Next()
+		require.NoError(t, err)
+		keys2 = append(keys2, fmt.Sprintf("%x", k))
+		vals2 = append(vals2, fmt.Sprintf("%x", v))
+	}
+
+	require.Equal(t, keys, keys2)
+	require.Equal(t, vals, vals2)
+}
+
 func TestHistoryCanPrune(t *testing.T) {
 	t.Parallel()
 

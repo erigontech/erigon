@@ -32,9 +32,8 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/merge"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -291,15 +290,6 @@ func (cp *ChainPack) Copy() *ChainPack {
 	}
 }
 
-func (cp *ChainPack) NumberOfPoWBlocks() int {
-	for i, header := range cp.Headers {
-		if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
-			return i
-		}
-	}
-	return len(cp.Headers)
-}
-
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.
@@ -355,7 +345,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = common.CopyBytes(misc.DAOForkBlockExtra)
+				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {
