@@ -283,6 +283,13 @@ func (d *DomainDiff) Copy() *DomainDiff {
 	return &DomainDiff{keys: maps.Clone(d.keys), prevValues: maps.Clone(d.prevValues)}
 }
 
+func (d *DomainDiff) Len() int {
+	if d == nil {
+		return 0
+	}
+	return len(d.prevValues)
+}
+
 // RecordDelta records a state change.
 func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte, prevStep Step) {
 	if d.keys == nil {

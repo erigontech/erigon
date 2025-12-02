@@ -57,7 +57,7 @@ These flags control database performance and memory usage.
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
-* `--db.read.concurrency value`: Limits the number of parallel database reads.
+* `--db.read.concurrency value`: Limits the number of parallel database reads. Default: equal to GOMAXPROCS (or number of CPU)
   * Default: `1408`
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
@@ -74,7 +74,7 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`).
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](../fundamentals/sync-modes.md)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
@@ -132,7 +132,7 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--port value`: The main network listening port.
   * Default: `30303`
 * `--p2p.protocol value`: The version of the `eth` P2P protocol.
-  * Default: `68`, `67`
+  * Default: `68`, `69`
 * `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
   * Default: `30303, 30304, 30305, 30306, 30307`
 * `--nat value`: The NAT port mapping mechanism.
@@ -354,10 +354,11 @@ These flags control the block synchronization and data downloading process, incl
 * `--torrent.trackers.disable`: Disables conventional BitTorrent trackers.
   * Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
-  * Default: `32mb`
+  * Default: `16mb`
 * `--torrent.download.rate value`: The download rate in bytes per second.
-* `--torrent.webseed.download.rate value`: The download rate for webseeds.
-* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs.
+  * Default: `512mb`
+* `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
+* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
 
 ### Caplin (Consensus Layer)
@@ -567,8 +568,8 @@ COMMANDS:
    help, h                                      Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --datadir value                                                                                                         Data directory for the databases (default: /home/bloxster/.local/share/erigon)
-   --ethash.dagdir value                                                                                                   Directory to store the ethash mining DAGs (default: /home/bloxster/.local/share/erigon-ethash)
+   --datadir value                                                                                                         Data directory for the databases (default: /home/user/.local/share/erigon)
+   --ethash.dagdir value                                                                                                   Directory to store the ethash mining DAGs (default: /home/user/.local/share/erigon-ethash)
    --externalcl                                                                                                            Enables the external consensus layer (default: false)
    --txpool.disable                                                                                                        External pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer. (default: false)
    --txpool.pricelimit value                                                                                               Minimum gas price (fee cap) limit to enforce for acceptance into the pool (default: 1)
@@ -654,7 +655,7 @@ GLOBAL OPTIONS:
    --snap.state.stop                                                                                                       Workaround to stop producing new state files, if you meet some state-related critical bug. It will stop aggregate DB history in a state files. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce). (default: false)
    --snap.skip-state-snapshot-download                                                                                     Skip state download and start from genesis block (default: false)
    --snap.download.to.block value, --shadow.fork.block value                                                               Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks. (default: 0)
-   --db.pagesize value                                                                                                     DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb (default: "16KB")
+   --db.pagesize value                                                                                                     DB is split to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb (default: "16KB")
    --db.size.limit value                                                                                                   Runtime limit of chaindata db size (can change at any time) (default: "1TB")
    --db.writemap                                                                                                           Enable WRITE_MAP feature for fast database writes and fast commit times (default: true)
    --torrent.port value                                                                                                    Port to listen and serve BitTorrent protocol (default: 42069)
@@ -762,7 +763,7 @@ GLOBAL OPTIONS:
    --caplin.blocks-archive                                                                                                 sets whether backfilling is enabled for caplin (default: false)
    --caplin.blobs-archive                                                                                                  sets whether backfilling is enabled for caplin (default: false)
    --caplin.states-archive                                                                                                 enables archival node for historical states in caplin (it will enable block archival as well) (default: false)
-   --caplin.blobs-immediate-backfill                                                                                       sets whether caplin should immediatelly backfill blobs (4096 epochs) (default: false)
+   --caplin.blobs-immediate-backfill                                                                                       sets whether caplin should immediately backfill blobs (4096 epochs) (default: false)
    --caplin.blobs-no-pruning                                                                                               disable blob pruning in caplin (default: false)
    --caplin.checkpoint-sync.disable                                                                                        disable checkpoint sync in caplin (default: false)
    --caplin.snapgen                                                                                                        enables snapshot generation in caplin (default: false)
@@ -772,7 +773,7 @@ GLOBAL OPTIONS:
    --caplin.custom-genesis value                                                                                           set the custom genesis for caplin
    --caplin.use-engine-api                                                                                                 Use engine API for internal Caplin. useful for testing and if CL network is degraded (default: false)
    --trusted-setup-file value                                                                                              Absolute path to trusted_setup.json file
-   --rpc.slow value                                                                                                        Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call (default: 0s)
+   --rpc.slow value                                                                                                        Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call (default: 0s)
    --txpool.gossip.disable                                                                                                 Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks (default: false)
    --sync.loop.block.limit value                                                                                           Sets the maximum number of blocks to process per loop iteration (default: 5000)
    --sync.loop.break.after value                                                                                           Sets the last stage of the sync loop to run

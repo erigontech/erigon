@@ -320,7 +320,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	}
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	if err != nil {
 		return "", err
 	}
@@ -474,7 +474,7 @@ func RebuildCommitmentFiles(ctx context.Context, db kv.TemporalRoDB, txNumsReade
 			}
 			defer tx.Rollback()
 
-			domains, err := execctx.NewSharedDomains(tx, log.New())
+			domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 			if err != nil {
 				return nil, err
 			}

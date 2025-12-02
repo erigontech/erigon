@@ -255,6 +255,7 @@ func (me *reset) walkSnapshots(
 			if path == datadir.PreverifiedFileName {
 				return nil
 			}
+			// Shouldn't be necessary with fs package.
 			slashPath := filepath.ToSlash(path)
 			itemName, _ := strings.CutSuffix(slashPath, ".part")
 			itemName, isTorrent := strings.CutSuffix(itemName, ".torrent")

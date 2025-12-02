@@ -80,7 +80,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	blockNum, txNum := uint64(0), uint64(0)
@@ -193,7 +193,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	domains, err = execctx.NewSharedDomains(tx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -224,7 +224,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err = execctx.NewSharedDomains(tx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	writer = state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
@@ -299,7 +299,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(tx, log.New())
+		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 		rnd := rand.New(rand.NewSource(time.Now().Unix()))
@@ -371,7 +371,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(tx, log.New())
+		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 
@@ -388,7 +388,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		tx, err = db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		domains, err = execctx.NewSharedDomains(tx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 
@@ -456,7 +456,7 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	blockNum, txNum := uint64(0), uint64(0)

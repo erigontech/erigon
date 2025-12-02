@@ -316,7 +316,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	domains, err := execctx.NewSharedDomains(tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = common.CopyBytes(misc.DAOForkBlockExtra)
+				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {

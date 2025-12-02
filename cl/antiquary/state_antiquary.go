@@ -567,15 +567,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		paths := s.stateSn.SegFileNames(from, to)
-		downloadItems := make([]*downloaderproto.AddItem, len(paths))
-		for i, path := range paths {
-			downloadItems[i] = &downloaderproto.AddItem{
-				Path: path,
-			}
-		}
 		if s.downloader != nil {
 			// Notify bittorent to seed the new snapshots
-			if _, err := s.downloader.Add(s.ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
+			if _, err := s.downloader.Seed(s.ctx, &downloaderproto.SeedRequest{Paths: paths}); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
 		}

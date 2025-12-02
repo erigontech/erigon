@@ -93,7 +93,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		if err != nil {
 			return nil, err
 		}
-		keys = append(keys, common.CopyBytes(k[20:]))
+		keys = append(keys, common.Copy(k[20:]))
 	}
 	return keys, nil
 }
