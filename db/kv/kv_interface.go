@@ -435,6 +435,8 @@ type TemporalDebugTx interface {
 	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
 	GetLatestFromDB(domain Domain, k []byte) (v []byte, step Step, found bool, err error)
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
+
+	// KeyTrace returns stream of <txNum->value_after_txnum_change> for a given key
 	KeyTrace(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
 
 	DomainFiles(domain ...Domain) VisibleFiles
