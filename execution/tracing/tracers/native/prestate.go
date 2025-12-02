@@ -217,6 +217,13 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	} else {
 		t.to = *tx.GetTo()
 		t.create = false
+		// Lookup the delegation target
+		if t.env.ChainConfig.IsPrague(t.env.Time) {
+			code, _ := t.env.IntraBlockState.GetCode(t.to)
+			if target, ok := types.ParseDelegation(code); ok {
+				t.lookupAccount(target)
+			}
+		}
 	}
 
 	t.lookupAccount(from)
