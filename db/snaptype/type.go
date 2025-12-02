@@ -492,6 +492,11 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	cfg.KeyCount = d.Count()
 	idxVer := indexVersion.Current
 	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.From, info.To))
+	versionOfRs := uint8(0)
+	if !idxVer.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+		versionOfRs = 1
+	}
+	cfg.Version = versionOfRs
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err

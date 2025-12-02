@@ -91,13 +91,13 @@ type InvIdxCfg struct {
 }
 
 type BlockDataFilesCfg struct {
-	Version BlockDataVersionTypes
-	Name    string
+	FileVersion BlockDataVersionTypes
+	Name        string
 }
 
 type BlockIdxFilesCfg struct {
-	Version BlockIdxVersionTypes
-	Name    string
+	FileVersion BlockIdxVersionTypes
+	Name        string
 }
 
 func (ii InvIdxCfg) GetVersions() VersionTypes {
@@ -147,16 +147,16 @@ type BlockIdxVersionTypes struct {
 
 func (b BlockDataFilesCfg) GetVersions() VersionTypes {
 	return VersionTypes{
-		BlockData: &b.Version,
+		BlockData: &b.FileVersion,
 		BlockIdx: &BlockIdxVersionTypes{
-			b.Version.AccessorIdx,
+			b.FileVersion.AccessorIdx,
 		},
 	}
 }
 
 func (b BlockIdxFilesCfg) GetVersions() VersionTypes {
 	return VersionTypes{
-		BlockIdx: &b.Version,
+		BlockIdx: &b.FileVersion,
 	}
 }
 
