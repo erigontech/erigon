@@ -561,7 +561,7 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 }
 
 func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
-	//defer db.Debug().EnableReadAhead().DisableReadAhead()
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -657,7 +657,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 			return 0, ctx.Err()
 		case <-logTicker.C:
 			rate := float64(total) / time.Since(start).Seconds()
-			logger.Info("checking commitment hist vals progress", "at", total, "keys/s", rate, "v", fileName)
+			logger.Info("checking commitment hist vals progress", "at", total, "vals/s", rate, "v", fileName)
 		default:
 			// no-op
 		}
