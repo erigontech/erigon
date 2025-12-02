@@ -83,7 +83,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -102,7 +102,7 @@ Loop:
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -184,7 +184,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -262,7 +262,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 
-	domains, err = execctx.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -342,7 +342,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 	}
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	defer domains.Close()
 
@@ -372,7 +372,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -381,7 +381,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete marker is in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -411,7 +411,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -432,7 +432,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -441,7 +441,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete/update more keys in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 
@@ -461,7 +461,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -471,7 +471,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
@@ -492,7 +492,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	rwTtx1, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTtx1.Rollback)
-	sd, err := execctx.NewSharedDomains(rwTtx1, log.New())
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 

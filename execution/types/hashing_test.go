@@ -103,7 +103,7 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 		valbuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
 		list.EncodeIndex(i, valbuf)
-		trie.Update(keybuf.Bytes(), common.CopyBytes(valbuf.Bytes()))
+		trie.Update(keybuf.Bytes(), common.Copy(valbuf.Bytes()))
 	}
 	return trie.Hash()
 }

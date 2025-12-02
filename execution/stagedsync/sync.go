@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"runtime/debug"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -284,6 +285,16 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialC
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 
+func (s *Sync) RunSnapshots(db kv.TemporalRwDB) error {
+	for _, stage := range s.stages {
+		if stage.ID == stages.Snapshots {
+			_, err := s.runStage(stage, db, nil, nil, true, true, false)
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Sync) RunUnwind(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
@@ -340,10 +351,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopBeforeStage(stage)
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
@@ -360,10 +368,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 			hasMore = true
 		}
 
-		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopAfterStage(stage)
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
@@ -398,12 +403,11 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (bool, error) {
+func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
 	var errBadBlock error
-	hasMore := false
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
@@ -437,10 +441,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopBeforeStage(stage)
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
@@ -452,21 +453,18 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 			return false, err
 		}
 		if stageHasMore {
-			hasMore = true
+			more = true
 		}
 
-		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopAfterStage(stage)
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
 			if s.posTransition != nil {
-				ptx := tx
+				ptx := tx.(kv.Tx)
 
 				if ptx == nil {
-					if tx, err := db.BeginTemporalRw(context.Background()); err == nil {
+					if tx, err := db.BeginTemporalRo(context.Background()); err == nil {
 						ptx = tx
 						defer tx.Rollback()
 					}
@@ -474,11 +472,11 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 
 				if ptx != nil {
 					if progress, err := stages.GetStageProgress(ptx, stage.ID); err == nil {
-						hasMore = progress < *s.posTransition
+						more = progress < *s.posTransition
 					}
 				}
 			} else {
-				hasMore = true
+				more = true
 			}
 			break
 		}
@@ -491,7 +489,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 	}
 
 	s.currentStage = 0
-	return hasMore, errBadBlock
+	return more, errBadBlock
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
@@ -676,5 +674,24 @@ func (s *Sync) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 		if s.stages[i].ID == id {
 			s.stages[i].Forward = f
 		}
+	}
+}
+
+// We're duplicating constants around env naming, and it isn't 100% because there can be ERIGON_
+// prefixing applied in dbg, but this is a minor feature. Abstracted out to avoid drifting on
+// implementation in separate areas.
+
+func (s *Sync) checkStopBeforeStage(stage *Stage) {
+	s.checkStopStage(stage, "STOP_BEFORE_STAGE", dbg.StopBeforeStage())
+}
+func (s *Sync) checkStopAfterStage(stage *Stage) {
+	s.checkStopStage(stage, "STOP_AFTER_STAGE", dbg.StopAfterStage())
+}
+func (s *Sync) checkStopStage(stage *Stage, envName, value string) {
+	if string(stage.ID) == value { // stop process for debugging reasons
+		s.logger.Warn("env flag forced to stop app", "env", envName, "value", value)
+		// None of the wrappers check the stop error reason anymore, and so they ignore this.
+		debug.PrintStack()
+		os.Exit(0)
 	}
 }

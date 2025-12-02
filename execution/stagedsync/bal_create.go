@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -291,7 +292,7 @@ func (ct *changeTracker[T]) apply(applyFn func(uint16, T)) {
 	for idx := range ct.entries {
 		indices = append(indices, idx)
 	}
-	sort.Slice(indices, func(i, j int) bool { return indices[i] < indices[j] })
+	slices.Sort(indices)
 
 	for _, idx := range indices {
 		applyFn(idx, ct.entries[idx])

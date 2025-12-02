@@ -447,7 +447,15 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	return true
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum uint64, requestedMaxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {
+func (br *BlockRetire) RetireBlocks(
+	ctx context.Context,
+	requestedMinBlockNum uint64,
+	requestedMaxBlockNum uint64,
+	lvl log.Lvl,
+	seedNewSnapshots func(downloadRequest []services.DownloadRequest) error,
+	onDeleteSnapshots func(l []string) error,
+	onFinish func() error,
+) error {
 	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(requestedMaxBlockNum)
 	}
