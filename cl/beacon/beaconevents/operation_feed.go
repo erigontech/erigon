@@ -25,7 +25,7 @@ func (f *operationFeed) SendAttestation(value *AttestationData) int {
 
 func (f *operationFeed) SendSingleAttestation(value *SingleAttestationData) int {
 	return f.feed.Send(&EventStream{
-		Event: OpAttestation,
+		Event: OpSingleAttestation,
 		Data:  value,
 	})
 }

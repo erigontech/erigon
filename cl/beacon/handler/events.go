@@ -33,6 +33,7 @@ import (
 var validTopics = map[event.EventTopic]struct{}{
 	// operation events
 	event.OpAttestation:       {},
+	event.OpSingleAttestation: {},
 	event.OpAttesterSlashing:  {},
 	event.OpBlobSidecar:       {},
 	event.OpDataColumnSidecar: {},
