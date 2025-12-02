@@ -967,15 +967,15 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	if task.IsBlockEnd() || txIndex < 0 {
 		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
 			if err := ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
-				return nil, err
+				return nil, nil, nil, err
 			}
 		}
 		return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
 	}
 
 	if task.shouldDelayFeeCalc {
-		if txTask.Config.IsLondon(blockNum) && !result.ExecutionResult.FeeBurnt.IsZero() && result.ExecutionResult.BurntContractAddress != (common.Address{})  {
-			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy) ; err != nil {
+		if txTask.Config.IsLondon(blockNum) && !result.ExecutionResult.FeeBurnt.IsZero() && result.ExecutionResult.BurntContractAddress != (common.Address{}) {
+			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
 				return nil, nil, nil, err
 			}
 		}
