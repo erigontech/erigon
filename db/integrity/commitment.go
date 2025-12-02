@@ -561,6 +561,7 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 }
 
 func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
+	//defer db.Debug().EnableReadAhead().DisableReadAhead()
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -587,6 +588,11 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 			continue
 		}
 		eg.Go(func() error {
+			tx, err := db.BeginTemporalRo(ctx) // each worker has its own RoTx
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
 			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, failFast, logger)
 			if err == nil {
 				totalVals.Add(valCount)
