@@ -974,7 +974,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	}
 
 	if task.shouldDelayFeeCalc {
-		if txTask.Config.IsLondon(blockNum) && !result.ExecutionResult.FeeBurnt.IsZero() && result.ExecutionResult.BurntContractAddress != (common.Address{}) {
+		if txTask.Config.IsLondon(blockNum) {
 			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
 				return nil, nil, nil, err
 			}
