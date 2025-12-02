@@ -689,8 +689,8 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			peers[peer.PeerID] = struct{}{}
 		}
 
-		_, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
-		_, segmentPeers := getPeersRatesForlogs(peersOfThisFile, torrentName)
+		webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
+		segmentPeers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 
 		diaglib.Send(diaglib.SegmentDownloadStatistics{
 			Name:            torrentName,
@@ -749,32 +749,22 @@ func setCommonPeerSegmentFields(peer *torrent.Peer, stats *torrent.PeerStats, se
 	segment.RemoteAddr = peer.RemoteAddr.String()
 }
 
-func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diaglib.SegmentPeer) {
+func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) []diaglib.SegmentPeer {
 	seeds := make([]diaglib.SegmentPeer, 0, len(weebseedPeersOfThisFile))
-	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
-	webseedRates = append(webseedRates, "file", fName)
 	for _, peer := range weebseedPeersOfThisFile {
 		if peerUrl, err := webPeerUrl(peer); err == nil {
-			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
+			if !finished {
 				stats := peer.Stats()
-				if !finished {
-					seed := diaglib.SegmentPeer{
-						Url:         peerUrl.Host,
-						TorrentName: fName,
-					}
-					setCommonPeerSegmentFields(peer, &stats, &seed)
-					seeds = append(seeds, seed)
+				seed := diaglib.SegmentPeer{
+					Url:         peerUrl.Host,
+					TorrentName: fName,
 				}
-				webseedRates = append(
-					webseedRates,
-					strings.TrimSuffix(shortUrl, "/"),
-					common.ByteCount(uint64(stats.DownloadRate))+"/s",
-				)
+				setCommonPeerSegmentFields(peer, &stats, &seed)
+				seeds = append(seeds, seed)
 			}
 		}
 	}
-
-	return webseedRates, seeds
+	return seeds
 }
 
 func webPeerUrl(peer *torrent.Peer) (*url.URL, error) {
@@ -782,10 +772,8 @@ func webPeerUrl(peer *torrent.Peer) (*url.URL, error) {
 	return url.Parse(root)
 }
 
-func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diaglib.SegmentPeer) {
+func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) []diaglib.SegmentPeer {
 	peers := make([]diaglib.SegmentPeer, 0, len(peersOfThisFile))
-	rates := make([]interface{}, 0, len(peersOfThisFile)*2)
-	rates = append(rates, "file", fName)
 
 	for _, peer := range peersOfThisFile {
 		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
@@ -797,10 +785,9 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 		}
 		setCommonPeerSegmentFields(&peer.Peer, &stats, &segPeer)
 		peers = append(peers, segPeer)
-		rates = append(rates, url, common.ByteCount(uint64(stats.DownloadRate))+"/s")
 	}
 
-	return rates, peers
+	return peers
 }
 
 // Check all loaded torrents by forcing a new verification then checking if the client considers
