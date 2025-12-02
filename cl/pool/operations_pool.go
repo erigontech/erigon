@@ -24,8 +24,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto/blake2b"
 )
 
-const operationsPerPool = 512
-
 // DoubleSignatureKey uses blake2b algorithm to merge two signatures together. blake2 is faster than sha3.
 func doubleSignatureKey(one, two common.Bytes96) (out common.Bytes96) {
 	res := blake2b.Sum256(append(one[:], two[:]...))
@@ -52,11 +50,11 @@ type OperationsPool struct {
 
 func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	return OperationsPool{
-		AttestationsPool:          NewOperationPool[common.Bytes96, *solid.Attestation](operationsPerPool, "attestationsPool"),
-		AttesterSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.AttesterSlashing](operationsPerPool, "attesterSlashingsPool"),
-		ProposerSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](operationsPerPool, "proposerSlashingsPool"),
-		BLSToExecutionChangesPool: NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](operationsPerPool, "blsExecutionChangesPool"),
-		VoluntaryExitsPool:        NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](operationsPerPool, "voluntaryExitsPool"),
+		AttestationsPool:          NewOperationPool[common.Bytes96, *solid.Attestation](cltypes.MaxAttestations, "attestationsPool"),
+		AttesterSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.AttesterSlashing](cltypes.MaxAttesterSlashings, "attesterSlashingsPool"),
+		ProposerSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](cltypes.MaxProposerSlashings, "proposerSlashingsPool"),
+		BLSToExecutionChangesPool: NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](cltypes.MaxExecutionChanges, "blsExecutionChangesPool"),
+		VoluntaryExitsPool:        NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](cltypes.MaxVoluntaryExits, "voluntaryExitsPool"),
 	}
 }
 
