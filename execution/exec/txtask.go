@@ -31,14 +31,14 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -108,8 +108,9 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms map[common.Address]struct{}
-	TraceTos   map[common.Address]struct{}
+	TraceFroms        map[common.Address]struct{}
+	TraceTos          map[common.Address]struct{}
+	AccessedAddresses map[common.Address]struct{}
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -565,6 +566,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			panic(err)
 		}
 
+		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}

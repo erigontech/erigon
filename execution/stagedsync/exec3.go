@@ -258,11 +258,12 @@ func ExecV3(ctx context.Context,
 	var lastCommittedBlockNum uint64
 
 	if parallel {
-		if !inMemExec {
+		if !inMemExec { //nolint:staticcheck
 			// this is becuase for parallel execution the shared domain needs to
 			// be co-ordinated between exec and unwind - otherwise unwound state
 			// is not visible to parallel workers
 			// TODO return fmt.Errorf("parallel exec only supports inmem exec")
+
 		}
 
 		pe := &parallelExecutor{
@@ -673,6 +674,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			te.execRequests <- &execRequest{
 				b.Number().Uint64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
+				b.BlockAccessList(),
 				txTasks, applyResults, false, exhausted,
 			}
 

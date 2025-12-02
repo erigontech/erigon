@@ -35,14 +35,14 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -460,7 +460,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		var prev *types.Receipt
 		if txTask.TxIndex > 0 {
 			prev = p.blockResult.Receipts[txTask.TxIndex-1]
-		} else {
+		} else { //nolint:staticcheck
 			// TODO get the previous reciept from the DB
 		}
 

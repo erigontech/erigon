@@ -67,7 +67,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 
 	from, to := RootNum(filesToMerge[0].startTxNum), RootNum(filesToMerge.EndTxNum())
 
-	segPath := f.snaps.schema.DataFile(version.V1_0, from, to)
+	segPath, _ := f.snaps.schema.DataFile(version.V1_0, from, to)
 
 	var exists bool
 	exists, err = dir.FileExist(segPath)
