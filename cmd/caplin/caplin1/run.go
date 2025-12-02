@@ -366,9 +366,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				select {
 				case <-logIntervalPeers.C:
 					if peerCount, err := beaconRpc.Peers(); err == nil {
-						logger.Info("P2P", "peers", peerCount)
+						logger.Info("Caplin P2P", "peers", peerCount)
 					} else {
-						logger.Error("P2P", "err", err)
+						logger.Error("Caplin P2P", "err", err)
 					}
 				case <-ctx.Done():
 					return
