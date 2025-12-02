@@ -229,7 +229,7 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 			}
 			time = true
 		}
-		if field.Type != reflect.TypeOf(new(big.Int)) {
+		if field.Type != reflect.TypeFor[*big.Int]() {
 			continue
 		}
 		// Extract the fork rule block number and aggregate it
