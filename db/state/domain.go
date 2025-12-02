@@ -1421,10 +1421,6 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	return nil, false, 0, 0, nil
 }
 
-func (dt *DomainRoTx) DebugKeyTrace(ctx context.Context, key []byte, fromTxNum, toTxNum uint64, roTx kv.Tx) stream.U64V {
-	return nil
-}
-
 // Returns the first txNum from available history
 func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
 	if len(dt.ht.files) == 0 { // if no history files, check in MDBX

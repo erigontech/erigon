@@ -1517,7 +1517,7 @@ func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.
 	return stream.Union(frozenIt, recentIt, asc, limit), nil
 }
 
-func (ht *HistoryRoTx) DebugKeyTrace(ctx context.Context, key []byte, fromTxNum, toTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
+func (ht *HistoryRoTx) DebugHistoryKeyTrace(ctx context.Context, key []byte, fromTxNum, toTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
 	files := HistoryKeyTraceFiles{
 		hc:        ht,
 		fromTxNum: fromTxNum,

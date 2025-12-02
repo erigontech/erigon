@@ -673,39 +673,44 @@ type HistoryKeyTraceFiles struct {
 	ctx    context.Context
 
 	// private
-	fileIdx             int
-	efbuf, buf, histKey []byte
-	seqItr              stream.U64 // stores iterator returned by multiencseq.SequenceReader#Iterator
-	histReader          *seg.Reader
+	txNum             uint64
+	hasNext           bool
+	fileIdx           int
+	efbuf, v, histKey []byte
+	seqItr            stream.U64 // stores iterator returned by multiencseq.SequenceReader#Iterator
+	histReader        *seg.Reader
 }
 
 func (ht *HistoryKeyTraceFiles) init() error {
 	ht.efbuf = make([]byte, 256)
-	ht.buf = make([]byte, 256)
+	ht.v = make([]byte, 256)
 	ht.histKey = make([]byte, 0, len(ht.key)+8)
-	return nil
+	ht.hasNext = true
+	return ht.advance()
 }
 
-func (ht *HistoryKeyTraceFiles) Close() {}
+func (ht *HistoryKeyTraceFiles) Close() {
+	ht.seqItr.Close()
+	ht.seqItr = nil
+	ht.histReader = nil
+}
 
 func (ht *HistoryKeyTraceFiles) HasNext() bool {
-	return ht.fileIdx < len(ht.hc.iit.files) && ht.fromTxNum < ht.hc.files[ht.fileIdx].endTxNum
+	return ht.hasNext
 }
 
-func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
-	select {
-	case <-ht.ctx.Done():
-		return 0, nil, ht.ctx.Err()
-	default:
+func (ht *HistoryKeyTraceFiles) advance() error {
+	if !ht.hasNext {
+		return nil
 	}
-
 	moveToNextFileFn := func() {
 		ht.fileIdx++
-		ht.seqItr.Close()
-		ht.seqItr = nil
+		if ht.seqItr != nil {
+			ht.seqItr.Close()
+			ht.seqItr = nil
+		}
 		ht.histReader = nil
 	}
-
 	for ht.fileIdx < len(ht.hc.iit.files) {
 		item := ht.hc.iit.files[ht.fileIdx]
 		if ht.toTxNum < item.startTxNum {
@@ -713,8 +718,9 @@ func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
 			continue
 		}
 		if ht.fromTxNum >= item.endTxNum {
-			// shouldn't happen
-			return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: inconsistent fromTxNum %d >= file endTxNum %d; probably HasNext ignored", ht.fromTxNum, item.endTxNum)
+			// done
+			ht.hasNext = false
+			return nil
 		}
 
 		if ht.seqItr == nil {
@@ -728,6 +734,7 @@ func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
 				continue
 			}
 			getter.Reset(offset)
+			getter.Next(ht.efbuf[:0]) // skip key
 			ht.efbuf, _ = getter.Next(ht.efbuf[:0])
 			currSeq := multiencseq.ReadMultiEncSeq(item.startTxNum, ht.efbuf)
 			ht.seqItr = currSeq.Iterator(int(ht.fromTxNum))
@@ -740,8 +747,9 @@ func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
 
 		txNum, err := ht.seqItr.Next()
 		if err != nil {
-			return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: seqItr.Next() error: %w", err)
+			return fmt.Errorf("HistoryKeyTraceFiles.Next: seqItr.Next() error: %w", err)
 		}
+
 		if txNum >= ht.toTxNum {
 			moveToNextFileFn()
 			continue
@@ -754,7 +762,7 @@ func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
 			offset, ok := idxReader.TwoLayerLookup(ht.histKey)
 			if !ok {
 				// shouldn't since key/txNum in ef
-				return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+				return fmt.Errorf("HistoryKeyTraceFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 			}
 
 			ht.histReader.Reset(offset)
@@ -762,14 +770,27 @@ func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
 
 		if !ht.histReader.HasNext() {
 			// shouldn't happen since key/txNum in ef
-			return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: no history value found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+			return fmt.Errorf("HistoryKeyTraceFiles.Next: no history value found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 		}
 
-		ht.buf, _ = ht.histReader.Next(ht.buf[:])
-		return txNum, common.Copy(ht.buf), nil
+		ht.txNum = txNum
+		ht.v, _ = ht.histReader.Next(ht.v[:0])
+		return nil
 	}
 
-	return 0, nil, fmt.Errorf("HistoryKeyTraceFiles.Next: no more files to read; probably HasNext ignored")
+	ht.hasNext = false
+	return nil
+}
+
+func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
+	select {
+	case <-ht.ctx.Done():
+		return 0, nil, ht.ctx.Err()
+	default:
+	}
+
+	defer ht.advance()
+	return ht.txNum, common.Copy(ht.v), nil
 }
 
 type HistoryKeyTraceDB struct {
@@ -794,7 +815,17 @@ func (ht *HistoryKeyTraceDB) init() error {
 	return ht.advance()
 }
 
-func (ht *HistoryKeyTraceDB) Close() {}
+func (ht *HistoryKeyTraceDB) Close() {
+	if ht.valsC != nil {
+		ht.valsC.Close()
+		ht.valsC = nil
+	}
+
+	if ht.valsCDup != nil {
+		ht.valsCDup.Close()
+		ht.valsCDup = nil
+	}
+}
 
 func (ht *HistoryKeyTraceDB) HasNext() bool {
 	return ht.k != nil
@@ -845,10 +876,19 @@ func (ht *HistoryKeyTraceDB) advanceSmallVals() error {
 			ht.k = nil
 			return nil
 		}
+		binary.BigEndian.PutUint64(ht.v, ht.fromTxNum)
+		return nil
 	}
-	binary.BigEndian.PutUint64(ht.v, ht.fromTxNum)
 	ht.k, ht.v, err = ht.valsCDup.NextDup()
-	return err
+	if err != nil {
+		return err
+	}
+	if ht.v != nil {
+		binary.BigEndian.PutUint64(ht.v, ht.fromTxNum)
+	} else {
+		ht.k = nil
+	}
+	return nil
 }
 
 func (ht *HistoryKeyTraceDB) advanceLargeVals() error {
@@ -860,7 +900,7 @@ func (ht *HistoryKeyTraceDB) advanceLargeVals() error {
 		startTxNumBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(startTxNumBytes, ht.fromTxNum)
 		seek := append([]byte{}, append(ht.key, startTxNumBytes[:]...)...)
-		firstKey, _, err := ht.valsC.Seek(seek)
+		firstKey, v, err := ht.valsC.Seek(seek)
 		if err != nil {
 			return err
 		}
@@ -868,6 +908,14 @@ func (ht *HistoryKeyTraceDB) advanceLargeVals() error {
 			ht.k = nil
 			return nil
 		}
+		ht.k = firstKey
+		ht.txNum = binary.BigEndian.Uint64(firstKey[len(firstKey)-8:])
+		if ht.txNum >= ht.toTxNum {
+			ht.k = nil
+			return nil
+		}
+		ht.v = v
+		return nil
 	}
 
 	ht.k, ht.v, err = ht.valsC.Next()
@@ -883,6 +931,7 @@ func (ht *HistoryKeyTraceDB) advanceLargeVals() error {
 		ht.k = nil
 		return nil
 	}
+	ht.txNum = foundTxNum
 
 	return nil
 }
