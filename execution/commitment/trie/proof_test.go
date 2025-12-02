@@ -7,9 +7,10 @@ import (
 	"log"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/stretchr/testify/require"
 )
 
 //go:embed proofResponse.json

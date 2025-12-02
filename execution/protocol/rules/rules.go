@@ -25,7 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	common "github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"

@@ -110,4 +110,6 @@ mdbx.lck
 /*/**/LOCK
 /*/**/nodekey
 
+# Alex Sharov
 .my
+.rules
