@@ -284,6 +284,16 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialC
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 
+func (s *Sync) RunSnapshots(db kv.TemporalRwDB) error {
+	for _, stage := range s.stages {
+		if stage.ID == stages.Snapshots {
+			_, err := s.runStage(stage, db, nil, nil, true, true, false)
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Sync) RunUnwind(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
@@ -398,12 +408,11 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (bool, error) {
+func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
 	var errBadBlock error
-	hasMore := false
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
@@ -452,7 +461,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 			return false, err
 		}
 		if stageHasMore {
-			hasMore = true
+			more = true
 		}
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
@@ -463,10 +472,10 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
 			if s.posTransition != nil {
-				ptx := tx
+				ptx := tx.(kv.Tx)
 
 				if ptx == nil {
-					if tx, err := db.BeginTemporalRw(context.Background()); err == nil {
+					if tx, err := db.BeginTemporalRo(context.Background()); err == nil {
 						ptx = tx
 						defer tx.Rollback()
 					}
@@ -474,11 +483,11 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 
 				if ptx != nil {
 					if progress, err := stages.GetStageProgress(ptx, stage.ID); err == nil {
-						hasMore = progress < *s.posTransition
+						more = progress < *s.posTransition
 					}
 				}
 			} else {
-				hasMore = true
+				more = true
 			}
 			break
 		}
@@ -491,7 +500,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 	}
 
 	s.currentStage = 0
-	return hasMore, errBadBlock
+	return more, errBadBlock
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
