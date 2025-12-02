@@ -31,6 +31,11 @@ type (
 	Empty[T any]             struct{}
 	EmptyDuo[K, V any]       struct{}
 	EmptyTrio[K, V1, V2 any] struct{}
+	SingleDuo[K, V any]      struct {
+		k       K
+		v       V
+		hasNext bool
+	}
 )
 
 func (Empty[T]) HasNext() bool                                    { return false }
@@ -42,6 +47,19 @@ func (EmptyDuo[K, V]) Close()                                     {}
 func (EmptyTrio[K, V1, v2]) HasNext() bool                        { return false }
 func (EmptyTrio[K, V1, V2]) Next() (k K, v1 V1, v2 V2, err error) { return k, v1, v2, err }
 func (EmptyTrio[K, V1, V2]) Close()                               {}
+
+func NewSingleDuo[K, V any](k K, v V) *SingleDuo[K, V] {
+	return &SingleDuo[K, V]{k: k, v: v, hasNext: true}
+}
+func (s *SingleDuo[K, V]) HasNext() bool { return s.hasNext }
+func (s *SingleDuo[K, V]) Next() (k K, v V, err error) {
+	if !s.hasNext {
+		return k, v, fmt.Errorf("no more elements")
+	}
+	s.hasNext = false
+	return s.k, s.v, nil
+}
+func (s *SingleDuo[K, V]) Close() {}
 
 type ArrStream[V any] struct {
 	arr []V

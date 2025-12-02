@@ -690,7 +690,9 @@ func (ht *HistoryKeyTraceFiles) init() error {
 }
 
 func (ht *HistoryKeyTraceFiles) Close() {
-	ht.seqItr.Close()
+	if ht.seqItr != nil {
+		ht.seqItr.Close()
+	}
 	ht.seqItr = nil
 	ht.histReader = nil
 }
@@ -758,7 +760,7 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 		if ht.histReader == nil {
 			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)
 			ht.histReader = ht.hc.statelessGetter(ht.fileIdx)
-			ht.histKey = historyKey(txNum, ht.key, ht.histKey[:0])
+			ht.histKey = ht.hc.encodeTs(txNum, ht.key)
 			offset, ok := idxReader.TwoLayerLookup(ht.histKey)
 			if !ok {
 				// shouldn't since key/txNum in ef
@@ -774,7 +776,8 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 		}
 
 		ht.txNum = txNum
-		ht.v, _ = ht.histReader.Next(ht.v[:0])
+		v, _ := ht.histReader.Next(nil)
+		ht.v = common.Copy(v)
 		return nil
 	}
 
@@ -790,7 +793,7 @@ func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
 	}
 
 	defer ht.advance()
-	return ht.txNum, common.Copy(ht.v), nil
+	return ht.txNum, ht.v, nil
 }
 
 type HistoryKeyTraceDB struct {
@@ -837,7 +840,7 @@ func (ht *HistoryKeyTraceDB) Next() (uint64, []byte, error) {
 		return 0, nil, ht.ctx.Err()
 	default:
 	}
-	txNum, v := ht.txNum, common.Copy(ht.v)
+	txNum, v := ht.txNum, ht.v
 	if err := ht.advance(); err != nil {
 		return 0, nil, err
 	}
@@ -889,6 +892,7 @@ func (ht *HistoryKeyTraceDB) advanceSmallVals() error {
 		ht.k = nil
 	}
 	ht.v = ht.v[8:]
+	ht.v = common.Copy(ht.v)
 	return nil
 }
 
