@@ -19,8 +19,7 @@ DISABLED_TEST_LIST=(
   eth_getBlockReceipts/test_06.json
   ots_getBlockDetails/test_01.json
   ots_getBlockDetailsByHash/test_01.json
-  # temporary
-  #ots_getBlockTransactions/test_02.json 
+  ots_getBlockTransactions/test_02.json 
 )
 
 # Transform the array into a comma-separated string
