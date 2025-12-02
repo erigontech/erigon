@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sync/atomic"
 	"time"
 
@@ -68,12 +67,14 @@ func (msg Msg) String() string {
 	return fmt.Sprintf("msg #%v (%v bytes)", msg.Code, msg.Size)
 }
 
-// Discard reads any remaining payload data into a black hole.
-func (msg Msg) Discard() {
-	_, err := io.Copy(io.Discard, msg.Payload)
-	if err != nil {
-		log.Fatal(err)
+// Discard reads any remaining payload data into a black hole and reports failures
+// so callers can decide how to react instead of killing the entire process.
+func (msg Msg) Discard() error {
+	if msg.Payload == nil {
+		return nil
 	}
+	_, err := io.Copy(io.Discard, msg.Payload)
+	return err
 }
 
 func (msg Msg) Time() time.Time {
@@ -238,8 +239,7 @@ func ExpectMsg(r MsgReader, code uint64, content interface{}) error {
 		return fmt.Errorf("message code mismatch: got %d, expected %d", msg.Code, code)
 	}
 	if content == nil {
-		msg.Discard()
-		return nil
+		return msg.Discard()
 	}
 	contentEnc, err := rlp.EncodeToBytes(content)
 	if err != nil {
