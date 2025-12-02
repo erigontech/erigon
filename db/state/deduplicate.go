@@ -36,7 +36,7 @@ import (
 // This function is supposed to be used only as part of the snapshot tooling
 // to help rebuilding existing snapshots. It should not be used for for
 // background merging process because it is not memory-efficient
-func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet, opts OverrideCompactOpts) error {
+func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet) error {
 	if !r.any() {
 		return nil
 	}
@@ -52,11 +52,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return fmt.Errorf("deduo %s history compressor: %w", ht.h.FilenameBase, err)
 	}
 
-	pagedWr := ht.datarWriter(comp, ht.h.HistoryValuesOnCompressedPage)
-
-	if opts.HistoryValuesOnCompressedPage != nil {
-		pagedWr = ht.datarWriter(comp, *opts.HistoryValuesOnCompressedPage)
-	}
+	pagedWr := ht.datarWriter(comp)
 
 	var cp CursorHeap
 	heap.Init(&cp)

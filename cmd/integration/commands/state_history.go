@@ -21,13 +21,14 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
+
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -131,8 +132,13 @@ var rebuildCmd = &cobra.Command{
 			return
 		}
 
+		histCfg := statecfg.Schema.GetDomainCfg(domainKV).Hist
+		if overrideValuesOnCompressedPage > 0 {
+			histCfg.HistoryValuesOnCompressedPage = overrideValuesOnCompressedPage
+		}
+
 		history, err := state.NewHistory(
-			statecfg.Schema.GetDomainCfg(domainKV).Hist,
+			histCfg,
 			config3.DefaultStepSize,
 			config3.DefaultStepsInFrozenFile,
 			dirs,
@@ -157,13 +163,7 @@ var rebuildCmd = &cobra.Command{
 
 			fmt.Printf("Compacting files %d-%d step\n", fromTxNum/config3.DefaultStepSize, i/config3.DefaultStepSize)
 
-			var opts state.OverrideCompactOpts
-
-			if overrideValuesOnCompressedPage > 0 {
-				opts.HistoryValuesOnCompressedPage = &overrideValuesOnCompressedPage
-			}
-
-			err = roTx.CompactRange(context.TODO(), fromTxNum, i, opts)
+			err = roTx.CompactRange(context.TODO(), fromTxNum, i)
 			if err != nil {
 				logger.Error("Failed to rebuild history", "error", err)
 				return
