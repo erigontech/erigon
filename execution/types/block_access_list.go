@@ -12,7 +12,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 type BlockAccessList []*AccountChanges
@@ -939,4 +943,143 @@ func (bal BlockAccessList) DebugString() string {
 		}
 	}
 	return sb.String()
+}
+
+func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessListAccount) *hexutil.Bytes {
+	if protoList == nil {
+		return nil
+	}
+	bal := make(BlockAccessList, len(protoList))
+	for i, acc := range protoList {
+		bal[i] = &AccountChanges{
+			Address: gointerfaces.ConvertH160toAddress(acc.Address),
+		}
+		if acc.StorageChanges != nil {
+			bal[i].StorageChanges = make([]*SlotChanges, len(acc.StorageChanges))
+			for j, sc := range acc.StorageChanges {
+				bal[i].StorageChanges[j] = &SlotChanges{
+					Slot: gointerfaces.ConvertH256ToHash(sc.Slot),
+				}
+				if sc.Changes != nil {
+					bal[i].StorageChanges[j].Changes = make([]*StorageChange, len(sc.Changes))
+					for k, c := range sc.Changes {
+						val := gointerfaces.ConvertH256ToHash(c.Value)
+						bal[i].StorageChanges[j].Changes[k] = &StorageChange{
+							Index: uint16(c.Index),
+							Value: val,
+						}
+					}
+				}
+			}
+		}
+		if acc.StorageReads != nil {
+			bal[i].StorageReads = make([]common.Hash, len(acc.StorageReads))
+			for j, r := range acc.StorageReads {
+				bal[i].StorageReads[j] = gointerfaces.ConvertH256ToHash(r)
+			}
+		}
+		if acc.BalanceChanges != nil {
+			bal[i].BalanceChanges = make([]*BalanceChange, len(acc.BalanceChanges))
+			for j, bc := range acc.BalanceChanges {
+				val := gointerfaces.ConvertH256ToUint256Int(bc.Value)
+				bal[i].BalanceChanges[j] = &BalanceChange{
+					Index: uint16(bc.Index),
+					Value: *val,
+				}
+			}
+		}
+		if acc.NonceChanges != nil {
+			bal[i].NonceChanges = make([]*NonceChange, len(acc.NonceChanges))
+			for j, nc := range acc.NonceChanges {
+				bal[i].NonceChanges[j] = &NonceChange{
+					Index: uint16(nc.Index),
+					Value: nc.Value,
+				}
+			}
+		}
+		if acc.CodeChanges != nil {
+			bal[i].CodeChanges = make([]*CodeChange, len(acc.CodeChanges))
+			for j, cc := range acc.CodeChanges {
+				bal[i].CodeChanges[j] = &CodeChange{
+					Index: uint16(cc.Index),
+					Data:  cc.Data,
+				}
+			}
+		}
+	}
+	encoded, err := rlp.EncodeToBytes(bal)
+	if err != nil {
+		return nil
+	}
+	res := hexutil.Bytes(encoded)
+	return &res
+}
+
+func ConvertBlockAccessListFromExecutionProto(protoList []*executionproto.BlockAccessListAccount) *hexutil.Bytes {
+	if protoList == nil {
+		return nil
+	}
+	bal := make(BlockAccessList, len(protoList))
+	for i, acc := range protoList {
+		bal[i] = &AccountChanges{
+			Address: gointerfaces.ConvertH160toAddress(acc.Address),
+		}
+		if acc.StorageChanges != nil {
+			bal[i].StorageChanges = make([]*SlotChanges, len(acc.StorageChanges))
+			for j, sc := range acc.StorageChanges {
+				bal[i].StorageChanges[j] = &SlotChanges{
+					Slot: gointerfaces.ConvertH256ToHash(sc.Slot),
+				}
+				if sc.Changes != nil {
+					bal[i].StorageChanges[j].Changes = make([]*StorageChange, len(sc.Changes))
+					for k, c := range sc.Changes {
+						bal[i].StorageChanges[j].Changes[k] = &StorageChange{
+							Index: uint16(c.Index),
+							Value: gointerfaces.ConvertH256ToHash(c.Value),
+						}
+					}
+				}
+			}
+		}
+		if acc.StorageReads != nil {
+			bal[i].StorageReads = make([]common.Hash, len(acc.StorageReads))
+			for j, r := range acc.StorageReads {
+				bal[i].StorageReads[j] = gointerfaces.ConvertH256ToHash(r)
+			}
+		}
+		if acc.BalanceChanges != nil {
+			bal[i].BalanceChanges = make([]*BalanceChange, len(acc.BalanceChanges))
+			for j, bc := range acc.BalanceChanges {
+				val := gointerfaces.ConvertH256ToUint256Int(bc.Value)
+				bal[i].BalanceChanges[j] = &BalanceChange{
+					Index: uint16(bc.Index),
+					Value: *val,
+				}
+			}
+		}
+		if acc.NonceChanges != nil {
+			bal[i].NonceChanges = make([]*NonceChange, len(acc.NonceChanges))
+			for j, nc := range acc.NonceChanges {
+				bal[i].NonceChanges[j] = &NonceChange{
+					Index: uint16(nc.Index),
+					Value: nc.Value,
+				}
+			}
+		}
+		if acc.CodeChanges != nil {
+			bal[i].CodeChanges = make([]*CodeChange, len(acc.CodeChanges))
+			for j, cc := range acc.CodeChanges {
+				bal[i].CodeChanges[j] = &CodeChange{
+					Index: uint16(cc.Index),
+					Data:  cc.Data,
+				}
+			}
+		}
+	}
+	encoded, err := rlp.EncodeToBytes(bal)
+	if err != nil {
+		return nil
+	}
+	res := hexutil.Bytes(encoded)
+	return &res
 }

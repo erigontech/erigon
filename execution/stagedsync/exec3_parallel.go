@@ -202,13 +202,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
-							log.Info("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
+							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
 
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
 								headerBALHash := *lastHeader.BlockAccessListHash
-								//if headerBALHash != b.BlockAccessList().Hash() {
-								//	return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
-								//}
+								if headerBALHash != b.BlockAccessList().Hash() {
+									log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
+									return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+								}
 								if headerBALHash != bal.Hash() {
 									log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
 									return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
@@ -1096,8 +1097,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		hooks.OnTxEnd(receipt, result.Err)
 	}
 
-	log.Info("number of writes", "len", len(ibs.VersionedWrites(true)))
-
 	return receipt, ibs.VersionedReads(), allWrites, nil
 }
 
@@ -1513,7 +1512,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					mergedReads := mergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
-				log.Info("num writes", "num", len(addWrites))
 				if len(addWrites) > 0 {
 					existing := be.blockIO.WriteSet(txVersion.TxIndex)
 					if len(existing) > 0 {

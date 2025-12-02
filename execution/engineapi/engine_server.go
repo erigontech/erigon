@@ -586,14 +586,10 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
 		(!s.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
-		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) {
+		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) ||
+		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
+		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
-	if s.config.AmsterdamTime != nil {
-		if (!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
-			(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
-			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-		}
 	}
 
 	payload := &engine_types.GetPayloadResponse{
