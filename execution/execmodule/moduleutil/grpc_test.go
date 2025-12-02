@@ -83,7 +83,32 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 			Amount:    uint64(10 * i),
 		}
 	}
-	return types.NewBlock(header, txs, uncles, receipts, withdrawals)
+	blockAccessList := types.BlockAccessList{
+		{
+			Address: common.HexToAddress("0x0000000000000000000000000000000000000001"),
+			StorageChanges: []*types.SlotChanges{
+				{
+					Slot: common.HexToHash("0x01"),
+					Changes: []*types.StorageChange{
+						{Index: 0, Value: common.HexToHash("0x02")},
+					},
+				},
+			},
+			StorageReads: []common.Hash{common.HexToHash("0x03")},
+			BalanceChanges: []*types.BalanceChange{
+				{Index: 0, Value: *uint256.NewInt(5)},
+			},
+			NonceChanges: []*types.NonceChange{
+				{Index: 1, Value: 7},
+			},
+			CodeChanges: []*types.CodeChange{
+				{Index: 0, Data: []byte{0xaa, 0xbb}},
+			},
+		},
+	}
+	block := types.NewBlock(header, txs, uncles, receipts, withdrawals)
+	block.SetBlockAccessList(blockAccessList)
+	return block
 }
 
 func TestBlockRpcConversion(t *testing.T) {
