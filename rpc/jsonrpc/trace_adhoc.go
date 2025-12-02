@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	math2 "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
@@ -80,11 +80,11 @@ type TraceCallParam struct {
 
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
-	Output          hexutil.Bytes                        `json:"output"`
-	StateDiff       map[common.Address]*StateDiffAccount `json:"stateDiff"`
-	Trace           []*ParityTrace                       `json:"trace"`
-	VmTrace         *VmTrace                             `json:"vmTrace"`
-	TransactionHash *common.Hash                         `json:"transactionHash,omitempty"`
+	Output          hexutil.Bytes                          `json:"output"`
+	StateDiff       map[accounts.Address]*StateDiffAccount `json:"stateDiff"`
+	Trace           []*ParityTrace                         `json:"trace"`
+	VmTrace         *VmTrace                               `json:"vmTrace"`
+	TransactionHash *common.Hash                           `json:"transactionHash,omitempty"`
 }
 
 // StateDiffAccount is the part of `trace_call` response that is under "stateDiff" tag
@@ -151,9 +151,9 @@ type VmTraceStore struct {
 // ToMessage converts CallArgs to the Message type used by the core evm
 func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*types.Message, error) {
 	// Set sender address or use zero address if none specified.
-	var addr common.Address
+	var addr accounts.Address
 	if args.From != nil {
-		addr = *args.From
+		addr = accounts.InternAddress(*args.From)
 	}
 
 	// Set default gas & gas price if none were set
@@ -211,13 +211,13 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 				}
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
-			gasPrice = new(uint256.Int)
+			var gasPrice uint256.Int
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				gasPrice = math2.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
+				gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
 			} else {
 				// This means gasFeeCap == 0, gasTipCap == 0
 				gasPrice.Set(baseFee)
-				gasFeeCap, gasTipCap = gasPrice, gasPrice
+				gasFeeCap, gasTipCap = &gasPrice, &gasPrice
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -239,7 +239,12 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
+
+	var to accounts.Address
+	if args.To != nil {
+		to = accounts.InternAddress(*args.To)
+	}
+	msg := types.NewMessage(addr, to, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
 	return msg, nil
 }
 
@@ -346,7 +351,7 @@ func (ot *OeTracer) Tracer() *tracers.Tracer {
 	}
 }
 
-func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
 		if deep {
@@ -390,7 +395,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 		trResult := &CreateTraceResult{}
 		trace.Type = CREATE
 		trResult.Address = new(common.Address)
-		copy(trResult.Address[:], to.Bytes())
+		toVal := to.Value()
+		copy(trResult.Address[:], toVal[:])
 		trace.Result = trResult
 	} else {
 		trace.Result = &TraceResult{}
@@ -417,7 +423,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 	copy(trace.TraceAddress, ot.traceAddr)
 	if create {
 		action := CreateTraceAction{}
-		action.From = from
+		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
 		action.Gas.ToInt().SetUint64(gas)
 		action.Init = common.Copy(input)
@@ -427,8 +433,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 		trace.Type = SUICIDE
 		trace.Result = nil
 		action := &SuicideTraceAction{}
-		action.Address = from
-		action.RefundAddress = to
+		action.Address = from.Value()
+		action.RefundAddress = to.Value()
 		action.Balance.ToInt().Set(value.ToBig())
 		trace.Action = action
 	} else {
@@ -443,8 +449,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 		case vm.STATICCALL:
 			action.CallType = STATICCALL
 		}
-		action.From = from
-		action.To = to
+		action.From = from.Value()
+		action.To = to.Value()
 		action.Gas.ToInt().SetUint64(gas)
 		action.Input = common.Copy(input)
 		action.Value.ToInt().Set(value.ToBig())
@@ -454,7 +460,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ot *OeTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	isCreate := vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2
 	ot.captureStartOrEnter(depth != 0 /* deep */, vm.OpCode(typ), from, to, precompile, isCreate, input, gas, &value, code)
 }
@@ -683,31 +689,31 @@ func (ot *OeTracer) Stop(err error) {}
 
 // Implements execution/state/StateWriter to provide state diffs
 type StateDiff struct {
-	sdMap map[common.Address]*StateDiffAccount
+	sdMap map[accounts.Address]*StateDiffAccount
 }
 
-func (sd *StateDiff) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (sd *StateDiff) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
-func (sd *StateDiff) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (sd *StateDiff) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
-func (sd *StateDiff) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (sd *StateDiff) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
-func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+func (sd *StateDiff) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -718,11 +724,11 @@ func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uin
 	}
 	m := make(map[string]interface{})
 	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
-	accountDiff.Storage[key] = m
+	accountDiff.Storage[key.Value()] = m
 	return nil
 }
 
-func (sd *StateDiff) CreateContract(address common.Address) error {
+func (sd *StateDiff) CreateContract(address accounts.Address) error {
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}
@@ -731,7 +737,7 @@ func (sd *StateDiff) CreateContract(address common.Address) error {
 
 // CompareStates uses the addresses accumulated in the sdMap and compares balances, nonces, and codes of the accounts, and fills the rest of the sdMap
 func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error {
-	var toRemove []common.Address
+	var toRemove []accounts.Address
 	for addr, accountDiff := range sd.sdMap {
 		initialExist, err := initialIbs.Exist(addr)
 		if err != nil {
@@ -1166,7 +1172,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	traceResult.Output = common.Copy(execResult.ReturnData)
 	if traceTypeStateDiff {
-		sdMap := make(map[common.Address]*StateDiffAccount)
+		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
 		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
@@ -1408,7 +1414,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			if isHistoricalStateReader {
 				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 			}
-			sdMap := make(map[common.Address]*StateDiffAccount)
+			sdMap := make(map[accounts.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd = &StateDiff{sdMap: sdMap}
 		}
@@ -1621,7 +1627,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		if isHistoricalStateReader {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
-		sdMap := make(map[common.Address]*StateDiffAccount)
+		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd = &StateDiff{sdMap: sdMap}
 	}

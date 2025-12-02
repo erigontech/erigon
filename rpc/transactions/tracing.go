@@ -36,6 +36,7 @@ import (
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -66,7 +67,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 		return headerReader.HeaderByNumber(ctx, dbtx, n)
 	}
 
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, nil, cfg)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, cfg)
 	rules := blockContext.Rules(cfg)
 
 	// Recompute transactions up to the target index.

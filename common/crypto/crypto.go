@@ -51,9 +51,9 @@ const RecoveryIDOffset = 64
 const DigestLength = 32
 
 var (
-	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1N     = *new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
 	secp256k1NBig  = secp256k1N.ToBig()
-	secp256k1halfN = new(uint256.Int).Rsh(secp256k1N, 1)
+	secp256k1halfN = new(uint256.Int).Rsh(&secp256k1N, 1)
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")
@@ -294,7 +294,7 @@ func TransactionSignatureIsValid(v byte, r, s *uint256.Int, allowPreEip2s bool) 
 		return false
 	}
 
-	return r.Lt(secp256k1N) && s.Lt(secp256k1N) && (v == 0 || v == 1)
+	return r.Lt(&secp256k1N) && s.Lt(&secp256k1N) && (v == 0 || v == 1)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account

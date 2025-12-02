@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type BlockAccessList []*AccountChanges
@@ -27,16 +28,16 @@ const (
 )
 
 type AccountChanges struct {
-	Address        common.Address
+	Address        accounts.Address
 	StorageChanges []*SlotChanges
-	StorageReads   []common.Hash
+	StorageReads   []accounts.StorageKey
 	BalanceChanges []*BalanceChange
 	NonceChanges   []*NonceChange
 	CodeChanges    []*CodeChange
 }
 
 type SlotChanges struct {
-	Slot    common.Hash
+	Slot    accounts.StorageKey
 	Changes []*StorageChange
 }
 
@@ -103,7 +104,8 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(ac.Address[:]); err != nil {
+	address := ac.Address.Value()
+	if _, err := w.Write(address[:]); err != nil {
 		return err
 	}
 
@@ -129,17 +131,18 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("account changes payload exceeds maximum size (%d bytes)", size)
 	}
 
-	if err := s.ReadBytes(ac.Address[:]); err != nil {
+	var address common.Address
+	if err := s.ReadBytes(address[:]); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-
+	ac.Address = accounts.InternAddress(address)
 	list, err := decodeSlotChangesList(s)
 	if err != nil {
 		return err
 	}
 	ac.StorageChanges = list
 
-	reads, err := decodeHashList(s)
+	reads, err := decodeStorageKeys(s)
 	if err != nil {
 		return err
 	}
@@ -170,11 +173,9 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-// GetBytes methods for byte sorting
-func (sc *SlotChanges) GetBytes() []byte { return sc.Slot[:] }
-
 func (sc *SlotChanges) EncodingSize() int {
-	size := rlp.StringLen(sc.Slot[:])
+	slot := sc.Slot.Value()
+	size := rlp.StringLen(slot[:])
 	changesLen := EncodingSizeGenericList(sc.Changes)
 	size += rlp.ListPrefixLen(changesLen) + changesLen
 	return size
@@ -192,8 +193,8 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-
-	if err := rlp.EncodeString(sc.Slot[:], w, b[:]); err != nil {
+	slot := sc.Slot.Value()
+	if err := rlp.EncodeString(slot[:], w, b[:]); err != nil {
 		return err
 	}
 
@@ -206,10 +207,11 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 	} else if size > maxBlockAccessListBytes {
 		return fmt.Errorf("slot changes payload exceeds maximum size (%d bytes)", size)
 	}
-	if err := s.ReadBytes(sc.Slot[:]); err != nil {
+	var slot common.Hash
+	if err := s.ReadBytes(slot[:]); err != nil {
 		return fmt.Errorf("read Slot: %w", err)
 	}
-
+	sc.Slot = accounts.InternKey(slot)
 	changes, err := decodeStorageChanges(s)
 	if err != nil {
 		return err
@@ -395,29 +397,32 @@ func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) e
 	return nil
 }
 
-func encodeHashList(hashes []common.Hash, w io.Writer, buf []byte) error {
+func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error {
 	if err := validateStorageReads(hashes); err != nil {
 		return err
 	}
 	total := 0
 	for i := range hashes {
-		total += rlp.StringLen(hashes[i][:])
+		hash := hashes[i].Value()
+		total += rlp.StringLen(hash[:])
 	}
 	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
 		return err
 	}
 	for i := range hashes {
-		if err := rlp.EncodeString(hashes[i][:], w, buf); err != nil {
+		hash := hashes[i].Value()
+		if err := rlp.EncodeString(hash[:], w, buf); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func encodingSizeHashList(hashes []common.Hash) int {
+func encodingSizeHashList(hashes []accounts.StorageKey) int {
 	size := 0
 	for i := range hashes {
-		size += rlp.StringLen(hashes[i][:])
+		hash := hashes[i].Value()
+		size += rlp.StringLen(hash[:])
 	}
 	return rlp.ListPrefixLen(size) + size
 }
@@ -444,8 +449,9 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		if err = ac.DecodeRLP(s); err != nil {
 			break
 		}
-		if hasPrev && bytes.Compare(prevAddr[:], ac.Address[:]) >= 0 {
-			err = fmt.Errorf("block access list addresses must be strictly increasing (prev=%s current=%s)", prevAddr.Hex(), ac.Address.Hex())
+		address := ac.Address.Value()
+		if hasPrev && bytes.Compare(prevAddr[:], address[:]) >= 0 {
+			err = fmt.Errorf("block access list addresses must be strictly increasing (prev=%s current=%s)", prevAddr.Hex(), address.Hex())
 			break
 		}
 		acCopy := ac
@@ -454,7 +460,7 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 			err = fmt.Errorf("block access list exceeds maximum accounts (%d)", maxBlockAccessAccounts)
 			break
 		}
-		prevAddr = ac.Address
+		prevAddr = address
 		hasPrev = true
 	}
 	if err = checkErrListEnd(s, err); err != nil {
@@ -488,7 +494,8 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 		if err = sc.DecodeRLP(s); err != nil {
 			break
 		}
-		if hasPrev && bytes.Compare(prevSlot[:], sc.Slot[:]) >= 0 {
+		slot := sc.Slot.Value()
+		if hasPrev && bytes.Compare(prevSlot[:], slot[:]) >= 0 {
 			err = fmt.Errorf("storage slot list must be strictly increasing (prev=%x current=%x)", prevSlot, sc.Slot)
 			break
 		}
@@ -497,7 +504,7 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 			err = fmt.Errorf("storage slot change list exceeds maximum entries (%d)", maxSlotChangesPerAccount)
 			break
 		}
-		prevSlot = sc.Slot
+		prevSlot = slot
 		hasPrev = true
 	}
 	if err = checkErrListEnd(s, err); err != nil {
@@ -641,7 +648,7 @@ func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
 	return out, nil
 }
 
-func decodeHashList(s *rlp.Stream) ([]common.Hash, error) {
+func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 	var err error
 	var size uint64
 	if size, err = s.List(); err != nil {
@@ -653,13 +660,13 @@ func decodeHashList(s *rlp.Stream) ([]common.Hash, error) {
 	if size > maxBlockAccessListBytes {
 		return nil, fmt.Errorf("storage read list payload exceeds maximum size (%d bytes)", size)
 	}
-	var hashes []common.Hash
+	var hashes []accounts.StorageKey
 	for {
 		var h common.Hash
 		if err = s.ReadBytes(h[:]); err != nil {
 			break
 		}
-		hashes = append(hashes, h)
+		hashes = append(hashes, accounts.InternKey(h))
 		if len(hashes) > maxStorageReadsPerAccount {
 			err = fmt.Errorf("storage read list exceeds maximum entries (%d)", maxStorageReadsPerAccount)
 			break
@@ -702,13 +709,14 @@ func (bal BlockAccessList) Validate() error {
 		if account == nil {
 			return fmt.Errorf("entry %d is nil", i)
 		}
-		if hasPrev && bytes.Compare(prev[:], account.Address[:]) >= 0 {
+		address := account.Address.Value()
+		if hasPrev && bytes.Compare(prev[:], address[:]) >= 0 {
 			return fmt.Errorf("account addresses must be strictly increasing (index %d)", i)
 		}
 		if err := account.validate(); err != nil {
-			return fmt.Errorf("account %s: %w", account.Address.Hex(), err)
+			return fmt.Errorf("account %s: %w", address.Hex(), err)
 		}
-		prev = account.Address
+		prev = address
 		hasPrev = true
 	}
 	return nil
@@ -768,7 +776,7 @@ func validateStorageChangeEntries(changes []*StorageChange) error {
 	return nil
 }
 
-func validateStorageReads(reads []common.Hash) error {
+func validateStorageReads(reads []accounts.StorageKey) error {
 	return validateHashOrdering(reads, maxStorageReadsPerAccount, "storage reads")
 }
 
@@ -806,7 +814,7 @@ func validateIndexedChanges[T indexedChange](changes []T, maxCount int, typeName
 }
 
 // validateHashOrdering validates that a slice of hashes is strictly increasing
-func validateHashOrdering(hashes []common.Hash, maxCount int, typeName string) error {
+func validateHashOrdering(hashes []accounts.StorageKey, maxCount int, typeName string) error {
 	if len(hashes) == 0 {
 		return nil
 	}
@@ -814,7 +822,7 @@ func validateHashOrdering(hashes []common.Hash, maxCount int, typeName string) e
 		return fmt.Errorf("too many %s (%d > %d)", typeName, len(hashes), maxCount)
 	}
 	for i := 1; i < len(hashes); i++ {
-		if bytes.Compare(hashes[i-1][:], hashes[i][:]) >= 0 {
+		if hashes[i-1].Cmp(hashes[i]) >= 0 {
 			return fmt.Errorf("%s must be strictly increasing (index %d)", typeName, i)
 		}
 	}
@@ -835,7 +843,7 @@ func validateSlotChangeList(slots []*SlotChanges) error {
 		}
 	}
 	for i := 1; i < len(slots); i++ {
-		if bytes.Compare(slots[i-1].Slot[:], slots[i].Slot[:]) >= 0 {
+		if slots[i-1].Slot.Cmp(slots[i].Slot) >= 0 {
 			return fmt.Errorf("slots must be strictly increasing (index %d)", i)
 		}
 	}

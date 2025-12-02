@@ -78,7 +78,7 @@ type ExecuteBlockCfg struct {
 	stateStream   bool
 	blockReader   services.FullBlockReader
 	hd            headerDownloader
-	author        *common.Address
+	author        accounts.Address
 	// last valid number of the stage
 
 	dirs      datadir.Dirs

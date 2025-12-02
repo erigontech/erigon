@@ -45,6 +45,7 @@ import (
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -139,7 +140,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			context := evmtypes.BlockContext{
 				CanTransfer: protocol.CanTransfer,
 				Transfer:    consensus.Transfer,
-				Coinbase:    test.Context.Miner,
+				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
 				Difficulty:  (*big.Int)(test.Context.Difficulty),
@@ -257,7 +258,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	context := evmtypes.BlockContext{
 		CanTransfer: protocol.CanTransfer,
 		Transfer:    consensus.Transfer,
-		Coinbase:    test.Context.Miner,
+		Coinbase:    accounts.InternAddress(test.Context.Miner),
 		BlockNumber: uint64(test.Context.Number),
 		Time:        uint64(test.Context.Time),
 		Difficulty:  (*big.Int)(test.Context.Difficulty),
@@ -277,7 +278,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 			b.Fatalf("failed to create call tracer: %v", err)
 		}
 		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
-		snap := statedb.Snapshot()
+		snap := statedb.PushSnapshot()
 		st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 		if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 			b.Fatalf("failed to execute transaction: %v", err)
@@ -286,6 +287,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 			b.Fatal(err)
 		}
 		statedb.RevertToSnapshot(snap, nil)
+		statedb.PopSnapshot(snap)
 	}
 }
 
@@ -317,7 +319,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	context := evmtypes.BlockContext{
 		CanTransfer: protocol.CanTransfer,
 		Transfer:    consensus.Transfer,
-		Coinbase:    common.Address{},
+		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),
@@ -333,7 +335,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Nonce: 1,
 			Code:  code,
 		},
-		origin: types.GenesisAccount{
+		origin.Value(): types.GenesisAccount{
 			Nonce:   0,
 			Balance: big.NewInt(500000000000000),
 		},

@@ -72,6 +72,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
@@ -798,7 +799,8 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 				if err != nil {
 					return err
 				}
-				if !bytes.Equal(from[:], senders[j][:]) {
+				fromValue := from.Value()
+				if !bytes.Equal(fromValue[:], senders[j][:]) {
 					logger.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
 				}
 			}
@@ -1412,7 +1414,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 
 	notifications := shards.NewNotifications(nil)
 
-	var signatures *lru.ARCCache[common.Hash, common.Address]
+	var signatures *lru.ARCCache[common.Hash, accounts.Address]
 
 	if bor, ok := engine.(*bor.Bor); ok {
 		signatures = bor.Signatures

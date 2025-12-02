@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestStateLogger(t *testing.T) {
@@ -41,8 +41,8 @@ func TestStateLogger(t *testing.T) {
 		{
 			name: "multiple add balance",
 			run: func(state *IntraBlockState) {
-				state.AddBalance(common.Address{}, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.AddBalance(common.Address{}, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				if len(stateDB.journal.entries) != 3 {
@@ -58,7 +58,7 @@ func TestStateLogger(t *testing.T) {
 							expectedPrev = uint256.NewInt(2)
 						}
 						if !reflect.DeepEqual(&balanceInc.prev, expectedPrev) {
-							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", common.Address{}, expectedPrev, &balanceInc.prev)
+							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", accounts.ZeroAddress, expectedPrev, &balanceInc.prev)
 						}
 					case createObjectChange:
 					default:
@@ -66,35 +66,35 @@ func TestStateLogger(t *testing.T) {
 					}
 				}
 
-				so, err := stateDB.GetOrNewStateObject(common.Address{})
+				so, err := stateDB.GetOrNewStateObject(accounts.ZeroAddress)
 				require.NoError(t, err)
 				balance := so.Balance()
 				if !reflect.DeepEqual(&balance, uint256.NewInt(3)) {
-					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(3), &balance)
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", accounts.ZeroAddress, uint256.NewInt(3), &balance)
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{
-				{addr: common.Address{}, prev: uint256.Int{}, new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
-				{addr: common.Address{}, prev: *uint256.NewInt(2), new: *uint256.NewInt(3), reason: tracing.BalanceChangeUnspecified},
+				{addr: accounts.ZeroAddress, prev: uint256.Int{}, new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
+				{addr: accounts.ZeroAddress, prev: *uint256.NewInt(2), new: *uint256.NewInt(3), reason: tracing.BalanceChangeUnspecified},
 			},
 		},
 		{
 			name: "sub balance",
 			run: func(state *IntraBlockState) {
-				state.AddBalance(common.Address{}, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.SubBalance(common.Address{}, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+				state.SubBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
-				so, err := stateDB.GetOrNewStateObject(common.Address{})
+				so, err := stateDB.GetOrNewStateObject(accounts.ZeroAddress)
 				require.NoError(t, err)
 				if !reflect.DeepEqual(so.Balance(), *uint256.NewInt(1)) {
 					balance := so.Balance()
-					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(1), &balance)
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", accounts.ZeroAddress, uint256.NewInt(1), &balance)
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{
-				{addr: common.Address{}, prev: uint256.Int{}, new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
-				{addr: common.Address{}, prev: *uint256.NewInt(2), new: *uint256.NewInt(1), reason: tracing.BalanceChangeUnspecified},
+				{addr: accounts.ZeroAddress, prev: uint256.Int{}, new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
+				{addr: accounts.ZeroAddress, prev: *uint256.NewInt(2), new: *uint256.NewInt(1), reason: tracing.BalanceChangeUnspecified},
 			},
 		},
 	}
@@ -125,7 +125,7 @@ type mockTracer struct {
 
 func (mt *mockTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnBalanceChange: func(addr common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
+		OnBalanceChange: func(addr accounts.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 			mt.balanceChangeTraces = append(mt.balanceChangeTraces, balanceChangeTrace{
 				addr:   addr,
 				prev:   prev,
@@ -137,7 +137,7 @@ func (mt *mockTracer) Hooks() *tracing.Hooks {
 }
 
 type balanceChangeTrace struct {
-	addr   common.Address
+	addr   accounts.Address
 	prev   uint256.Int
 	new    uint256.Int
 	reason tracing.BalanceChangeReason

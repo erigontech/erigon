@@ -80,7 +80,7 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 
 	h := History{
 		HistCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:    btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
 	}
 
@@ -1514,5 +1514,5 @@ func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.
 	if err != nil {
 		return nil, err
 	}
-	return stream.Union[uint64](frozenIt, recentIt, asc, limit), nil
+	return stream.Union(frozenIt, recentIt, asc, limit), nil
 }

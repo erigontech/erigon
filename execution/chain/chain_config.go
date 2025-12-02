@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -183,10 +184,10 @@ type BorConfig interface {
 	GetBhilaiBlock() *big.Int
 	IsRio(num uint64) bool
 	GetRioBlock() *big.Int
-	StateReceiverContractAddress() common.Address
+	StateReceiverContractAddress() accounts.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
-	CalculateCoinbase(number uint64) common.Address
+	CalculateCoinbase(number uint64) accounts.Address
 }
 
 func timestampToTime(unixTime *big.Int) *time.Time {
@@ -353,12 +354,12 @@ func (c *Config) IsOsaka(time uint64) bool {
 	return isForked(c.OsakaTime, time)
 }
 
-func (c *Config) GetBurntContract(num uint64) *common.Address {
+func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	if len(c.BurntContract) == 0 {
-		return nil
+		return accounts.NilAddress
 	}
 	addr := ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BurntContract), num)
-	return &addr
+	return accounts.InternAddress(addr)
 }
 
 func (c *Config) GetMinBlobGasPrice() uint64 {
@@ -461,14 +462,14 @@ func (c *Config) SecondsPerSlot() uint64 {
 	return 12 // Ethereum
 }
 
-func (c *Config) SystemContracts(time uint64) map[string]common.Address {
-	contracts := map[string]common.Address{}
+func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
+	contracts := map[string]accounts.Address{}
 	if c.IsCancun(time) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
 	if c.IsPrague(time) {
 		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
-		contracts["DEPOSIT_CONTRACT_ADDRESS"] = c.DepositContract
+		contracts["DEPOSIT_CONTRACT_ADDRESS"] = accounts.InternAddress(c.DepositContract)
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
 		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
 	}
