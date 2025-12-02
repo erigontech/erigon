@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -345,7 +345,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = common.CopyBytes(misc.DAOForkBlockExtra)
+				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {

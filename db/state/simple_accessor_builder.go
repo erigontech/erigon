@@ -161,7 +161,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 	}
 	defer iidq.Close()
 	meta := iidq.Metadata()
-	idxFile := s.parser.AccessorIdxFile(version.V1_0, from, to, s.indexPos)
+	idxFile, _ := s.parser.AccessorIdxFile(version.V1_0, from, to, uint16(s.indexPos))
 
 	keyCount := iidq.Count()
 	if p != nil {

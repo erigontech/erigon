@@ -57,7 +57,7 @@ var (
 		Blocks:      Distance(math.MaxUint64),
 	}
 
-	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s", archiveModeStr, fullModeStr, minimalModeStr)
+	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s, %s", fullModeStr, archiveModeStr, minimalModeStr, blockModeStr)
 	ErrDistanceOnlyForArchive = fmt.Errorf("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=%s", archiveModeStr)
 )
 

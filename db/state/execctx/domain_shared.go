@@ -234,8 +234,8 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-		firstKey = common.CopyBytes(k)
-		firstVal = common.CopyBytes(v)
+		firstKey = common.Copy(k)
+		firstVal = common.Copy(v)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
 	})
