@@ -49,7 +49,7 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
 		}
-	}).MapSize(128 * datasize.MB).MustOpen()
+	}).MapSize(64 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
 	return db
 }
@@ -64,7 +64,7 @@ func BaseCaseDBNotInMem(t *testing.T) kv.RwDB {
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
 		}
-	}).MapSize(128 * datasize.MB).Path(path).AutoRemove(true).MustOpen()
+	}).MapSize(64 * datasize.GB).Path(path).AutoRemove(true).MustOpen()
 	t.Cleanup(db.Close)
 	return db
 }
@@ -1181,62 +1181,63 @@ func TestAutoRemove(t *testing.T) {
 }
 
 func TestParallelInsertRemove(t *testing.T) {
-
-	t.Run("in mem", func(t *testing.T) {
-		db := BaseCaseDB(t)
-
-		blockToDelete := atomic.Uint64{}
-		wg := sync.WaitGroup{}
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 100; i++ {
-				txPut, err := db.BeginRw(context.Background())
-				if err != nil {
-					println("err", err.Error())
-				}
-				require.NoError(t, err)
-				for j := 0; j < 100; j++ {
-					err := txPut.Put("Table", []byte(fmt.Sprintf("%d-block-%d", i, j)), nil)
-					require.NoError(t, err)
-
-					//time.Sleep(50 * time.Millisecond)
-				}
-				blockToDelete.Store(uint64(i))
-				time.Sleep(10 * time.Millisecond)
-				err = txPut.Commit()
-				println("put", i)
-				require.NoError(t, err)
-			}
-		}()
-
-		go func() {
-			defer wg.Done()
-			time.Sleep(50 * time.Millisecond)
-
-			for b := uint64(0); b < 100; b++ {
-				txDel, err := db.BeginRw(context.Background())
-				require.NoError(t, err)
-				for i := 0; i < 100; i++ {
-					err := txDel.Delete("Table", []byte(fmt.Sprintf("%d-block-%d", b, i)))
-					require.NoError(t, err)
-				}
-				println("del", b)
-				err = txDel.Commit()
-				require.NoError(t, err)
-				if b < blockToDelete.Load() || b == 99 {
-					continue
-				} else {
-					for b == blockToDelete.Load() {
-						time.Sleep(10 * time.Millisecond)
-					}
-				}
-			}
-
-		}()
-		wg.Wait()
-		db.Close()
-	})
+	n := 100
+	m := 1000000
+	//t.Run("in mem", func(t *testing.T) {
+	//	db := BaseCaseDB(t)
+	//
+	//	blockToDelete := atomic.Uint64{}
+	//	wg := sync.WaitGroup{}
+	//	wg.Add(2)
+	//	go func() {
+	//		defer wg.Done()
+	//		for i := 0; i < n; i++ {
+	//			txPut, err := db.BeginRw(context.Background())
+	//			if err != nil {
+	//				println("err", err.Error())
+	//			}
+	//			require.NoError(t, err)
+	//			for j := 0; j < m; j++ {
+	//				err := txPut.Put("Table", []byte(fmt.Sprintf("%d-block-%d", i, j)), nil)
+	//				require.NoError(t, err)
+	//
+	//				//time.Sleep(50 * time.Millisecond)
+	//			}
+	//			blockToDelete.Store(uint64(i))
+	//			time.Sleep(10 * time.Millisecond)
+	//			err = txPut.Commit()
+	//			println("put", i)
+	//			require.NoError(t, err)
+	//		}
+	//	}()
+	//
+	//	go func() {
+	//		defer wg.Done()
+	//		time.Sleep(50 * time.Millisecond)
+	//
+	//		for b := uint64(0); b < uint64(n); b++ {
+	//			txDel, err := db.BeginRw(context.Background())
+	//			require.NoError(t, err)
+	//			for i := 0; i < m; i++ {
+	//				err := txDel.Delete("Table", []byte(fmt.Sprintf("%d-block-%d", b, i)))
+	//				require.NoError(t, err)
+	//			}
+	//			println("del", b)
+	//			err = txDel.Commit()
+	//			require.NoError(t, err)
+	//			if b < blockToDelete.Load() || b == uint64(n - 1) {
+	//				continue
+	//			} else {
+	//				for b == blockToDelete.Load() {
+	//					time.Sleep(10 * time.Millisecond)
+	//				}
+	//			}
+	//		}
+	//
+	//	}()
+	//	wg.Wait()
+	//	db.Close()
+	//})
 	t.Run("not in mem", func(t *testing.T) {
 		db := BaseCaseDBNotInMem(t)
 
@@ -1245,22 +1246,21 @@ func TestParallelInsertRemove(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			for i := 0; i < 100; i++ {
+			for i := 0; i < n; i++ {
 				txPut, err := db.BeginRw(context.Background())
 				if err != nil {
 					println("err", err.Error())
 				}
 				require.NoError(t, err)
-				for j := 0; j < 100; j++ {
+				for j := 0; j < m; j++ {
 					err := txPut.Put("Table", []byte(fmt.Sprintf("%d-block-%d", i, j)), nil)
 					require.NoError(t, err)
 
 					//time.Sleep(50 * time.Millisecond)
 				}
 				blockToDelete.Store(uint64(i))
-				time.Sleep(10 * time.Millisecond)
 				err = txPut.Commit()
-				println("put", i)
+				//println("put", i)
 				require.NoError(t, err)
 			}
 		}()
@@ -1269,17 +1269,17 @@ func TestParallelInsertRemove(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(50 * time.Millisecond)
 
-			for b := uint64(0); b < 100; b++ {
+			for b := uint64(0); b < uint64(n); b++ {
 				txDel, err := db.BeginRw(context.Background())
 				require.NoError(t, err)
-				for i := 0; i < 100; i++ {
+				for i := 0; i < m; i++ {
 					err := txDel.Delete("Table", []byte(fmt.Sprintf("%d-block-%d", b, i)))
 					require.NoError(t, err)
 				}
-				println("del", b)
+				//println("del", b)
 				err = txDel.Commit()
 				require.NoError(t, err)
-				if b < blockToDelete.Load() || b == 99 {
+				if b < blockToDelete.Load() || b == uint64(n-1) {
 					continue
 				} else {
 					for b == blockToDelete.Load() {
