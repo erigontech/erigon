@@ -18,11 +18,13 @@ package downloader
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -69,26 +71,25 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 }
 
 func TestNoEscape(t *testing.T) {
-	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	ctx := context.Background()
 
 	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
 	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 
 	// reject escaping snapshots dir
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
-	require.Error(err)
+	assert.NotErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
-	require.Error(err)
+	assert.NotErrorIs(t, err, fs.ErrNotExist)
 }
 
 func TestVerifyData(t *testing.T) {
