@@ -64,10 +64,23 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, opts.stepsInFrozenFile, opts.reorgBlockDepth, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.reorgBlockDepth, db, opts.logger)
 	if err != nil {
 		return nil, err
 	}
+
+	// Read DB settings from erigondb.toml first; it assumes default or legacy settings if not present; then
+	// allow override from opts
+	if err := a.reloadErigonDBSettings(); err != nil {
+		return nil, err
+	}
+	if opts.stepSize != 0 {
+		a.stepSize = opts.stepSize
+	}
+	if opts.stepsInFrozenFile != 0 {
+		a.stepsInFrozenFile = opts.stepsInFrozenFile
+	}
+
 	a.disableHistory = opts.disableHistory
 	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(opts.dirs, opts.logger); err != nil {
 		return nil, err

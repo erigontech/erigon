@@ -99,7 +99,7 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, stepsInFrozenFile, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
@@ -107,8 +107,6 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, stepsInFroz
 		onFilesChange:          func(frozenFileNames []string) {},
 		onFilesDelete:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		stepSize:               stepSize,
-		stepsInFrozenFile:      stepsInFrozenFile,
 		reorgBlockDepth:        reorgBlockDepth,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -242,6 +240,16 @@ func (a *Aggregator) reloadSalt() error {
 		ii.salt.Store(salt)
 	}
 
+	return nil
+}
+
+func (a *Aggregator) reloadErigonDBSettings() error {
+	settings, err := CreateOrReadErigonDBSettings(a.dirs, a.logger)
+	if err != nil {
+		return err
+	}
+	a.stepSize = settings.StepSize
+	a.stepsInFrozenFile = settings.StepsInFrozenFile
 	return nil
 }
 
