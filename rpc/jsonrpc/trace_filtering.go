@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
@@ -232,7 +233,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	for _, r := range rewards {
 		var tr ParityTrace
 		rewardAction := &RewardTraceAction{}
-		rewardAction.Author = r.Beneficiary
+		rewardAction.Author = r.Beneficiary.Value()
 		rewardAction.RewardType = rewardKindToString(r.Kind)
 		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
 		tr.Action = rewardAction
@@ -823,7 +824,7 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, cmErr
 	}
 
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := protocol.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}

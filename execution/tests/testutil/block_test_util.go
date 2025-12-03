@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
@@ -357,15 +358,16 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
-		code2, err := statedb.GetCode(addr)
+		address := accounts.InternAddress(addr)
+		code2, err := statedb.GetCode(address)
 		if err != nil {
 			return err
 		}
-		balance2, err := statedb.GetBalance(addr)
+		balance2, err := statedb.GetBalance(address)
 		if err != nil {
 			return err
 		}
-		nonce2, err := statedb.GetNonce(addr)
+		nonce2, err := statedb.GetNonce(address)
 		if err != nil {
 			return err
 		}
@@ -380,9 +382,8 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		}
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
-			val2 := uint256.NewInt(0)
-			statedb.GetState(addr, loc, val2)
-			if !val1.Eq(val2) {
+			val2, _ := statedb.GetState(address, accounts.InternKey(loc))
+			if !val1.Eq(&val2) {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
 			}
 		}

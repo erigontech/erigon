@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -44,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Ethash proof-of-work protocol constants.
@@ -111,8 +111,8 @@ func (ethash *Ethash) Type() chain.RulesName {
 // Author implements rules.Engine, returning the header's coinbase as the
 // proof-of-work verified author of the block.
 // This is thread-safe (only access the header.Coinbase)
-func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
-	return header.Coinbase, nil
+func (ethash *Ethash) Author(header *types.Header) (accounts.Address, error) {
+	return accounts.InternAddress(header.Coinbase), nil
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules of the
@@ -457,7 +457,7 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	return hash
 }
 
-func (ethash *Ethash) IsServiceTransaction(sender common.Address, syscall rules.SystemCall) bool {
+func (ethash *Ethash) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
 	return false
 }
 
@@ -465,11 +465,11 @@ func (ethash *Ethash) CalculateRewards(config *chain.Config, header *types.Heade
 ) ([]rules.Reward, error) {
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	rewards := make([]rules.Reward, 1+len(uncles))
-	rewards[0].Beneficiary = header.Coinbase
+	rewards[0].Beneficiary = accounts.InternAddress(header.Coinbase)
 	rewards[0].Kind = rules.RewardAuthor
 	rewards[0].Amount = minerReward
 	for i, uncle := range uncles {
-		rewards[i+1].Beneficiary = uncle.Coinbase
+		rewards[i+1].Beneficiary = accounts.InternAddress(uncle.Coinbase)
 		rewards[i+1].Kind = rules.RewardUncle
 		rewards[i+1].Amount = uncleRewards[i]
 	}
@@ -493,7 +493,7 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 	reward := new(uint256.Int).Set(blockReward)
 	r := new(uint256.Int)
 	for _, uncle := range uncles {
-		r.Add(&uncle.Number, u256.Num8)
+		r.AddUint64(&uncle.Number, 8)
 		r.Sub(r, &header.Number)
 		r.Mul(r, blockReward)
 		r.Rsh(r, 3) // ÷8
@@ -510,8 +510,8 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
 		if i < len(uncleRewards) {
-			state.AddBalance(uncle.Coinbase, uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
+			state.AddBalance(accounts.InternAddress(uncle.Coinbase), uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
 		}
 	}
-	state.AddBalance(header.Coinbase, minerReward, tracing.BalanceIncreaseRewardMineBlock)
+	state.AddBalance(accounts.InternAddress(header.Coinbase), minerReward, tracing.BalanceIncreaseRewardMineBlock)
 }

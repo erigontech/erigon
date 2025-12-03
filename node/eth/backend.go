@@ -97,6 +97,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
@@ -868,7 +869,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 
-	var signatures *lru.ARCCache[common.Hash, common.Address]
+	var signatures *lru.ARCCache[common.Hash, accounts.Address]
 
 	if bor, ok := backend.engine.(*bor.Bor); ok {
 		signatures = bor.Signatures
@@ -1072,11 +1073,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if !config.Snapshot.NoDownloader && backend.downloaderClient == nil {
 			panic("expect to have non-nil downloaderClient")
 		}
-		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
-			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-				backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
-				blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
-			)), nil, nil, backend.logger, stages.ModeApplyingBlocks)
+		backend.polygonDownloadSync = stagedsync.New(
+			backend.config.Sync,
+			stagedsync.DownloadSyncStages(
+				backend.sentryCtx, stagedsync.StageSnapshotsCfg(
+					backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
+					blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
+				)),
+			nil,
+			nil,
+			backend.logger,
+			stages.ModeApplyingBlocks,
+		)
 
 		// these range extractors set the db to the local db instead of the chain db
 		// TODO this needs be refactored away by having a retire/merge component per
@@ -1273,14 +1281,8 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(frozenFileNames))}
-		for _, fName := range frozenFileNames {
-			req.Items = append(req.Items, &downloaderproto.AddItem{
-				Path: fName,
-			})
-		}
-		if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-			s.logger.Warn("[snapshots] downloader.Add", "err", err)
+		if _, err := s.downloaderClient.Seed(ctx, &downloaderproto.SeedRequest{Paths: frozenFileNames}); err != nil {
+			s.logger.Warn("[snapshots] downloader.Seed", "err", err)
 		}
 	}, func(deletedFiles []string) {
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
@@ -1312,8 +1314,6 @@ func (s *Ethereum) setUpSnapDownloader(
 		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
 			return nil
 		}
-		// Always disable the asynchronous adder. We will do it here to support downloader.verify.
-		downloaderCfg.AddTorrentsFromDisk = false
 
 		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
 		if err != nil {
@@ -1322,6 +1322,9 @@ func (s *Ethereum) setUpSnapDownloader(
 		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
 		// start embedded Downloader
+		// TODO: Not sure if we want to add only the completed here, or add after we finish initial
+		// sync checks. Looks like we'd need to pass this or a callback all the way up into the sync
+		// stage somewhere?
 		err = s.downloader.AddTorrentsFromDisk(ctx)
 		if err != nil {
 			return fmt.Errorf("adding torrents from disk: %w", err)
@@ -1331,7 +1334,7 @@ func (s *Ethereum) setUpSnapDownloader(
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
-		s.downloader.MainLoopInBackground(true)
+		s.downloader.InitBackgroundLogger(true)
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
@@ -1756,6 +1759,5 @@ func (e *engineAPISwitcher) SetConsuming(consuming bool) {
 	if e.backend.engineBackendRPC == nil {
 		return
 	}
-
 	e.backend.engineBackendRPC.SetConsuming(consuming)
 }

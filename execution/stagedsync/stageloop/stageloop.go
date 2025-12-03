@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -73,7 +74,7 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, logger); err != nil {
 		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
 		}
@@ -134,50 +135,61 @@ func StageLoop(
 }
 
 // ProcessFrozenBlocks - withuot global rwtx
-func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
-	initialCycle, firstCycle := true, true
-	for {
+
+	if err := sync.RunSnapshots(db); err != nil {
+		return err
+	}
+
+	initialCycle, firstCycle := true, false
+
+	tx, err := db.BeginTemporalRw(ctx)  //nolint
+	if err != nil {
+		return err
+	}
+	defer func() {
+		tx.Commit()
+	}()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	defer doms.Close()
+
+	for more := true; more; {
 		// run stages first time - it will download blocks
 		if hook != nil {
-			if err := db.View(ctx, func(tx kv.Tx) error {
-				return hook.BeforeRun(tx, false)
-			}); err != nil {
+			if err = hook.BeforeRun(tx, false); err != nil {
 				return err
 			}
 		}
 
-		more, err := sync.Run(db, nil, nil, initialCycle, firstCycle)
+		more, err = sync.Run(db, doms, tx, initialCycle, firstCycle)
 		if err != nil {
 			return err
 		}
 
 		if hook != nil {
-			if err := db.View(ctx, func(tx kv.Tx) error {
-				finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
-				if err != nil {
-					return err
-				}
-				return hook.AfterRun(tx, finishProgressBefore, false)
-			}); err != nil {
+			finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
+			if err != nil {
+				return err
+			}
+			err = hook.AfterRun(tx, finishProgressBefore, false)
+			if err != nil {
 				return err
 			}
 		}
 
-		if err := sync.RunPrune(db, nil, initialCycle); err != nil {
+		if err := sync.RunPrune(db, tx, initialCycle); err != nil {
 			return err
 		}
-		firstCycle = false
 
 		var finStageProgress uint64
 		if blockReader.FrozenBlocks() > 0 {
-			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
-				if err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
+			finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
+			if err != nil {
 				return err
 			}
 			if finStageProgress >= blockReader.FrozenBlocks() {
@@ -192,20 +204,27 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			}
 		}
 
-		if !more {
-			break
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
+		doms.ClearRam(true)
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		if tx, err = db.BeginTemporalRw(ctx); err != nil {
+			return err
 		}
 	}
+
+	if err := doms.Flush(ctx, tx); err != nil {
+		return err
+	}
+	doms.ClearRam(true)
+
 	if hook != nil {
 		var headerStageProgress uint64
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			progress, err := stages.GetStageProgress(tx, stages.Headers)
-			if err != nil {
-				return err
-			}
-			headerStageProgress = progress
-			return nil
-		}); err != nil {
+		headerStageProgress, err = stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
 			return err
 		}
 		hook.LastNewBlockSeen(headerStageProgress)
@@ -583,7 +602,7 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Close()
 
-	sd, err := execctx.NewSharedDomains(mb, logger)
+	sd, err := execctx.NewSharedDomains(ctx, mb, logger)
 	if err != nil {
 		return err
 	}
@@ -695,11 +714,8 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		if !test {
 			hasMore, err := stateSync.RunNoInterrupt(nil, sd, tx)
 			if err != nil {
-				if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
-					return err
-
-				}
-				return err
+				// Don't lose the original error, like cancellation or common.ErrStopped.
+				return errors.Join(err, cleanupProgressIfNeeded(tx, currentHeader))
 			}
 			if hasMore {
 				// should not ever happen since we exec blocks 1 by 1
@@ -732,7 +748,7 @@ func NewDefaultStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
-	signatures *lru.ARCCache[common.Hash, common.Address],
+	signatures *lru.ARCCache[common.Hash, accounts.Address],
 	logger log.Logger,
 	tracer *tracers.Tracer,
 ) []*stagedsync.Stage {
@@ -793,7 +809,7 @@ func NewPipelineStages(ctx context.Context,
 		stagedsync.StageWitnessProcessingCfg(db, controlServer.ChainConfig, controlServer.WitnessBuffer))
 }
 
-func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry_multi_client.MultiClient,
+func NewInMemoryExecution(ctx context.Context, db kv.TemporalRwDB, cfg *ethconfig.Config, controlServer *sentry_multi_client.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter,
 	silkworm *silkworm.Silkworm, logger log.Logger) *stagedsync.Sync {
 	return stagedsync.New(

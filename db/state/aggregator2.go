@@ -30,6 +30,7 @@ type AggOpts struct { //nolint:gocritic
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
 	disableFsync    bool // for tests speed
+	disableHistory  bool // for temp/inmem aggregator instances
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -67,6 +68,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.disableHistory = opts.disableHistory
 	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(opts.dirs, opts.logger); err != nil {
 		return nil, err
 	}
@@ -112,9 +114,10 @@ func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
 	opts.reorgBlockDepth = d
 	return opts
 }
-func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
-func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
-func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
+func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }     //nolint:gocritic
+func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }            //nolint:gocritic
+func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts }   //nolint:gocritic
+func (opts AggOpts) DisableHistory() AggOpts      { opts.disableHistory = true; return opts } //nolint:gocritic
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
 	return opts

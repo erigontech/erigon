@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -48,8 +49,8 @@ import (
 type Config struct {
 	ChainConfig *chain.Config
 	Difficulty  *uint256.Int
-	Origin      common.Address
-	Coinbase    common.Address
+	Origin      accounts.Address
+	Coinbase    accounts.Address
 	BlockNumber uint64
 	Time        uint64
 	GasLimit    uint64
@@ -87,6 +88,9 @@ func setDefaults(cfg *Config) {
 		}
 	}
 
+	if cfg.Origin.IsNil() {
+		cfg.Origin = accounts.ZeroAddress
+	}
 	if cfg.Difficulty == nil {
 		cfg.Difficulty = new(uint256.Int)
 	}
@@ -108,6 +112,9 @@ func setDefaults(cfg *Config) {
 //
 // Execute sets up an in-memory, temporary, environment for the execution of
 // the given code. It makes sure that it's restored to its original state afterwards.
+
+var contractAsAddress = accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+
 func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
@@ -125,7 +132,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(tx, log.New())
+		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -134,22 +141,22 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	}
 	var (
-		address = common.BytesToAddress([]byte("contract"))
+		address = contractAsAddress
 		vmenv   = NewEnv(cfg)
 		sender  = cfg.Origin
 		rules   = vmenv.ChainRules()
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil, nil)
 	cfg.State.CreateAccount(address, true)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(address, code)
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
 	}
 	ret, _, err := vmenv.Call(
 		sender,
-		common.BytesToAddress([]byte("contract")),
+		contractAsAddress,
 		input,
 		cfg.GasLimit,
 		cfg.Value,
@@ -182,7 +189,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(tx, log.New())
+		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -195,7 +202,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil, nil)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
 	code, address, leftOverGas, err := vmenv.Create(
@@ -205,7 +212,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		cfg.Value,
 		false,
 	)
-	return code, address, leftOverGas, err
+	return code, address.Value(), leftOverGas, err
 }
 
 // Call executes the code given by the contract's address. It will return the
@@ -213,7 +220,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
+func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)
@@ -224,10 +231,10 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
-	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil, nil)
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
 	}
 
 	// Call the code with the given configuration.

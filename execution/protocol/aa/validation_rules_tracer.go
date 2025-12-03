@@ -10,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -51,20 +52,20 @@ type ValidationRulesTracer struct {
 
 	bannedOpcodes    map[vm.OpCode]bool
 	prevWasGas       bool
-	senderAddress    common.Address
-	accessedAccounts map[common.Address]bool
-	currentContract  common.Address
-	checkedAccounts  map[common.Address]bool
+	senderAddress    accounts.Address
+	accessedAccounts map[accounts.Address]bool
+	currentContract  accounts.Address
+	checkedAccounts  map[accounts.Address]bool
 	senderHasCode    bool
 }
 
-func NewValidationRulesTracer(sender common.Address, senderHasCode bool) *ValidationRulesTracer {
+func NewValidationRulesTracer(sender accounts.Address, senderHasCode bool) *ValidationRulesTracer {
 	t := &ValidationRulesTracer{
 		bannedOpcodes:    make(map[vm.OpCode]bool),
 		senderAddress:    sender,
 		senderHasCode:    senderHasCode,
-		accessedAccounts: make(map[common.Address]bool),
-		checkedAccounts:  make(map[common.Address]bool),
+		accessedAccounts: make(map[accounts.Address]bool),
+		checkedAccounts:  make(map[accounts.Address]bool),
 	}
 
 	bannedOpcodes := []vm.OpCode{
@@ -130,9 +131,9 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 
 	if opCode == vm.EXTCODESIZE || opCode == vm.EXTCODECOPY || opCode == vm.EXTCODEHASH {
 		if len(scope.StackData()) > 0 {
-			addr := common.BytesToAddress(scope.StackData()[0].Bytes())
+			addr := accounts.InternAddress(common.BytesToAddress(scope.StackData()[0].Bytes()))
 			if t.isDelegatedAccount(scope.Code()) && addr != t.senderAddress {
-				t.err = fmt.Errorf("access to delegated account %s not allowed", addr.Hex())
+				t.err = fmt.Errorf("access to delegated account %s not allowed", addr)
 				return
 			}
 			t.accessedAccounts[addr] = true
@@ -142,7 +143,8 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 	if opCode == vm.CALL || opCode == vm.CALLCODE || opCode == vm.DELEGATECALL || opCode == vm.STATICCALL {
 		if len(scope.StackData()) > 0 {
 			addr := common.BytesToAddress(scope.StackData()[0].Bytes())
-			if t.isDelegatedAccount(scope.Code()) && addr != t.senderAddress {
+			senderValue := t.senderAddress.Value()
+			if t.isDelegatedAccount(scope.Code()) && addr != senderValue {
 				t.err = fmt.Errorf("access to delegated account %s not allowed", addr.Hex())
 				return
 			}
@@ -154,7 +156,7 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 	}
 }
 
-func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if t.err != nil {
 		return
 	}
@@ -165,7 +167,7 @@ func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from common.Address
 	}
 
 	if t.isDelegatedAccount(code) && from != t.senderAddress {
-		t.err = fmt.Errorf("delegated account %s can only be used as sender", from.Hex())
+		t.err = fmt.Errorf("delegated account %s can only be used as sender", from)
 		return
 	}
 
@@ -190,15 +192,18 @@ func (t *ValidationRulesTracer) OnFault(pc uint64, op byte, gas, cost uint64, sc
 	}
 }
 
-func (t *ValidationRulesTracer) isAssociatedStorage(slot common.Hash, addr common.Address) bool {
+func (t *ValidationRulesTracer) isAssociatedStorage(slot accounts.StorageKey, addr accounts.Address) bool {
+	slotValue := slot.Value()
+	addrValue := addr.Value()
+
 	// Case 1: The slot value is the address
-	if bytes.Equal(slot.Bytes(), addr.Bytes()) {
+	if bytes.Equal(slotValue[:], addrValue[:]) {
 		return true
 	}
 
 	// Case 2: The slot value was calculated as keccak(A||x)+n, we test the first 50 slots and 128 offsets
 	buf := make([]byte, 52)
-	copy(buf, addr.Bytes())
+	copy(buf, addrValue[:])
 
 	hash := sha3.NewLegacyKeccak256()
 	result := make([]byte, 32)
@@ -212,7 +217,7 @@ func (t *ValidationRulesTracer) isAssociatedStorage(slot common.Hash, addr commo
 
 		for n := 0; n <= 128; n++ {
 			result[31] += byte(n)
-			if bytes.Equal(result, slot.Bytes()) {
+			if bytes.Equal(result, slotValue[:]) {
 				return true
 			}
 			result[31] -= byte(n)
@@ -222,7 +227,7 @@ func (t *ValidationRulesTracer) isAssociatedStorage(slot common.Hash, addr commo
 	return false
 }
 
-func (t *ValidationRulesTracer) OnStorageChange(addr common.Address, slot common.Hash, prev, new uint256.Int) {
+func (t *ValidationRulesTracer) OnStorageChange(addr accounts.Address, slot accounts.StorageKey, prev, new uint256.Int) {
 	if t.err != nil {
 		return
 	}
@@ -232,12 +237,12 @@ func (t *ValidationRulesTracer) OnStorageChange(addr common.Address, slot common
 	}
 
 	if !t.senderHasCode {
-		t.err = fmt.Errorf("access to storage of external contract %s not allowed - sender has no code", addr.Hex())
+		t.err = fmt.Errorf("access to storage of external contract %s not allowed - sender has no code", addr)
 		return
 	}
 
 	if !t.isAssociatedStorage(slot, t.senderAddress) {
-		t.err = fmt.Errorf("access to non-associated storage slot %s in account %s", slot.Hex(), addr.Hex())
+		t.err = fmt.Errorf("access to non-associated storage slot %s in account %s", slot, addr)
 		return
 	}
 }

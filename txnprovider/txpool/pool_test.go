@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -80,7 +81,7 @@ func TestNonceFromAddress(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -334,7 +335,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(10 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -459,7 +460,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -582,7 +583,7 @@ func TestReverseNonces(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -712,7 +713,7 @@ func TestTxnPoke(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -925,7 +926,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			tx, err := coreDB.BeginTemporalRw(ctx)
 			defer tx.Rollback()
 			asrt.NoError(err)
-			sd, err := execctx.NewSharedDomains(tx, logger)
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
@@ -996,7 +997,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -1049,7 +1050,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginTemporalRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
-	sd, err := execctx.NewSharedDomains(tx.(kv.TemporalTx), logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -1116,7 +1117,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -1301,7 +1302,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -1409,7 +1410,7 @@ func TestBlobSlots(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -1493,7 +1494,7 @@ func TestGetBlobsV1(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -1565,7 +1566,7 @@ func TestGasLimitChanged(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    common.Hash{},
+		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -1665,7 +1666,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 		acc := accounts3.Account{
 			Nonce:       0,
 			Balance:     *uint256.NewInt(1 * common.Ether),
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 1,
 		}
 		v := accounts3.SerialiseV3(&acc)

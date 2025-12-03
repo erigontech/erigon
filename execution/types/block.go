@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -809,7 +810,7 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, txn := range b.Transactions {
-		txn.SetSender(senders[i])
+		txn.SetSender(accounts.InternAddress(senders[i]))
 	}
 }
 
@@ -818,7 +819,7 @@ func (b *Body) SendersFromTxs() []common.Address {
 	senders := make([]common.Address, len(b.Transactions))
 	for i, txn := range b.Transactions {
 		if sender, ok := txn.GetSender(); ok {
-			senders[i] = sender
+			senders[i] = sender.Value()
 		}
 	}
 	return senders
@@ -1396,7 +1397,7 @@ func (b *Block) ParentHash() common.Hash  { return b.header.ParentHash }
 func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Extra) }
+func (b *Block) Extra() []byte            { return common.Copy(b.header.Extra) }
 func (b *Block) BaseFee() *uint256.Int {
 	if b.header.BaseFee == nil {
 		return nil
@@ -1439,7 +1440,7 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, txn := range b.transactions {
-		txn.SetSender(senders[i])
+		txn.SetSender(accounts.InternAddress(senders[i]))
 	}
 }
 

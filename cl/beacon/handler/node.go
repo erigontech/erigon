@@ -103,6 +103,9 @@ func (a *ApiHandler) GetEthV1NodePeersInfos(w http.ResponseWriter, r *http.Reque
 	}
 	peers := make([]peer, 0, len(ret.Peers))
 	for i := range ret.Peers {
+		if ret.Peers[i].Enr == "" {
+			continue
+		}
 		peers = append(peers, peer{
 			PeerID:             ret.Peers[i].Pid,
 			State:              ret.Peers[i].State,
@@ -128,6 +131,9 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 	// find the peer with matching enr
 	for _, p := range ret.Peers {
 		if p.Pid == pid {
+			if p.Enr == "" {
+				continue
+			}
 			return newBeaconResponse(peer{
 				PeerID:             p.Pid,
 				State:              p.State,

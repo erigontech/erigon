@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/runtime"
@@ -156,8 +157,8 @@ func runCmd(ctx *cli.Context) error {
 		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
 		chainConfig   *chain.Config
-		sender        = common.BytesToAddress([]byte("sender"))
-		receiver      = common.BytesToAddress([]byte("receiver"))
+		sender        = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
+		receiver      = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
@@ -185,7 +186,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(tx, log.Root())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.Root())
 	if err != nil {
 		return err
 	}
@@ -193,12 +194,12 @@ func runCmd(ctx *cli.Context) error {
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
-		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
+		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
 	statedb.CreateAccount(sender, true)
 
 	if ctx.String(ReceiverFlag.Name) != "" {
-		receiver = common.HexToAddress(ctx.String(ReceiverFlag.Name))
+		receiver = accounts.InternAddress(common.HexToAddress(ctx.String(ReceiverFlag.Name)))
 	}
 
 	var code []byte
@@ -259,7 +260,7 @@ func runCmd(ctx *cli.Context) error {
 		Value:       *value,
 		Difficulty:  genesisConfig.Difficulty,
 		Time:        genesisConfig.Timestamp,
-		Coinbase:    genesisConfig.Coinbase,
+		Coinbase:    accounts.InternAddress(genesisConfig.Coinbase),
 		BlockNumber: genesisConfig.Number,
 	}
 

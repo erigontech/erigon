@@ -206,9 +206,9 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 			GasLimit: 123457,
 			Data:     []byte{},
 		},
-		ChainID:    u256.Num1,
+		ChainID:    &u256.Num1,
 		FeeCap:     feeCap,
-		TipCap:     u256.Num0,
+		TipCap:     &u256.Num0,
 		AccessList: accesses,
 	}
 	tx2, err := tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), common.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))
@@ -407,12 +407,12 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rlpBytes := common.CopyBytes(writer.Bytes())
+	rlpBytes := common.Copy(writer.Bytes())
 	writer.Reset()
 	writer.WriteString(hexutil.Encode(rlpBytes))
 
 	var rawBody RawBody
-	fromHex := common.CopyBytes(common.FromHex(writer.String()))
+	fromHex := common.Copy(common.FromHex(writer.String()))
 	bodyReader := bytes.NewReader(fromHex)
 	stream := rlp.NewStream(bodyReader, 0)
 

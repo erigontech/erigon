@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.BlockAccessList {
-	ac := make(map[common.Address]*accountState)
+	ac := make(map[accounts.Address]*accountState)
 	maxTxIndex := len(txIO.Inputs()) - 1
 
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
@@ -90,7 +91,7 @@ func addStorageUpdate(ac *types.AccountChanges, vw *state.VersionedWrite, txInde
 	})
 }
 
-func ensureAccountState(accounts map[common.Address]*accountState, addr common.Address) *accountState {
+func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
 	if account, ok := accounts[addr]; ok {
 		return account
 	}
@@ -215,7 +216,7 @@ func (ct *changeTracker[T]) apply(applyFn func(uint16, T)) {
 	for idx := range ct.entries {
 		indices = append(indices, idx)
 	}
-	sort.Slice(indices, func(i, j int) bool { return indices[i] < indices[j] })
+	slices.Sort(indices)
 
 	for _, idx := range indices {
 		applyFn(idx, ct.entries[idx])
@@ -224,7 +225,9 @@ func (ct *changeTracker[T]) apply(applyFn func(uint16, T)) {
 
 func normalizeAccountChanges(ac *types.AccountChanges) {
 	if len(ac.StorageChanges) > 1 {
-		sortByBytes(ac.StorageChanges)
+		sort.Slice(ac.StorageChanges, func(i, j int) bool {
+			return ac.StorageChanges[i].Slot.Cmp(ac.StorageChanges[j].Slot) < 0
+		})
 	}
 
 	for _, slotChange := range ac.StorageChanges {
@@ -294,9 +297,9 @@ func sortByBytes[T interface{ GetBytes() []byte }](items []T) {
 	})
 }
 
-func sortHashes(hashes []common.Hash) {
+func sortHashes(hashes []accounts.StorageKey) {
 	sort.Slice(hashes, func(i, j int) bool {
-		return bytes.Compare(hashes[i][:], hashes[j][:]) < 0
+		return hashes[i].Cmp(hashes[j]) < 0
 	})
 }
 
@@ -336,13 +339,13 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 
 	// Write each account's changes
 	for _, account := range bal {
-		fmt.Fprintf(file, "Account: %s\n", account.Address.Hex())
+		fmt.Fprintf(file, "Account: %s\n", account.Address.Value().Hex())
 
 		// Storage changes
 		if len(account.StorageChanges) > 0 {
 			fmt.Fprintf(file, "  Storage Changes (%d):\n", len(account.StorageChanges))
 			for _, slotChange := range account.StorageChanges {
-				fmt.Fprintf(file, "    Slot: %s\n", slotChange.Slot.Hex())
+				fmt.Fprintf(file, "    Slot: %s\n", slotChange.Slot.Value().Hex())
 				for _, change := range slotChange.Changes {
 					fmt.Fprintf(file, "      [%d] -> %s\n", change.Index, change.Value.Hex())
 				}
@@ -353,7 +356,7 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 		if len(account.StorageReads) > 0 {
 			fmt.Fprintf(file, "  Storage Reads (%d):\n", len(account.StorageReads))
 			for _, read := range account.StorageReads {
-				fmt.Fprintf(file, "    %s\n", read.Hex())
+				fmt.Fprintf(file, "    %s\n", read.Value().Hex())
 			}
 		}
 

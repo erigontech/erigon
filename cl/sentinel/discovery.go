@@ -88,7 +88,7 @@ func (s *Sentinel) listenForPeers() {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
 		}
 	}
-	log.Info("Static peers", "len", len(enodes))
+	log.Info("CL Sentinel static peers", "len", len(enodes))
 	if s.cfg.NoDiscovery {
 		return
 	}

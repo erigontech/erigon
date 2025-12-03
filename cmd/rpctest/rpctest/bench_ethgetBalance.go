@@ -18,6 +18,8 @@ package rpctest
 
 import (
 	"fmt"
+	"math/rand"
+	"time"
 )
 
 // BenchEthGetBalance compares response of Erigon with Geth
@@ -104,5 +106,62 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 			}
 		}
 	}
+	return nil
+}
+
+func BenchEthGetBalanceRandomAccount(erigonURL string, blocksToProcess int) error {
+	setRoutes(erigonURL, "")
+
+	reqGen := &RequestGenerator{}
+
+	var res CallResult
+
+	var blockNumber EthBlockNumber
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	if res.Err != nil {
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	}
+	if blockNumber.Error != nil {
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	}
+
+	processedAccounts := 0
+	timeStart := time.Now()
+
+	for i := 0; i < blocksToProcess; i++ {
+		bn := uint64(rand.Intn(
+			int(blockNumber.Number.Uint64()),
+		))
+
+		var b EthBlockByNumber
+		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
+		if res.Err != nil {
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+		}
+
+		if b.Error != nil {
+			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+		}
+
+		processedAccounts += len(b.Result.Transactions)
+
+		for txn := range b.Result.Transactions {
+			tx := b.Result.Transactions[txn]
+			var balance EthBalance
+			account := tx.From
+
+			res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(account, bn), &balance)
+			if res.Err != nil {
+				return fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err)
+			}
+			if balance.Error != nil {
+				return fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
+			}
+		}
+	}
+
+	perAcc := float64(time.Since(timeStart)) / float64(time.Millisecond) / float64(processedAccounts)
+	fmt.Printf("Processed accounts: %d took %dms perTx %.2fms\n", processedAccounts, time.Since(timeStart)/time.Millisecond, perAcc)
+
 	return nil
 }

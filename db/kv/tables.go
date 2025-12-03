@@ -740,7 +740,7 @@ func (idx InvertedIdx) String() string {
 }
 
 func String2InvertedIdx(in string) (InvertedIdx, error) {
-	switch in {
+	switch strings.ToLower(in) {
 	case "accounts":
 		return AccountsHistoryIdx, nil
 	case "storage":
@@ -802,7 +802,7 @@ func (d Domain) String() string {
 }
 
 func String2Domain(in string) (Domain, error) {
-	switch in {
+	switch strings.ToLower(in) {
 	case "accounts":
 		return AccountsDomain, nil
 	case "storage":

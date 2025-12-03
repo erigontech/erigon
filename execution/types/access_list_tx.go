@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // AccessTuple is the element type of an access list.
@@ -65,7 +66,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				TransactionMisc: TransactionMisc{},
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
-				Data:            common.CopyBytes(tx.Data),
+				Data:            common.Copy(tx.Data),
 				GasLimit:        tx.GasLimit,
 				// These are copied below.
 				Value: new(uint256.Int),
@@ -412,13 +413,20 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 
 // AsMessage returns the transaction as a core.Message.
 func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) (*Message, error) {
+	var txTo accounts.Address
+	if tx.To == nil {
+		txTo = accounts.NilAddress
+	} else {
+		txTo = accounts.InternAddress(*tx.To)
+	}
+
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         *tx.GasPrice,
 		tipCap:           *tx.GasPrice,
 		feeCap:           *tx.GasPrice,
-		to:               tx.To,
+		to:               txTo,
 		amount:           *tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,
@@ -494,27 +502,25 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cachedSender() (sender common.Address, ok bool) {
-	s := tx.from.Load()
-	if s == nil {
+func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
 
-var zeroAddr = common.Address{}
-
-func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
+func (tx *AccessListTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() {
+		if !from.IsZero() { // Sender address can never be zero in a transaction with a valid signer
+			return from, nil
 		}
 	}
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.ZeroAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }

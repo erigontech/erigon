@@ -59,7 +59,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		// Erigon: all the legacy formats are removed intentionally
 	}
 
-	tx := NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
+	tx := NewTransaction(1, common.HexToAddress("0x1"), &u256.Num1, 1, &u256.Num1, nil)
 	receipt := &Receipt{
 		Status:            ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
@@ -141,19 +141,19 @@ func TestDeriveFields(t *testing.T) {
 		&LegacyTx{
 			CommonTx: CommonTx{
 				Nonce:    1,
-				Value:    u256.Num1,
+				Value:    &u256.Num1,
 				GasLimit: 1,
 			},
-			GasPrice: u256.Num1,
+			GasPrice: &u256.Num1,
 		},
 		&LegacyTx{
 			CommonTx: CommonTx{
 				To:       &to2,
 				Nonce:    2,
-				Value:    u256.Num2,
+				Value:    &u256.Num2,
 				GasLimit: 2,
 			},
-			GasPrice: u256.Num2,
+			GasPrice: &u256.Num2,
 		},
 		&AccessListTx{
 			LegacyTx: LegacyTx{
@@ -243,7 +243,7 @@ func TestDeriveFields(t *testing.T) {
 				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.Address{}).String())
 			}
 			from, _ := txs[i].Sender(*signer)
-			contractAddress := CreateAddress(from, txs[i].GetNonce())
+			contractAddress := CreateAddress(from.Value(), txs[i].GetNonce())
 			if txs[i].GetTo() == nil && r.ContractAddress != contractAddress {
 				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), contractAddress.String())
 			}

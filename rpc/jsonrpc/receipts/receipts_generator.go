@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -226,7 +227,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
-		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
+		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, cfg)
 		evm = vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vm.Config{})
 		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, genEnv.ibs, genEnv.gp, header, evm, cfg)
 		if err != nil {
@@ -258,7 +259,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState {
-			sharedDomains, err = execctx.NewSharedDomains(tx, log.Root())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
 			if err != nil {
 				return nil, err
 			}
@@ -280,7 +281,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 
-			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vm.Config{})
+			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 			defer cancel()
 			go func() {
@@ -316,7 +317,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			stateWriter = genEnv.noopWriter
 		}
 
-		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vm.Config{})
+		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
 		go func() {
@@ -437,7 +438,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	var stateWriter state.StateWriter
 	var minTxNum uint64
 	if calculatePostState {
-		sharedDomains, err = execctx.NewSharedDomains(tx, log.Root())
+		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
 		if err != nil {
 			return nil, err
 		}
@@ -462,7 +463,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		default:
 		}
 
-		evm := protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vmCfg)
+		evm := protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
 		go func() {
 			<-ctx.Done()
 			evm.Cancel()

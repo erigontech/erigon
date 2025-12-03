@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type DynamicFeeTransaction struct {
@@ -71,7 +72,7 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.CopyBytes(tx.Data),
+			Data:            common.Copy(tx.Data),
 			GasLimit:        tx.GasLimit,
 			// These are copied below.
 			Value: new(uint256.Int),
@@ -333,13 +334,19 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 
 // AsMessage returns the transaction as a core.Message.
 func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.To)
+	}
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         *tx.FeeCap,
 		tipCap:           *tx.TipCap,
 		feeCap:           *tx.FeeCap,
-		to:               tx.To,
+		to:               to,
 		amount:           *tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,
@@ -359,8 +366,10 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules
 	}
 
 	var err error
-	msg.from, err = tx.Sender(s)
-	return &msg, err
+	if msg.from, err = tx.Sender(s); err != nil {
+		return nil, err
+	}
+	return &msg, nil
 }
 
 // Hash computes the hash (but not for signatures!)
@@ -411,24 +420,23 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *DynamicFeeTransaction) cachedSender() (sender common.Address, ok bool) {
-	s := tx.from.Load()
-	if s == nil {
+func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
-func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (tx *DynamicFeeTransaction) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.ZeroAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }
 

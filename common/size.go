@@ -29,17 +29,7 @@ type StorageSize float64
 
 // String implements the stringer interface.
 func (s StorageSize) String() string {
-	if s >= 1099511627776 {
-		return fmt.Sprintf("%.2f TiB", s/1099511627776)
-	} else if s >= 1073741824 {
-		return fmt.Sprintf("%.2f GiB", s/1073741824)
-	} else if s >= 1048576 {
-		return fmt.Sprintf("%.2f MiB", s/1048576)
-	} else if s >= 1024 {
-		return fmt.Sprintf("%.2f KiB", s/1024)
-	} else {
-		return fmt.Sprintf("%.2f B", s)
-	}
+	return formatStorageSize(s, true)
 }
 
 func (s StorageSize) MarshalJSON() ([]byte, error) {
@@ -49,21 +39,36 @@ func (s StorageSize) MarshalJSON() ([]byte, error) {
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
 func (s StorageSize) TerminalString() string {
-	if s >= 1099511627776 {
-		return fmt.Sprintf("%.2fTiB", s/1099511627776)
-	} else if s >= 1073741824 {
-		return fmt.Sprintf("%.2fGiB", s/1073741824)
-	} else if s >= 1048576 {
-		return fmt.Sprintf("%.2fMiB", s/1048576)
-	} else if s >= 1024 {
-		return fmt.Sprintf("%.2fKiB", s/1024)
-	} else {
-		return fmt.Sprintf("%.2fB", s)
-	}
+	return formatStorageSize(s, false)
 }
 
 // Counter
 type StorageCounter float64
+
+func formatStorageSize(s StorageSize, addSpace bool) string {
+	value := float64(s)
+	unit := "B"
+
+	switch {
+	case s >= 1099511627776:
+		value /= 1099511627776
+		unit = "TiB"
+	case s >= 1073741824:
+		value /= 1073741824
+		unit = "GiB"
+	case s >= 1048576:
+		value /= 1048576
+		unit = "MiB"
+	case s >= 1024:
+		value /= 1024
+		unit = "KiB"
+	}
+
+	if addSpace {
+		return fmt.Sprintf("%.2f %s", value, unit)
+	}
+	return fmt.Sprintf("%.2f%s", value, unit)
+}
 
 // String implements the stringer interface.
 func (s StorageCounter) String() string {

@@ -492,6 +492,6 @@ If you need to connect to Erigon from an external network (e.g., opening a port 
 
 Once you have Erigon installed, you can see Basic Usage to configure your node.
 
-{% content-ref url="../fundamentals/basic-usage.md" %}
-[basic-usage.md](../fundamentals/basic-usage.md)
+{% content-ref url="../../fundamentals/basic-usage.md" %}
+[basic-usage.md](../../fundamentals/basic-usage.md)
 {% endcontent-ref %}

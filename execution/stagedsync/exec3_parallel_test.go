@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -56,7 +57,7 @@ type testExecTask struct {
 	ops          []Op
 	readMap      state.ReadSet
 	writeMap     state.WriteSet
-	sender       common.Address
+	sender       accounts.Address
 	nonce        int
 	dependencies []int
 }
@@ -69,9 +70,9 @@ type TaskRunnerWithMetadata func(numTx int, numRead int, numWrite int, numNonIO 
 
 type Timer func(txIdx int, opIdx int) time.Duration
 
-type Sender func(int) common.Address
+type Sender func(int) accounts.Address
 
-func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *testExecTask {
+func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *testExecTask {
 
 	return &testExecTask{
 		TxTask: &exec.TxTask{
@@ -183,7 +184,7 @@ func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {
 	return t.readMap
 }
 
-func (t *testExecTask) Sender() common.Address {
+func (t *testExecTask) Sender() accounts.Address {
 	return t.sender
 }
 
@@ -226,23 +227,23 @@ func longTailTimeGenerator(min time.Duration, max time.Duration, i int, j int) f
 }
 
 type opkey struct {
-	addr common.Address
-	key  common.Hash
+	addr accounts.Address
+	key  accounts.StorageKey
 	path state.AccountPath
 }
 
 var randomPathGenerator = func(i int, j int, total int) opkey {
-	addr := common.BigToAddress((big.NewInt(int64(i % 10))))
-	hash := common.BigToHash((big.NewInt(int64(total))))
+	addr := accounts.InternAddress(common.BigToAddress((big.NewInt(int64(i % 10)))))
+	hash := accounts.InternKey(common.BigToHash((big.NewInt(int64(total)))))
 	return opkey{addr, hash, state.StoragePath}
 }
 
 var dexPathGenerator = func(i int, j int, total int) opkey {
 	if j == total-1 || j == 2 {
-		addr := common.BigToAddress(big.NewInt(int64(0)))
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(0))))
 		return opkey{addr: addr, path: state.BalancePath}
 	} else {
-		addr := common.BigToAddress(big.NewInt(int64(j)))
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(j))))
 		return opkey{addr: addr, path: state.BalancePath}
 	}
 }
@@ -256,7 +257,7 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 
 	var serialDuration time.Duration
 
-	senderNonces := make(map[common.Address]int)
+	senderNonces := make(map[accounts.Address]int)
 
 	for i := 0; i < numTask; i++ {
 		s := sender(i)
@@ -495,7 +496,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -536,7 +537,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 	// Need to apply the final write set to storage
 
-	finalWriteSet := map[common.Address]map[state.AccountKey]time.Duration{}
+	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
@@ -613,7 +614,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -666,9 +667,9 @@ func TestLessConflicts(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) common.Address {
+		sender := func(i int) accounts.Address {
 			randomness := rand.Intn(10) + 10
-			return common.BigToAddress(big.NewInt(int64(i % randomness)))
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % randomness))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
@@ -695,9 +696,9 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		sender := func(i int) common.Address {
+		sender := func(i int) accounts.Address {
 			randomness := rand.Intn(10) + 10
-			return common.BigToAddress(big.NewInt(int64(i % randomness)))
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % randomness))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
@@ -744,7 +745,7 @@ func TestZeroTx(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(1))) }
+		sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1)))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
 		return runParallel(t, tasks, checks, false, logger), serialDuration
@@ -769,7 +770,9 @@ func TestAlternatingTx(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i % 2))) }
+		sender := func(i int) accounts.Address {
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
+		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
 		return runParallel(t, tasks, checks, false, logger), serialDuration
@@ -793,7 +796,9 @@ func TestAlternatingTxWithMetadata(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i % 2))) }
+		sender := func(i int) accounts.Address {
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
+		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
 		parallelDuration := runParallel(t, tasks, checks, false, logger)
@@ -841,9 +846,9 @@ func TestMoreConflicts(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) common.Address {
+		sender := func(i int) accounts.Address {
 			randomness := rand.Intn(10) + 10
-			return common.BigToAddress(big.NewInt(int64(i / randomness)))
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
@@ -870,9 +875,9 @@ func TestMoreConflictsWithMetadata(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		sender := func(i int) common.Address {
+		sender := func(i int) accounts.Address {
 			randomness := rand.Intn(10) + 10
-			return common.BigToAddress(big.NewInt(int64(i / randomness)))
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
@@ -922,7 +927,9 @@ func TestRandomTx(t *testing.T) {
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
 		// Randomly assign this tx to one of 10 senders
-		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(rand.Intn(10)))) }
+		sender := func(i int) accounts.Address {
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(rand.Intn(10)))))
+		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
 		return runParallel(t, tasks, checks, false, logger), serialDuration
@@ -949,7 +956,9 @@ func TestRandomTxWithMetadata(t *testing.T) {
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		// Randomly assign this tx to one of 10 senders
-		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(rand.Intn(10)))) }
+		sender := func(i int) accounts.Address {
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(rand.Intn(10)))))
+		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
 		parallelDuration := runParallel(t, tasks, checks, false, logger)
@@ -997,9 +1006,9 @@ func TestTxWithLongTailRead(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) common.Address {
+		sender := func(i int) accounts.Address {
 			randomness := rand.Intn(10) + 10
-			return common.BigToAddress(big.NewInt(int64(i / randomness)))
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
 		}
 
 		longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
@@ -1029,9 +1038,9 @@ func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		sender := func(i int) common.Address {
+		sender := func(i int) accounts.Address {
 			randomness := rand.Intn(10) + 10
-			return common.BigToAddress(big.NewInt(int64(i / randomness)))
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
 		}
 
 		longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
@@ -1105,7 +1114,7 @@ func TestDexScenario(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, postValidation, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i))) }
+		sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 
 		return runParallel(t, tasks, checks, false, logger), serialDuration
@@ -1153,7 +1162,7 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, postValidation, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i))) }
+		sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 
 		parallelDuration := runParallel(t, tasks, checks, false, logger)

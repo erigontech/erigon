@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type CommonTx struct {
@@ -67,15 +68,15 @@ func (ct *CommonTx) GetData() []byte {
 	return ct.Data
 }
 
-func (ct *CommonTx) GetSender() (common.Address, bool) {
-	if sc := ct.from.Load(); sc != nil {
-		return *sc, true
+func (ct *CommonTx) GetSender() (accounts.Address, bool) {
+	if sc := ct.from; !sc.IsNil() {
+		return sc, true
 	}
-	return common.Address{}, false
+	return accounts.NilAddress, false
 }
 
-func (ct *CommonTx) SetSender(addr common.Address) {
-	ct.from.Store(&addr)
+func (ct *CommonTx) SetSender(addr accounts.Address) {
+	ct.from = addr
 }
 
 func (ct *CommonTx) Protected() bool {
@@ -170,7 +171,7 @@ func (tx *LegacyTx) copy() *LegacyTx {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.CopyBytes(tx.Data),
+			Data:            common.Copy(tx.Data),
 			GasLimit:        tx.GasLimit,
 			// These are initialized below.
 			Value: new(uint256.Int),
@@ -349,13 +350,19 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 
 // AsMessage returns the transaction as a core.Message.
 func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.To)
+	}
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         *tx.GasPrice,
 		tipCap:           *tx.GasPrice,
 		feeCap:           *tx.GasPrice,
-		to:               tx.To,
+		to:               to,
 		amount:           *tx.Value,
 		data:             tx.Data,
 		accessList:       nil,
@@ -431,24 +438,23 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender common.Address, ok bool) {
-	s := tx.from.Load()
-	if s == nil {
+func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
-func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.ZeroAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }

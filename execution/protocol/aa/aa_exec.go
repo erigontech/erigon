@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -28,7 +29,7 @@ func ValidateAATransaction(
 	evm *vm.EVM,
 	chainConfig *chain.Config,
 ) (paymasterContext []byte, validationGasUsed uint64, err error) {
-	senderCodeSize, err := ibs.GetCodeSize(*tx.SenderAddress)
+	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -36,14 +37,14 @@ func ValidateAATransaction(
 	var paymasterCodeSize, deployerCodeSize int
 
 	if tx.Paymaster != nil {
-		paymasterCodeSize, err = ibs.GetCodeSize(*tx.Paymaster)
+		paymasterCodeSize, err = ibs.GetCodeSize(accounts.InternAddress(*tx.Paymaster))
 		if err != nil {
 			return nil, 0, err
 		}
 	}
 
 	if tx.Deployer != nil {
-		deployerCodeSize, err = ibs.GetCodeSize(*tx.Deployer)
+		deployerCodeSize, err = ibs.GetCodeSize(accounts.InternAddress(*tx.Deployer))
 		if err != nil {
 			return nil, 0, err
 		}
@@ -78,7 +79,7 @@ func ValidateAATransaction(
 	// TODO: Nonce manager frame
 	// applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 
-	senderNonce, _ := ibs.GetNonce(*tx.SenderAddress)
+	senderNonce, _ := ibs.GetNonce(tx.SenderAddress)
 	if tx.Nonce > senderNonce+1 { // ibs returns last used nonce
 		return nil, 0, errors.New("nonce too low")
 	}
@@ -177,7 +178,7 @@ func validateValidityTimeRange(time uint64, validAfter uint64, validUntil uint64
 }
 
 func deployValidation(tx *types.AccountAbstractionTransaction, ibs *state.IntraBlockState) error {
-	senderCodeSize, err := ibs.GetCodeSize(*tx.SenderAddress)
+	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return wrapError(fmt.Errorf(
 			"error getting code for sender:%s err:%s",
@@ -200,7 +201,9 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 	if ept.Input == nil {
 		return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
 	}
-	if !bytes.Equal(ept.From[:], tx.SenderAddress[:]) {
+	fromValue := ept.From.Value()
+	senderAddress := tx.SenderAddress.Value()
+	if !bytes.Equal(fromValue[:], senderAddress[:]) {
 		return fmt.Errorf("invalid call to EntryPoint contract from a wrong account address, wanted %s got %s", tx.SenderAddress.String(), ept.From)
 	}
 
@@ -218,8 +221,8 @@ func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.
 	if ept.Input == nil {
 		return nil, errors.New("paymaster validation did not call the EntryPoint 'acceptPaymaster' callback")
 	}
-
-	if !bytes.Equal(ept.From[:], tx.Paymaster[:]) {
+	fromValue := ept.From.Value()
+	if !bytes.Equal(fromValue[:], tx.Paymaster[:]) {
 		return nil, errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
 	}
 	paymasterValidity, err := types.DecodeAcceptPaymaster(ept.Input) // TODO: find better name
@@ -254,11 +257,11 @@ func ExecuteAATransaction(
 ) (executionStatus uint64, gasUsed uint64, err error) {
 	executionStatus = types.ExecutionStatusSuccess
 
-	nonce, err := ibs.GetNonce(*tx.SenderAddress)
+	nonce, err := ibs.GetNonce(tx.SenderAddress)
 	if err != nil {
 		return 0, 0, err
 	}
-	if err = ibs.SetNonce(*tx.SenderAddress, nonce+1); err != nil {
+	if err = ibs.SetNonce(tx.SenderAddress, nonce+1); err != nil {
 		return 0, 0, err
 	}
 
@@ -310,7 +313,7 @@ func ExecuteAATransaction(
 		return 0, 0, err
 	}
 
-	if err = payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase); err != nil {
+	if err = payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase.Value()); err != nil {
 		return 0, 0, err
 	}
 

@@ -31,9 +31,11 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -56,16 +58,16 @@ type CallArgs struct {
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
-func (args *CallArgs) FromOrEmpty() common.Address {
+func (args *CallArgs) FromOrEmpty() accounts.Address {
 	return args.from()
 }
 
 // from retrieves the transaction sender address.
-func (args *CallArgs) from() common.Address {
+func (args *CallArgs) from() accounts.Address {
 	if args.From == nil {
-		return common.Address{}
+		return accounts.ZeroAddress
 	}
-	return *args.From
+	return accounts.InternAddress(*args.From)
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -135,7 +137,8 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
 			gasPrice = new(uint256.Int)
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				gasPrice = math.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
+				min := u256.Min(*new(uint256.Int).Add(gasTipCap, baseFee), *gasFeeCap)
+				gasPrice = &min
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -169,7 +172,12 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 		nonce = args.Nonce.Uint64()
 	}
 
-	msg := types.NewMessage(addr, args.To, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
+	var to = accounts.NilAddress
+	if args.To != nil {
+		to = accounts.InternAddress(*args.To)
+	}
+
+	msg := types.NewMessage(addr, to, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
@@ -612,11 +620,13 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 	}
 
 	signer := types.LatestSignerForChainID(chainId.ToBig())
-	var err error
-	result.From, err = txn.Sender(*signer)
+	from, err := txn.Sender(*signer)
 	if err != nil {
 		log.Warn("sender recovery", "err", err)
+	} else {
+		result.From = from.Value()
 	}
+
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
@@ -628,7 +638,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *uint256.Int) *hexutil.Big {
 	if baseFee != nil && blockHash != (common.Hash{}) {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := math.U256Min(new(uint256.Int).Add(txn.GetTipCap(), baseFee), txn.GetFeeCap())
+		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())
 	}
 	return nil

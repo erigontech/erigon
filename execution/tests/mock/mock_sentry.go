@@ -612,16 +612,8 @@ func mockDownloader(ctrl *gomock.Controller) *downloaderproto.MockDownloaderClie
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
-		Add(gomock.Any(), gomock.Any(), gomock.Any()).
+		Download(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		SetLogPrefix(gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		Completed(gomock.Any(), gomock.Any()).
-		Return(&downloaderproto.CompletedReply{Completed: true}, nil).
 		AnyTimes()
 
 	return snapDownloader
@@ -741,12 +733,15 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, _, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	status, verr, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
 	}
 
 	if status != executionproto.ExecutionStatus_Success {
+		if verr != nil {
+			return fmt.Errorf("insertion failed for block %d, code: %s err: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String(), *verr)
+		}
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 
