@@ -49,12 +49,12 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
 		}
-	}).MapSize(64 * datasize.GB).MustOpen()
+	}).MapSize(128 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
 	return db
 }
 
-func BaseCaseDBNotInMem(t *testing.T) kv.RwDB {
+func BaseCaseDBNotInMemBig(t *testing.T) kv.RwDB {
 	t.Helper()
 	path := t.TempDir()
 	logger := log.New()
@@ -1239,7 +1239,7 @@ func TestParallelInsertRemove(t *testing.T) {
 	//	db.Close()
 	//})
 	t.Run("not in mem", func(t *testing.T) {
-		db := BaseCaseDBNotInMem(t)
+		db := BaseCaseDBNotInMemBig(t)
 
 		blockToDelete := atomic.Uint64{}
 		wg := sync.WaitGroup{}
