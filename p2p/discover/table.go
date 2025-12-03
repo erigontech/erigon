@@ -482,47 +482,32 @@ func (tab *Table) copyLiveNodes() {
 // preferLive is true and the table contains any verified nodes, the result will not
 // contain unverified nodes. However, if there are no verified nodes at all, the result
 // will contain unverified nodes.
-func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) *nodesByDistance {
+func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) (nodes nodesByDistance) {
+	nodes.target = target
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 
 	// Scan all buckets. There might be a better way to do this, but there aren't that many
 	// buckets, so this solution should be fine. The worst-case complexity of this loop
 	// is O(tab.len() * nresults).
-	nodes := &nodesByDistance{target: target}
-	liveNodes := &nodesByDistance{target: target}
-	var liveNodesFound = false
 	if preferLive {
-	outer:
 		for _, b := range &tab.buckets {
 			for _, n := range b.entries {
 				if n.livenessChecks > 0 {
-					liveNodesFound = true
-					break outer
+					nodes.push(n, nresults)
 				}
 			}
 		}
-	}
-	if liveNodesFound {
-		for _, b := range &tab.buckets {
-			for _, n := range b.entries {
-				if n.livenessChecks > 0 {
-					liveNodes.push(n, nresults)
-				}
-			}
-		}
-	} else {
-		for _, b := range &tab.buckets {
-			for _, n := range b.entries {
-				nodes.push(n, nresults)
-			}
+		if len(nodes.entries) > 0 {
+			return
 		}
 	}
-
-	if preferLive && len(liveNodes.entries) > 0 {
-		return liveNodes
+	for _, b := range &tab.buckets {
+		for _, n := range b.entries {
+			nodes.push(n, nresults)
+		}
 	}
-	return nodes
+	return
 }
 
 // len returns the number of nodes in the table.
