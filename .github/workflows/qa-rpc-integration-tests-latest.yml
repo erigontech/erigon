@@ -152,18 +152,6 @@ jobs:
             echo "Erigon has already terminated"
           fi
 
-      - name: Delete Erigon Testbed Data Directory
-        if: ${{ always() && steps.save_datadir_step.outputs.datadir_saved == 'true' }}
-        run: |
-          if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
-            rm -rf $ERIGON_TESTBED_DATA_DIR
-          fi
-
-      - name: Resume the Erigon instance dedicated to db maintenance
-        if: ${{ always() }}
-        run: |
-          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-
       - name: Upload test results
         if: steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v5
@@ -185,6 +173,18 @@ jobs:
           fi
           
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
+
+      - name: Delete Erigon Testbed Data Directory
+        if: ${{ always() && steps.save_datadir_step.outputs.datadir_saved == 'true' }}
+        run: |
+          if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
+            rm -rf $ERIGON_TESTBED_DATA_DIR
+          fi
+
+      - name: Resume the Erigon instance dedicated to db maintenance
+        if: ${{ always() }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
       - name: Action to check failure condition
         if: failure()
