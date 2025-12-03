@@ -1240,7 +1240,8 @@ func TestParallelInsertRemove(t *testing.T) {
 	//})
 	t.Run("not in mem", func(t *testing.T) {
 		db := BaseCaseDBNotInMemBig(t)
-
+		amountOfTxs := atomic.Int64{}
+		amountOfTxs.Store(0)
 		blockToDelete := atomic.Uint64{}
 		wg := sync.WaitGroup{}
 		wg.Add(2)
@@ -1248,6 +1249,7 @@ func TestParallelInsertRemove(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < n; i++ {
 				txPut, err := db.BeginRw(context.Background())
+				amountOfTxs.Add(1)
 				if err != nil {
 					println("err", err.Error())
 				}
@@ -1260,6 +1262,7 @@ func TestParallelInsertRemove(t *testing.T) {
 				}
 				blockToDelete.Store(uint64(i))
 				err = txPut.Commit()
+				amountOfTxs.Add(-1)
 				//println("put", i)
 				require.NoError(t, err)
 			}
@@ -1271,6 +1274,8 @@ func TestParallelInsertRemove(t *testing.T) {
 
 			for b := uint64(0); b < uint64(n); b++ {
 				txDel, err := db.BeginRw(context.Background())
+				amountOfTxs.Add(1)
+				println("amountOfTxs", amountOfTxs.Load())
 				require.NoError(t, err)
 				for i := 0; i < m; i++ {
 					err := txDel.Delete("Table", []byte(fmt.Sprintf("%d-block-%d", b, i)))
@@ -1278,6 +1283,7 @@ func TestParallelInsertRemove(t *testing.T) {
 				}
 				//println("del", b)
 				err = txDel.Commit()
+				amountOfTxs.Add(-1)
 				require.NoError(t, err)
 				if b < blockToDelete.Load() || b == uint64(n-1) {
 					continue
