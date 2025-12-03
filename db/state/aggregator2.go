@@ -11,7 +11,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -23,8 +22,8 @@ type AggOpts struct { //nolint:gocritic
 	schema            statecfg.SchemaGen // biz-logic
 	dirs              datadir.Dirs
 	logger            log.Logger
-	stepSize          uint64
-	stepsInFrozenFile uint64
+	stepSize          uint64 // != 0 mean override erigondb.toml settings
+	stepsInFrozenFile uint64 // != 0 mean override erigondb.toml settings
 	reorgBlockDepth   uint64
 
 	genSaltIfNeed   bool
@@ -35,15 +34,13 @@ type AggOpts struct { //nolint:gocritic
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return AggOpts{ //Defaults
-		logger:            log.Root(),
-		schema:            statecfg.Schema,
-		dirs:              dirs,
-		stepSize:          config3.DefaultStepSize,
-		stepsInFrozenFile: config3.DefaultStepsInFrozenFile,
-		reorgBlockDepth:   dbg.MaxReorgDepth,
-		genSaltIfNeed:     false,
-		sanityOldNaming:   false,
-		disableFsync:      false,
+		logger:          log.Root(),
+		schema:          statecfg.Schema,
+		dirs:            dirs,
+		reorgBlockDepth: dbg.MaxReorgDepth,
+		genSaltIfNeed:   false,
+		sanityOldNaming: false,
+		disableFsync:    false,
 	}
 }
 
