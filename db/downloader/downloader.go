@@ -79,8 +79,8 @@ type snapshotName = string
 
 // Just a pair of name and known infohash.
 type snapshot struct {
-	Name     string
 	InfoHash metainfo.Hash
+	Name     string
 }
 
 // Snapshot pair with valid name.
@@ -114,6 +114,7 @@ type Downloader struct {
 	lock                   sync.RWMutex
 	initedBackgroundLogger bool
 	torrentsByName         map[snapshotName]*torrent.Torrent
+	activeDownloads        map[metainfo.Hash]struct{}
 }
 
 type AggStats struct {
@@ -706,29 +707,60 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Download the provided snapshots in their entirety. No consumers should do this asynchronously.
 // Now we can log properly. Target is a name for what we're syncing.
-func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedSnapshot, target string) error {
+func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedSnapshot, target string) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	torrents := make([]*torrent.Torrent, 0, len(items))
+	wait, err := d.startSnapshotsDownload(ctx, items, target)
+	if err != nil {
+		return
+	}
+	return wait()
+}
+
+// Starts downloading, returns a function to wait for completion. The download is tied to the
+// provided ctx.
+func (d *Downloader) startSnapshotsDownload(
+	ctx context.Context,
+	items []preverifiedSnapshot,
+	target string,
+) (wait func() error, err error) {
 	// Before we start logging the download
 	d.incDownloadRequests()
-	defer d.decDownloadRequests()
+	ctx, cancel := context.WithCancel(ctx)
 	go d.logDownload(ctx, items, target)
-	for _, it := range items {
-		t, err := d.downloadPreverifiedSnapshot(it.InfoHash, it.Name)
+	cleanup := func() {
+		// Make sure to stop the logger before decrementing.
+		cancel()
+		d.decDownloadRequests()
+	}
+	defer func() {
 		if err != nil {
-			return fmt.Errorf("adding %q: %w", it.Name, err)
+			cleanup()
+		}
+		// What about the abandoned torrents?
+	}()
+	torrents := make([]*torrent.Torrent, 0, len(items))
+	for _, it := range items {
+		var t *torrent.Torrent
+		t, err = d.downloadPreverifiedSnapshot(it.InfoHash, it.Name)
+		if err != nil {
+			err = fmt.Errorf("adding %q: %w", it.Name, err)
+			return
 		}
 		torrents = append(torrents, t)
 	}
-	for _, t := range torrents {
-		select {
-		case <-t.Complete().On():
-		case <-ctx.Done():
-			return context.Cause(ctx)
+	wait = sync.OnceValue[error](func() error {
+		defer cleanup()
+		for _, t := range torrents {
+			select {
+			case <-t.Complete().On():
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			}
 		}
-	}
-	return nil
+		return nil
+	})
+	return
 }
 
 func (d *Downloader) incDownloadRequests() {
@@ -815,19 +847,16 @@ func (d *Downloader) logDownload(ctx context.Context, ts []preverifiedSnapshot, 
 	}
 }
 
-// addPreverifiedUnlocked Requests that a torrent with a known infohash be downloaded in entirety.
-func (d *Downloader) addPreverifiedUnlocked(
+// testingAddPreverifiedUnlocked Starts a snapshot download bug doesn't care about waiting.
+func (d *Downloader) testingAddPreverifiedUnlocked(
+	ctx context.Context,
 	infoHash metainfo.Hash,
 	name string,
 ) error {
-	panicif.Zero(infoHash)
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	_, err := d.downloadPreverifiedSnapshot(infoHash, name)
-	if err != nil {
-		return err
-	}
-	return nil
+	_, err := d.startSnapshotsDownload(ctx, []preverifiedSnapshot{
+		{infoHash, name},
+	}, "testing")
+	return err
 }
 
 func (d *Downloader) invalidateData(name snapshotName, infoHash metainfo.Hash) (err error) {
@@ -851,6 +880,10 @@ func (d *Downloader) downloadPreverifiedSnapshot(
 	infoHash metainfo.Hash,
 	name string,
 ) (t *torrent.Torrent, err error) {
+	if d.activeDownloads[infoHash] > 0 {
+		td.torrentClient.Torrent(infoHash)
+	}
+	// TODO: What if it was previously requested to seed?
 	t, ok := d.torrentsByName[name]
 	if ok {
 		if t.InfoHash() != infoHash {
@@ -858,6 +891,8 @@ func (d *Downloader) downloadPreverifiedSnapshot(
 		}
 		return
 	}
+	_, ok = d.torrentClient.Torrent(infoHash)
+	panicif.True(ok)
 	miOpt, err := d.maybeLoadMetainfoFromDisk(name)
 	if err != nil {
 		d.logger.Error("error loading metainfo from disk", "err", err, "name", name)
@@ -1382,8 +1417,8 @@ func (d *Downloader) metainfoFilePathForName(name string) string {
 func (d *Downloader) addNewTorrent(name string, infoHash metainfo.Hash) *torrent.Torrent {
 	panicif.False(IsSnapNameAllowed(name))
 	opts := d.makeAddTorrentOpts(infoHash)
-	t, new := d.torrentClient.AddTorrentOpt(opts)
-	panicif.False(new)
+	t, _ := d.torrentClient.AddTorrentOpt(opts)
+	//panicif.False(new)
 	t.SetDisplayName(name)
 	g.MakeMapIfNil(&d.torrentsByName)
 	g.MapMustAssignNew(d.torrentsByName, name, t)
