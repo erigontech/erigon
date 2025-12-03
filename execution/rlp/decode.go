@@ -69,7 +69,6 @@ func IsInvalidRLPError(err error) bool {
 	return errors.Is(err, ErrExpectedString) ||
 		errors.Is(err, ErrExpectedList) ||
 		errors.Is(err, ErrCanonInt) ||
-		errors.Is(err, ErrCanonInt) ||
 		errors.Is(err, ErrCanonSize) ||
 		errors.Is(err, ErrElemTooLarge) ||
 		errors.Is(err, ErrValueTooLarge) ||
@@ -203,7 +202,7 @@ func addErrorContext(err error, ctx string) error {
 }
 
 var (
-	decoderInterface = reflect.TypeOf(new(Decoder)).Elem()
+	decoderInterface = reflect.TypeFor[Decoder]()
 	bigInt           = reflect.TypeFor[big.Int]()
 	uint256Int       = reflect.TypeFor[uint256.Int]()
 )
@@ -578,7 +577,7 @@ func makeNilPtrDecoder(etype reflect.Type, etypeinfo *typeinfo, nilKind Kind) de
 	}
 }
 
-var ifsliceType = reflect.TypeOf([]interface{}{})
+var ifsliceType = reflect.TypeFor[[]interface{}]()
 
 func decodeInterface(s *Stream, val reflect.Value) error {
 	if val.Type().NumMethod() != 0 {

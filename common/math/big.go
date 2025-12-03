@@ -23,8 +23,6 @@ package math
 import (
 	"fmt"
 	"math/big"
-
-	"github.com/holiman/uint256"
 )
 
 // Various big integer limit values.
@@ -161,14 +159,6 @@ func BigMax(x, y *big.Int) *big.Int {
 
 // BigMin returns the smaller of x or y.
 func BigMin(x, y *big.Int) *big.Int {
-	if x.Cmp(y) > 0 {
-		return y
-	}
-	return x
-}
-
-// U256Min returns the smaller of x or y.
-func U256Min(x, y *uint256.Int) *uint256.Int {
 	if x.Cmp(y) > 0 {
 		return y
 	}

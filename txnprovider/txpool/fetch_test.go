@@ -54,7 +54,7 @@ func TestFetch(t *testing.T) {
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
 	m.StreamWg.Add(2)
 	fetch.ConnectSentries()
 	m.StreamWg.Wait()
@@ -291,7 +291,7 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(1)
 
-	fetch := NewFetch(ctx, nil, pool, stateChanges, db, *u256.N1, log.New())
+	fetch := NewFetch(ctx, nil, pool, stateChanges, db, u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Len(t, minedTxns.Txns, 3)

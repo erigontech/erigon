@@ -153,7 +153,7 @@ func puthead(buf []byte, smalltag, largetag byte, size uint64) int {
 	return sizesize + 1
 }
 
-var encoderInterface = reflect.TypeOf(new(Encoder)).Elem()
+var encoderInterface = reflect.TypeFor[Encoder]()
 
 // makeWriter creates a writer function for the given type.
 func makeWriter(typ reflect.Type, ts tags) (writer, error) {

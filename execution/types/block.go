@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -816,7 +817,7 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, txn := range b.Transactions {
-		txn.SetSender(senders[i])
+		txn.SetSender(accounts.InternAddress(senders[i]))
 	}
 }
 
@@ -825,7 +826,7 @@ func (b *Body) SendersFromTxs() []common.Address {
 	senders := make([]common.Address, len(b.Transactions))
 	for i, txn := range b.Transactions {
 		if sender, ok := txn.GetSender(); ok {
-			senders[i] = sender
+			senders[i] = sender.Value()
 		}
 	}
 	return senders
@@ -1449,7 +1450,7 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, txn := range b.transactions {
-		txn.SetSender(senders[i])
+		txn.SetSender(accounts.InternAddress(senders[i]))
 	}
 }
 

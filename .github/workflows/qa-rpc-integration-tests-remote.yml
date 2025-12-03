@@ -27,7 +27,7 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, Ethereum, rpc-integration ]
+    runs-on: [ self-hosted, qa, Ethereum, rpc-integration-commitment ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -71,7 +71,7 @@ jobs:
         run: |
           echo "Starting Erigon..."
           
-          ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR  --ethash.dagdir $ERIGON_REFERENCE_DATA_DIR --nodiscover --maxpeers 0 --no-downloader --prune.mode=archive --http=false > erigon.log 2>&1 &
+          ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR --persist.receipts --prune.experimental.include-commitment-history --nodiscover --maxpeers 0 --no-downloader --prune.mode=archive --http=false > erigon.log 2>&1 &
 
           ERIGON_PID=$!          
           ERIGON_EXIT_STATUS=$?
@@ -193,7 +193,8 @@ jobs:
           name: test-results
           path: |
             ${{ env.TEST_RESULT_DIR }}
-            ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
+            ${{ github.workspace }}/build/bin/rpcdaemon.log 
+            ${{ github.workspace }}/build/bin/erigon.log 
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'

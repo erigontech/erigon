@@ -1172,12 +1172,12 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		c.update.Balance.Set(&acc.Balance)
 		c.update.Flags |= BalanceUpdate
 	}
-	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
-		if len(acc.CodeHash.Bytes()) == 0 {
+	if acc.CodeHash.Value() != c.update.CodeHash {
+		if acc.CodeHash.IsEmpty() {
 			c.update.CodeHash = empty.CodeHash
 		} else {
 			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash
+			c.update.CodeHash = acc.CodeHash.Value()
 		}
 	}
 }

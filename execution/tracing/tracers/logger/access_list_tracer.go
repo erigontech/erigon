@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -193,9 +194,9 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		addr := scope.Address()
 
 		slot := common.Hash(stackData[stackLen-1].Bytes32())
-		a.list.addSlot(addr, slot)
-		if _, ok := a.createdContracts[addr]; !ok {
-			a.usedBeforeCreation[addr] = struct{}{}
+		a.list.addSlot(addr.Value(), slot)
+		if _, ok := a.createdContracts[addr.Value()]; !ok {
+			a.usedBeforeCreation[addr.Value()] = struct{}{}
 		}
 	}
 	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
@@ -220,7 +221,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		// contract address for CREATE can only be generated with state
 		if a.state != nil {
 			nonce, _ := a.state.GetNonce(scope.Address())
-			addr := types.CreateAddress(scope.Address(), nonce)
+			addr := types.CreateAddress(scope.Address().Value(), nonce)
 			if _, ok := a.excl[addr]; !ok {
 				a.createdContracts[addr] = struct{}{}
 			}
@@ -234,9 +235,9 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 			// t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
-		inithash := crypto.Keccak256(init)
+		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))
 		salt := stackData[stackLen-4]
-		addr := types.CreateAddress2(scope.Address(), salt.Bytes32(), inithash)
+		addr := types.CreateAddress2(scope.Address().Value(), salt.Bytes32(), inithash)
 		if _, ok := a.excl[addr]; !ok {
 			a.createdContracts[addr] = struct{}{}
 		}

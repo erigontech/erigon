@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
@@ -225,12 +226,12 @@ func (sg Signer) String() string {
 }
 
 // Sender returns the sender address of the transaction.
-func (sg Signer) Sender(tx Transaction) (common.Address, error) {
+func (sg Signer) Sender(tx Transaction) (accounts.Address, error) {
 	return sg.SenderWithContext(secp256k1.DefaultContext, tx)
 }
 
 // SenderWithContext returns the sender address of the transaction.
-func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) (common.Address, error) {
+func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) (accounts.Address, error) {
 	var V uint256.Int
 	var R, S *uint256.Int
 	signChainID := sg.chainID.ToBig() // This is reset to nil if txn is unprotected
@@ -239,85 +240,85 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 	case *LegacyTx:
 		if !t.Protected() {
 			if !sg.unprotected {
-				return common.Address{}, fmt.Errorf("unprotected txn is not supported by signer %s", sg)
+				return accounts.NilAddress, fmt.Errorf("unprotected txn is not supported by signer %s", sg)
 			}
 			signChainID = nil
 			V.Set(&t.V)
 		} else {
 			if !sg.protected {
-				return common.Address{}, fmt.Errorf("protected txn is not supported by signer %s", sg)
+				return accounts.NilAddress, fmt.Errorf("protected txn is not supported by signer %s", sg)
 			}
 			if !DeriveChainId(&t.V).Eq(&sg.chainID) {
-				return common.Address{}, ErrInvalidChainId
+				return accounts.NilAddress, ErrInvalidChainId
 			}
 			V.Sub(&t.V, &sg.chainIDMul)
-			V.Sub(&V, u256.Num8)
+			V.Sub(&V, &u256.Num8)
 		}
 		R, S = &t.R, &t.S
 	case *AccessListTx:
 		if !sg.accessList {
-			return common.Address{}, fmt.Errorf("accessList txn is not supported by signer %s", sg)
+			return accounts.NilAddress, fmt.Errorf("accessList txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
-				return common.Address{}, ErrInvalidChainId
+				return accounts.NilAddress, ErrInvalidChainId
 			}
 		} else if !t.ChainID.Eq(&sg.chainID) {
-			return common.Address{}, ErrInvalidChainId
+			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
 		// 27 to become equivalent to unprotected Homestead signatures.
-		V.Add(&t.V, u256.Num27)
+		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
 	case *DynamicFeeTransaction:
 		if !sg.dynamicFee {
-			return common.Address{}, fmt.Errorf("dynamicFee txn is not supported by signer %s", sg)
+			return accounts.NilAddress, fmt.Errorf("dynamicFee txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
-				return common.Address{}, ErrInvalidChainId
+				return accounts.NilAddress, ErrInvalidChainId
 			}
 		} else if !t.ChainID.Eq(&sg.chainID) {
-			return common.Address{}, ErrInvalidChainId
+			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
-		V.Add(&t.V, u256.Num27)
+		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
 	case *BlobTx:
 		if !sg.blob {
-			return common.Address{}, fmt.Errorf("blob txn is not supported by signer %s", sg)
+			return accounts.NilAddress, fmt.Errorf("blob txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
-				return common.Address{}, ErrInvalidChainId
+				return accounts.NilAddress, ErrInvalidChainId
 			}
 		} else if !t.ChainID.Eq(&sg.chainID) {
-			return common.Address{}, ErrInvalidChainId
+			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL, DynamicFee, and blob txs are defined to use 0 and 1 as their recovery
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
-		V.Add(&t.V, u256.Num27)
+		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
 	case *SetCodeTransaction:
 		if !sg.setCode {
-			return common.Address{}, fmt.Errorf("setCode tx is not supported by signer %s", sg)
+			return accounts.NilAddress, fmt.Errorf("setCode tx is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
-				return common.Address{}, ErrInvalidChainId
+				return accounts.NilAddress, ErrInvalidChainId
 			}
 		} else if !t.ChainID.Eq(&sg.chainID) {
-			return common.Address{}, ErrInvalidChainId
+			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL, DynamicFee, blob, and setCode txs are defined to use 0 and 1 as their recovery
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
-		V.Add(&t.V, u256.Num27)
+		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
 	case *AccountAbstractionTransaction:
 		return txn.Sender(Signer{})
 	default:
-		return common.Address{}, ErrTxTypeNotSupported
+		return accounts.NilAddress, ErrTxTypeNotSupported
 	}
 	return recoverPlain(context, txn.SigningHash(signChainID), R, S, &V, !sg.malleable)
 }
@@ -329,9 +330,9 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 	case *LegacyTx:
 		R, S, V = decodeSignature(sig)
 		if sg.chainID.IsZero() {
-			V.Add(V, u256.Num27)
+			V.Add(V, &u256.Num27)
 		} else {
-			V.Add(V, u256.Num35)
+			V.Add(V, &u256.Num35)
 			V.Add(V, &sg.chainIDMul)
 		}
 	case *DynamicFeeTransaction, *AccessListTx, *BlobTx, *SetCodeTransaction:
@@ -374,13 +375,13 @@ func decodeSignature(sig []byte) (r, s, v *uint256.Int) {
 	return r, s, v
 }
 
-func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uint256.Int, homestead bool) (common.Address, error) {
+func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uint256.Int, homestead bool) (accounts.Address, error) {
 	if Vb.BitLen() > 8 {
-		return common.Address{}, ErrInvalidSig
+		return accounts.NilAddress, ErrInvalidSig
 	}
 	V := byte(Vb.Uint64() - 27)
 	if !crypto.TransactionSignatureIsValid(V, R, S, !homestead) {
-		return common.Address{}, ErrInvalidSig
+		return accounts.NilAddress, ErrInvalidSig
 	}
 	// encode the signature in uncompressed format
 	r, s := R.Bytes(), S.Bytes()
@@ -391,14 +392,14 @@ func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uin
 	// recover the public key from the signature
 	pub, err := crypto.EcrecoverWithContext(context, sighash[:], sig)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
 	if len(pub) == 0 || pub[0] != 4 {
-		return common.Address{}, errors.New("invalid public key")
+		return accounts.NilAddress, errors.New("invalid public key")
 	}
 	var addr common.Address
 	copy(addr[:], crypto.Keccak256(pub[1:])[12:])
-	return addr, nil
+	return accounts.InternAddress(addr), nil
 }
 
 // deriveChainID derives the chain id from the given v parameter
@@ -410,6 +411,6 @@ func DeriveChainId(v *uint256.Int) *uint256.Int {
 		}
 		return new(uint256.Int).SetUint64((v - 35) / 2)
 	}
-	r := new(uint256.Int).Sub(v, u256.Num35)
+	r := new(uint256.Int).Sub(v, &u256.Num35)
 	return r.Rsh(r, 1) // ÷2
 }

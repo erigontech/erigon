@@ -49,7 +49,7 @@ func TestFeedPanics(t *testing.T) {
 	{
 		var f Feed
 		f.Send(2)
-		want := feedTypeError{op: "Subscribe", got: reflect.TypeOf(make(chan uint64)), want: reflect.TypeOf(make(chan<- int))}
+		want := feedTypeError{op: "Subscribe", got: reflect.TypeFor[chan uint64](), want: reflect.TypeFor[chan<- int]()}
 		if err := checkPanic(want, func() { f.Subscribe(make(chan uint64)) }); err != nil {
 			t.Error(err)
 		}

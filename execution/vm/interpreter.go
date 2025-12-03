@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Config are the configuration options for the Interpreter
@@ -154,12 +155,12 @@ func (ctx *CallContext) StackData() []uint256.Int {
 }
 
 // Caller returns the current caller.
-func (ctx *CallContext) Caller() common.Address {
+func (ctx *CallContext) Caller() accounts.Address {
 	return ctx.Contract.Caller()
 }
 
 // Address returns the address where this scope of execution is taking place.
-func (ctx *CallContext) Address() common.Address {
+func (ctx *CallContext) Address() accounts.Address {
 	return ctx.Contract.Address()
 }
 
@@ -178,7 +179,7 @@ func (ctx *CallContext) Code() []byte {
 	return ctx.Contract.Code
 }
 
-func (ctx *CallContext) CodeHash() common.Hash {
+func (ctx *CallContext) CodeHash() accounts.CodeHash {
 	return ctx.Contract.CodeHash
 }
 
