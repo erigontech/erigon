@@ -49,6 +49,21 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
 		}
+	}).MapSize(128 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+	return db
+}
+
+func BaseCaseDBNoSticky(t *testing.T) kv.RwDB {
+	t.Helper()
+	path := t.TempDir()
+	logger := log.New()
+	table := "Table"
+	db := New(dbcfg.ChainDB, logger).InMem(t, path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			table:       kv.TableCfgItem{Flags: kv.DupSort},
+			kv.Sequence: kv.TableCfgItem{},
+		}
 	}).MapSize(128 * datasize.MB).AddFlags(mdbxgo.NoStickyThreads).MustOpen()
 	t.Cleanup(db.Close)
 	return db
@@ -1188,7 +1203,7 @@ func TestParallelInsertRemove(t *testing.T) {
 					//time.Sleep(50 * time.Millisecond)
 				}
 				blockToDelete.Store(uint64(i))
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
 				err = txPut.Commit()
 				println("put", i)
 				require.NoError(t, err)
@@ -1197,7 +1212,7 @@ func TestParallelInsertRemove(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
-			time.Sleep(2 * time.Second)
+			time.Sleep(50 * time.Millisecond)
 
 			for b := uint64(0); b < 100; b++ {
 				txDel, err := db.BeginRw(context.Background())
