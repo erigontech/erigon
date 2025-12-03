@@ -34,7 +34,7 @@ jobs:
     runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
-      ERIGON_TESTBED_AREA: /opt/erigon-testbed
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TOTAL_TIME_SECONDS: 900 # 15 minutes
       REFERENCE_SYSTEM_HOST_ADDRESS: 157.180.55.78:8545
@@ -59,18 +59,23 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-      - name: Save Erigon Chaindata Directory
+      - name: Save Erigon datadir Directory
         id: save_chaindata_step
         run: |
-          rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
-          echo "Backup chaindata"
-          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+          rm -rf ERIGON_TESTBED_DATA_DIR || true
+          #rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+          echo "Mirror datadir"
+          if ! "$GITHUB_WORKSPACE/cmd/scripts/mirror-datadir.sh" "$ERIGON_REFERENCE_DATA_DIR" "$ERIGON_TESTBED_DATA_DIR" > /dev/null 2>&1; then
+            echo "Failed to mirror datadir from $ERIGON_REFERENCE_DATA_DIR to $ERIGON_TESTBED_DATA_DIR"
+            exit 1
+          fi
+          echo "chaindata_saved=true" >> $GITHUB_OUTPUT
 
       - name: Run Migrations
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           echo "Running migrations on datadir..."
-          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
+          ./integration run_migrations --datadir $ERIGON_TESTBED_DATA_DIR --chain $CHAIN
 
       - name: Run Erigon version and wait for sync 
         id: pre_test_step
@@ -80,7 +85,7 @@ jobs:
           # Launch the testbed Erigon instance & test its ability to sync 
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-sync/run_and_chase_tip.py \
             --build-dir=${{ github.workspace }}/build/bin \
-            --data-dir=$ERIGON_REFERENCE_DATA_DIR \
+            --data-dir=$ERIGON_TESTBED_DATA_DIR \
             --total-time=$TOTAL_TIME_SECONDS \
             --chain=$CHAIN \
             --node-type=minimal_node \
@@ -147,13 +152,11 @@ jobs:
             echo "Erigon has already terminated"
           fi
 
-      - name: Restore Erigon Chaindata Directory
-        if: ${{ always() }}
+      - name: Delete Erigon Testbed Data Directory
+        if: ${{ always() && steps.save_chaindata_step.outputs.chaindata_saved == 'true' }}
         run: |
-          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
-          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
-          echo "Restore chaindata"
-          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+          if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
+            rm -rf $ERIGON_TESTBED_DATA_DIR
           fi
 
       - name: Resume the Erigon instance dedicated to db maintenance
@@ -168,7 +171,7 @@ jobs:
           name: test-results
           path: |
             ${{ env.TEST_RESULT_DIR }}
-            ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
+            ${{ env.$ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'
@@ -176,7 +179,7 @@ jobs:
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
         run: |
-          db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+          db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_TESTBED_DATA_DIR/../production.ini production erigon_repo_commit)
           if [ -z "$db_version" ]; then
             db_version="no-version"
           fi
