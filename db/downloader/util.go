@@ -149,7 +149,7 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *AtomicTorrentFS) (ok bool, err error) {
 	select {
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return false, context.Cause(ctx)
 	default:
 	}
 	fName, err = ensureCantLeaveDir(fName, root)

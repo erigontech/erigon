@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -34,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
-func TestChangeInfoHashOfSameFile(t *testing.T) {
+func TestConcurrentDownload(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
+		t.Skip("copied from TestChangeInfoHashOfSameFile")
 	}
 
 	require := require.New(t)
@@ -46,14 +47,36 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
 	defer d.Close()
-	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("aa"), "a.seg")
+	g, ctx := errgroup.WithContext(t.Context())
+	g.Go(func() error {
+		return d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	})
+	g.Go(func() error {
+		return d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	})
+}
+
+func TestChangeInfoHashOfSameFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
+	ctx := t.Context()
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	require.NoError(err)
+	defer d.Close()
+	err = d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 	tt, ok := d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 
 	// adding same file twice is ok
-	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 
 	// adding same file with another infoHash - is ok, must be skipped
@@ -61,7 +84,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//	- release of re-compressed version of same file,
 	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
-	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("bb"), "a.seg")
+	err = d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
 	//require.Error(err)
 	_ = err
@@ -127,7 +150,7 @@ func TestAddDel(t *testing.T) {
 	f1Abs := filepath.Join(dirs.Snap, "a.seg")      // block file
 	f2Abs := filepath.Join(dirs.SnapDomain, "a.kv") // state file
 	_, _ = os.Create(f1Abs)
-	_, _ = os.Create(f2Abs)
+	require.NoError(os.WriteFile(f2Abs, []byte("a.kv"), 0o666))
 
 	server, _ := NewGrpcServer(d)
 	// Add: expect relative paths
