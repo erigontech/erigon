@@ -62,8 +62,8 @@ jobs:
       - name: Save Erigon datadir Directory
         id: save_chaindata_step
         run: |
-          rm -rf ERIGON_TESTBED_DATA_DIR || true
-          #rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+          rm -rf $ERIGON_TESTBED_DATA_DIR || true
+
           echo "Mirror datadir"
           if ! "$GITHUB_WORKSPACE/cmd/scripts/mirror-datadir.sh" "$ERIGON_REFERENCE_DATA_DIR" "$ERIGON_TESTBED_DATA_DIR" > /dev/null 2>&1; then
             echo "Failed to mirror datadir from $ERIGON_REFERENCE_DATA_DIR to $ERIGON_TESTBED_DATA_DIR"
@@ -153,7 +153,7 @@ jobs:
           fi
 
       - name: Delete Erigon Testbed Data Directory
-        if: ${{ always() && steps.save_chaindata_step.outputs.chaindata_saved == 'true' }}
+        if: ${{ always() && steps.save_datadir_step.outputs.datadir_saved == 'true' }}
         run: |
           if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
             rm -rf $ERIGON_TESTBED_DATA_DIR
@@ -171,7 +171,7 @@ jobs:
           name: test-results
           path: |
             ${{ env.TEST_RESULT_DIR }}
-            ${{ env.$ERIGON_TESTBED_DATA_DIR }}/logs/
+            ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'
