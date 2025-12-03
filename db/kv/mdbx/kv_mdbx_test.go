@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"github.com/anacrolix/sync"
 	"math/rand"
 	"sync/atomic"
 	"testing"
@@ -47,7 +49,7 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
 		}
-	}).MapSize(128 * datasize.MB).MustOpen()
+	}).MapSize(128 * datasize.MB).AddFlags(mdbxgo.NoStickyThreads).MustOpen()
 	t.Cleanup(db.Close)
 	return db
 }
@@ -1160,5 +1162,64 @@ func TestAutoRemove(t *testing.T) {
 		require.DirExists(t, dbPath)
 		db.Close()
 		require.DirExists(t, dbPath)
+	})
+}
+
+func TestParallelInsertRemove(t *testing.T) {
+
+	t.Run("main", func(t *testing.T) {
+		db := BaseCaseDB(t)
+
+		blockToDelete := atomic.Uint64{}
+		wg := sync.WaitGroup{}
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				txPut, err := db.BeginRw(context.Background())
+				if err != nil {
+					println("err", err.Error())
+				}
+				require.NoError(t, err)
+				for j := 0; j < 100; j++ {
+					err := txPut.Put("Table", []byte(fmt.Sprintf("%d-block-%d", i, j)), nil)
+					require.NoError(t, err)
+
+					//time.Sleep(50 * time.Millisecond)
+				}
+				blockToDelete.Store(uint64(i))
+				time.Sleep(100 * time.Millisecond)
+				err = txPut.Commit()
+				println("put", i)
+				require.NoError(t, err)
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			time.Sleep(2 * time.Second)
+
+			for b := uint64(0); b < 100; b++ {
+				txDel, err := db.BeginRw(context.Background())
+				require.NoError(t, err)
+				for i := 0; i < 100; i++ {
+					err := txDel.Delete("Table", []byte(fmt.Sprintf("%d-block-%d", b, i)))
+					require.NoError(t, err)
+				}
+				println("del", b)
+				err = txDel.Commit()
+				require.NoError(t, err)
+				if b < blockToDelete.Load() || b == 99 {
+					continue
+				} else {
+					for b == blockToDelete.Load() {
+						time.Sleep(10 * time.Millisecond)
+					}
+				}
+			}
+
+		}()
+		wg.Wait()
+		db.Close()
 	})
 }
