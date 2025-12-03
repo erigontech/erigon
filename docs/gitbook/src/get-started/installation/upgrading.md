@@ -71,7 +71,7 @@ Follow the below instructions depending on your installation method:
 
 ### Pre-built Binaries (only Linux and MacOS)
 
-Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](../../archive/installation/linux-and-macos/pre-built-binaries.md#generate-the-checksum-of-your-downloaded-file) and reinstall it, no other operation needed.
+Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](../installation/README.md#pre-built-binaries-linux-only) and reinstall it, no other operation needed.
 
 ### Docker
 
@@ -81,4 +81,4 @@ Simply follow the [Docker](upgrading.md#docker) instructions and install and lau
 
 ### Compiled from source
 
-To upgrade Erigon to a newer version when you've originally installed it via Git and manual compilation, follow the installation instructions from step 2 "[Check Out the Desired Stable Version (Tag)](../../archive/installation/linux-and-macos/build-erigon-from-source.md#check-out-the-desired-stable-version-tag)".
+To upgrade Erigon to a newer version when you've originally installed it via Git and manual compilation, follow the installation instructions from step 2 "Check Out the Desired Stable Version (Tag)".

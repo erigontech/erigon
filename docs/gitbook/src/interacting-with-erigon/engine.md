@@ -18,7 +18,7 @@ For API usage refer to the below official resources:
 
 By default, Erigon runs its own embedded consensus layer client, Caplin. For optimized performance, Caplin bypasses the Engine API and uses direct internal calls to communicate with Erigon's execution layer.
 
-You can optionally force Caplin to use the Engine API interface by setting the `--caplin.use-engine-api` flag. When this flag is active, Caplin connects via the same [JWT](../../../get-started/fundamentals/jwt.md)-authenticated HTTP endpoint used by external CL clients.
+You can optionally force Caplin to use the Engine API interface by setting the `--caplin.use-engine-api` flag. When this flag is active, Caplin connects via the same [JWT](../fundamentals/jwt.md)-authenticated HTTP endpoint used by external CL clients.
 
 #### Engine API Functionality
 
