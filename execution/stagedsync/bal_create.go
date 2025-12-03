@@ -73,7 +73,7 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 		}
 		account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
 	case state.BalancePath:
-		if val, ok := toUint256(vr.Val); ok {
+		if val, ok := vr.Val.(uint256.Int); ok {
 			account.setBalanceValue(val)
 		}
 	default:
@@ -125,7 +125,7 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 	case state.StoragePath:
 		addStorageUpdate(account.changes, vw, accessIndex)
 	case state.BalancePath:
-		val, ok := toUint256(vw.Val)
+		val, ok := vw.Val.(uint256.Int)
 		if !ok {
 			return
 		}
@@ -176,31 +176,6 @@ func removeStorageRead(ac *types.AccountChanges, slot common.Hash) {
 			ac.StorageReads = append(ac.StorageReads[:i], ac.StorageReads[i+1:]...)
 			return
 		}
-	}
-}
-
-func toUint256(v any) (uint256.Int, bool) {
-	switch x := v.(type) {
-	case uint256.Int:
-		return x, true
-	case *uint256.Int:
-		if x == nil {
-			return uint256.Int{}, false
-		}
-		return *x, true
-	case common.Hash:
-		var out uint256.Int
-		out.SetBytes(x[:])
-		return out, true
-	case []byte:
-		if len(x) > 32 {
-			return uint256.Int{}, false
-		}
-		var out uint256.Int
-		out.SetBytes(x)
-		return out, true
-	default:
-		return uint256.Int{}, false
 	}
 }
 
