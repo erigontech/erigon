@@ -326,16 +326,16 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 		// by the caller because we've already mutated the in-mem tree within the previous loop iterations
 		processed := headers[:i]
 		if header.Number.Uint64() != parent.header.Number.Uint64()+1 {
-			return processed, fmt.Errorf("can't connect %s: invalid number: expected %d", header.Number, parent.header.Number.Uint64()+1)
+			return processed, fmt.Errorf("can't connect %v: invalid number: expected %d", header.Number, parent.header.Number.Uint64()+1)
 		}
 
 		if err := ccb.headerValidator.ValidateHeader(ctx, header, parent.header, time.Now()); err != nil {
-			return processed, fmt.Errorf("can't connect %s: invalid header: error %w", header.Number, err)
+			return processed, fmt.Errorf("can't connect %v: invalid header: error %w", header.Number, err)
 		}
 
 		difficulty, err := ccb.difficultyCalc.HeaderDifficulty(ctx, header)
 		if err != nil {
-			return processed, fmt.Errorf("can't connect %s: header difficulty error %w", header.Number, err)
+			return processed, fmt.Errorf("can't connect %v: header difficulty error %w", header.Number, err)
 		}
 		if header.Difficulty.Uint64() != difficulty {
 			err := &bor.WrongDifficultyError{
@@ -349,7 +349,7 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 
 		slot := producerSlotIndex(difficulty)
 		if _, ok := parent.children[slot]; ok {
-			return processed, fmt.Errorf("can't connect %s: producer slot is already filled by a different header", header.Number)
+			return processed, fmt.Errorf("can't connect %v: producer slot is already filled by a different header", header.Number)
 		}
 
 		node := &forkTreeNode{

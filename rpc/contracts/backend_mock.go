@@ -85,7 +85,7 @@ func (c *MockBackendCallContractCall) DoAndReturn(f func(context.Context, ethere
 }
 
 // CodeAt mocks base method.
-func (m *MockBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
+func (m *MockBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CodeAt", ctx, contract, blockNumber)
 	ret0, _ := ret[0].([]byte)
