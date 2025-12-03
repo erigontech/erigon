@@ -10,6 +10,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -157,11 +158,11 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 	}
 }
 
-func isSystemBALAddress(addr common.Address) bool {
+func isSystemBALAddress(addr accounts.Address) bool {
 	return addr == state.SystemAddress
 }
 
-func hasStorageWrite(ac *types.AccountChanges, slot common.Hash) bool {
+func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
 	for _, sc := range ac.StorageChanges {
 		if sc != nil && sc.Slot == slot {
 			return true
@@ -170,7 +171,7 @@ func hasStorageWrite(ac *types.AccountChanges, slot common.Hash) bool {
 	return false
 }
 
-func removeStorageRead(ac *types.AccountChanges, slot common.Hash) {
+func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
 	for i := range ac.StorageReads {
 		if ac.StorageReads[i] == slot {
 			ac.StorageReads = append(ac.StorageReads[:i], ac.StorageReads[i+1:]...)
