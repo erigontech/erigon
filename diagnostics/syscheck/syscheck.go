@@ -121,7 +121,4 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 		log.Info("running under container cgroup; ensure sysctls are applied on the host or via --sysctl in the runtime")
 	}
 
-	if len(hints) == 0 {
-		log.Info("kernel allocation settings look sane for mmap/fork workloads")
-	}
 }
