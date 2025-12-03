@@ -161,7 +161,6 @@ jobs:
             echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
             echo "RpcDaemon stopped"
-            cp -f ${{ github.workspace }}/build/bin/rpcdaemon.log $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon-run.log
           else
             echo "RpcDaemon has already terminated"
           fi
@@ -194,7 +193,8 @@ jobs:
           name: test-results
           path: |
             ${{ env.TEST_RESULT_DIR }}
-            ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
+            ${{ github.workspace }}/build/bin/rpcdaemon.log 
+            ${{ github.workspace }}/build/bin/erigon.log 
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'
