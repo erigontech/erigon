@@ -60,7 +60,7 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
       - name: Save Erigon datadir Directory
-        id: save_chaindata_step
+        id: save_datadir_step
         run: |
           rm -rf $ERIGON_TESTBED_DATA_DIR || true
 
@@ -69,7 +69,7 @@ jobs:
             echo "Failed to mirror datadir from $ERIGON_REFERENCE_DATA_DIR to $ERIGON_TESTBED_DATA_DIR"
             exit 1
           fi
-          echo "chaindata_saved=true" >> $GITHUB_OUTPUT
+          echo "datadir_saved=true" >> $GITHUB_OUTPUT
 
       - name: Run Migrations
         working-directory: ${{ github.workspace }}/build/bin
