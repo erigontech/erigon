@@ -45,7 +45,6 @@ import (
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/metrics"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -1089,18 +1088,6 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
-
-	// ErigonDB geometry settings
-	ErigonDBStepSizeFlag = cli.Uint64Flag{
-		Name:  "erigondb.override.stepsize",
-		Usage: "Override the number of transactions per step; may lead to a corrupted database if used incorrectly",
-		Value: config3.DefaultStepSize,
-	}
-	ErigonDBStepsInFrozenFileFlag = cli.Uint64Flag{
-		Name:  "erigondb.override.stepsinfrozenfile",
-		Usage: "Override the number of steps in frozen snapshot files; may lead to a corrupted database if used incorrectly",
-		Value: config3.DefaultStepsInFrozenFile,
-	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1901,9 +1888,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		// cfg.ExperimentalConcurrentCommitment = true
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
-
-	cfg.ErigonDBStepSize = ctx.Int(ErigonDBStepSizeFlag.Name)
-	cfg.ErigonDBStepsInFrozenFile = ctx.Int(ErigonDBStepsInFrozenFileFlag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
