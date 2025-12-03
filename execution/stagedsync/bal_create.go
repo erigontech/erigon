@@ -85,7 +85,6 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 func addStorageUpdate(ac *types.AccountChanges, vw *state.VersionedWrite, txIndex uint16) {
 	val := vw.Val.(uint256.Int)
 	value := common.Hash(val.Bytes32())
-	removeStorageRead(ac, vw.Key)
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,
@@ -169,15 +168,6 @@ func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
 		}
 	}
 	return false
-}
-
-func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
-	for i := range ac.StorageReads {
-		if ac.StorageReads[i] == slot {
-			ac.StorageReads = append(ac.StorageReads[:i], ac.StorageReads[i+1:]...)
-			return
-		}
-	}
 }
 
 func blockAccessIndex(txIndex int) uint16 {

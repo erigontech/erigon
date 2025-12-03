@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
@@ -85,16 +86,16 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 	}
 	blockAccessList := types.BlockAccessList{
 		{
-			Address: common.HexToAddress("0x0000000000000000000000000000000000000001"),
+			Address: accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000001")),
 			StorageChanges: []*types.SlotChanges{
 				{
-					Slot: common.HexToHash("0x01"),
+					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*types.StorageChange{
 						{Index: 0, Value: common.HexToHash("0x02")},
 					},
 				},
 			},
-			StorageReads: []common.Hash{common.HexToHash("0x03")},
+			StorageReads: []accounts.StorageKey{accounts.InternKey(common.HexToHash("0x03"))},
 			BalanceChanges: []*types.BalanceChange{
 				{Index: 0, Value: *uint256.NewInt(5)},
 			},
