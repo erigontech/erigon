@@ -9,7 +9,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -67,34 +66,17 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 	var _min, _max uint64
 	_min, _ = txNumsReader.Min(tx, fromBlock)
 	_max, _ = txNumsReader.Max(tx, fromBlock)
-	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-		r, found, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			TxNum:         txNum,
-			BlockNum:      blockNum,
-			BlockHash:     common.Hash{}, // don't care about blockHash/txnHash
-			TxnHash:       common.Hash{},
-			DontCalcBloom: true, // we don't need bloom for this check
-		})
+
+	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+
+	for it.HasNext() {
+		txNum, r, err := it.Next()
 		if err != nil {
 			return err
-		}
-		if !found {
-			if txNum == _max {
-				blockNum++
-				_min = _max + 1
-				_max, _ = txNumsReader.Max(tx, blockNum)
-				expectedFirstLogIdx = 0
-				prevCumUsedGas = -1
-				continue // skip system txs
-			}
-			if txNum == _min {
-				continue
-			}
-			if failFast {
-				return fmt.Errorf("[integrity] RCacheNoDups: missing receipt for block %d, txNum %d", blockNum, txNum)
-			}
-			log.Warn("[integrity] RCacheNoDups: missing receipt", "block", blockNum, "txNum", txNum)
-			continue
 		}
 
 		logIdx := r.FirstLogIndexWithinBlock
@@ -119,7 +101,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 		}
 		prevCumUsedGas = int(cumUsedGas)
 
-		if txNum == _max {
+		for txNum >= _max {
 			blockNum++
 			_min = _max + 1
 			_max, _ = txNumsReader.Max(tx, blockNum)
