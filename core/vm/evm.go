@@ -312,8 +312,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 			if value != nil {
 				vs = value.String()
 			}
-			fmt.Printf("code CALLER %s TO %s (system=%t) VALUE %s GAS %d CODE %x\n",
-				contract.Caller().String(), contract.self.String(), contract.IsSystemCall, vs, gas, code)
+			fmt.Printf("code CALLER %s TO %s (system=%t) VALUE %s GAS %d\n",
+				contract.Caller().String(), contract.self.String(), contract.IsSystemCall, vs, gas)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 
