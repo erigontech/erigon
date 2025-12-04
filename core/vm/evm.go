@@ -235,8 +235,12 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		trace = true
 	}
 	if trace {
+		vs := ""
+		if value != nil {
+			vs = value.String()
+		}
 		fmt.Printf("opcode %s CALLER %s TO %s VALUE %s GAS %d DEPTH %d precompile %t\n",
-			typ.String(), caller.Address().String(), addr.String(), value.String(), gas, depth, isPrecompile)
+			typ.String(), caller.Address().String(), addr.String(), vs, gas, depth, isPrecompile)
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
