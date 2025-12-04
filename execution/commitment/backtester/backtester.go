@@ -19,6 +19,8 @@ package backtester
 import (
 	"context"
 	"fmt"
+	"os"
+	"path"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -47,6 +49,7 @@ func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, out
 }
 
 func (b Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) error {
+	start := time.Now()
 	b.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)
 	if fromBlock > toBlock || fromBlock == 0 {
 		return fmt.Errorf("invalid block range for backtest: fromBlock=%d, toBlock=%d", fromBlock, toBlock)
@@ -61,17 +64,28 @@ func (b Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) e
 	if err != nil {
 		return err
 	}
-	//runId := fmt.Sprintf("%d_%d_%d", fromBlock, toBlock, startTime.Unix())
+	runId := fmt.Sprintf("%d_%d_%d", fromBlock, toBlock, start.Unix())
+	runOutputDir := path.Join(b.outputDir, runId)
+	err = os.MkdirAll(runOutputDir, 0755)
+	if err != nil {
+		return err
+	}
 	for block := fromBlock; block <= toBlock; block++ {
-		err = b.backtestBlock(ctx, tx, block, tnr)
+		blockOutputDir := path.Join(runOutputDir, fmt.Sprintf("block_%d", block))
+		err = os.MkdirAll(blockOutputDir, 0755)
+		if err != nil {
+			return err
+		}
+		err = b.backtestBlock(ctx, tx, block, tnr, blockOutputDir)
 		if err != nil {
 			return err
 		}
 	}
+	b.logger.Info("finished commitment backtest", "blocks", toBlock-fromBlock+1, "in", time.Since(start), "output", runOutputDir)
 	return nil
 }
 
-func (b Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader) error {
+func (b Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, blockOutputDir string) error {
 	start := time.Now()
 	b.logger.Info("backtesting block commitment", "block", block)
 	fromTxNum, err := tnr.Min(tx, block)
@@ -91,6 +105,7 @@ func (b Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block u
 	defer sd.Close()
 	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
 	sd.GetCommitmentCtx().SetTrace(b.logger.Enabled(ctx, log.LvlTrace))
+	sd.GetCommitmentCtx().EnableCsvMetrics(path.Join(blockOutputDir, "commitment_metrics"))
 	err = sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err
