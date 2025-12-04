@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type CsvMetrics interface {
@@ -34,6 +35,7 @@ type Metrics struct {
 	spentUnfolding  time.Duration
 	spentFolding    time.Duration
 	spentProcessing time.Duration
+	batchStart      time.Time // used to tell which metrics belong to the same processed batch
 	// metric config related
 	metricsFilePrefix        string
 	collectCommitmentMetrics bool
@@ -172,12 +174,17 @@ func (m *Metrics) Values() [][]string {
 	}
 }
 
+func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (m *Metrics) Reset() {
 	if !m.collectCommitmentMetrics {
 		return
 	}
-
-	m.Accounts.Reset()
+	m.batchStart = time.Now()
+	m.Accounts.Reset(m.batchStart)
 	m.updates.Store(0)
 	m.addressKeys.Store(0)
 	m.storageKeys.Store(0)
@@ -307,6 +314,7 @@ type AccountMetrics struct {
 	m sync.RWMutex
 	// will be separate value for each key in parallel processing
 	AccountStats map[string]*AccountStats
+	BatchStart   time.Time
 }
 
 func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
@@ -324,18 +332,21 @@ func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
 	fn(as)
 }
 
+var accountMetricsHeaders = []string{
+	"batchStart",
+	"account",
+	"storage updates",
+	"loading branch",
+	"loading account",
+	"loading storage",
+	"total unfolds",
+	"total unfolding time (μs)",
+	"total folds",
+	"total folding time (μs)",
+}
+
 func (am *AccountMetrics) Headers() []string {
-	return []string{
-		"account",
-		"storage updates",
-		"loading branch",
-		"loading account",
-		"loading storage",
-		"total unfolds",
-		"total unfolding time (μs)",
-		"total folds",
-		"total folding time (μs)",
-	}
+	return accountMetricsHeaders
 }
 
 func (am *AccountMetrics) Values() [][]string {
@@ -345,6 +356,7 @@ func (am *AccountMetrics) Values() [][]string {
 	vi := 1
 	for addr, stat := range am.AccountStats {
 		values[vi] = []string{
+			fmt.Sprintf("%d", am.BatchStart.Unix()),
 			fmt.Sprintf("%x", addr),
 			strconv.FormatUint(stat.StorageUpates, 10),
 			strconv.FormatUint(stat.LoadBranch, 10),
@@ -360,10 +372,106 @@ func (am *AccountMetrics) Values() [][]string {
 	return values
 }
 
-func (am *AccountMetrics) Reset() {
+func AccountMetricsUnmarshallCsv(filePath string) ([]*AccountMetrics, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Error("failed to close commitment account metrics csv file", "err", err)
+		}
+	}()
+	reader := csv.NewReader(f)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	var metrics []*AccountMetrics
+	var current *AccountMetrics
+	for i, row := range records {
+		if i == 0 {
+			if len(row) != len(accountMetricsHeaders) {
+				return nil, fmt.Errorf("headers len don't match: got=%d, wanted=%d", len(row), len(accountMetricsHeaders))
+			}
+			for j, header := range row {
+				if header != accountMetricsHeaders[j] {
+					return nil, fmt.Errorf("headers sequence doesn't match: got=%s, wanted=%s, idx=%d", header, accountMetricsHeaders[j], j)
+				}
+			}
+		} else {
+			var col int
+			batchStart, err := strconv.ParseInt(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			batchStartTime := time.Unix(batchStart, 0)
+			if current == nil || current.BatchStart != batchStartTime {
+				current = &AccountMetrics{BatchStart: batchStartTime}
+				metrics = append(metrics, current)
+			}
+			col++
+			addr := row[col]
+			if _, ok := current.AccountStats[addr]; ok {
+				return nil, fmt.Errorf("duplicate account address in metrics batch: addr=%s, batchStart=%d", addr, batchStart)
+			}
+			accStats := &AccountStats{}
+			current.AccountStats[addr] = accStats
+			col++
+			accStats.StorageUpates, err = strconv.ParseUint(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			col++
+			accStats.LoadBranch, err = strconv.ParseUint(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			col++
+			accStats.LoadAccount, err = strconv.ParseUint(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			col++
+			accStats.LoadStorage, err = strconv.ParseUint(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			col++
+			accStats.Unfolds, err = strconv.ParseUint(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			col++
+			spentUnfolding, err := strconv.ParseInt(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			accStats.SpentUnfolding = time.Duration(spentUnfolding) * time.Microsecond
+			col++
+			accStats.Folds, err = strconv.ParseUint(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			col++
+			spentFolding, err := strconv.ParseInt(row[col], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			accStats.SpentFolding = time.Duration(spentFolding) * time.Microsecond
+			if col != len(accountMetricsHeaders) {
+				return nil, fmt.Errorf("haven't processed correct number of columns in metrics row: got=%d, wanted=%d", col, len(accountMetricsHeaders))
+			}
+		}
+	}
+	return metrics, nil
+}
+
+func (am *AccountMetrics) Reset(batchStart time.Time) {
 	am.m.Lock()
 	defer am.m.Unlock()
 	am.AccountStats = make(map[string]*AccountStats)
+	am.BatchStart = batchStart
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
