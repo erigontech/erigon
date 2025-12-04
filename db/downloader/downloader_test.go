@@ -149,7 +149,7 @@ func TestAddDel(t *testing.T) {
 	f1Abs := filepath.Join(dirs.Snap, "a.seg")      // block file
 	f2Abs := filepath.Join(dirs.SnapDomain, "a.kv") // state file
 	_, _ = os.Create(f1Abs)
-	_, _ = os.Create(f2Abs)
+	require.NoError(os.WriteFile(f2Abs, []byte("a.kv"), 0o666))
 
 	server, _ := NewGrpcServer(d)
 	// Add: expect relative paths

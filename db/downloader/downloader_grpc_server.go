@@ -96,6 +96,7 @@ func (s *GrpcServer) Seed(ctx context.Context, request *downloaderproto.SeedRequ
 	for _, name := range names {
 		err = s.d.AddNewSeedableFile(ctx, name)
 		if err != nil {
+			err = fmt.Errorf("adding %q: %w", name, err)
 			return
 		}
 	}
