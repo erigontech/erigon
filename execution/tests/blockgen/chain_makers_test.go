@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -117,25 +118,25 @@ func TestGenerateChain(t *testing.T) {
 	if big.NewInt(5).Cmp(m.Current(tx).Number()) != 0 {
 		t.Errorf("wrong block number: %d", m.Current(tx).Number())
 	}
-	balance, err := st.GetBalance(addr1)
+	balance, err := st.GetBalance(accounts.InternAddress(addr1))
 	if err != nil {
 		t.Error(err)
 	}
 	if !uint256.NewInt(989000).Eq(&balance) {
 		t.Errorf("wrong balance of addr1: %s", &balance)
 	}
-	balance, err = st.GetBalance(addr2)
+	balance, err = st.GetBalance(accounts.InternAddress(addr2))
 	if err != nil {
 		t.Error(err)
 	}
 	if !uint256.NewInt(10000).Eq(&balance) {
 		t.Errorf("wrong balance of addr2: %s", &balance)
 	}
-	balance, err = st.GetBalance(addr3)
+	balance, err = st.GetBalance(accounts.InternAddress(addr3))
 	if err != nil {
 		t.Error(err)
 	}
-	if fmt.Sprintf("%s", &balance) != "19687500000000001000" { //nolint
+	if balance.String() != "19687500000000001000" { //nolint
 		t.Errorf("wrong balance of addr3: %s", &balance)
 	}
 

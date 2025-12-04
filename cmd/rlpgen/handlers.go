@@ -243,7 +243,7 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	fmt.Fprintf(b1, "    size += rlp.Uint256LenExcludingHead(&obj.%s) + 1\n", fieldName)
 
 	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(&obj.%s, w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(obj.%s, w, b[:]); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 
@@ -267,10 +267,10 @@ func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName 
 	}
 
 	// size
-	fmt.Fprintf(b1, "    size += rlp.Uint256LenExcludingHead(obj.%s) + 1\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.Uint256LenExcludingHead(*obj.%s) + 1\n", fieldName)
 
 	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(obj.%s, w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(*obj.%s, w, b[:]); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 

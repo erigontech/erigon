@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -447,7 +448,15 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	return true
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum uint64, requestedMaxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {
+func (br *BlockRetire) RetireBlocks(
+	ctx context.Context,
+	requestedMinBlockNum uint64,
+	requestedMaxBlockNum uint64,
+	lvl log.Lvl,
+	seedNewSnapshots func(downloadRequest []services.DownloadRequest) error,
+	onDeleteSnapshots func(l []string) error,
+	onFinish func() error,
+) error {
 	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(requestedMaxBlockNum)
 	}
@@ -672,14 +681,15 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		hash := txn2.Hash()
 		hashFirstByte := hash[:1]
 		if len(senders) > 0 {
-			txn2.SetSender(senders[j])
+			txn2.SetSender(accounts.InternAddress(senders[j]))
 			sender = senders[j]
 		} else {
 			signer := types.LatestSignerForChainID(chainConfig.ChainID)
-			sender, err = txn2.Sender(*signer)
+			s, err := txn2.Sender(*signer)
 			if err != nil {
 				return nil, err
 			}
+			sender = s.Value()
 		}
 
 		valueBuf = valueBuf[:0]

@@ -22,10 +22,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type GasLimitOverride struct {
@@ -76,7 +77,7 @@ func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHea
 	//IsPoSHeader check is necessary as merge.go calls Initialize on AuRa indiscriminately
 	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header)
 	if gasLimitOverride {
-		syscallPrevHeader := func(addr common.Address, data []byte) ([]byte, error) {
+		syscallPrevHeader := func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscallCustom(addr, data, state, chain.GetHeaderByHash(header.ParentHash), true)
 		}
 		blockGasLimit := c.GetBlockGasLimitFromContract(config, syscallPrevHeader)

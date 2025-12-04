@@ -30,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -75,7 +77,19 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, nil, nil, mockSentry.Sync, initialCycle, firstCycle, log.New(), mockSentry.BlockReader, nil); err != nil {
+
+	if err := mockSentry.DB.UpdateTemporal(mockSentry.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(mockSentry.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, sd, tx, mockSentry.Sync, initialCycle, firstCycle, log.New(), mockSentry.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(mockSentry.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -180,7 +194,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
-	return pricedTransaction(nonce, gaslimit, u256.Num1, key)
+	return pricedTransaction(nonce, gaslimit, &u256.Num1, key)
 }
 
 func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {

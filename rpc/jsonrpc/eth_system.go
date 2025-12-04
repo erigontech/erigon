@@ -27,8 +27,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -341,9 +341,13 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
 	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
 	for addr, precompile := range precompiles {
-		forkConfig.Precompiles[precompile.Name()] = addr
+		forkConfig.Precompiles[precompile.Name()] = addr.Value()
 	}
-	forkConfig.SystemContracts = chainConfig.SystemContracts(activationTime)
+	systemContracts := chainConfig.SystemContracts(activationTime)
+	forkConfig.SystemContracts = make(map[string]common.Address, len(systemContracts))
+	for name, contract := range systemContracts {
+		forkConfig.SystemContracts[name] = contract.Value()
+	}
 	return &forkConfig
 }
 

@@ -45,7 +45,6 @@ import (
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/metrics"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -741,7 +740,7 @@ var (
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
+		Usage: "DB is split to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
 		Value: ethconfig.DefaultChainDBPageSize.String(),
 	}
 	DbSizeLimitFlag = cli.StringFlag{
@@ -981,7 +980,7 @@ var (
 	}
 	RPCSlowFlag = cli.DurationFlag{
 		Name:  "rpc.slow",
-		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowLogBlackList, ","),
+		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: " + strings.Join(rpccfg.SlowLogBlackList, ","),
 		Value: 0,
 	}
 	CaplinArchiveBlocksFlag = cli.BoolFlag{
@@ -1001,7 +1000,7 @@ var (
 	}
 	CaplinImmediateBlobBackfillFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-immediate-backfill",
-		Usage: "sets whether caplin should immediatelly backfill blobs (4096 epochs)",
+		Usage: "sets whether caplin should immediately backfill blobs (4096 epochs)",
 		Value: false,
 	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{
@@ -1085,21 +1084,9 @@ var (
 		Value: false,
 	}
 	KeepExecutionProofsFlag = cli.BoolFlag{
-		Name:    "prune.experimental.include-commitment-history",
+		Name:    "prune.include-commitment-history",
 		Usage:   "Enables blazing fast eth_getProof for executed block",
-		Aliases: []string{"experimental.commitment-history"},
-	}
-
-	// ErigonDB geometry settings
-	ErigonDBStepSizeFlag = cli.Uint64Flag{
-		Name:  "erigondb.override.stepsize",
-		Usage: "Override the number of transactions per step; may lead to a corrupted database if used incorrectly",
-		Value: config3.DefaultStepSize,
-	}
-	ErigonDBStepsInFrozenFileFlag = cli.Uint64Flag{
-		Name:  "erigondb.override.stepsinfrozenfile",
-		Usage: "Override the number of steps in frozen snapshot files; may lead to a corrupted database if used incorrectly",
-		Value: config3.DefaultStepsInFrozenFile,
+		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
 )
 
@@ -1901,9 +1888,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		// cfg.ExperimentalConcurrentCommitment = true
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
-
-	cfg.ErigonDBStepSize = ctx.Int(ErigonDBStepSizeFlag.Name)
-	cfg.ErigonDBStepsInFrozenFile = ctx.Int(ErigonDBStepsInFrozenFileFlag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)

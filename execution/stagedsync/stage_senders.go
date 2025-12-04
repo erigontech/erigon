@@ -359,7 +359,8 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 					rules.ErrInvalidBlock, txn.Hash(), err)
 				break
 			}
-			copy(job.senders[i*length.Addr:], from[:])
+			fromValue := from.Value()
+			copy(job.senders[i*length.Addr:], fromValue[:])
 		}
 
 		// prevent sending to close channel

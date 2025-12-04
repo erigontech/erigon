@@ -46,7 +46,7 @@ jobs:
         echo "Load sequence: ${{ env.LOAD_SEQUENCE }}"
 
     - name: Check out Erigon repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Checkout RPC Tests Repository & Install Requirements
       run: |

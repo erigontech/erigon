@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -297,58 +298,53 @@ func testBrokenChain(t *testing.T) {
 	}
 }
 
-// Tests that reorganising a long difficult chain after a short easy one
-// overwrites the canonical numbers and links in the database.
+// Tests that reorganising a long chain after a short one overwrites the canonical numbers and links in the database.
 func TestReorgLongBlocks(t *testing.T) { testReorgLong(t) }
 
 func testReorgLong(t *testing.T) {
 	t.Parallel()
-	testReorg(t, []int64{0, 0, -9}, []int64{0, 0, 0, -9}, 393280)
+	testReorg(t, []int64{0, 0, -9}, []int64{0, 0, 0, -9}, 524352)
 }
 
-// Tests that reorganising a short difficult chain after a long easy one
-// overwrites the canonical numbers and links in the database.
+// Tests that reorganising a short chain after a long one overwrites the canonical numbers and links in the database.
 func TestReorgShortBlocks(t *testing.T) { testReorgShort(t) }
 
 func testReorgShort(t *testing.T) {
 	t.Parallel()
-	// Create a long easy chain vs. a short heavy one. Due to difficulty adjustment
-	// we need a fairly long chain of blocks with different difficulties for a short
-	// one to become heavier than a long one. The 96 is an empirical value.
-	easy := make([]int64, 96)
-	for i := 0; i < len(easy); i++ {
-		easy[i] = 60
+	long := make([]int64, 96)
+	for i := 0; i < len(long); i++ {
+		long[i] = 60
 	}
-	diff := make([]int64, len(easy)-1)
-	for i := 0; i < len(diff); i++ {
-		diff[i] = -9
+	short := make([]int64, len(long)-1)
+	for i := 0; i < len(short); i++ {
+		short[i] = -9
 	}
-	testReorg(t, easy, diff, 12615120)
+	testReorg(t, long, short, 12746192)
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
 	require := require.New(t)
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
-	// Insert an easy and a difficult chain afterwards
-	easyChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(first), func(i int, b *blockgen.BlockGen) {
+	// Insert one chain first, then the other
+	firstChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(first), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(first[i])
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	diffChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(second), func(i int, b *blockgen.BlockGen) {
+	secondChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(second), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(second[i])
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	if err = m.InsertChain(easyChain); err != nil {
-		t.Fatalf("failed to insert easy chain: %v", err)
+	if err = m.InsertChain(firstChain); err != nil {
+		t.Fatalf("failed to insert first chain: %v", err)
 	}
-	if err = m.InsertChain(diffChain); err != nil {
-		t.Fatalf("failed to insert difficult chain: %v", err)
+	if err = m.InsertChain(secondChain); err != nil {
+		t.Fatalf("failed to insert second chain: %v", err)
 	}
 	tx, err := m.DB.BeginRw(m.Ctx)
 	if err != nil {
@@ -422,6 +418,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	require.NoError(err)
 	if have.Cmp(want) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
+	}
+	// Make sure the canonical chain is the correct one
+	require.Equal(secondChain.TopBlock.Hash(), rawdb.ReadHeadHeaderHash(tx))
+	for _, h := range secondChain.Headers {
+		canon, err := rawdb.ReadCanonicalHash(tx, h.Number.Uint64())
+		require.NoError(err)
+		require.Equal(h.Hash(), canon)
 	}
 }
 
@@ -958,7 +961,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		theAddr = common.Address{1}
+		theAddr = accounts.InternAddress(common.Address{1})
 		gspec   = &types.Genesis{
 			Config: &libchain.Config{
 				ChainID:               big.NewInt(1),
@@ -979,11 +982,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		)
 		switch i {
 		case 0:
-			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr.Value(), new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		case 1:
-			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr.Value(), new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		case 2:
-			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr.Value(), new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -1105,25 +1108,25 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	st := state.New(m.NewStateReader(tx))
 	require.NoError(t, err)
-	exist, err := st.Exist(theAddr)
+	exist, err := st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should've been removed")
 
 	st = state.New(m.NewHistoryStateReader(1, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(theAddr)
+	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #0")
 
 	st = state.New(m.NewHistoryStateReader(2, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(theAddr)
+	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #1")
 
 	st = state.New(m.NewHistoryStateReader(3, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(theAddr)
+	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 }
@@ -1385,11 +1388,11 @@ func TestDeleteCreateRevert(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to BBBB
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {
@@ -1463,8 +1466,8 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := crypto.Keccak256Hash(initCode)
-	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
@@ -1472,7 +1475,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
-			aa: {
+			aa.Value(): {
 				// Code needs to just selfdestruct
 				Code:    aaCode,
 				Nonce:   1,
@@ -1490,12 +1493,12 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
-		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+		tx, _ := types.SignTx(types.NewTransaction(0, aa.Value(),
+			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to BB, to recreate AA
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {
@@ -1512,25 +1515,28 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 	// If all is correct, then slot 1 and 2 are zero
-	key1 := common.HexToHash("01")
-	var got uint256.Int
-	statedb.GetState(aa, key1, &got)
+	key1 := accounts.InternKey(common.HexToHash("01"))
+	got, err := statedb.GetState(aa, key1)
+	require.NoError(t, err)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
-	key2 := common.HexToHash("02")
-	statedb.GetState(aa, key2, &got)
+	key2 := accounts.InternKey(common.HexToHash("02"))
+	got, err = statedb.GetState(aa, key2)
+	require.NoError(t, err)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	// Also, 3 and 4 should be set
-	key3 := common.HexToHash("03")
-	statedb.GetState(aa, key3, &got)
+	key3 := accounts.InternKey(common.HexToHash("03"))
+	got, err = statedb.GetState(aa, key3)
+	require.NoError(t, err)
 	if got.Uint64() != 3 {
 		t.Errorf("got %d exp %d", got.Uint64(), 3)
 	}
-	key4 := common.HexToHash("04")
-	statedb.GetState(aa, key4, &got)
+	key4 := accounts.InternKey(common.HexToHash("04"))
+	got, err = statedb.GetState(aa, key4)
+	require.NoError(t, err)
 	if got.Uint64() != 4 {
 		t.Errorf("got %d exp %d", got.Uint64(), 4)
 	}
@@ -1546,7 +1552,7 @@ func TestCVE2020_26265(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 
-		aa        = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
+		aa        = accounts.InternAddress(common.HexToAddress("0x000000000000000000000000000000000000aaaa"))
 		aaStorage = make(map[common.Hash]common.Hash) // Initial storage in AA
 		aaCode    = []byte{
 			byte(vm.CALLVALUE),
@@ -1589,7 +1595,7 @@ func TestCVE2020_26265(t *testing.T) {
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
-			aa: {
+			aa.Value(): {
 				// Code needs to just selfdestruct
 				Code:    aaCode,
 				Nonce:   1,
@@ -1611,11 +1617,11 @@ func TestCVE2020_26265(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, caller,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to AA, to recreate it (but without storage
-		tx, _ = types.SignTx(types.NewTransaction(1, aa,
-			new(uint256.Int).SetUint64(5), 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+		tx, _ = types.SignTx(types.NewTransaction(1, aa.Value(),
+			new(uint256.Int).SetUint64(5), 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {
@@ -1654,7 +1660,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 
-		aa        = common.HexToAddress("0x7217d81b76bdd8707601e959454e3d776aee5f43")
+		aa        = accounts.InternAddress(common.HexToAddress("0x7217d81b76bdd8707601e959454e3d776aee5f43"))
 		aaStorage = make(map[common.Hash]common.Hash)          // Initial storage in AA
 		aaCode    = []byte{byte(vm.PC), byte(vm.SELFDESTRUCT)} // Code for AA (simple selfdestruct)
 	)
@@ -1667,7 +1673,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
-			aa: {
+			aa.Value(): {
 				// Code needs to just selfdestruct
 				Code:    aaCode,
 				Nonce:   1,
@@ -1681,12 +1687,12 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
-		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+		tx, _ := types.SignTx(types.NewTransaction(0, aa.Value(),
+			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to AA, to recreate it (but without storage
-		tx, _ = types.SignTx(types.NewTransaction(1, aa,
-			u256.Num1, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+		tx, _ = types.SignTx(types.NewTransaction(1, aa.Value(),
+			&u256.Num1, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {
@@ -1700,14 +1706,15 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 		// If all is correct, then both slots are zero
-		key1 := common.HexToHash("01")
-		var got uint256.Int
-		statedb.GetState(aa, key1, &got)
+		key1 := accounts.InternKey(common.HexToHash("01"))
+		got, err := statedb.GetState(aa, key1)
+		require.NoError(t, err)
 		if !got.IsZero() {
 			t.Errorf("got %x exp %x", got, 0)
 		}
-		key2 := common.HexToHash("02")
-		statedb.GetState(aa, key2, &got)
+		key2 := accounts.InternKey(common.HexToHash("02"))
+		got, err = statedb.GetState(aa, key2)
+		require.NoError(t, err)
 		if !got.IsZero() {
 			t.Errorf("got %x exp %x", got, 0)
 		}
@@ -1785,15 +1792,15 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := crypto.Keccak256Hash(initCode)
-	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
 		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
-			aa: {
+			aa.Value(): {
 				// Code needs to just selfdestruct
 				Code:    aaCode,
 				Nonce:   1,
@@ -1822,8 +1829,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	var expectations []*expectation
 	var newDestruct = func(e *expectation) types.Transaction {
-		tx, _ := types.SignTx(types.NewTransaction(nonce, aa,
-			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+		tx, _ := types.SignTx(types.NewTransaction(nonce, aa.Value(),
+			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
 		if e.exist {
 			e.exist = false
@@ -1834,7 +1841,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	var newResurrect = func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
 		if !e.exist {
 			e.exist = true
@@ -1883,14 +1890,15 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 
 			statedb := state.New(m.NewStateReader(tx))
 			// If all is correct, then slot 1 and 2 are zero
-			key1 := common.HexToHash("01")
-			var got uint256.Int
-			statedb.GetState(aa, key1, &got)
+			key1 := accounts.InternKey(common.HexToHash("01"))
+			got, err := statedb.GetState(aa, key1)
+			require.NoError(t, err)
 			if !got.IsZero() {
 				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
-			key2 := common.HexToHash("02")
-			statedb.GetState(aa, key2, &got)
+			key2 := accounts.InternKey(common.HexToHash("02"))
+			got, err = statedb.GetState(aa, key2)
+			require.NoError(t, err)
 			if !got.IsZero() {
 				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
@@ -1904,9 +1912,9 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 					t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
 				}
 				for slot, val := range exp.values {
-					key := asHash(slot)
-					var gotValue uint256.Int
-					statedb.GetState(aa, key, &gotValue)
+					key := accounts.InternKey(asHash(slot))
+					gotValue, err := statedb.GetState(aa, key)
+					require.NoError(t, err)
 					if gotValue.Uint64() != uint64(val) {
 						t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
 					}
@@ -1986,8 +1994,8 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := crypto.Keccak256Hash(initCode)
-	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
@@ -1995,7 +2003,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address aa has some funds
-			aa: {Balance: big.NewInt(100000)},
+			aa.Value(): {Balance: big.NewInt(100000)},
 			// The contract BB tries to create code onto AA
 			bb: {
 				Code:    bbCode,
@@ -2010,7 +2018,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to BB
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		nonce++
 	})
@@ -2162,14 +2170,14 @@ func TestEIP1559Transition(t *testing.T) {
 		// A sender who makes transactions, has some funds
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
-		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
-		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(common.Ether))
+		addr1   = accounts.InternAddress(crypto.PubkeyToAddress(key1.PublicKey))
+		addr2   = accounts.InternAddress(crypto.PubkeyToAddress(key2.PublicKey))
+		funds   = new(uint256.Int).Mul(&u256.Num1, new(uint256.Int).SetUint64(common.Ether))
 		gspec   = &types.Genesis{
 			Config: chainspec.Sepolia.Config,
 			Alloc: types.GenesisAlloc{
-				addr1: {Balance: funds.ToBig()},
-				addr2: {Balance: funds.ToBig()},
+				addr1.Value(): {Balance: funds.ToBig()},
+				addr2.Value(): {Balance: funds.ToBig()},
 				// The address 0xAAAA sloads 0x00 and 0x01
 				aa: {
 					Code: []byte{
@@ -2211,7 +2219,7 @@ func TestEIP1559Transition(t *testing.T) {
 				},
 				ChainID:    &chainID,
 				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)),
-				TipCap:     u256.Num2,
+				TipCap:     &u256.Num2,
 				AccessList: accesses,
 			}
 			txn, _ = types.SignTx(txn, *signer, key1)
@@ -2240,7 +2248,7 @@ func TestEIP1559Transition(t *testing.T) {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
-		actual, err := statedb.GetBalance(block.Coinbase())
+		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
 		if err != nil {
 			return err
 		}
@@ -2270,7 +2278,7 @@ func TestEIP1559Transition(t *testing.T) {
 	chain, err = blockgen.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{2})
 
-		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)), nil)
+		var txn types.Transaction = types.NewTransaction(0, aa, &u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)), nil)
 		txn, _ = types.SignTx(txn, *signer, key2)
 
 		b.AddTx(txn)
@@ -2290,7 +2298,7 @@ func TestEIP1559Transition(t *testing.T) {
 		effectiveTip := block.Transactions()[0].GetEffectiveGasTip(baseFee).Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
-		actual, err := statedb.GetBalance(block.Coinbase())
+		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
 		if err != nil {
 			return err
 		}

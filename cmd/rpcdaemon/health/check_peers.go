@@ -26,12 +26,12 @@ var (
 	errNotEnoughPeers = errors.New("not enough peers")
 )
 
-func checkMinPeers(minPeerCount uint, api NetAPI) error {
+func checkMinPeers(ctx context.Context, minPeerCount uint, api NetAPI) error {
 	if api == nil {
 		return errors.New("no connection to the Erigon server or `net` namespace isn't enabled")
 	}
 
-	peerCount, err := api.PeerCount(context.TODO())
+	peerCount, err := api.PeerCount(ctx)
 	if err != nil {
 		return err
 	}

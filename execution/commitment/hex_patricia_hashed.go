@@ -214,36 +214,36 @@ func (cell *cell) reset() {
 func (cell *cell) FullString() string {
 	b := new(strings.Builder)
 	b.WriteString("{")
-	b.WriteString(fmt.Sprintf("loaded=%v ", cell.loaded))
+	b.WriteString(fmt.Sprintf("loaded=%v", cell.loaded))
 	if cell.Deleted() {
-		b.WriteString("DELETED ")
+		b.WriteString(" DELETED ")
 	}
 
 	if cell.accountAddrLen > 0 {
-		b.WriteString(fmt.Sprintf("addr=%x ", cell.accountAddr[:cell.accountAddrLen]))
-		b.WriteString(fmt.Sprintf("balance=%s ", cell.Balance.String()))
-		b.WriteString(fmt.Sprintf("nonce=%d ", cell.Nonce))
+		b.WriteString(fmt.Sprintf(" addr=%x", cell.accountAddr[:cell.accountAddrLen]))
+		b.WriteString(fmt.Sprintf(" balance=%s", cell.Balance.String()))
+		b.WriteString(fmt.Sprintf(" nonce=%d", cell.Nonce))
 		if cell.CodeHash != empty.CodeHash {
-			b.WriteString(fmt.Sprintf("codeHash=%x ", cell.CodeHash[:]))
+			b.WriteString(fmt.Sprintf(" codeHash=%x", cell.CodeHash[:]))
 		} else {
-			b.WriteString("codeHash=EMPTY ")
+			b.WriteString(" codeHash=EMPTY")
 		}
 	}
 	if cell.storageAddrLen > 0 {
-		b.WriteString(fmt.Sprintf("addr[s]=%x ", cell.storageAddr[:cell.storageAddrLen]))
-		b.WriteString(fmt.Sprintf("storage=%x ", cell.Storage[:cell.StorageLen]))
+		b.WriteString(fmt.Sprintf(" addr[s]=%x", cell.storageAddr[:cell.storageAddrLen]))
+		b.WriteString(fmt.Sprintf(" storage=%x", cell.Storage[:cell.StorageLen]))
 	}
 	if cell.hashLen > 0 {
-		b.WriteString(fmt.Sprintf("h=%x ", cell.hash[:cell.hashLen]))
+		b.WriteString(fmt.Sprintf(" h=%x", cell.hash[:cell.hashLen]))
 	}
 	if cell.stateHashLen > 0 {
-		b.WriteString(fmt.Sprintf("memHash=%x ", cell.stateHash[:cell.stateHashLen]))
+		b.WriteString(fmt.Sprintf(" memHash=%x", cell.stateHash[:cell.stateHashLen]))
 	}
 	if cell.extLen > 0 {
-		b.WriteString(fmt.Sprintf("extension=%x ", cell.extension[:cell.extLen]))
+		b.WriteString(fmt.Sprintf(" extension=%x", cell.extension[:cell.extLen]))
 	}
 	if cell.hashedExtLen > 0 {
-		b.WriteString(fmt.Sprintf("hashedExtension=%x ", cell.hashedExtension[:cell.hashedExtLen]))
+		b.WriteString(fmt.Sprintf(" hashedExtension=%x", cell.hashedExtension[:cell.hashedExtLen]))
 	}
 
 	b.WriteString("}")
@@ -1167,7 +1167,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	account.Balance = accountUpdate.Balance
 	account.Initialised = true
 	account.Root = accountUpdate.Storage
-	account.CodeHash = accountUpdate.CodeHash
+	account.CodeHash = accounts.InternCodeHash(accountUpdate.CodeHash)
 
 	addrHash, err := CompactKey(hashedKey[:64])
 	if err != nil {

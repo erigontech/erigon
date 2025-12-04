@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -74,7 +76,18 @@ func TestHeaderStep(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -113,14 +126,25 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, log.New(), m.BlockReader, nil); err != nil {
+		if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+			sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+			if err != nil {
+				return err
+			}
+			defer sd.Close()
+			if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+				return err
+			}
+
+			return sd.Flush(m.Ctx, tx)
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	chain, err = blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, &u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(err)
 		gen.AddTx(tx)
 	})
@@ -182,7 +206,18 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -233,8 +268,18 @@ func TestReorg(t *testing.T) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
 
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -277,7 +322,18 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -312,8 +368,18 @@ func TestReorg(t *testing.T) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
 
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -410,7 +476,18 @@ func TestAnchorReplace(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -516,7 +593,18 @@ func TestAnchorReplace2(t *testing.T) {
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

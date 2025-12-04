@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Hive
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           # ref: master

@@ -19,7 +19,6 @@ linters:
     - govet
   disable:
     - testifylint
-    - staticcheck #TODO: enable me
     - errchkjson #TODO: enable me
     - makezero #TODO: enable me
     - noctx #TODO: enable me
@@ -93,6 +92,7 @@ linters:
     govet:
       enable:
         - nilness
+        - unusedwrite
       disable:
         - deepequalerrors
         - fieldalignment
@@ -111,7 +111,7 @@ linters:
         text: not checked
       - linters:
           - staticcheck
-        text: SA(1019|1029|5011)
+        text: ST1019|ST1029|ST5011|QF1003|SA1019|QF1008|S1021|QF1001|SA6005|S1002|QF1002|QF1012|QF1006|ST1005|SA5011|ST1023|ST1012|QF1011|S1019|S1000|S1000|S1009|ST1008|S1016|S1016|ST1017|SA4009|QF1007|SA6002|QF1010|SA9003
       - linters:
           - gocritic
           - gosec

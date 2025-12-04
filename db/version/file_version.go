@@ -3,6 +3,7 @@ package version
 import (
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -48,19 +49,21 @@ type Version struct {
 var ErrVersionIsNotSupported error = errors.New("this version is not supported")
 
 var (
-	ZeroVersion            = Version{}
-	V1_0          Version  = Version{1, 0}
-	V1_1          Version  = Version{1, 1}
-	V1_2          Version  = Version{1, 2}
-	V2_0          Version  = Version{2, 0}
-	V2_1          Version  = Version{2, 1}
-	V1_0_standart Versions = Versions{V1_0, V1_0}
-	V1_1_standart Versions = Versions{V1_1, V1_0}
-	V1_2_standart Versions = Versions{V1_2, V1_0}
-	V1_1_exact    Versions = Versions{V1_1, V1_1}
-	V2_0_standart Versions = Versions{V2_0, V1_0}
-	V2_0_nosup             = Versions{V2_0, V2_0}
-	V2_1_standart Versions = Versions{V2_1, V1_0}
+	ZeroVersion                  = Version{}
+	StrictSearchVersion          = Version{math.MaxUint64, math.MaxUint64}
+	SearchVersion                = Version{math.MaxUint64 - 1, math.MaxUint64 - 1}
+	V1_0                Version  = Version{1, 0}
+	V1_1                Version  = Version{1, 1}
+	V1_2                Version  = Version{1, 2}
+	V2_0                Version  = Version{2, 0}
+	V2_1                Version  = Version{2, 1}
+	V1_0_standart       Versions = Versions{V1_0, V1_0}
+	V1_1_standart       Versions = Versions{V1_1, V1_0}
+	V1_2_standart       Versions = Versions{V1_2, V1_0}
+	V1_1_exact          Versions = Versions{V1_1, V1_1}
+	V2_0_standart       Versions = Versions{V2_0, V1_0}
+	V2_0_nosup                   = Versions{V2_0, V2_0}
+	V2_1_standart       Versions = Versions{V2_1, V1_0}
 )
 
 func (v Version) Less(rhd Version) bool {
@@ -123,6 +126,10 @@ func (v Version) Downgrade() Version {
 
 func (v Version) IsZero() bool {
 	return v.Major == 0 && v.Minor == 0
+}
+
+func (v Version) IsSearch() bool {
+	return v == SearchVersion || v == StrictSearchVersion
 }
 
 func ParseVersion(v string) (Version, error) {
@@ -220,6 +227,15 @@ func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error 
 		return fmt.Errorf("file version %s is less than supported version %s", fileVer.String(), minSup.String())
 	}
 	return nil
+}
+
+func MakeMaskedWithExtReplace(path string, newExt string) string {
+	fName, err := ReplaceVersionWithMask(path)
+	if err != nil {
+		return ""
+	}
+
+	return strings.ReplaceAll(fName, filepath.Ext(path), newExt)
 }
 
 func ReplaceVersionWithMask(path string) (string, error) {

@@ -22,11 +22,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -368,9 +367,9 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	acc := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,
-		Balance:     *uint256.NewInt(200),
+		Balance:     u256.U64(200),
 		Root:        EmptyRoot,
-		CodeHash:    emptyState,
+		CodeHash:    accounts.InternCodeHash(emptyState),
 	}
 
 	trie := newEmpty()

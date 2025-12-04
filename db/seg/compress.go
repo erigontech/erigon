@@ -395,7 +395,6 @@ func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
 	elem.word = append(elem.word[:0], chars...)
 	elem.score = score
 	heap.Push(db, elem)
-	return
 }
 
 func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {

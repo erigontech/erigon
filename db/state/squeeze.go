@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/version"
 	"math"
 	"os"
 	"path/filepath"
@@ -57,17 +58,17 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 
 		filesToRemove = append(filesToRemove,
 			tempFileCopy,
-			strings.ReplaceAll(to, ".kv", ".kv.torrent"),
-			strings.ReplaceAll(to, ".kv", ".bt"),
-			strings.ReplaceAll(to, ".kv", ".bt.torrent"),
-			strings.ReplaceAll(to, ".kv", ".kvei"),
-			strings.ReplaceAll(to, ".kv", ".kvei.torrent"),
-			strings.ReplaceAll(to, ".kv", ".kvi"),
-			strings.ReplaceAll(to, ".kv", ".kvi.torrent"))
+			version.MakeMaskedWithExtReplace(to, ".kv.torrent"),
+			version.MakeMaskedWithExtReplace(to, ".bt"),
+			version.MakeMaskedWithExtReplace(to, ".bt.torrent"),
+			version.MakeMaskedWithExtReplace(to, ".kvei"),
+			version.MakeMaskedWithExtReplace(to, ".kvei.torrent"),
+			version.MakeMaskedWithExtReplace(to, ".kvi"),
+			version.MakeMaskedWithExtReplace(to, ".kvi.torrent"))
 	}
 
 	for _, f := range filesToRemove {
-		if err := dir.RemoveFile(f); err != nil {
+		if err := dir.RemoveFilesByMask(f); err != nil {
 			return err
 		}
 	}
@@ -319,7 +320,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	}
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	if err != nil {
 		return "", err
 	}
@@ -473,7 +474,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomains(rwTx, log.New())
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 			if err != nil {
 				return nil, err
 			}

@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -210,11 +211,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// Cap the maximum gas allowance according to EIP-7825 if Osaka
 		hi = params.MaxTxnGasLimit
 	}
-	// Recap the highest gas allowance with specified gascap.
-	if hi > api.GasCap {
-		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
-		hi = api.GasCap
-	}
 
 	var feeCap *big.Int
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
@@ -233,7 +229,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("can't get the current state")
 		}
 
-		balance, err := state.GetBalance(*args.From) // from can't be nil
+		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
 			return 0, err
 		}
@@ -244,6 +240,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			}
 			available.Sub(available, args.Value.ToInt())
 		}
+
 		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
@@ -256,6 +253,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)
 			hi = allowance.Uint64()
 		}
+	}
+
+	// Recap the highest gas allowance with specified gascap.
+	if hi > api.GasCap {
+		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
+		hi = api.GasCap
 	}
 
 	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, header, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
@@ -273,13 +276,13 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if state == nil {
 			return 0, errors.New("can't get the current state")
 		}
-		codeSize, err := state.GetCodeSize(*args.To)
+		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
 		if args.To != nil && codeSize == 0 {
-			result, err := caller.DoCallWithNewGas(ctx, params.TxGas, engine)
-			if err == nil && result != nil && !result.Failed() {
+			failed, _, err := doCall(ctx, caller, params.TxGas, engine)
+			if err == nil && !failed {
 				return hexutil.Uint64(params.TxGas), nil
 			}
 		}
@@ -287,12 +290,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// We first execute the transaction at the highest allowable gas limit, since if this fails we
 	// can return error immediately.
-	result, err := caller.DoCallWithNewGas(ctx, hi, engine)
-	if err != nil || result == nil {
+	failed, result, err := doCall(ctx, caller, hi, engine)
+	if err != nil {
 		return 0, err
 	}
-	if result.Failed() {
-		if !errors.Is(result.Err, vm.ErrOutOfGas) {
+	if failed {
+		if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
 			if len(result.Revert()) > 0 {
 				return 0, ethapi2.NewRevertError(result)
 			}
@@ -314,11 +317,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// binary search.
 	optimisticGasLimit := (result.GasUsed + params.CallStipend) * 64 / 63
 	if optimisticGasLimit < hi {
-		result, err := caller.DoCallWithNewGas(ctx, optimisticGasLimit, engine)
-		if err != nil || result == nil {
+		failed, _, err := doCall(ctx, caller, optimisticGasLimit, engine)
+		if err != nil {
 			return 0, err
 		}
-		if result.Failed() {
+		if failed {
 			lo = optimisticGasLimit
 		} else {
 			hi = optimisticGasLimit
@@ -331,20 +334,45 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			break
 		}
 		mid := (hi + lo) / 2
-		result, err := caller.DoCallWithNewGas(ctx, mid, engine)
+		if mid > lo*2 {
+			// Most txs don't need much higher gas limit than their gas used, and most txs don't
+			// require near the full block limit of gas, so the selection of where to bisect the
+			// range here is skewed to favor the low side.
+			mid = lo * 2
+		}
+		failed, _, err := doCall(ctx, caller, mid, engine)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more.
-		if err != nil && !errors.Is(err, protocol.ErrIntrinsicGas) {
+		if err != nil {
 			return 0, err
 		}
-		if errors.Is(err, protocol.ErrIntrinsicGas) || result.Failed() {
+		if failed {
 			lo = mid
 		} else {
 			hi = mid
 		}
 	}
 	return hexutil.Uint64(hi), nil
+}
+
+// execute is a helper that executes the transaction under a given gas limit and
+// returns true if the transaction fails for a reason that might be related to
+// not enough gas. A non-nil error means execution failed due to reasons unrelated
+// to the gas limit.
+func doCall(ctx context.Context, caller *transactions.ReusableCaller, gasLimit uint64, engine rules.EngineReader) (bool, *evmtypes.ExecutionResult, error) {
+	result, err := caller.DoCallWithNewGas(ctx, gasLimit, engine)
+	if err != nil {
+		if errors.Is(err, protocol.ErrIntrinsicGas) {
+			return true, nil, nil // Special case, raise gas limit
+		}
+
+		if errors.Is(err, protocol.ErrGasLimitTooHigh) {
+			return true, nil, nil // Special case, lower gas limit
+		}
+		return true, nil, err
+	}
+	return result.Failed(), result, nil
 }
 
 type StorageKeysInfo struct {
@@ -403,7 +431,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -483,7 +511,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
-	proof.CodeHash = acc.CodeHash
+	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie
@@ -530,7 +558,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		res, _, err := reader.ReadAccountStorage(address, storageKey.Hash)
+		res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(storageKey.Hash))
 		if err != nil {
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
@@ -596,7 +624,7 @@ func verifyExecResult(execResult *protocol.EphemeralExecResult, block *types.Blo
 	return nil
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -659,7 +687,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, errors.New("engine is not rules.Engine")
 	}
 
-	roTx2, err := db.BeginRo(ctx)
+	roTx2, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -685,7 +713,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(txBatch2, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -757,7 +785,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
 	}
 	witnessBufBytes := witnessBuffer.Bytes()
-	witnessBufBytesCopy := common.CopyBytes(witnessBufBytes)
+	witnessBufBytesCopy := common.Copy(witnessBufBytes)
 	return witnessBufBytesCopy, nil
 }
 
@@ -842,7 +870,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if reply.Found {
 				nonce = reply.Nonce + 1
 			} else {
-				a, err := stateReader.ReadAccountData(*args.From)
+				a, err := stateReader.ReadAccountData(accounts.InternAddress(*args.From))
 				if err != nil {
 					return nil, err
 				}
@@ -869,7 +897,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	excl[*args.From] = struct{}{}
 	excl[to] = struct{}{}
 	for _, pc := range precompiles {
-		excl[pc] = struct{}{}
+		excl[pc.Value()] = struct{}{}
 	}
 
 	// Create an initial tracer
@@ -877,11 +905,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if args.AccessList != nil {
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
+
 	for {
 		state := state.New(stateReader)
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
-			if err := stateOverrides.Override(state, blockCtx.Rules(chainConfig)); err != nil {
+			if err := stateOverrides.OverrideAndCommit(state, blockCtx.Rules(chainConfig)); err != nil {
 				return nil, err
 			}
 		}

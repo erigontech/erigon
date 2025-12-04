@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -135,7 +136,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return hash, err
 	}
 
-	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
+	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
@@ -196,7 +197,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	if stateOverride != nil {
-		err = stateOverride.Override(evm.IntraBlockState(), blockCtx.Rules(chainConfig))
+		err = stateOverride.OverrideAndCommit(evm.IntraBlockState(), blockCtx.Rules(chainConfig))
 		if err != nil {
 			return nil, err
 		}
@@ -213,7 +214,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.BaseFee = *bundle.BlockOverride.BaseFee
 		}
 		if bundle.BlockOverride.Coinbase != nil {
-			blockCtx.Coinbase = *bundle.BlockOverride.Coinbase
+			blockCtx.Coinbase = accounts.InternAddress(*bundle.BlockOverride.Coinbase)
 		}
 		if bundle.BlockOverride.Difficulty != nil {
 			blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*bundle.BlockOverride.Difficulty))

@@ -28,11 +28,12 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -309,7 +310,7 @@ type internalIssuance struct {
 
 func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader) (internalIssuance, error) {
 	// TODO: aura seems to be already broken in the original version of this RPC method
-	rewards, err := engine.CalculateRewards(chainConfig, block.HeaderNoCopy(), block.Uncles(), func(contract common.Address, data []byte) ([]byte, error) {
+	rewards, err := engine.CalculateRewards(chainConfig, block.HeaderNoCopy(), block.Uncles(), func(contract accounts.Address, data []byte) ([]byte, error) {
 		return nil, nil
 	})
 	if err != nil {

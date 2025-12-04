@@ -63,7 +63,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			// Add transactions and stuff on the last block
 			for i := 0; i < transactions; i++ {
 				tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
-					u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), *types.LatestSignerForChainID(nil), key)
+					&u256.Num0, 50000, &u256.Num1, make([]byte, dataSize)), *types.LatestSignerForChainID(nil), key)
 				b.AddTx(tx)
 			}
 			for i := 0; i < uncles; i++ {

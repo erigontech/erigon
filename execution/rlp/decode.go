@@ -69,7 +69,6 @@ func IsInvalidRLPError(err error) bool {
 	return errors.Is(err, ErrExpectedString) ||
 		errors.Is(err, ErrExpectedList) ||
 		errors.Is(err, ErrCanonInt) ||
-		errors.Is(err, ErrCanonInt) ||
 		errors.Is(err, ErrCanonSize) ||
 		errors.Is(err, ErrElemTooLarge) ||
 		errors.Is(err, ErrValueTooLarge) ||
@@ -203,9 +202,9 @@ func addErrorContext(err error, ctx string) error {
 }
 
 var (
-	decoderInterface = reflect.TypeOf(new(Decoder)).Elem()
-	bigInt           = reflect.TypeOf(big.Int{})
-	uint256Int       = reflect.TypeOf(uint256.Int{})
+	decoderInterface = reflect.TypeFor[Decoder]()
+	bigInt           = reflect.TypeFor[big.Int]()
+	uint256Int       = reflect.TypeFor[uint256.Int]()
 )
 
 func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {
@@ -578,7 +577,7 @@ func makeNilPtrDecoder(etype reflect.Type, etypeinfo *typeinfo, nilKind Kind) de
 	}
 }
 
-var ifsliceType = reflect.TypeOf([]interface{}{})
+var ifsliceType = reflect.TypeFor[[]interface{}]()
 
 func decodeInterface(s *Stream, val reflect.Value) error {
 	if val.Type().NumMethod() != 0 {
@@ -837,6 +836,10 @@ func (s *Stream) uint(maxbits int) (uint64, error) {
 	}
 }
 
+// Deprecated: Uint256Bytes generates unecessary garbage by
+// returning a heap buffer which is immediately converted
+// into an array and disguared.  Use Uint256() instead
+// which processed the buffer internally so it doesnt leak
 func (s *Stream) Uint256Bytes() ([]byte, error) {
 	b, err := s.bigIntBytes()
 	if err != nil {
@@ -846,6 +849,52 @@ func (s *Stream) Uint256Bytes() ([]byte, error) {
 		return nil, errUintOverflow
 	}
 	return b, nil
+}
+
+func (s *Stream) Uint256() (i uint256.Int, err error) {
+	var buffer []byte
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return i, err
+	case kind == List:
+		return i, ErrExpectedString
+	case kind == Byte:
+		buffer = s.uintbuf[:1]
+		buffer[0] = s.byteval
+		s.kind = -1 // re-arm Kind
+	case size == 0:
+		// Avoid zero-length read.
+		s.kind = -1
+	case size > 32:
+		return i, ErrElemTooLarge
+	case size <= uint64(len(s.uintbuf)):
+		// For integers smaller than s.uintbuf, allocating a buffer
+		// can be avoided.
+		buffer = s.uintbuf[:size]
+		if err := s.readFull(buffer); err != nil {
+			return i, err
+		}
+		// Reject inputs where single byte encoding should have been used.
+		if size == 1 && buffer[0] < 128 {
+			return i, ErrCanonSize
+		}
+	default:
+		// For large integers, a temporary buffer is needed.
+		buffer = make([]byte, size)
+		if err := s.readFull(buffer); err != nil {
+			return i, err
+		}
+	}
+
+	// Reject leading zero bytes.
+	if len(buffer) > 0 && buffer[0] == 0 {
+		return i, ErrCanonInt
+	}
+
+	i.SetBytes(buffer)
+
+	return i, nil
 }
 
 func (s *Stream) bigIntBytes() ([]byte, error) {

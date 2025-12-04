@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -382,9 +383,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if baseFeeChanged {
 		p.pending.best.pendingBaseFee = pendingBaseFee
 		p.pending.worst.pendingBaseFee = pendingBaseFee
-		p.baseFee.best.pendingBastFee = pendingBaseFee
+		p.baseFee.best.pendingBaseFee = pendingBaseFee
 		p.baseFee.worst.pendingBaseFee = pendingBaseFee
-		p.queued.best.pendingBastFee = pendingBaseFee
+		p.queued.best.pendingBaseFee = pendingBaseFee
 		p.queued.worst.pendingBaseFee = pendingBaseFee
 	}
 
@@ -938,7 +939,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 
 		var sender common.Address
 		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(sender)
+		txn.SetSender(accounts.InternAddress(sender))
 		txns = append(txns, txn)
 	}
 
@@ -1650,10 +1651,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		//Regular txn threshold checks
 		tipThreshold := uint256.NewInt(0)
 		tipThreshold = tipThreshold.Mul(&found.TxnSlot.Tip, uint256.NewInt(100+priceBump))
-		tipThreshold.Div(tipThreshold, u256.N100)
+		tipThreshold.Div(tipThreshold, &u256.N100)
 		feecapThreshold := uint256.NewInt(0)
 		feecapThreshold.Mul(&found.TxnSlot.FeeCap, uint256.NewInt(100+priceBump))
-		feecapThreshold.Div(feecapThreshold, u256.N100)
+		feecapThreshold.Div(feecapThreshold, &u256.N100)
 
 		if mt.TxnSlot.Value.Cmp(&found.TxnSlot.Value) > 0 {
 			//Potential latent overdraft attack
@@ -2694,6 +2695,8 @@ func (p *TxPool) logStats() {
 func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 	var txns []*metaTxn
 	var senders []common.Address
+	var subPoolTypes []SubPoolType
+	var rlpValues [][]byte
 
 	p.lock.Lock()
 
@@ -2701,6 +2704,8 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
 			txns = append(txns, mt)
 			senders = append(senders, sender)
+			subPoolTypes = append(subPoolTypes, mt.currentSubPool)
+			rlpValues = append(rlpValues, mt.TxnSlot.Rlp)
 		}
 
 		return true
@@ -2709,7 +2714,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 	p.lock.Unlock()
 
 	for i := range txns {
-		slotRlp := txns[i].TxnSlot.Rlp
+		slotRlp := rlpValues[i]
 		if slotRlp == nil {
 			v, err := tx.GetOne(kv.PoolTransaction, txns[i].TxnSlot.IDHash[:])
 			if err != nil {
@@ -2723,7 +2728,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 			slotRlp = v[20:]
 		}
 
-		f(slotRlp, senders[i], txns[i].currentSubPool)
+		f(slotRlp, senders[i], subPoolTypes[i])
 	}
 }
 

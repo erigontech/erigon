@@ -27,33 +27,28 @@ func ByteCount(b uint64) string {
 	if b < unit {
 		return fmt.Sprintf("%dB", b)
 	}
-	bGb, exp := MBToGB(b)
-	return fmt.Sprintf("%.1f%cB", bGb, "KMGTPE"[exp])
-}
-
-func MBToGB(b uint64) (float64, int) {
-	const unit = 1024
-	if b < unit {
-		return float64(b), 0
-	}
 
 	div, exp := uint64(unit), 0
 	for n := b / unit; n >= unit; n /= unit {
 		div *= unit
 		exp++
 	}
+	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "KMGTPE"[exp])
 
-	return float64(b) / float64(div), exp
 }
 
 var Copy = bytes.Clone
 
 func Append(data ...[]byte) []byte {
-	s := new(bytes.Buffer)
+	var totalLen int
 	for _, d := range data {
-		s.Write(d)
+		totalLen += len(d)
 	}
-	return s.Bytes()
+	result := make([]byte, 0, totalLen)
+	for _, d := range data {
+		result = append(result, d...)
+	}
+	return result
 }
 
 func EnsureEnoughSize(in []byte, size int) []byte {
@@ -96,8 +91,8 @@ func isHex(str string) bool {
 	if len(str)%2 != 0 {
 		return false
 	}
-	for _, c := range []byte(str) {
-		if !isHexCharacter(c) {
+	for i := 0; i < len(str); i++ {
+		if !isHexCharacter(str[i]) {
 			return false
 		}
 	}

@@ -22,7 +22,7 @@ import (
 	"reflect"
 )
 
-var bytesT = reflect.TypeOf(Bytes(nil))
+var bytesT = reflect.TypeFor[Bytes]()
 
 // Bytes marshals/unmarshals as a JSON string with 0x prefix.
 // The empty slice marshals as "0x".
