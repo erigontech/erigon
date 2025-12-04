@@ -136,6 +136,10 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 		}
 		if overrideBalancerTime != nil {
 			config.BalancerTime = overrideBalancerTime
+			if config.CensoringSchedule != nil {
+				var noCensoring chain.CensoringConfig
+				config.CensoringSchedule[*overrideBalancerTime] = &noCensoring
+			}
 		}
 	}
 
