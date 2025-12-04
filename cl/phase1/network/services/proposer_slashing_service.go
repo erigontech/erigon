@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type proposerSlashingService struct {
@@ -63,13 +63,17 @@ func NewProposerSlashingService(
 	}
 }
 
+func (s *proposerSlashingService) Names() []string {
+	return []string{gossip.TopicNameProposerSlashing}
+}
+
 func (s *proposerSlashingService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameProposerSlashing
 }
 
-func (s *proposerSlashingService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.ProposerSlashing, error) {
+func (s *proposerSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.ProposerSlashing, error) {
 	obj := &cltypes.ProposerSlashing{}
-	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil

@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -101,17 +102,25 @@ func NewAttestationService(
 	return a
 }
 
+func (s *attestationService) Names() []string {
+	names := make([]string, 0, s.netCfg.AttestationSubnetCount)
+	for i := 0; i < int(s.netCfg.AttestationSubnetCount); i++ {
+		names = append(names, gossip.TopicNameBeaconAttestation(uint64(i)))
+	}
+	return names
+}
+
 func (s *attestationService) IsMyGossipMessage(name string) bool {
 	return gossip.IsTopicBeaconAttestation(name)
 }
 
-func (s *attestationService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*AttestationForGossip, error) {
+func (s *attestationService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*AttestationForGossip, error) {
 	obj := &AttestationForGossip{
-		Receiver:         copyOfPeerData(data),
+		Receiver:         &sentinelproto.Peer{Pid: pid.String()},
 		ImmediateProcess: false,
 	}
 	obj.SingleAttestation = &solid.SingleAttestation{}
-	if err := obj.SingleAttestation.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SingleAttestation.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil

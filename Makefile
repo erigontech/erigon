@@ -181,7 +181,6 @@ COMMANDS += sentry
 COMMANDS += state
 COMMANDS += txpool
 COMMANDS += evm
-COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += snapshots
 COMMANDS += diag

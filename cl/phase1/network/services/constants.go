@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils/bls"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const (
@@ -52,18 +51,3 @@ var (
 	computeSigningRoot = fork.ComputeSigningRoot
 	blsVerify          = bls.Verify
 )
-
-func copyOfPeerData(in *sentinelproto.GossipData) *sentinelproto.Peer {
-	if in == nil || in.Peer == nil {
-		return nil
-	}
-	ret := new(sentinelproto.Peer)
-	ret.State = in.Peer.State
-	ret.Pid = in.Peer.Pid
-	ret.Enr = in.Peer.Enr
-	ret.Direction = in.Peer.Direction
-	ret.AgentVersion = in.Peer.AgentVersion
-	ret.Address = in.Peer.Address
-
-	return ret
-}
