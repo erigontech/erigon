@@ -308,8 +308,12 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 		contract.IsSystemCall = isSystemCall(caller.Address())
 		if trace {
+			vs := ""
+			if value != nil {
+				vs = value.String()
+			}
 			fmt.Printf("code CALLER %s TO %s (system=%t) VALUE %s GAS %d CODE %x\n",
-				contract.Caller().String(), contract.self.String(), contract.IsSystemCall, value.String(), gas, code)
+				contract.Caller().String(), contract.self.String(), contract.IsSystemCall, vs, gas, code)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 
