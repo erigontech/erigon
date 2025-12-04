@@ -26,7 +26,8 @@ jobs:
 
   Build:
     # runs-on: ubuntu-latest
-    runs-on: [devops-01-self-hosted]
+    runs-on:
+      group: hive
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
