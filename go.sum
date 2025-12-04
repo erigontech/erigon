@@ -306,6 +306,8 @@ github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXE
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
 github.com/erigontech/mdbx-go v0.39.11 h1:4qp5jDakeisZ+1ABaLcQe46acE/Z0Q+/mcCAahXRnR8=
 github.com/erigontech/mdbx-go v0.39.11/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
+github.com/erigontech/mdbx-go v0.40.1-0.20251204113142-4f55f444de77 h1:gOonFsYp5R1++8PzDdeGpML93Wr1kLGNXOXZezkeDu8=
+github.com/erigontech/mdbx-go v0.40.1-0.20251204113142-4f55f444de77/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
 github.com/erigontech/secp256k1 v1.2.0 h1:Q/HCBMdYYT0sh1xPZ9ZYEnU30oNyb/vt715cJhj7n7A=
 github.com/erigontech/secp256k1 v1.2.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
 github.com/erigontech/silkworm-go v0.24.0 h1:fFe74CjQM5LI7ouMYjmqfFaqIFzQTpMrt+ls+a5PxpE=
