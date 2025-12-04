@@ -280,8 +280,8 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	if dbg.EnvBool("CHECK_COMMITMENT_KVS_DEREF_SEQUENTIAL", false) {
 		eg.SetLimit(1)
 	}
-	var integrityErr error
 	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
+	var integrityHit atomic.Bool
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -296,8 +296,13 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 				plainStorages.Add(counts.plainStorages)
 				return nil
 			}
-			if !failFast {
+			if errors.Is(err, ErrIntegrity) {
+				if failFast {
+					return err
+				}
 				logger.Warn(err.Error())
+				integrityHit.Store(true)
+				return nil
 			}
 			return err
 		})
@@ -316,7 +321,10 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		"referencedStorages", referencedStorages.Load(),
 		"plainStorages", plainStorages.Load(),
 	)
-	return integrityErr
+	if integrityHit.Load() {
+		return ErrIntegrity
+	}
+	return nil
 }
 
 type derefCounts struct {
