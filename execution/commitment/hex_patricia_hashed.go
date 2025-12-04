@@ -2318,7 +2318,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.trace = true
 
-	if collectCommitmentMetrics {
+	if hph.metrics.collectCommitmentMetrics {
 		hph.metrics.Reset()
 		hph.metrics.updates.Store(updatesCount)
 		defer func() {
@@ -2455,6 +2455,10 @@ func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 }
 
 func (hph *HexPatriciaHashed) SetCapture(capture []string) { hph.capture = capture }
+
+func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
+	hph.metrics.EnableCsvMetrics(filePathPrefix)
+}
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 

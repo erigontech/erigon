@@ -15,21 +15,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-/*
-ERIGON_COMMITMENT_TRACE - file path prefix to write commitment metrics
-*/
-func init() {
-	metricsFile = dbg.EnvString("ERIGON_COMMITMENT_TRACE", "")
-	collectCommitmentMetrics = true
-	writeCommitmentMetrics = metricsFile != ""
-}
-
-var (
-	metricsFile              string
-	collectCommitmentMetrics bool
-	writeCommitmentMetrics   bool
-)
-
 type CsvMetrics interface {
 	Headers() []string
 	Values() [][]string
@@ -49,6 +34,10 @@ type Metrics struct {
 	spentUnfolding  time.Duration
 	spentFolding    time.Duration
 	spentProcessing time.Duration
+	// metric config related
+	metricsFilePrefix        string
+	collectCommitmentMetrics bool
+	writeCommitmentMetrics   bool
 }
 
 type MetricValues struct {
@@ -81,9 +70,21 @@ func (m MetricValues) RUnlock() {
 }
 
 func NewMetrics() *Metrics {
-	return &Metrics{
-		Accounts: NewAccounts(),
+	metrics := &Metrics{
+		Accounts:                 NewAccounts(),
+		collectCommitmentMetrics: true,
 	}
+	csvFilePathPrefix := dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
+	if csvFilePathPrefix != "" {
+		metrics.EnableCsvMetrics(csvFilePathPrefix)
+	}
+	return metrics
+}
+
+func (m *Metrics) EnableCsvMetrics(filePathPrefix string) {
+	m.metricsFilePrefix = filePathPrefix
+	m.writeCommitmentMetrics = true
+	m.collectCommitmentMetrics = true
 }
 
 func (m *Metrics) AsValues() MetricValues {
@@ -106,10 +107,13 @@ func (m *Metrics) AsValues() MetricValues {
 }
 
 func (m *Metrics) WriteToCSV() {
-	if err := writeMetricsToCSV(m, metricsFile+"_process.csv"); err != nil {
+	if !m.writeCommitmentMetrics {
+		return
+	}
+	if err := writeMetricsToCSV(m, m.metricsFilePrefix+"_process.csv"); err != nil {
 		panic(err)
 	}
-	if err := writeMetricsToCSV(m.Accounts, metricsFile+"_accounts.csv"); err != nil {
+	if err := writeMetricsToCSV(m.Accounts, m.metricsFilePrefix+"_accounts.csv"); err != nil {
 		panic(err)
 	}
 }
@@ -169,7 +173,7 @@ func (m *Metrics) Values() [][]string {
 }
 
 func (m *Metrics) Reset() {
-	if !collectCommitmentMetrics {
+	if !m.collectCommitmentMetrics {
 		return
 	}
 
@@ -188,7 +192,7 @@ func (m *Metrics) Reset() {
 }
 
 func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
-	if !writeCommitmentMetrics {
+	if !m.writeCommitmentMetrics {
 		return
 	}
 	ends := make([]uint64, 0, len(endTxNumStats))
@@ -206,7 +210,7 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 }
 
 func (m *Metrics) Updates(plainKey []byte) {
-	if !collectCommitmentMetrics {
+	if !m.collectCommitmentMetrics {
 		return
 	}
 	if len(plainKey) == length.Addr {
@@ -221,7 +225,7 @@ func (m *Metrics) Updates(plainKey []byte) {
 }
 
 func (m *Metrics) AccountLoad(plainKey []byte) {
-	if collectCommitmentMetrics {
+	if m.collectCommitmentMetrics {
 		m.loadAccount.Add(1)
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadAccount++
@@ -230,7 +234,7 @@ func (m *Metrics) AccountLoad(plainKey []byte) {
 }
 
 func (m *Metrics) StorageLoad(plainKey []byte) {
-	if collectCommitmentMetrics {
+	if m.collectCommitmentMetrics {
 		m.loadStorage.Add(1)
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadStorage++
@@ -239,7 +243,7 @@ func (m *Metrics) StorageLoad(plainKey []byte) {
 }
 
 func (m *Metrics) BranchLoad(plainKey []byte) {
-	if collectCommitmentMetrics {
+	if m.collectCommitmentMetrics {
 		m.loadBranch.Add(1)
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadBranch++
@@ -248,7 +252,7 @@ func (m *Metrics) BranchLoad(plainKey []byte) {
 }
 
 func (m *Metrics) StartUnfolding(plainKey []byte) func() {
-	if collectCommitmentMetrics {
+	if m.collectCommitmentMetrics {
 		start := time.Now()
 		m.unfolds.Add(1)
 		return func() {
@@ -263,7 +267,7 @@ func (m *Metrics) StartUnfolding(plainKey []byte) func() {
 }
 
 func (m *Metrics) StartFolding(plainKey []byte) func() {
-	if collectCommitmentMetrics {
+	if m.collectCommitmentMetrics {
 		start := time.Now()
 		return func() {
 			d := time.Since(start)
@@ -277,7 +281,7 @@ func (m *Metrics) StartFolding(plainKey []byte) func() {
 }
 
 func (m *Metrics) TotalProcessingTimeInc(t time.Time) {
-	if collectCommitmentMetrics {
+	if m.collectCommitmentMetrics {
 		m.spentProcessing += time.Since(t)
 	}
 }
@@ -362,10 +366,7 @@ func (am *AccountMetrics) Reset() {
 	am.AccountStats = make(map[string]*AccountStats)
 }
 
-func writeMetricsToCSV(metrics CsvMetrics, filePath string) error {
-	if !writeCommitmentMetrics {
-		return nil
-	}
+func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 	// Open the file in append mode or create if it doesn't exist
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
