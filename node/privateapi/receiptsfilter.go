@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 type ReceiptsFilterAggregator struct {

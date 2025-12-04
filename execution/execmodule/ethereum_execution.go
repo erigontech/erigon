@@ -133,8 +133,6 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.Temp
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stageloop.Hook, accumulator *shards.Accumulator,
-	recentLogs *shards.RecentLogs,
-	hook *stageloop.Hook, accumulator *shards.Accumulator,
 	recentReceipts *shards.RecentReceipts,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine rules.Engine,
