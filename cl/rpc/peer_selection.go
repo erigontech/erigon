@@ -112,7 +112,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				log.Debug("[peerSelector] empty cgc", "peer", pid)
 				continue
 			}
-			custodyIndices := map[cltypes.CustodyIndex]bool{}
+			var custodyIndices map[cltypes.CustodyIndex]bool
 			if peer.EnodeId == "" {
 				// if no enode id, use all custody indices
 				custodyIndices = allCustodyIndices
