@@ -235,7 +235,7 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
-	// fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
+	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
@@ -350,7 +350,7 @@ func (branchData BranchData) String() string {
 	pos := 4
 	var sb strings.Builder
 	var cell cell
-	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
+	fmt.Fprintf(&sb, "(%d) touchMap %016b, afterMap %016b\n", len(branchData), touchMap, afterMap)
 	for bitset, j := touchMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
@@ -718,6 +718,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 					return fmt.Errorf("accountAddr mismatch with storageAddr: %s != %x", common.BytesToAddress(c.accountAddr[:]), common.BytesToHash(c.storageAddr[:length.Addr]))
 				}
 			} else {
+				//nolint:staticcheck
 				//fmt.Printf("--- debug --- cell with accountAddrLen=0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
 			}
 		}
@@ -1171,12 +1172,12 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		c.update.Balance.Set(&acc.Balance)
 		c.update.Flags |= BalanceUpdate
 	}
-	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
-		if len(acc.CodeHash.Bytes()) == 0 {
+	if acc.CodeHash.Value() != c.update.CodeHash {
+		if acc.CodeHash.IsEmpty() {
 			c.update.CodeHash = empty.CodeHash
 		} else {
 			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash
+			c.update.CodeHash = acc.CodeHash.Value()
 		}
 	}
 }

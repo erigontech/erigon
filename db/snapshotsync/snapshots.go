@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -425,8 +424,13 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		f := s.FilePath()
 		s.closeIdx()
 		s.closeSeg()
+		toRemove := make([]string, 0, 2)
+		toRemove = append(toRemove, f)
+		for _, index := range s.indexes {
+			toRemove = append(toRemove, index.FilePath())
+		}
 
-		removeOldFiles([]string{f})
+		removeOldFiles(toRemove)
 	}
 }
 
@@ -523,20 +527,6 @@ func (s *RoTx) Close() {
 	}
 
 	//fmt.Println("CRO", s.segments)
-}
-
-type BlockSnapshots interface {
-	LogStat(label string)
-	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
-	SegmentsMax() uint64
-	Delete(fileNames ...string) error
-	Types() []snaptype.Type
-	Close()
-	DownloadComplete()
-	RemoveOverlaps(onDelete func(l []string) error) error
-	DownloadReady() bool
-	Ready(context.Context) <-chan error
 }
 
 type retireOperators struct {
@@ -1692,15 +1682,6 @@ func removeOldFiles(toDel []string) {
 	for _, f := range toDel {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = dir.RemoveFile(withoutExt + ".idx")
-		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
-		if isTxnType {
-			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
-			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
-		}
 	}
 }
 

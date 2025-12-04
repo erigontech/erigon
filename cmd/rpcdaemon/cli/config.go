@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -68,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/debug"
@@ -182,9 +182,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
 	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketSubscribeLogsChannelSize, utils.WSSubscribeLogsChannelSize.Name, utils.WSSubscribeLogsChannelSize.Value, utils.WSSubscribeLogsChannelSize.Usage)
-
-	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBStepSize, utils.ErigonDBStepSizeFlag.Name, utils.ErigonDBStepSizeFlag.Value, utils.ErigonDBStepSizeFlag.Usage)
-	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBStepsInFrozenFile, utils.ErigonDBStepsInFrozenFileFlag.Name, utils.ErigonDBStepsInFrozenFileFlag.Value, utils.ErigonDBStepsInFrozenFileFlag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -432,18 +429,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 
-		if cfg.ErigonDBStepSize == config3.DefaultStepSize {
-			logger.Info("Using default step size", "size", cfg.ErigonDBStepSize)
-		} else {
-			logger.Warn("OVERRIDING STEP SIZE; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "size", cfg.ErigonDBStepSize, "default", config3.DefaultStepSize)
-		}
-		if cfg.ErigonDBStepsInFrozenFile == config3.DefaultStepsInFrozenFile {
-			logger.Info("Using default number of steps in frozen files", "steps", cfg.ErigonDBStepsInFrozenFile)
-		} else {
-			logger.Warn("OVERRIDING NUMBER OF STEPS IN FROZEN FILES; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", cfg.ErigonDBStepsInFrozenFile, "default", config3.DefaultStepsInFrozenFile)
-		}
-
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).StepSize(cfg.ErigonDBStepSize).StepsInFrozenFile(cfg.ErigonDBStepsInFrozenFile).Open(ctx, rawDB)
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).Open(ctx, rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
@@ -976,7 +962,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	return engineListener, engineSrv, engineAddr.String(), nil
 }
 
-var remoteRulesEngineNotReadyErr = errors.New("remote rules engine not ready")
+var errRemoteRulesEngineNotReady = errors.New("remote rules engine not ready")
 
 type remoteRulesEngine struct {
 	engine rules.Engine
@@ -994,7 +980,7 @@ func (e *remoteRulesEngine) Engine() rules.EngineReader {
 
 func (e *remoteRulesEngine) validateEngineReady() error {
 	if !e.HasEngine() {
-		return remoteRulesEngineNotReadyErr
+		return errRemoteRulesEngineNotReady
 	}
 
 	return nil
@@ -1041,15 +1027,15 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader services.FullBlockReade
 	return nil
 }
 
-func (e *remoteRulesEngine) Author(header *types.Header) (common.Address, error) {
+func (e *remoteRulesEngine) Author(header *types.Header) (accounts.Address, error) {
 	if err := e.validateEngineReady(); err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
 
 	return e.engine.Author(header)
 }
 
-func (e *remoteRulesEngine) IsServiceTransaction(sender common.Address, syscall rules.SystemCall) bool {
+func (e *remoteRulesEngine) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}

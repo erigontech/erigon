@@ -23,6 +23,14 @@ accounts:
         efi:
             current: v2.0
             min: v1.0
+bodies:
+  block:
+    idx:
+      current: v2.0
+      min: v1.0
+    seg:
+      current: v1.1
+      min: v1.0
 code:
     domain:
         bt:
@@ -70,6 +78,14 @@ commitment:
         efi:
             current: v2.0
             min: v1.0
+headers:
+  block:
+    idx:
+      current: v2.0
+      min: v1.0
+    seg:
+      current: v1.1
+      min: v1.0
 logaddrs:
     ii:
         ef:
@@ -176,30 +192,14 @@ tracesto:
             min: v1.0
 transactions:
     block:
-        seg:
-            current: v1.1
-            min: v1.0
         idx:
-            current: v1.1
+          current: v2.0
             min: v1.0
-bodies:
-    block:
         seg:
-            current: v1.1
-            min: v1.0
-        idx:
-            current: v1.1
-            min: v1.0
-headers:
-    block:
-        seg:
-            current: v1.1
-            min: v1.0
-        idx:
             current: v1.1
             min: v1.0
 transactiontoblock:
     block:
         idx:
-            current: v1.1
+          current: v2.0
             min: v1.0

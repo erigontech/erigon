@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -41,11 +41,11 @@ import (
 const reorgTooDeepDepth = 3
 
 type ExecutionClientDirect struct {
-	chainRW eth1_chain_reader.ChainReaderWriterEth1
+	chainRW chainreader.ChainReaderWriterEth1
 	txpool  txpoolproto.TxpoolClient
 }
 
-func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient) (*ExecutionClientDirect, error) {
+func NewExecutionClientDirect(chainRW chainreader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient) (*ExecutionClientDirect, error) {
 	return &ExecutionClientDirect{
 		chainRW: chainRW,
 		txpool:  txpool,

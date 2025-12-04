@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	polygonchain "github.com/erigontech/erigon/polygon/chain"
 )
 
@@ -330,7 +331,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(tx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -354,7 +355,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
 	if hasConstructorAllocation && g.Config.Aura != nil {
-		statedb.CreateAccount(common.Address{}, false)
+		statedb.CreateAccount(accounts.ZeroAddress, false)
 	}
 
 	addrs := sortedAllocAddresses(g.Alloc)
@@ -365,23 +366,24 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 		if overflow {
 			panic("overflow at genesis allocs")
 		}
-		statedb.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
-		statedb.SetCode(addr, account.Code)
-		statedb.SetNonce(addr, account.Nonce)
+		address := accounts.InternAddress(addr)
+		statedb.AddBalance(address, *balance, tracing.BalanceIncreaseGenesisBalance)
+		statedb.SetCode(address, account.Code)
+		statedb.SetNonce(address, account.Nonce)
 		var slotVal uint256.Int
 		for key, value := range account.Storage {
 			slotVal.SetBytes(value.Bytes())
-			statedb.SetState(addr, key, slotVal)
+			statedb.SetState(address, accounts.InternKey(key), slotVal)
 		}
 
 		if len(account.Constructor) > 0 {
-			if _, err = protocol.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
+			if _, err = protocol.SysCreate(address, account.Constructor, g.Config, statedb, head); err != nil {
 				return nil, nil, err
 			}
 		}
 
 		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
-			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+			statedb.SetIncarnation(address, state.FirstContractIncarnation)
 		}
 	}
 	if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {

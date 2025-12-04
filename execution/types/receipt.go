@@ -118,6 +118,7 @@ type storedReceiptRLP struct {
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
+//
 // Deprecated: create receipts using a struct literal instead.
 func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 	r := &Receipt{
@@ -607,7 +608,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 		// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 		// and then the address of the contract one is creating this way will depend on the `tx.From`
 		// and the nonce of the creating account (which is `tx.From`).
-		r.ContractAddress = CreateAddress(sender, txn.GetNonce())
+		r.ContractAddress = CreateAddress(sender.Value(), txn.GetNonce())
 	}
 	// The used gas can be calculated based on previous r
 	if txnIdx == 0 {

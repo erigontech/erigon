@@ -38,6 +38,10 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 		return len(pending), len(queued), len(baseFee), fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
+	if b.Error != nil {
+		return 0, 0, 0, fmt.Errorf("txpool_content rpc failed: %w", b.Error)
+	}
+
 	resp, ok := b.Result.(map[string]interface{})
 
 	if !ok {

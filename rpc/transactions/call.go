@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -92,7 +94,7 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 		blockCtx.BaseFee = *o.BaseFee
 	}
 	if o.Coinbase != nil {
-		blockCtx.Coinbase = *o.Coinbase
+		blockCtx.Coinbase = accounts.InternAddress(*o.Coinbase)
 	}
 	if o.Difficulty != nil {
 		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
@@ -115,7 +117,7 @@ func DoCall(
 	tx kv.Tx,
 	blockNrOrHash rpc.BlockNumberOrHash,
 	header *types.Header,
-	overrides *ethapi2.StateOverrides,
+	stateOverrides *ethapi2.StateOverrides,
 	blockOverrides *ethapi2.BlockOverrides,
 	gasCap uint64,
 	chainConfig *chain.Config,
@@ -132,13 +134,6 @@ func DoCall(
 	*/
 
 	state := state.New(stateReader)
-
-	// Override the fields of specified contracts before execution.
-	if overrides != nil {
-		if err := overrides.Override(state); err != nil {
-			return nil, err
-		}
-	}
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -170,6 +165,12 @@ func DoCall(
 	if blockOverrides != nil {
 		blockOverrides.Override(&blockCtx)
 	}
+	// Override the fields of specified contracts before execution.
+	if stateOverrides != nil {
+		if err := stateOverrides.OverrideAndCommit(state, blockCtx.Rules(chainConfig)); err != nil {
+			return nil, err
+		}
+	}
 
 	txCtx := protocol.NewEVMTxContext(msg)
 
@@ -198,7 +199,7 @@ func DoCall(
 func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineReader, header *types.Header, tx kv.Getter,
 	reader services.CanonicalReader, config *chain.Config, blockOverrides *BlockOverrides, blockHashOverrides BlockHashOverrides) evmtypes.BlockContext {
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
-	blockContext := protocol.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
+	blockContext := protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 	if blockOverrides != nil {
 		blockOverrides.OverrideBlockContext(&blockContext, blockHashOverrides)
 	}
@@ -208,7 +209,7 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineRea
 func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
 	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
-	return protocol.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
+	return protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 }
 
 type BlockHashProvider func(blockNum uint64) (common.Hash, error)
@@ -242,21 +243,20 @@ func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services
 }
 
 type ReusableCaller struct {
-	evm             *vm.EVM
-	intraBlockState *state.IntraBlockState
-	gasCap          uint64
-	baseFee         *uint256.Int
-	stateReader     state.StateReader
-	callTimeout     time.Duration
-	message         *types.Message
+	evm            *vm.EVM
+	gasCap         uint64
+	baseFee        *uint256.Int
+	stateReader    state.StateReader
+	stateOverrides *ethapi2.StateOverrides
+	rules          *chain.Rules
+	callTimeout    time.Duration
+	message        *types.Message
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
-	engine rules.EngineReader,
-	overrides *ethapi2.StateOverrides,
-) (*evmtypes.ExecutionResult, error) {
+	engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
 	var cancel context.CancelFunc
 	if r.callTimeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, r.callTimeout)
@@ -272,11 +272,13 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	// reset the EVM so that we can continue to use it with the new context
 	txCtx := protocol.NewEVMTxContext(r.message)
-	if overrides == nil {
-		r.intraBlockState = state.New(r.stateReader)
+	ibs := state.New(r.stateReader)
+	if r.stateOverrides != nil {
+		if err := r.stateOverrides.OverrideAndCommit(ibs, r.rules); err != nil {
+			return nil, err
+		}
 	}
-
-	r.evm.Reset(txCtx, r.intraBlockState)
+	r.evm.Reset(txCtx, ibs)
 
 	timedOut := false
 	go func() {
@@ -286,6 +288,9 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
+	dbg.TraceInstructions = true
+	dbg.TraceTransactionIO = true
+	r.evm.IntraBlockState().SetTrace(true)
 	result, err := protocol.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
@@ -302,7 +307,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 func NewReusableCaller(
 	engine rules.EngineReader,
 	stateReader state.StateReader,
-	overrides *ethapi2.StateOverrides,
+	stateOverrides *ethapi2.StateOverrides,
 	blockOverrides *ethapi2.BlockOverrides,
 	header *types.Header,
 	initialArgs ethapi2.CallArgs,
@@ -313,13 +318,8 @@ func NewReusableCaller(
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
-	ibs := state.New(stateReader)
 
-	if overrides != nil {
-		if err := overrides.Override(ibs); err != nil {
-			return nil, err
-		}
-	}
+	ibs := state.New(stateReader)
 
 	var baseFee *uint256.Int
 	if header != nil && header.BaseFee != nil {
@@ -336,6 +336,7 @@ func NewReusableCaller(
 	}
 
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+
 	if blockOverrides != nil {
 		blockOverrides.Override(&blockCtx)
 	}
@@ -344,12 +345,13 @@ func NewReusableCaller(
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 
 	return &ReusableCaller{
-		evm:             evm,
-		intraBlockState: ibs,
-		baseFee:         baseFee,
-		gasCap:          gasCap,
-		callTimeout:     callTimeout,
-		stateReader:     stateReader,
-		message:         msg,
+		evm:            evm,
+		baseFee:        baseFee,
+		gasCap:         gasCap,
+		callTimeout:    callTimeout,
+		stateReader:    stateReader,
+		stateOverrides: stateOverrides,
+		rules:          blockCtx.Rules(chainConfig),
+		message:        msg,
 	}, nil
 }

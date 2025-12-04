@@ -21,7 +21,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Cleanup space
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+
+      - run: df -h
+
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6
@@ -31,6 +41,6 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: 'v2.5.0'
+          version: 'v2.6.2'
 
       - run: make lint

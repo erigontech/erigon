@@ -54,11 +54,10 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/execution/eth1"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
@@ -81,7 +80,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -119,7 +117,7 @@ type MockSentry struct {
 	StreamWg             sync.WaitGroup
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
-	Eth1ExecutionService *eth1.EthereumExecutionModule
+	Eth1ExecutionService *execmodule.EthereumExecutionModule
 	retirementStart      chan bool
 	retirementDone       chan struct{}
 	retirementWg         sync.WaitGroup
@@ -287,6 +285,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
+	cfg.Prune = prune
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -484,13 +483,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					&vm.Config{},
 					mock.Notifications,
 					cfg.StateStream,
-					/*stateStream=*/ false,
+					/*badBlockHalt*/ false,
 					dirs,
 					mock.BlockReader,
 					mock.sentriesClient.Hd,
 					gspec,
 					cfg.Sync,
 					nil,
+					/*experimentalBAL*/ false,
 				),
 				stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 				stagedsync.StageMiningExecCfg(mock.DB, miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
@@ -523,13 +523,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				&vm.Config{},
 				mock.Notifications,
 				cfg.StateStream,
-				/*stateStream=*/ false,
+				/*badBlockHalt*/ false,
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
 				nil,
+				/*experimentalBAL*/ false,
 			), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator), !withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -548,7 +549,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, tracer)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
-	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.RecentLogs, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
+	mock.Eth1ExecutionService = execmodule.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.RecentLogs, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -565,13 +566,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				&vm.Config{},
 				mock.Notifications,
 				cfg.StateStream,
-				/*stateStream=*/ false,
+				/*badBlockHalt*/ false,
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
 				nil,
+				/*experimentalBAL*/ false,
 			),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
@@ -610,16 +612,8 @@ func mockDownloader(ctrl *gomock.Controller) *downloaderproto.MockDownloaderClie
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
-		Add(gomock.Any(), gomock.Any(), gomock.Any()).
+		Download(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		SetLogPrefix(gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		Completed(gomock.Any(), gomock.Any()).
-		Return(&downloaderproto.CompletedReply{Completed: true}, nil).
 		AnyTimes()
 
 	return snapDownloader
@@ -722,110 +716,13 @@ func (ms *MockSentry) EnableLogs() {
 	ms.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
-func (ms *MockSentry) numberOfPoWBlocks(chain *blockgen.ChainPack) int {
-	if ms.ChainConfig.TerminalTotalDifficulty == nil {
-		return chain.Length()
-	}
-	return chain.NumberOfPoWBlocks()
-}
-
 func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
-func (ms *MockSentry) insertPoWBlocks(chain *blockgen.ChainPack) error {
-	n := ms.numberOfPoWBlocks(chain)
-	if n == 0 {
-		// No Proof-of-Work blocks
-		return nil
-	}
-	for i := 0; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(false); err != nil {
-			return err
-		}
-	}
-
-	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.Blocks[n-1],
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	if err != nil {
-		return err
-	}
-	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}) {
-		if err != nil {
-			return err
-		}
-	}
-
-	// Send all the headers
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers[0:n],
-	})
-	if err != nil {
-		return err
-	}
-	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}) {
-		if err != nil {
-			return err
-		}
-	}
-
-	// Send all the bodies
-	packet := make(eth.BlockBodiesPacket, n)
-	for i, block := range chain.Blocks[0:n] {
-		packet[i] = block.Body()
-	}
-	b, err = rlp.EncodeToBytes(&eth.BlockBodiesPacket66{
-		RequestId:         1,
-		BlockBodiesPacket: packet,
-	})
-	if err != nil {
-		return err
-	}
-	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}) {
-		if err != nil {
-			return err
-		}
-	}
-	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
-
-	if ms.TxPool != nil {
-		ms.ReceiveWg.Add(1)
-	}
-	initialCycle, firstCycle := MockInsertAsInitialCycle, false
-	hook := stageloop.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil, nil, nil)
-
-	if err = stageloop.StageLoopIteration(ms.Ctx, ms.DB, nil, nil, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
-		return err
-	}
-	// Wait to know if a new background retirement has started
-	if retirementStarted := <-ms.retirementStart; retirementStarted {
-		// If so, increment the background retirement counter and start a task to watch for its completion
-		ms.retirementWg.Add(1)
-		go func() {
-			defer ms.retirementWg.Done()
-			<-ms.retirementDone
-		}()
-	}
-	if ms.TxPool != nil {
-		ms.ReceiveWg.Wait() // Wait for TxPool notification
-	}
-	return nil
-}
 
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	n := ms.numberOfPoWBlocks(chain)
-	if n >= chain.Length() {
-		return nil
-	}
-
-	wr := eth1_chain_reader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
+	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
 	ctx := context.Background()
-	for i := n; i < chain.Length(); i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(false); err != nil {
 			return err
 		}
@@ -836,18 +733,15 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, _, lvh, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
-
+	status, verr, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
 	}
-	if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
-		rawdb.WriteHeadBlockHash(tx, lvh)
-		return nil
-	}); err != nil {
-		return err
-	}
+
 	if status != executionproto.ExecutionStatus_Success {
+		if verr != nil {
+			return fmt.Errorf("insertion failed for block %d, code: %s err: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String(), *verr)
+		}
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 
@@ -855,10 +749,6 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 }
 
 func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
-
-	if err := ms.insertPoWBlocks(chain); err != nil {
-		return err
-	}
 	if err := ms.insertPoSBlocks(chain); err != nil {
 		return err
 	}

@@ -21,13 +21,15 @@ import (
 	"fmt"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/jellydator/ttlcache/v3"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/jellydator/ttlcache/v3"
 )
 
 var VeBlopNewSpanTimeout = 8 * time.Second     // timeout for waiting for a new span
@@ -36,7 +38,7 @@ var DefaultRecentHeadersCapacity uint64 = 4096 // capacity of recent headers TTL
 
 type HeaderTimeValidator struct {
 	borConfig             *borcfg.BorConfig
-	signaturesCache       *lru.ARCCache[common.Hash, common.Address]
+	signaturesCache       *lru.ARCCache[common.Hash, accounts.Address]
 	recentVerifiedHeaders *ttlcache.Cache[common.Hash, *types.Header]
 	blockProducersTracker blockProducersTracker
 	logger                log.Logger
@@ -65,7 +67,7 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 			return fmt.Errorf("unexpected number of producers post Rio (expected 1 producer) , blockNum=%d , numProducers=%d", header.Number.Uint64(), len(producers.Validators))
 		}
 		producer := producers.Validators[0]
-		shouldWaitForNewSpans, timeout, err := htv.needToWaitForNewSpan(header, parent, producer.Address)
+		shouldWaitForNewSpans, timeout, err := htv.needToWaitForNewSpan(header, parent, accounts.InternAddress(producer.Address))
 		if err != nil {
 			return fmt.Errorf("needToWaitForNewSpan failed for blockNum=%d with %w", header.Number.Uint64(), err)
 		}
@@ -102,7 +104,7 @@ func (htv *HeaderTimeValidator) UpdateLatestVerifiedHeader(header *types.Header)
 
 // check if the conditions are met where we need to await for a span rotation
 // If yes, then the second return value contains how long to wait for new spans to be fetched (this can vary)
-func (htv *HeaderTimeValidator) needToWaitForNewSpan(header *types.Header, parent *types.Header, producer common.Address) (bool, time.Duration, error) {
+func (htv *HeaderTimeValidator) needToWaitForNewSpan(header *types.Header, parent *types.Header, producer accounts.Address) (bool, time.Duration, error) {
 	author, err := bor.Ecrecover(header, htv.signaturesCache, htv.borConfig)
 	if err != nil {
 		return false, 0, err
@@ -118,5 +120,4 @@ func (htv *HeaderTimeValidator) needToWaitForNewSpan(header *types.Header, paren
 		return true, VeBlopNewSpanTimeout, nil
 	}
 	return false, 0, nil
-
 }

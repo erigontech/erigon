@@ -12,50 +12,96 @@ type agg struct {
 	Warm []float64 // averages (per-tx)
 }
 
+// CompareResults groups all blocks into 10 clusters and compares averaged cold & warm latencies.
 func CompareResults(old BenchOutput, newer BenchOutput) string {
+	const clusters = 10 // number of clusters for grouping
+
 	oldAgg := aggregateByBlock(old)
 	newAgg := aggregateByBlock(newer)
 
-	keys := make(map[uint64]struct{})
+	// collect common block numbers
+	keys := make([]uint64, 0, len(oldAgg))
 	for k := range oldAgg {
-		keys[k] = struct{}{}
-	}
-	for k := range newAgg {
-		keys[k] = struct{}{}
-	}
-	blocks := make([]uint64, 0, len(keys))
-	for k := range keys {
-		blocks = append(blocks, k)
-	}
-	slices.Sort(blocks)
-
-	out := ""
-	out += "FIRST-LATENCY (cold)\n"
-	out += "name\told avg ms\tnew avg ms\tdelta\n"
-	for _, b := range blocks {
-		oc, ok1 := oldAgg[b]
-		nc, ok2 := newAgg[b]
-		if !ok1 || !ok2 || len(oc.Cold) == 0 || len(nc.Cold) == 0 {
-			continue
+		if _, ok := newAgg[k]; ok {
+			keys = append(keys, k)
 		}
-		om := mean(oc.Cold)
-		nm := mean(nc.Cold)
-		delta := pctDelta(om, nm)
-		out += fmt.Sprintf("block_%d\t%.3f\t%.3f\t%+.1f%%\n", b, om, nm, delta)
+	}
+	if len(keys) == 0 {
+		return "no overlapping blocks\n"
+	}
+	slices.Sort(keys)
+
+	clusterSize := len(keys) / clusters
+	if clusterSize == 0 {
+		clusterSize = 1
 	}
 
-	out += "\nWARM-LATENCY (avg of repeats)\n"
-	out += "name\told avg ms\tnew avg ms\tdelta\n"
-	for _, b := range blocks {
-		ow, ok1 := oldAgg[b]
-		nw, ok2 := newAgg[b]
-		if !ok1 || !ok2 || len(ow.Warm) == 0 || len(nw.Warm) == 0 {
+	type cluster struct {
+		start, end           uint64
+		count                int
+		oldCold, newCold     float64
+		oldWarm, newWarm     float64
+		deltaCold, deltaWarm float64
+	}
+	results := make([]cluster, 0, clusters)
+
+	for i := 0; i < clusters; i++ {
+		startIdx := i * clusterSize
+		endIdx := startIdx + clusterSize
+		if i == clusters-1 || endIdx > len(keys) {
+			endIdx = len(keys)
+		}
+		sub := keys[startIdx:endIdx]
+		if len(sub) == 0 {
 			continue
 		}
-		om := mean(ow.Warm)
-		nm := mean(nw.Warm)
-		delta := pctDelta(om, nm)
-		out += fmt.Sprintf("block_%d\t%.3f\t%.3f\t%+.1f%%\n", b, om, nm, delta)
+
+		var oldColdSum, newColdSum, oldWarmSum, newWarmSum float64
+		var cnt int
+		for _, b := range sub {
+			oc, nc := oldAgg[b], newAgg[b]
+			if len(oc.Cold) == 0 || len(nc.Cold) == 0 {
+				continue
+			}
+			oldColdSum += mean(oc.Cold)
+			newColdSum += mean(nc.Cold)
+			if len(oc.Warm) > 0 && len(nc.Warm) > 0 {
+				oldWarmSum += mean(oc.Warm)
+				newWarmSum += mean(nc.Warm)
+			}
+			cnt++
+		}
+		if cnt == 0 {
+			continue
+		}
+		oldColdAvg := oldColdSum / float64(cnt)
+		newColdAvg := newColdSum / float64(cnt)
+		oldWarmAvg := oldWarmSum / float64(cnt)
+		newWarmAvg := newWarmSum / float64(cnt)
+
+		results = append(results, cluster{
+			start:     sub[0],
+			end:       sub[len(sub)-1],
+			count:     cnt,
+			oldCold:   oldColdAvg,
+			newCold:   newColdAvg,
+			oldWarm:   oldWarmAvg,
+			newWarm:   newWarmAvg,
+			deltaCold: pctDelta(oldColdAvg, newColdAvg),
+			deltaWarm: pctDelta(oldWarmAvg, newWarmAvg),
+		})
+	}
+
+	out := "LATENCY COMPARISON (averaged over clusters)\n"
+	out += "cluster_range\tblocks\told_cold_ms\tnew_cold_ms\tdelta_cold\told_warm_ms\tnew_warm_ms\tdelta_warm\n"
+
+	for i, c := range results {
+		out += fmt.Sprintf(
+			"%2d: %d–%d\t%d\t%.3f\t%.3f\t%+.1f%%\t%.3f\t%.3f\t%+.1f%%\n",
+			i+1, c.start, c.end, c.count,
+			c.oldCold, c.newCold, c.deltaCold,
+			c.oldWarm, c.newWarm, c.deltaWarm,
+		)
 	}
 
 	return out

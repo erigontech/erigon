@@ -914,6 +914,7 @@ func Defrag() error {
 		return err
 	}
 	fmt.Println("------------------- 15 -------------------")
+	//nolint
 	if err := defragSteps("vis15", oneBucketCfg,
 		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change1(tx) },
@@ -931,6 +932,7 @@ func Defrag() error {
 	readerErrorCh := make(chan error)
 
 	fmt.Println("------------------- 16 -------------------")
+	//nolint
 	if err := defragSteps("vis16", oneBucketCfg,
 		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change1(tx) },

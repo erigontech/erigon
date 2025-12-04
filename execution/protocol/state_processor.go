@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -97,7 +98,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader,
-	author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
+	author accounts.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
@@ -107,7 +108,7 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, vmenv, cfg)
 }
 
-func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader, author *common.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
+func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader, author accounts.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	return vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
@@ -147,8 +148,8 @@ func MakeReceipt(
 		receipt.BlobGasUsed = txn.GetBlobGas()
 	}
 	// If the transaction created a contract, store the creation address in the receipt.
-	if msg.To() == nil {
-		receipt.ContractAddress = types.CreateAddress(evm.Origin, txn.GetNonce())
+	if msg.To().IsNil() {
+		receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)

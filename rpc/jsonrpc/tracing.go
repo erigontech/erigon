@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -386,12 +387,6 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	ibs := state.New(stateReader)
 
-	if config != nil && config.StateOverrides != nil {
-		if err := config.StateOverrides.Override(ibs); err != nil {
-			return fmt.Errorf("override state: %v", err)
-		}
-	}
-
 	var baseFee *uint256.Int
 	if header.BaseFee != nil {
 		var overflow bool
@@ -424,6 +419,12 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	if config != nil && config.StateOverrides != nil {
+		if err := config.StateOverrides.OverrideAndCommit(ibs, blockCtx.Rules(chainConfig)); err != nil {
+			return fmt.Errorf("override state: %v", err)
+		}
+	}
+
 	if config != nil && config.BlockOverrides != nil {
 		err := config.BlockOverrides.Override(&blockCtx)
 		if err != nil {
@@ -529,14 +530,14 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return hash, nil
 	}
 
-	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
+	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 	rules := evm.ChainRules()
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		err = config.StateOverrides.Override(ibs)
+		err = config.StateOverrides.OverrideAndCommit(ibs, rules)
 		if err != nil {
 			return err
 		}

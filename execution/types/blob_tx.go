@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var ErrNilToFieldTx = errors.New("txn: field 'To' can not be 'nil'")
@@ -49,13 +50,19 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 }
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	var stxTo accounts.Address
+	if stx.To == nil {
+		stxTo = accounts.NilAddress
+	} else {
+		stxTo = accounts.InternAddress(*stx.To)
+	}
 	msg := Message{
 		nonce:            stx.Nonce,
 		gasLimit:         stx.GasLimit,
 		gasPrice:         *stx.FeeCap,
 		tipCap:           *stx.TipCap,
 		feeCap:           *stx.FeeCap,
-		to:               stx.To,
+		to:               stxTo,
 		amount:           *stx.Value,
 		data:             stx.Data,
 		accessList:       stx.AccessList,
@@ -77,31 +84,32 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		msg.gasPrice.Set(stx.FeeCap)
 	}
 	var err error
-	msg.from, err = stx.Sender(s)
+	if msg.from, err = stx.Sender(s); err != nil {
+		return nil, err
+	}
 	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
-	return &msg, err
+	return &msg, nil
 }
 
-func (stx *BlobTx) cachedSender() (sender common.Address, ok bool) {
-	s := stx.from.Load()
-	if s == nil {
+func (stx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := stx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
 
-func (stx *BlobTx) Sender(signer Signer) (common.Address, error) {
-	if from := stx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (stx *BlobTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := stx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.ZeroAddress, err
 	}
-	stx.from.Store(&addr)
+	stx.from = addr
 	return addr, nil
 }
 
@@ -178,7 +186,7 @@ func (stx *BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, 
 	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
 	// size of MaxFeePerBlobGas
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerBlobGas)
+	payloadSize += rlp.Uint256LenExcludingHead(*stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
 	payloadSize += rlp.ListPrefixLen(blobHashesLen) + blobHashesLen
@@ -204,7 +212,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(stx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.ChainID, w, b); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -212,11 +220,11 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(stx.TipCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(stx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.FeeCap, w, b); err != nil {
 		return err
 	}
 	// encode GasLimit
@@ -232,7 +240,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(stx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.Value, w, b); err != nil {
 		return err
 	}
 	// encode Data
@@ -248,7 +256,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode MaxFeePerBlobGas
-	if err := rlp.EncodeUint256(stx.MaxFeePerBlobGas, w, b); err != nil {
+	if err := rlp.EncodeUint256(*stx.MaxFeePerBlobGas, w, b); err != nil {
 		return err
 	}
 	// prefix
@@ -260,15 +268,15 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode V
-	if err := rlp.EncodeUint256(&stx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(stx.V, w, b); err != nil {
 		return err
 	}
 	// encode R
-	if err := rlp.EncodeUint256(&stx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(stx.R, w, b); err != nil {
 		return err
 	}
 	// encode S
-	if err := rlp.EncodeUint256(&stx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(stx.S, w, b); err != nil {
 		return err
 	}
 	return nil

@@ -133,6 +133,5 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		return
 	}
 }

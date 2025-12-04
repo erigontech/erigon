@@ -305,7 +305,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(tx, log.New())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
 		return err
 	}
@@ -425,6 +425,10 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	commonTx.V.SetFromBig(txJson.V.ToInt())
 	commonTx.R.SetFromBig(txJson.R.ToInt())
 	commonTx.S.SetFromBig(txJson.S.ToInt())
+
+	//TODO: remove after https://github.com/erigontech/erigon/issues/17942
+	_, _, _, _, _, _, _, _ = commonTx.V, commonTx.R, commonTx.S, commonTx.Data, commonTx.Value, commonTx.To, commonTx.GasLimit, commonTx.Nonce
+
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		if txJson.Type == types.LegacyTxType {
 			return &types.LegacyTx{
@@ -658,7 +662,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 	defer c.Close()
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}
@@ -686,11 +690,11 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 			h.Sha.Write(k[length.Addr+length.Incarnation:])
 			//nolint:errcheck
 			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorageDeprecated, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorageDeprecated, newK, common.Copy(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccountsDeprecated, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccountsDeprecated, newK, common.Copy(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}

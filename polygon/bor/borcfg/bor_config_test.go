@@ -19,8 +19,10 @@ package borcfg
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestCalculateSprintNumber(t *testing.T) {
@@ -75,7 +77,7 @@ func TestCalculateCoinbase(t *testing.T) {
 		config := &BorConfig{}
 
 		result := config.CalculateCoinbase(100)
-		expected := common.HexToAddress("0x0000000000000000000000000000000000000000")
+		expected := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000000"))
 
 		if result != expected {
 			t.Errorf("Expected %s, got %s", expected, result)
@@ -115,7 +117,7 @@ func TestCalculateCoinbase(t *testing.T) {
 
 		for _, tc := range testCases {
 			result := config.CalculateCoinbase(tc.blockNumber)
-			if result != tc.expected {
+			if result != accounts.InternAddress(tc.expected) {
 				t.Errorf("Block %d (%s): expected %s, got %s",
 					tc.blockNumber, tc.description, tc.expected, result)
 			}
