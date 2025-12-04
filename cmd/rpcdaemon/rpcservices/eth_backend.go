@@ -283,6 +283,29 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), requestor *atomic.Value) error {
+	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	requestor.Store(subscription.Send)
+	for {
+		receipts, err := subscription.Recv()
+		if errors.Is(err, io.EOF) {
+			log.Info("rpcdaemon: the receipts subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+		onNewReceipts(receipts)
+	}
+	return nil
+}
+
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
 	return back.blockReader.TxnLookup(ctx, tx, txnHash)
 }

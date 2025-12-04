@@ -209,6 +209,96 @@ func (c *SubscribeLogsStreamC) Recv() (*remoteproto.SubscribeLogsReply, error) {
 
 // -- end SubscribeLogs
 
+// -- SubscribeReceipts
+
+func (s *EthBackendClientDirect) SubscribeReceipts(ctx context.Context, opts ...grpc.CallOption) (remoteproto.ETHBACKEND_SubscribeReceiptsClient, error) {
+	subscribeReceiptsRequestChan := make(chan *subscribeReceiptsRequest, 16384)
+	subscribeReceiptsReplyChan := make(chan *subscribeReceiptsReply, 16384)
+	srv := &SubscribeReceiptsStreamS{
+		chSend: subscribeReceiptsReplyChan,
+		chRecv: subscribeReceiptsRequestChan,
+		ctx:    ctx,
+	}
+	go func() {
+		defer close(subscribeReceiptsRequestChan)
+		defer close(subscribeReceiptsReplyChan)
+		srv.Err(s.server.SubscribeReceipts(srv))
+	}()
+	cli := &SubscribeReceiptsStreamC{
+		chSend: subscribeReceiptsRequestChan,
+		chRecv: subscribeReceiptsReplyChan,
+		ctx:    ctx,
+	}
+	return cli, nil
+}
+
+type SubscribeReceiptsStreamS struct {
+	chSend chan *subscribeReceiptsReply
+	chRecv chan *subscribeReceiptsRequest
+	ctx    context.Context
+	grpc.ServerStream
+}
+
+type subscribeReceiptsReply struct {
+	r   *remoteproto.SubscribeReceiptsReply
+	err error
+}
+
+type subscribeReceiptsRequest struct {
+	r   *remoteproto.ReceiptsFilterRequest
+	err error
+}
+
+func (s *SubscribeReceiptsStreamS) Send(m *remoteproto.SubscribeReceiptsReply) error {
+	s.chSend <- &subscribeReceiptsReply{r: m}
+	return nil
+}
+
+func (s *SubscribeReceiptsStreamS) Recv() (*remoteproto.ReceiptsFilterRequest, error) {
+	select {
+	case m, ok := <-s.chRecv:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	}
+}
+
+func (s *SubscribeReceiptsStreamS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.chSend <- &subscribeReceiptsReply{err: err}
+}
+
+type SubscribeReceiptsStreamC struct {
+	chSend chan *subscribeReceiptsRequest
+	chRecv chan *subscribeReceiptsReply
+	ctx    context.Context
+	grpc.ClientStream
+}
+
+func (c *SubscribeReceiptsStreamC) Send(m *remoteproto.ReceiptsFilterRequest) error {
+	c.chSend <- &subscribeReceiptsRequest{r: m}
+	return nil
+}
+
+func (c *SubscribeReceiptsStreamC) Recv() (*remoteproto.SubscribeReceiptsReply, error) {
+	select {
+	case m, ok := <-c.chRecv:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
+	}
+}
+
+// -- end SubscribeReceipts
+
 func (s *EthBackendClientDirect) CanonicalBodyForStorage(ctx context.Context, in *remoteproto.CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*remoteproto.CanonicalBodyForStorageReply, error) {
 	return s.server.CanonicalBodyForStorage(ctx, in)
 }

@@ -20,36 +20,37 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestRecentLogs(t *testing.T) {
+func TestRecentReceipts(t *testing.T) {
 	t.Parallel()
 	t.Run("Evict", func(t *testing.T) {
-		e := NewRecentLogs(3)
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}})
+		e := NewRecentReceipts(3)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}}, []types.Transaction{}, nil)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}}, []types.Transaction{}, nil)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}}, []types.Transaction{}, nil)
 		require.Len(t, e.receipts, 3)
 
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(31)}})
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(31)}}, []types.Transaction{}, nil)
 		require.Len(t, e.receipts, 1)
 	})
 	t.Run("Nil", func(t *testing.T) {
-		e := NewRecentLogs(3)
-		e.Add(types.Receipts{nil, {BlockNumber: big.NewInt(1)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}, nil})
-		e.Add(types.Receipts{nil, nil, {BlockNumber: big.NewInt(31)}})
+		e := NewRecentReceipts(3)
+		e.Add(types.Receipts{nil, {BlockNumber: big.NewInt(1)}}, []types.Transaction{}, nil)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(21)}, nil}, []types.Transaction{}, nil)
+		e.Add(types.Receipts{nil, nil, {BlockNumber: big.NewInt(31)}}, []types.Transaction{}, nil)
 		require.Len(t, e.receipts, 3)
 	})
 	t.Run("Order", func(t *testing.T) {
-		e := NewRecentLogs(3)
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}})
+		e := NewRecentReceipts(3)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}}, []types.Transaction{}, nil)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}}, []types.Transaction{}, nil)
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(1)}}, []types.Transaction{}, nil)
 		require.Len(t, e.receipts, 2)
-		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}})
+		e.Add(types.Receipts{{BlockNumber: big.NewInt(11)}}, []types.Transaction{}, nil)
 		require.Len(t, e.receipts, 2)
 	})
 }
