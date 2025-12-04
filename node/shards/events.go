@@ -455,7 +455,7 @@ func (r *RecentReceipts) NotifyReceipts(n *Events, from, to uint64, isUnwind boo
 
 			// Add transaction data (from/to) from txs array
 			if sender, err := txn.Sender(*signer); err == nil {
-				protoReceipt.From = gointerfaces.ConvertAddressToH160(sender)
+				protoReceipt.From = gointerfaces.ConvertAddressToH160(sender.Value())
 			}
 			if to := txn.GetTo(); to != nil {
 				protoReceipt.To = gointerfaces.ConvertAddressToH160(*to)
