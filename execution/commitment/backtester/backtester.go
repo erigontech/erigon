@@ -48,24 +48,24 @@ func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, out
 	}
 }
 
-func (b Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) error {
+func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) error {
 	start := time.Now()
-	b.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)
+	bt.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)
 	if fromBlock > toBlock || fromBlock == 0 {
 		return fmt.Errorf("invalid block range for backtest: fromBlock=%d, toBlock=%d", fromBlock, toBlock)
 	}
-	tx, err := b.db.BeginTemporalRo(ctx)
+	tx, err := bt.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	tnr := b.blockReader.TxnumReader(ctx)
+	tnr := bt.blockReader.TxnumReader(ctx)
 	err = checkHistoryAvailable(tx, fromBlock, tnr)
 	if err != nil {
 		return err
 	}
 	runId := fmt.Sprintf("%d_%d_%d", fromBlock, toBlock, start.Unix())
-	runOutputDir := path.Join(b.outputDir, runId)
+	runOutputDir := path.Join(bt.outputDir, runId)
 	err = os.MkdirAll(runOutputDir, 0755)
 	if err != nil {
 		return err
@@ -76,18 +76,18 @@ func (b Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) e
 		if err != nil {
 			return err
 		}
-		err = b.backtestBlock(ctx, tx, block, tnr, blockOutputDir)
+		err = bt.backtestBlock(ctx, tx, block, tnr, blockOutputDir)
 		if err != nil {
 			return err
 		}
 	}
-	b.logger.Info("finished commitment backtest", "blocks", toBlock-fromBlock+1, "in", time.Since(start), "output", runOutputDir)
+	bt.logger.Info("finished commitment backtest", "blocks", toBlock-fromBlock+1, "in", time.Since(start), "output", runOutputDir)
 	return nil
 }
 
-func (b Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, blockOutputDir string) error {
+func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, blockOutputDir string) error {
 	start := time.Now()
-	b.logger.Info("backtesting block commitment", "block", block)
+	bt.logger.Info("backtesting block commitment", "block", block)
 	fromTxNum, err := tnr.Min(tx, block)
 	if err != nil {
 		return err
@@ -97,14 +97,14 @@ func (b Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block u
 		return err
 	}
 	toTxNum := maxTxNum + 1
-	b.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
-	sd, err := execctx.NewSharedDomains(ctx, tx, b.logger)
+	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
+	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger)
 	if err != nil {
 		return err
 	}
 	defer sd.Close()
 	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
-	sd.GetCommitmentCtx().SetTrace(b.logger.Enabled(ctx, log.LvlTrace))
+	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(path.Join(blockOutputDir, "commitment_metrics"))
 	err = sd.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -116,22 +116,22 @@ func (b Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block u
 	if expected := fromTxNum - 1; sd.TxNum() != expected {
 		return fmt.Errorf("unexpected sd tx number: %d != %d", sd.TxNum(), maxTxNum)
 	}
-	err = b.replayChanges(tx, kv.AccountsDomain, sd, fromTxNum, toTxNum)
+	err = bt.replayChanges(tx, kv.AccountsDomain, sd, fromTxNum, toTxNum)
 	if err != nil {
 		return err
 	}
-	err = b.replayChanges(tx, kv.StorageDomain, sd, fromTxNum, toTxNum)
+	err = bt.replayChanges(tx, kv.StorageDomain, sd, fromTxNum, toTxNum)
 	if err != nil {
 		return err
 	}
-	b.logger.Info("computing commitment", "block", block)
+	bt.logger.Info("computing commitment", "block", block)
 	commitmentStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /*saveState*/, block, maxTxNum, "commitment-backtester", nil /*progress*/)
 	if err != nil {
 		return err
 	}
-	b.logger.Info("computed commitment", "block", block, "in", time.Since(commitmentStart))
-	canonicalHeader, err := b.blockReader.HeaderByNumber(ctx, tx, block)
+	bt.logger.Info("computed commitment", "block", block, "in", time.Since(commitmentStart))
+	canonicalHeader, err := bt.blockReader.HeaderByNumber(ctx, tx, block)
 	if err != nil {
 		return err
 	}
@@ -141,18 +141,18 @@ func (b Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block u
 	if common.Hash(root) != canonicalHeader.Root {
 		return fmt.Errorf("computed commitment %x does not match canonical header root %x", root, canonicalHeader.Root)
 	}
-	b.logger.Info("computed commitment matches canonical header root", "block", block, "root", canonicalHeader.Root)
-	b.logger.Info("backtested block commitment", "block", block, "in", time.Since(start))
+	bt.logger.Info("computed commitment matches canonical header root", "block", block, "root", canonicalHeader.Root)
+	bt.logger.Info("backtested block commitment", "block", block, "in", time.Since(start))
 	return nil
 }
 
-func (b Backtester) replayChanges(tx kv.TemporalTx, d kv.Domain, sd *execctx.SharedDomains, fromTxNum uint64, toTxNum uint64) error {
+func (bt Backtester) replayChanges(tx kv.TemporalTx, d kv.Domain, sd *execctx.SharedDomains, fromTxNum uint64, toTxNum uint64) error {
 	starTime := time.Now()
 	changes := 0
 	defer func() {
-		b.logger.Info("replayed changes", "domain", d, "changes", changes, "in", time.Since(starTime))
+		bt.logger.Info("replayed changes", "domain", d, "changes", changes, "in", time.Since(starTime))
 	}()
-	b.logger.Info("replaying changes", "domain", d, "fromTxNum", fromTxNum, "toTxNum", toTxNum)
+	bt.logger.Info("replaying changes", "domain", d, "fromTxNum", fromTxNum, "toTxNum", toTxNum)
 	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return err
