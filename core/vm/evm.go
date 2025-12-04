@@ -230,6 +230,14 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 			return nil, gas, multigas.ZeroGas(), ErrInsufficientBalance
 		}
 	}
+	var trace bool
+	if evm.Context.BlockNumber == 216934477 {
+		trace = true
+	}
+	if trace {
+		fmt.Printf("opcode %s CALLER %s TO %s VALUE %s GAS %d DEPTH %d precompile %t\n",
+			typ.String(), caller.Address().String(), addr.String(), value.String(), gas, depth, isPrecompile)
+	}
 
 	snapshot := evm.intraBlockState.Snapshot()
 	usedMultiGas = multigas.ZeroGas()
@@ -259,7 +267,14 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
 		var precompileMultiGas multigas.MultiGas
-		ret, gas, precompileMultiGas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, arbInfo)
+		var newGas uint64
+		ret, newGas, precompileMultiGas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, arbInfo)
+		if trace {
+			fmt.Printf("precompile %s CALLER %s TO %s gas spending %d (ended with %d) multigas %s, result %x\n",
+				typ.String(), caller.Address().String(), addr.String(), gas-newGas, newGas, precompileMultiGas.String(), ret)
+		}
+
+		gas = newGas
 		usedMultiGas.SaturatingAddInto(precompileMultiGas)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
@@ -288,6 +303,10 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.JumpDestCache)
 		}
 		contract.IsSystemCall = isSystemCall(caller.Address())
+		if trace {
+			fmt.Printf("code CALLER %s TO %s (system=%t) VALUE %s GAS %d CODE %x\n",
+				contract.Caller().String(), contract.self.String(), contract.IsSystemCall, value.String(), gas, code)
+		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 
 		readOnly := false
@@ -296,8 +315,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 
 		ret, err = evm.interpreter.Run(contract, input, readOnly)
-		//fmt.Printf("block %d CALLER %s TO %s gas spending %d multigas %s\n",
-		//	evm.Context.BlockNumber, contract.Caller().String(), contract.self.String(), gas-contract.Gas, contract.GetTotalUsedMultiGas().String())
+		fmt.Printf("block %d CALLER %s TO %s gas spending %d multigas %s\n",
+			evm.Context.BlockNumber, contract.Caller().String(), contract.self.String(), gas-contract.Gas, contract.GetTotalUsedMultiGas().String())
 		gas = contract.Gas
 
 		usedMultiGas.SaturatingAddInto(contract.GetTotalUsedMultiGas())

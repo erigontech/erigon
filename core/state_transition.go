@@ -592,6 +592,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// Gas limit suffices for the floor data cost (EIP-7623)
 	if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
 		floorDataGas, err := FloorDataGas(msg.Data())
+		fmt.Printf("EIP-7623 calldata pricing check: gas limit %d, floor data gas %d fdg %d\n", msg.Gas(), floorGas7623, floorDataGas)
 		if err != nil {
 			return nil, err
 		}
