@@ -1090,934 +1090,6 @@ func (x *SubscribeLogsReply) GetRemoved() bool {
 	return false
 }
 
-type BlockRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BlockHeight   uint64                 `protobuf:"varint,2,opt,name=block_height,json=blockHeight,proto3" json:"block_height,omitempty"`
-	BlockHash     *typesproto.H256       `protobuf:"bytes,3,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockRequest) Reset() {
-	*x = BlockRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[21]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockRequest) ProtoMessage() {}
-
-func (x *BlockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[21]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockRequest.ProtoReflect.Descriptor instead.
-func (*BlockRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *BlockRequest) GetBlockHeight() uint64 {
-	if x != nil {
-		return x.BlockHeight
-	}
-	return 0
-}
-
-func (x *BlockRequest) GetBlockHash() *typesproto.H256 {
-	if x != nil {
-		return x.BlockHash
-	}
-	return nil
-}
-
-type BlockReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BlockRlp      []byte                 `protobuf:"bytes,1,opt,name=block_rlp,json=blockRlp,proto3" json:"block_rlp,omitempty"`
-	Senders       []byte                 `protobuf:"bytes,2,opt,name=senders,proto3" json:"senders,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockReply) Reset() {
-	*x = BlockReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockReply) ProtoMessage() {}
-
-func (x *BlockReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockReply.ProtoReflect.Descriptor instead.
-func (*BlockReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *BlockReply) GetBlockRlp() []byte {
-	if x != nil {
-		return x.BlockRlp
-	}
-	return nil
-}
-
-func (x *BlockReply) GetSenders() []byte {
-	if x != nil {
-		return x.Senders
-	}
-	return nil
-}
-
-type TxnLookupRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TxnHash       *typesproto.H256       `protobuf:"bytes,1,opt,name=txn_hash,json=txnHash,proto3" json:"txn_hash,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TxnLookupRequest) Reset() {
-	*x = TxnLookupRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TxnLookupRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TxnLookupRequest) ProtoMessage() {}
-
-func (x *TxnLookupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TxnLookupRequest.ProtoReflect.Descriptor instead.
-func (*TxnLookupRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *TxnLookupRequest) GetTxnHash() *typesproto.H256 {
-	if x != nil {
-		return x.TxnHash
-	}
-	return nil
-}
-
-type TxnLookupReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BlockNumber   uint64                 `protobuf:"varint,1,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	TxNumber      uint64                 `protobuf:"varint,2,opt,name=tx_number,json=txNumber,proto3" json:"tx_number,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TxnLookupReply) Reset() {
-	*x = TxnLookupReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TxnLookupReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TxnLookupReply) ProtoMessage() {}
-
-func (x *TxnLookupReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TxnLookupReply.ProtoReflect.Descriptor instead.
-func (*TxnLookupReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *TxnLookupReply) GetBlockNumber() uint64 {
-	if x != nil {
-		return x.BlockNumber
-	}
-	return 0
-}
-
-func (x *TxnLookupReply) GetTxNumber() uint64 {
-	if x != nil {
-		return x.TxNumber
-	}
-	return 0
-}
-
-type NodesInfoRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Limit         uint32                 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *NodesInfoRequest) Reset() {
-	*x = NodesInfoRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[25]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *NodesInfoRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NodesInfoRequest) ProtoMessage() {}
-
-func (x *NodesInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[25]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NodesInfoRequest.ProtoReflect.Descriptor instead.
-func (*NodesInfoRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{25}
-}
-
-func (x *NodesInfoRequest) GetLimit() uint32 {
-	if x != nil {
-		return x.Limit
-	}
-	return 0
-}
-
-type AddPeerRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AddPeerRequest) Reset() {
-	*x = AddPeerRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[26]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AddPeerRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AddPeerRequest) ProtoMessage() {}
-
-func (x *AddPeerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[26]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AddPeerRequest.ProtoReflect.Descriptor instead.
-func (*AddPeerRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *AddPeerRequest) GetUrl() string {
-	if x != nil {
-		return x.Url
-	}
-	return ""
-}
-
-type RemovePeerRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RemovePeerRequest) Reset() {
-	*x = RemovePeerRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[27]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RemovePeerRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RemovePeerRequest) ProtoMessage() {}
-
-func (x *RemovePeerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[27]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RemovePeerRequest.ProtoReflect.Descriptor instead.
-func (*RemovePeerRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{27}
-}
-
-func (x *RemovePeerRequest) GetUrl() string {
-	if x != nil {
-		return x.Url
-	}
-	return ""
-}
-
-type NodesInfoReply struct {
-	state         protoimpl.MessageState      `protogen:"open.v1"`
-	NodesInfo     []*typesproto.NodeInfoReply `protobuf:"bytes,1,rep,name=nodes_info,json=nodesInfo,proto3" json:"nodes_info,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *NodesInfoReply) Reset() {
-	*x = NodesInfoReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[28]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *NodesInfoReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NodesInfoReply) ProtoMessage() {}
-
-func (x *NodesInfoReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[28]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NodesInfoReply.ProtoReflect.Descriptor instead.
-func (*NodesInfoReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{28}
-}
-
-func (x *NodesInfoReply) GetNodesInfo() []*typesproto.NodeInfoReply {
-	if x != nil {
-		return x.NodesInfo
-	}
-	return nil
-}
-
-type PeersReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Peers         []*typesproto.PeerInfo `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PeersReply) Reset() {
-	*x = PeersReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[29]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PeersReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PeersReply) ProtoMessage() {}
-
-func (x *PeersReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[29]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PeersReply.ProtoReflect.Descriptor instead.
-func (*PeersReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{29}
-}
-
-func (x *PeersReply) GetPeers() []*typesproto.PeerInfo {
-	if x != nil {
-		return x.Peers
-	}
-	return nil
-}
-
-type AddPeerReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AddPeerReply) Reset() {
-	*x = AddPeerReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[30]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AddPeerReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AddPeerReply) ProtoMessage() {}
-
-func (x *AddPeerReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[30]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AddPeerReply.ProtoReflect.Descriptor instead.
-func (*AddPeerReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{30}
-}
-
-func (x *AddPeerReply) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-type RemovePeerReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RemovePeerReply) Reset() {
-	*x = RemovePeerReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[31]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RemovePeerReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RemovePeerReply) ProtoMessage() {}
-
-func (x *RemovePeerReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[31]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RemovePeerReply.ProtoReflect.Descriptor instead.
-func (*RemovePeerReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{31}
-}
-
-func (x *RemovePeerReply) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-type PendingBlockReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BlockRlp      []byte                 `protobuf:"bytes,1,opt,name=block_rlp,json=blockRlp,proto3" json:"block_rlp,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PendingBlockReply) Reset() {
-	*x = PendingBlockReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[32]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PendingBlockReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PendingBlockReply) ProtoMessage() {}
-
-func (x *PendingBlockReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[32]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PendingBlockReply.ProtoReflect.Descriptor instead.
-func (*PendingBlockReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{32}
-}
-
-func (x *PendingBlockReply) GetBlockRlp() []byte {
-	if x != nil {
-		return x.BlockRlp
-	}
-	return nil
-}
-
-type EngineGetPayloadBodiesByHashV1Request struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Hashes        []*typesproto.H256     `protobuf:"bytes,1,rep,name=hashes,proto3" json:"hashes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EngineGetPayloadBodiesByHashV1Request) Reset() {
-	*x = EngineGetPayloadBodiesByHashV1Request{}
-	mi := &file_remote_ethbackend_proto_msgTypes[33]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EngineGetPayloadBodiesByHashV1Request) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EngineGetPayloadBodiesByHashV1Request) ProtoMessage() {}
-
-func (x *EngineGetPayloadBodiesByHashV1Request) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[33]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EngineGetPayloadBodiesByHashV1Request.ProtoReflect.Descriptor instead.
-func (*EngineGetPayloadBodiesByHashV1Request) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{33}
-}
-
-func (x *EngineGetPayloadBodiesByHashV1Request) GetHashes() []*typesproto.H256 {
-	if x != nil {
-		return x.Hashes
-	}
-	return nil
-}
-
-type EngineGetPayloadBodiesByRangeV1Request struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Start         uint64                 `protobuf:"varint,1,opt,name=start,proto3" json:"start,omitempty"`
-	Count         uint64                 `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EngineGetPayloadBodiesByRangeV1Request) Reset() {
-	*x = EngineGetPayloadBodiesByRangeV1Request{}
-	mi := &file_remote_ethbackend_proto_msgTypes[34]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EngineGetPayloadBodiesByRangeV1Request) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EngineGetPayloadBodiesByRangeV1Request) ProtoMessage() {}
-
-func (x *EngineGetPayloadBodiesByRangeV1Request) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[34]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EngineGetPayloadBodiesByRangeV1Request.ProtoReflect.Descriptor instead.
-func (*EngineGetPayloadBodiesByRangeV1Request) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{34}
-}
-
-func (x *EngineGetPayloadBodiesByRangeV1Request) GetStart() uint64 {
-	if x != nil {
-		return x.Start
-	}
-	return 0
-}
-
-func (x *EngineGetPayloadBodiesByRangeV1Request) GetCount() uint64 {
-	if x != nil {
-		return x.Count
-	}
-	return 0
-}
-
-type AAValidationRequest struct {
-	state         protoimpl.MessageState                    `protogen:"open.v1"`
-	Tx            *typesproto.AccountAbstractionTransaction `protobuf:"bytes,1,opt,name=tx,proto3" json:"tx,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AAValidationRequest) Reset() {
-	*x = AAValidationRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[35]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AAValidationRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AAValidationRequest) ProtoMessage() {}
-
-func (x *AAValidationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[35]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AAValidationRequest.ProtoReflect.Descriptor instead.
-func (*AAValidationRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{35}
-}
-
-func (x *AAValidationRequest) GetTx() *typesproto.AccountAbstractionTransaction {
-	if x != nil {
-		return x.Tx
-	}
-	return nil
-}
-
-type AAValidationReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Valid         bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AAValidationReply) Reset() {
-	*x = AAValidationReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[36]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AAValidationReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AAValidationReply) ProtoMessage() {}
-
-func (x *AAValidationReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[36]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AAValidationReply.ProtoReflect.Descriptor instead.
-func (*AAValidationReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{36}
-}
-
-func (x *AAValidationReply) GetValid() bool {
-	if x != nil {
-		return x.Valid
-	}
-	return false
-}
-
-type BlockForTxNumRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Txnum         uint64                 `protobuf:"varint,1,opt,name=txnum,proto3" json:"txnum,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockForTxNumRequest) Reset() {
-	*x = BlockForTxNumRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[37]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockForTxNumRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockForTxNumRequest) ProtoMessage() {}
-
-func (x *BlockForTxNumRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[37]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockForTxNumRequest.ProtoReflect.Descriptor instead.
-func (*BlockForTxNumRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{37}
-}
-
-func (x *BlockForTxNumRequest) GetTxnum() uint64 {
-	if x != nil {
-		return x.Txnum
-	}
-	return 0
-}
-
-type BlockForTxNumResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BlockNumber   uint64                 `protobuf:"varint,1,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	Present       bool                   `protobuf:"varint,2,opt,name=present,proto3" json:"present,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockForTxNumResponse) Reset() {
-	*x = BlockForTxNumResponse{}
-	mi := &file_remote_ethbackend_proto_msgTypes[38]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockForTxNumResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockForTxNumResponse) ProtoMessage() {}
-
-func (x *BlockForTxNumResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[38]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockForTxNumResponse.ProtoReflect.Descriptor instead.
-func (*BlockForTxNumResponse) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{38}
-}
-
-func (x *BlockForTxNumResponse) GetBlockNumber() uint64 {
-	if x != nil {
-		return x.BlockNumber
-	}
-	return 0
-}
-
-func (x *BlockForTxNumResponse) GetPresent() bool {
-	if x != nil {
-		return x.Present
-	}
-	return false
-}
-
-type MinimumBlockAvailableReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BlockNum      uint64                 `protobuf:"varint,1,opt,name=block_num,json=blockNum,proto3" json:"block_num,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MinimumBlockAvailableReply) Reset() {
-	*x = MinimumBlockAvailableReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[39]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MinimumBlockAvailableReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MinimumBlockAvailableReply) ProtoMessage() {}
-
-func (x *MinimumBlockAvailableReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[39]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MinimumBlockAvailableReply.ProtoReflect.Descriptor instead.
-func (*MinimumBlockAvailableReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{39}
-}
-
-func (x *MinimumBlockAvailableReply) GetBlockNum() uint64 {
-	if x != nil {
-		return x.BlockNum
-	}
-	return 0
-}
-
-type SyncingReply_StageProgress struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	StageName     string                 `protobuf:"bytes,1,opt,name=stage_name,json=stageName,proto3" json:"stage_name,omitempty"`
-	BlockNumber   uint64                 `protobuf:"varint,2,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SyncingReply_StageProgress) Reset() {
-	*x = SyncingReply_StageProgress{}
-	mi := &file_remote_ethbackend_proto_msgTypes[40]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SyncingReply_StageProgress) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SyncingReply_StageProgress) ProtoMessage() {}
-
-func (x *SyncingReply_StageProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[40]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SyncingReply_StageProgress.ProtoReflect.Descriptor instead.
-func (*SyncingReply_StageProgress) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{4, 0}
-}
-
-func (x *SyncingReply_StageProgress) GetStageName() string {
-	if x != nil {
-		return x.StageName
-	}
-	return ""
-}
-
-func (x *SyncingReply_StageProgress) GetBlockNumber() uint64 {
-	if x != nil {
-		return x.BlockNumber
-	}
-	return 0
-}
-
 type ReceiptsFilterRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	AllTransactions   bool                   `protobuf:"varint,1,opt,name=all_transactions,json=allTransactions,proto3" json:"all_transactions,omitempty"`
@@ -2028,7 +1100,7 @@ type ReceiptsFilterRequest struct {
 
 func (x *ReceiptsFilterRequest) Reset() {
 	*x = ReceiptsFilterRequest{}
-	mi := &file_remote_ethbackend_proto_msgTypes[41]
+	mi := &file_remote_ethbackend_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2040,7 +1112,7 @@ func (x *ReceiptsFilterRequest) String() string {
 func (*ReceiptsFilterRequest) ProtoMessage() {}
 
 func (x *ReceiptsFilterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[41]
+	mi := &file_remote_ethbackend_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2051,8 +1123,9 @@ func (x *ReceiptsFilterRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
+// Deprecated: Use ReceiptsFilterRequest.ProtoReflect.Descriptor instead.
 func (*ReceiptsFilterRequest) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{41}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ReceiptsFilterRequest) GetAllTransactions() bool {
@@ -2070,38 +1143,33 @@ func (x *ReceiptsFilterRequest) GetTransactionHashes() []*typesproto.H256 {
 }
 
 type SubscribeReceiptsReply struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Receipt metadata
-	BlockHash        *typesproto.H256 `protobuf:"bytes,1,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
-	BlockNumber      uint64           `protobuf:"varint,2,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	TransactionHash  *typesproto.H256 `protobuf:"bytes,3,opt,name=transaction_hash,json=transactionHash,proto3" json:"transaction_hash,omitempty"`
-	TransactionIndex uint64           `protobuf:"varint,4,opt,name=transaction_index,json=transactionIndex,proto3" json:"transaction_index,omitempty"`
-	// Receipt core fields
-	Type              uint32                `protobuf:"varint,5,opt,name=type,proto3" json:"type,omitempty"`
-	Status            uint64                `protobuf:"varint,6,opt,name=status,proto3" json:"status,omitempty"`
-	CumulativeGasUsed uint64                `protobuf:"varint,7,opt,name=cumulative_gas_used,json=cumulativeGasUsed,proto3" json:"cumulative_gas_used,omitempty"`
-	GasUsed           uint64                `protobuf:"varint,8,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`
-	ContractAddress   *typesproto.H160      `protobuf:"bytes,9,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
-	LogsBloom         []byte                `protobuf:"bytes,10,opt,name=logs_bloom,json=logsBloom,proto3" json:"logs_bloom,omitempty"`
-	Logs              []*SubscribeLogsReply `protobuf:"bytes,11,rep,name=logs,proto3" json:"logs,omitempty"`
-	// Transaction data (for from/to addresses)
-	From   *typesproto.H160 `protobuf:"bytes,12,opt,name=from,proto3" json:"from,omitempty"`
-	To     *typesproto.H160 `protobuf:"bytes,13,opt,name=to,proto3" json:"to,omitempty"`
-	TxType uint32           `protobuf:"varint,14,opt,name=tx_type,json=txType,proto3" json:"tx_type,omitempty"`
-	// Header data (for MarshalReceipt)
-	BaseFee       *typesproto.H256 `protobuf:"bytes,15,opt,name=base_fee,json=baseFee,proto3" json:"base_fee,omitempty"`
-	BlockTime     uint64           `protobuf:"varint,16,opt,name=block_time,json=blockTime,proto3" json:"block_time,omitempty"`
-	ExcessBlobGas uint64           `protobuf:"varint,17,opt,name=excess_blob_gas,json=excessBlobGas,proto3" json:"excess_blob_gas,omitempty"`
-	// EIP-4844 fields
-	BlobGasUsed   uint64           `protobuf:"varint,18,opt,name=blob_gas_used,json=blobGasUsed,proto3" json:"blob_gas_used,omitempty"`
-	BlobGasPrice  *typesproto.H256 `protobuf:"bytes,19,opt,name=blob_gas_price,json=blobGasPrice,proto3" json:"blob_gas_price,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	BlockHash         *typesproto.H256       `protobuf:"bytes,1,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
+	BlockNumber       uint64                 `protobuf:"varint,2,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	TransactionHash   *typesproto.H256       `protobuf:"bytes,3,opt,name=transaction_hash,json=transactionHash,proto3" json:"transaction_hash,omitempty"`
+	TransactionIndex  uint64                 `protobuf:"varint,4,opt,name=transaction_index,json=transactionIndex,proto3" json:"transaction_index,omitempty"`
+	Type              uint32                 `protobuf:"varint,5,opt,name=type,proto3" json:"type,omitempty"`
+	Status            uint64                 `protobuf:"varint,6,opt,name=status,proto3" json:"status,omitempty"`
+	CumulativeGasUsed uint64                 `protobuf:"varint,7,opt,name=cumulative_gas_used,json=cumulativeGasUsed,proto3" json:"cumulative_gas_used,omitempty"`
+	GasUsed           uint64                 `protobuf:"varint,8,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`
+	ContractAddress   *typesproto.H160       `protobuf:"bytes,9,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
+	LogsBloom         []byte                 `protobuf:"bytes,10,opt,name=logs_bloom,json=logsBloom,proto3" json:"logs_bloom,omitempty"`
+	Logs              []*SubscribeLogsReply  `protobuf:"bytes,11,rep,name=logs,proto3" json:"logs,omitempty"`
+	From              *typesproto.H160       `protobuf:"bytes,12,opt,name=from,proto3" json:"from,omitempty"`
+	To                *typesproto.H160       `protobuf:"bytes,13,opt,name=to,proto3" json:"to,omitempty"`
+	TxType            uint32                 `protobuf:"varint,14,opt,name=tx_type,json=txType,proto3" json:"tx_type,omitempty"`
+	BaseFee           *typesproto.H256       `protobuf:"bytes,15,opt,name=base_fee,json=baseFee,proto3" json:"base_fee,omitempty"`
+	BlockTime         uint64                 `protobuf:"varint,16,opt,name=block_time,json=blockTime,proto3" json:"block_time,omitempty"`
+	ExcessBlobGas     uint64                 `protobuf:"varint,17,opt,name=excess_blob_gas,json=excessBlobGas,proto3" json:"excess_blob_gas,omitempty"`
+	BlobGasUsed       uint64                 `protobuf:"varint,18,opt,name=blob_gas_used,json=blobGasUsed,proto3" json:"blob_gas_used,omitempty"`
+	BlobGasPrice      *typesproto.H256       `protobuf:"bytes,19,opt,name=blob_gas_price,json=blobGasPrice,proto3" json:"blob_gas_price,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SubscribeReceiptsReply) Reset() {
 	*x = SubscribeReceiptsReply{}
-	mi := &file_remote_ethbackend_proto_msgTypes[42]
+	mi := &file_remote_ethbackend_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2113,7 +1181,7 @@ func (x *SubscribeReceiptsReply) String() string {
 func (*SubscribeReceiptsReply) ProtoMessage() {}
 
 func (x *SubscribeReceiptsReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_ethbackend_proto_msgTypes[42]
+	mi := &file_remote_ethbackend_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2124,8 +1192,9 @@ func (x *SubscribeReceiptsReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
+// Deprecated: Use SubscribeReceiptsReply.ProtoReflect.Descriptor instead.
 func (*SubscribeReceiptsReply) Descriptor() ([]byte, []int) {
-	return file_remote_ethbackend_proto_rawDescGZIP(), []int{42}
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SubscribeReceiptsReply) GetBlockHash() *typesproto.H256 {
@@ -2261,6 +1330,934 @@ func (x *SubscribeReceiptsReply) GetBlobGasPrice() *typesproto.H256 {
 	return nil
 }
 
+type BlockRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BlockHeight   uint64                 `protobuf:"varint,2,opt,name=block_height,json=blockHeight,proto3" json:"block_height,omitempty"`
+	BlockHash     *typesproto.H256       `protobuf:"bytes,3,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockRequest) Reset() {
+	*x = BlockRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockRequest) ProtoMessage() {}
+
+func (x *BlockRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockRequest.ProtoReflect.Descriptor instead.
+func (*BlockRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *BlockRequest) GetBlockHeight() uint64 {
+	if x != nil {
+		return x.BlockHeight
+	}
+	return 0
+}
+
+func (x *BlockRequest) GetBlockHash() *typesproto.H256 {
+	if x != nil {
+		return x.BlockHash
+	}
+	return nil
+}
+
+type BlockReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BlockRlp      []byte                 `protobuf:"bytes,1,opt,name=block_rlp,json=blockRlp,proto3" json:"block_rlp,omitempty"`
+	Senders       []byte                 `protobuf:"bytes,2,opt,name=senders,proto3" json:"senders,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockReply) Reset() {
+	*x = BlockReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockReply) ProtoMessage() {}
+
+func (x *BlockReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockReply.ProtoReflect.Descriptor instead.
+func (*BlockReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *BlockReply) GetBlockRlp() []byte {
+	if x != nil {
+		return x.BlockRlp
+	}
+	return nil
+}
+
+func (x *BlockReply) GetSenders() []byte {
+	if x != nil {
+		return x.Senders
+	}
+	return nil
+}
+
+type TxnLookupRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TxnHash       *typesproto.H256       `protobuf:"bytes,1,opt,name=txn_hash,json=txnHash,proto3" json:"txn_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TxnLookupRequest) Reset() {
+	*x = TxnLookupRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TxnLookupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TxnLookupRequest) ProtoMessage() {}
+
+func (x *TxnLookupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TxnLookupRequest.ProtoReflect.Descriptor instead.
+func (*TxnLookupRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *TxnLookupRequest) GetTxnHash() *typesproto.H256 {
+	if x != nil {
+		return x.TxnHash
+	}
+	return nil
+}
+
+type TxnLookupReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BlockNumber   uint64                 `protobuf:"varint,1,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	TxNumber      uint64                 `protobuf:"varint,2,opt,name=tx_number,json=txNumber,proto3" json:"tx_number,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TxnLookupReply) Reset() {
+	*x = TxnLookupReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TxnLookupReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TxnLookupReply) ProtoMessage() {}
+
+func (x *TxnLookupReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TxnLookupReply.ProtoReflect.Descriptor instead.
+func (*TxnLookupReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *TxnLookupReply) GetBlockNumber() uint64 {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return 0
+}
+
+func (x *TxnLookupReply) GetTxNumber() uint64 {
+	if x != nil {
+		return x.TxNumber
+	}
+	return 0
+}
+
+type NodesInfoRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         uint32                 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodesInfoRequest) Reset() {
+	*x = NodesInfoRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodesInfoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodesInfoRequest) ProtoMessage() {}
+
+func (x *NodesInfoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodesInfoRequest.ProtoReflect.Descriptor instead.
+func (*NodesInfoRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *NodesInfoRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type AddPeerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddPeerRequest) Reset() {
+	*x = AddPeerRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddPeerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddPeerRequest) ProtoMessage() {}
+
+func (x *AddPeerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddPeerRequest.ProtoReflect.Descriptor instead.
+func (*AddPeerRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *AddPeerRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+type RemovePeerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemovePeerRequest) Reset() {
+	*x = RemovePeerRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemovePeerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemovePeerRequest) ProtoMessage() {}
+
+func (x *RemovePeerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemovePeerRequest.ProtoReflect.Descriptor instead.
+func (*RemovePeerRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *RemovePeerRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+type NodesInfoReply struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	NodesInfo     []*typesproto.NodeInfoReply `protobuf:"bytes,1,rep,name=nodes_info,json=nodesInfo,proto3" json:"nodes_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodesInfoReply) Reset() {
+	*x = NodesInfoReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodesInfoReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodesInfoReply) ProtoMessage() {}
+
+func (x *NodesInfoReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodesInfoReply.ProtoReflect.Descriptor instead.
+func (*NodesInfoReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *NodesInfoReply) GetNodesInfo() []*typesproto.NodeInfoReply {
+	if x != nil {
+		return x.NodesInfo
+	}
+	return nil
+}
+
+type PeersReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Peers         []*typesproto.PeerInfo `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeersReply) Reset() {
+	*x = PeersReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeersReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeersReply) ProtoMessage() {}
+
+func (x *PeersReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeersReply.ProtoReflect.Descriptor instead.
+func (*PeersReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *PeersReply) GetPeers() []*typesproto.PeerInfo {
+	if x != nil {
+		return x.Peers
+	}
+	return nil
+}
+
+type AddPeerReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddPeerReply) Reset() {
+	*x = AddPeerReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddPeerReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddPeerReply) ProtoMessage() {}
+
+func (x *AddPeerReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddPeerReply.ProtoReflect.Descriptor instead.
+func (*AddPeerReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *AddPeerReply) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type RemovePeerReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemovePeerReply) Reset() {
+	*x = RemovePeerReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemovePeerReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemovePeerReply) ProtoMessage() {}
+
+func (x *RemovePeerReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemovePeerReply.ProtoReflect.Descriptor instead.
+func (*RemovePeerReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *RemovePeerReply) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type PendingBlockReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BlockRlp      []byte                 `protobuf:"bytes,1,opt,name=block_rlp,json=blockRlp,proto3" json:"block_rlp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PendingBlockReply) Reset() {
+	*x = PendingBlockReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PendingBlockReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PendingBlockReply) ProtoMessage() {}
+
+func (x *PendingBlockReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PendingBlockReply.ProtoReflect.Descriptor instead.
+func (*PendingBlockReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *PendingBlockReply) GetBlockRlp() []byte {
+	if x != nil {
+		return x.BlockRlp
+	}
+	return nil
+}
+
+type EngineGetPayloadBodiesByHashV1Request struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hashes        []*typesproto.H256     `protobuf:"bytes,1,rep,name=hashes,proto3" json:"hashes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EngineGetPayloadBodiesByHashV1Request) Reset() {
+	*x = EngineGetPayloadBodiesByHashV1Request{}
+	mi := &file_remote_ethbackend_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EngineGetPayloadBodiesByHashV1Request) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EngineGetPayloadBodiesByHashV1Request) ProtoMessage() {}
+
+func (x *EngineGetPayloadBodiesByHashV1Request) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EngineGetPayloadBodiesByHashV1Request.ProtoReflect.Descriptor instead.
+func (*EngineGetPayloadBodiesByHashV1Request) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *EngineGetPayloadBodiesByHashV1Request) GetHashes() []*typesproto.H256 {
+	if x != nil {
+		return x.Hashes
+	}
+	return nil
+}
+
+type EngineGetPayloadBodiesByRangeV1Request struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Start         uint64                 `protobuf:"varint,1,opt,name=start,proto3" json:"start,omitempty"`
+	Count         uint64                 `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EngineGetPayloadBodiesByRangeV1Request) Reset() {
+	*x = EngineGetPayloadBodiesByRangeV1Request{}
+	mi := &file_remote_ethbackend_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EngineGetPayloadBodiesByRangeV1Request) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EngineGetPayloadBodiesByRangeV1Request) ProtoMessage() {}
+
+func (x *EngineGetPayloadBodiesByRangeV1Request) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EngineGetPayloadBodiesByRangeV1Request.ProtoReflect.Descriptor instead.
+func (*EngineGetPayloadBodiesByRangeV1Request) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *EngineGetPayloadBodiesByRangeV1Request) GetStart() uint64 {
+	if x != nil {
+		return x.Start
+	}
+	return 0
+}
+
+func (x *EngineGetPayloadBodiesByRangeV1Request) GetCount() uint64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+type AAValidationRequest struct {
+	state         protoimpl.MessageState                    `protogen:"open.v1"`
+	Tx            *typesproto.AccountAbstractionTransaction `protobuf:"bytes,1,opt,name=tx,proto3" json:"tx,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AAValidationRequest) Reset() {
+	*x = AAValidationRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AAValidationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AAValidationRequest) ProtoMessage() {}
+
+func (x *AAValidationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AAValidationRequest.ProtoReflect.Descriptor instead.
+func (*AAValidationRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *AAValidationRequest) GetTx() *typesproto.AccountAbstractionTransaction {
+	if x != nil {
+		return x.Tx
+	}
+	return nil
+}
+
+type AAValidationReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Valid         bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AAValidationReply) Reset() {
+	*x = AAValidationReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AAValidationReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AAValidationReply) ProtoMessage() {}
+
+func (x *AAValidationReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AAValidationReply.ProtoReflect.Descriptor instead.
+func (*AAValidationReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *AAValidationReply) GetValid() bool {
+	if x != nil {
+		return x.Valid
+	}
+	return false
+}
+
+type BlockForTxNumRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Txnum         uint64                 `protobuf:"varint,1,opt,name=txnum,proto3" json:"txnum,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockForTxNumRequest) Reset() {
+	*x = BlockForTxNumRequest{}
+	mi := &file_remote_ethbackend_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockForTxNumRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockForTxNumRequest) ProtoMessage() {}
+
+func (x *BlockForTxNumRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockForTxNumRequest.ProtoReflect.Descriptor instead.
+func (*BlockForTxNumRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *BlockForTxNumRequest) GetTxnum() uint64 {
+	if x != nil {
+		return x.Txnum
+	}
+	return 0
+}
+
+type BlockForTxNumResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BlockNumber   uint64                 `protobuf:"varint,1,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	Present       bool                   `protobuf:"varint,2,opt,name=present,proto3" json:"present,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockForTxNumResponse) Reset() {
+	*x = BlockForTxNumResponse{}
+	mi := &file_remote_ethbackend_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockForTxNumResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockForTxNumResponse) ProtoMessage() {}
+
+func (x *BlockForTxNumResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockForTxNumResponse.ProtoReflect.Descriptor instead.
+func (*BlockForTxNumResponse) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *BlockForTxNumResponse) GetBlockNumber() uint64 {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return 0
+}
+
+func (x *BlockForTxNumResponse) GetPresent() bool {
+	if x != nil {
+		return x.Present
+	}
+	return false
+}
+
+type MinimumBlockAvailableReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BlockNum      uint64                 `protobuf:"varint,1,opt,name=block_num,json=blockNum,proto3" json:"block_num,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MinimumBlockAvailableReply) Reset() {
+	*x = MinimumBlockAvailableReply{}
+	mi := &file_remote_ethbackend_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MinimumBlockAvailableReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MinimumBlockAvailableReply) ProtoMessage() {}
+
+func (x *MinimumBlockAvailableReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MinimumBlockAvailableReply.ProtoReflect.Descriptor instead.
+func (*MinimumBlockAvailableReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *MinimumBlockAvailableReply) GetBlockNum() uint64 {
+	if x != nil {
+		return x.BlockNum
+	}
+	return 0
+}
+
+type SyncingReply_StageProgress struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StageName     string                 `protobuf:"bytes,1,opt,name=stage_name,json=stageName,proto3" json:"stage_name,omitempty"`
+	BlockNumber   uint64                 `protobuf:"varint,2,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncingReply_StageProgress) Reset() {
+	*x = SyncingReply_StageProgress{}
+	mi := &file_remote_ethbackend_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncingReply_StageProgress) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncingReply_StageProgress) ProtoMessage() {}
+
+func (x *SyncingReply_StageProgress) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncingReply_StageProgress.ProtoReflect.Descriptor instead.
+func (*SyncingReply_StageProgress) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{4, 0}
+}
+
+func (x *SyncingReply_StageProgress) GetStageName() string {
+	if x != nil {
+		return x.StageName
+	}
+	return ""
+}
+
+func (x *SyncingReply_StageProgress) GetBlockNumber() uint64 {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return 0
+}
+
 var File_remote_ethbackend_proto protoreflect.FileDescriptor
 
 const file_remote_ethbackend_proto_rawDesc = "" +
@@ -2325,7 +2322,34 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x06topics\x18\x06 \x03(\v2\v.types.H256R\x06topics\x126\n" +
 	"\x10transaction_hash\x18\a \x01(\v2\v.types.H256R\x0ftransactionHash\x12+\n" +
 	"\x11transaction_index\x18\b \x01(\x04R\x10transactionIndex\x12\x18\n" +
-	"\aremoved\x18\t \x01(\bR\aremoved\"]\n" +
+	"\aremoved\x18\t \x01(\bR\aremoved\"~\n" +
+	"\x15ReceiptsFilterRequest\x12)\n" +
+	"\x10all_transactions\x18\x01 \x01(\bR\x0fallTransactions\x12:\n" +
+	"\x12transaction_hashes\x18\x02 \x03(\v2\v.types.H256R\x11transactionHashes\"\xe7\x05\n" +
+	"\x16SubscribeReceiptsReply\x12*\n" +
+	"\n" +
+	"block_hash\x18\x01 \x01(\v2\v.types.H256R\tblockHash\x12!\n" +
+	"\fblock_number\x18\x02 \x01(\x04R\vblockNumber\x126\n" +
+	"\x10transaction_hash\x18\x03 \x01(\v2\v.types.H256R\x0ftransactionHash\x12+\n" +
+	"\x11transaction_index\x18\x04 \x01(\x04R\x10transactionIndex\x12\x12\n" +
+	"\x04type\x18\x05 \x01(\rR\x04type\x12\x16\n" +
+	"\x06status\x18\x06 \x01(\x04R\x06status\x12.\n" +
+	"\x13cumulative_gas_used\x18\a \x01(\x04R\x11cumulativeGasUsed\x12\x19\n" +
+	"\bgas_used\x18\b \x01(\x04R\agasUsed\x126\n" +
+	"\x10contract_address\x18\t \x01(\v2\v.types.H160R\x0fcontractAddress\x12\x1d\n" +
+	"\n" +
+	"logs_bloom\x18\n" +
+	" \x01(\fR\tlogsBloom\x12.\n" +
+	"\x04logs\x18\v \x03(\v2\x1a.remote.SubscribeLogsReplyR\x04logs\x12\x1f\n" +
+	"\x04from\x18\f \x01(\v2\v.types.H160R\x04from\x12\x1b\n" +
+	"\x02to\x18\r \x01(\v2\v.types.H160R\x02to\x12\x17\n" +
+	"\atx_type\x18\x0e \x01(\rR\x06txType\x12&\n" +
+	"\bbase_fee\x18\x0f \x01(\v2\v.types.H256R\abaseFee\x12\x1d\n" +
+	"\n" +
+	"block_time\x18\x10 \x01(\x04R\tblockTime\x12&\n" +
+	"\x0fexcess_blob_gas\x18\x11 \x01(\x04R\rexcessBlobGas\x12\"\n" +
+	"\rblob_gas_used\x18\x12 \x01(\x04R\vblobGasUsed\x121\n" +
+	"\x0eblob_gas_price\x18\x13 \x01(\v2\v.types.H256R\fblobGasPrice\"]\n" +
 	"\fBlockRequest\x12!\n" +
 	"\fblock_height\x18\x02 \x01(\x04R\vblockHeight\x12*\n" +
 	"\n" +
@@ -2378,7 +2402,7 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x06HEADER\x10\x00\x12\x10\n" +
 	"\fPENDING_LOGS\x10\x01\x12\x11\n" +
 	"\rPENDING_BLOCK\x10\x02\x12\x10\n" +
-	"\fNEW_SNAPSHOT\x10\x032\x80\r\n" +
+	"\fNEW_SNAPSHOT\x10\x032\xd8\r\n" +
 	"\n" +
 	"ETHBACKEND\x12=\n" +
 	"\tEtherbase\x12\x18.remote.EtherbaseRequest\x1a\x16.remote.EtherbaseReply\x12@\n" +
@@ -2390,7 +2414,8 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x0fProtocolVersion\x12\x1e.remote.ProtocolVersionRequest\x1a\x1c.remote.ProtocolVersionReply\x12I\n" +
 	"\rClientVersion\x12\x1c.remote.ClientVersionRequest\x1a\x1a.remote.ClientVersionReply\x12?\n" +
 	"\tSubscribe\x12\x18.remote.SubscribeRequest\x1a\x16.remote.SubscribeReply0\x01\x12J\n" +
-	"\rSubscribeLogs\x12\x19.remote.LogsFilterRequest\x1a\x1a.remote.SubscribeLogsReply(\x010\x01\x121\n" +
+	"\rSubscribeLogs\x12\x19.remote.LogsFilterRequest\x1a\x1a.remote.SubscribeLogsReply(\x010\x01\x12V\n" +
+	"\x11SubscribeReceipts\x12\x1d.remote.ReceiptsFilterRequest\x1a\x1e.remote.SubscribeReceiptsReply(\x010\x01\x121\n" +
 	"\x05Block\x12\x14.remote.BlockRequest\x1a\x12.remote.BlockReply\x12g\n" +
 	"\x17CanonicalBodyForStorage\x12&.remote.CanonicalBodyForStorageRequest\x1a$.remote.CanonicalBodyForStorageReply\x12I\n" +
 	"\rCanonicalHash\x12\x1c.remote.CanonicalHashRequest\x1a\x1a.remote.CanonicalHashReply\x12F\n" +
@@ -2421,7 +2446,7 @@ func file_remote_ethbackend_proto_rawDescGZIP() []byte {
 }
 
 var file_remote_ethbackend_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_remote_ethbackend_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
+var file_remote_ethbackend_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
 var file_remote_ethbackend_proto_goTypes = []any{
 	(Event)(0),                                       // 0: remote.Event
 	(*EtherbaseRequest)(nil),                         // 1: remote.EtherbaseRequest
@@ -2445,110 +2470,123 @@ var file_remote_ethbackend_proto_goTypes = []any{
 	(*SubscribeReply)(nil),                           // 19: remote.SubscribeReply
 	(*LogsFilterRequest)(nil),                        // 20: remote.LogsFilterRequest
 	(*SubscribeLogsReply)(nil),                       // 21: remote.SubscribeLogsReply
-	(*BlockRequest)(nil),                             // 22: remote.BlockRequest
-	(*BlockReply)(nil),                               // 23: remote.BlockReply
-	(*TxnLookupRequest)(nil),                         // 24: remote.TxnLookupRequest
-	(*TxnLookupReply)(nil),                           // 25: remote.TxnLookupReply
-	(*NodesInfoRequest)(nil),                         // 26: remote.NodesInfoRequest
-	(*AddPeerRequest)(nil),                           // 27: remote.AddPeerRequest
-	(*RemovePeerRequest)(nil),                        // 28: remote.RemovePeerRequest
-	(*NodesInfoReply)(nil),                           // 29: remote.NodesInfoReply
-	(*PeersReply)(nil),                               // 30: remote.PeersReply
-	(*AddPeerReply)(nil),                             // 31: remote.AddPeerReply
-	(*RemovePeerReply)(nil),                          // 32: remote.RemovePeerReply
-	(*PendingBlockReply)(nil),                        // 33: remote.PendingBlockReply
-	(*EngineGetPayloadBodiesByHashV1Request)(nil),    // 34: remote.EngineGetPayloadBodiesByHashV1Request
-	(*EngineGetPayloadBodiesByRangeV1Request)(nil),   // 35: remote.EngineGetPayloadBodiesByRangeV1Request
-	(*AAValidationRequest)(nil),                      // 36: remote.AAValidationRequest
-	(*AAValidationReply)(nil),                        // 37: remote.AAValidationReply
-	(*BlockForTxNumRequest)(nil),                     // 38: remote.BlockForTxNumRequest
-	(*BlockForTxNumResponse)(nil),                    // 39: remote.BlockForTxNumResponse
-	(*MinimumBlockAvailableReply)(nil),               // 40: remote.MinimumBlockAvailableReply
-	(*SyncingReply_StageProgress)(nil),               // 41: remote.SyncingReply.StageProgress
-	(*typesproto.H160)(nil),                          // 42: types.H160
-	(*typesproto.H256)(nil),                          // 43: types.H256
-	(*typesproto.NodeInfoReply)(nil),                 // 44: types.NodeInfoReply
-	(*typesproto.PeerInfo)(nil),                      // 45: types.PeerInfo
-	(*typesproto.AccountAbstractionTransaction)(nil), // 46: types.AccountAbstractionTransaction
-	(*emptypb.Empty)(nil),                            // 47: google.protobuf.Empty
-	(*BorTxnLookupRequest)(nil),                      // 48: remote.BorTxnLookupRequest
-	(*BorEventsRequest)(nil),                         // 49: remote.BorEventsRequest
-	(*typesproto.VersionReply)(nil),                  // 50: types.VersionReply
-	(*BorTxnLookupReply)(nil),                        // 51: remote.BorTxnLookupReply
-	(*BorEventsReply)(nil),                           // 52: remote.BorEventsReply
+	(*ReceiptsFilterRequest)(nil),                    // 22: remote.ReceiptsFilterRequest
+	(*SubscribeReceiptsReply)(nil),                   // 23: remote.SubscribeReceiptsReply
+	(*BlockRequest)(nil),                             // 24: remote.BlockRequest
+	(*BlockReply)(nil),                               // 25: remote.BlockReply
+	(*TxnLookupRequest)(nil),                         // 26: remote.TxnLookupRequest
+	(*TxnLookupReply)(nil),                           // 27: remote.TxnLookupReply
+	(*NodesInfoRequest)(nil),                         // 28: remote.NodesInfoRequest
+	(*AddPeerRequest)(nil),                           // 29: remote.AddPeerRequest
+	(*RemovePeerRequest)(nil),                        // 30: remote.RemovePeerRequest
+	(*NodesInfoReply)(nil),                           // 31: remote.NodesInfoReply
+	(*PeersReply)(nil),                               // 32: remote.PeersReply
+	(*AddPeerReply)(nil),                             // 33: remote.AddPeerReply
+	(*RemovePeerReply)(nil),                          // 34: remote.RemovePeerReply
+	(*PendingBlockReply)(nil),                        // 35: remote.PendingBlockReply
+	(*EngineGetPayloadBodiesByHashV1Request)(nil),    // 36: remote.EngineGetPayloadBodiesByHashV1Request
+	(*EngineGetPayloadBodiesByRangeV1Request)(nil),   // 37: remote.EngineGetPayloadBodiesByRangeV1Request
+	(*AAValidationRequest)(nil),                      // 38: remote.AAValidationRequest
+	(*AAValidationReply)(nil),                        // 39: remote.AAValidationReply
+	(*BlockForTxNumRequest)(nil),                     // 40: remote.BlockForTxNumRequest
+	(*BlockForTxNumResponse)(nil),                    // 41: remote.BlockForTxNumResponse
+	(*MinimumBlockAvailableReply)(nil),               // 42: remote.MinimumBlockAvailableReply
+	(*SyncingReply_StageProgress)(nil),               // 43: remote.SyncingReply.StageProgress
+	(*typesproto.H160)(nil),                          // 44: types.H160
+	(*typesproto.H256)(nil),                          // 45: types.H256
+	(*typesproto.NodeInfoReply)(nil),                 // 46: types.NodeInfoReply
+	(*typesproto.PeerInfo)(nil),                      // 47: types.PeerInfo
+	(*typesproto.AccountAbstractionTransaction)(nil), // 48: types.AccountAbstractionTransaction
+	(*emptypb.Empty)(nil),                            // 49: google.protobuf.Empty
+	(*BorTxnLookupRequest)(nil),                      // 50: remote.BorTxnLookupRequest
+	(*BorEventsRequest)(nil),                         // 51: remote.BorEventsRequest
+	(*typesproto.VersionReply)(nil),                  // 52: types.VersionReply
+	(*BorTxnLookupReply)(nil),                        // 53: remote.BorTxnLookupReply
+	(*BorEventsReply)(nil),                           // 54: remote.BorEventsReply
 }
 var file_remote_ethbackend_proto_depIdxs = []int32{
-	42, // 0: remote.EtherbaseReply.address:type_name -> types.H160
-	41, // 1: remote.SyncingReply.stages:type_name -> remote.SyncingReply.StageProgress
-	43, // 2: remote.CanonicalHashReply.hash:type_name -> types.H256
-	43, // 3: remote.HeaderNumberRequest.hash:type_name -> types.H256
+	44, // 0: remote.EtherbaseReply.address:type_name -> types.H160
+	43, // 1: remote.SyncingReply.stages:type_name -> remote.SyncingReply.StageProgress
+	45, // 2: remote.CanonicalHashReply.hash:type_name -> types.H256
+	45, // 3: remote.HeaderNumberRequest.hash:type_name -> types.H256
 	0,  // 4: remote.SubscribeRequest.type:type_name -> remote.Event
 	0,  // 5: remote.SubscribeReply.type:type_name -> remote.Event
-	42, // 6: remote.LogsFilterRequest.addresses:type_name -> types.H160
-	43, // 7: remote.LogsFilterRequest.topics:type_name -> types.H256
-	42, // 8: remote.SubscribeLogsReply.address:type_name -> types.H160
-	43, // 9: remote.SubscribeLogsReply.block_hash:type_name -> types.H256
-	43, // 10: remote.SubscribeLogsReply.topics:type_name -> types.H256
-	43, // 11: remote.SubscribeLogsReply.transaction_hash:type_name -> types.H256
-	43, // 12: remote.BlockRequest.block_hash:type_name -> types.H256
-	43, // 13: remote.TxnLookupRequest.txn_hash:type_name -> types.H256
-	44, // 14: remote.NodesInfoReply.nodes_info:type_name -> types.NodeInfoReply
-	45, // 15: remote.PeersReply.peers:type_name -> types.PeerInfo
-	43, // 16: remote.EngineGetPayloadBodiesByHashV1Request.hashes:type_name -> types.H256
-	46, // 17: remote.AAValidationRequest.tx:type_name -> types.AccountAbstractionTransaction
-	1,  // 18: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
-	3,  // 19: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
-	6,  // 20: remote.ETHBACKEND.NetPeerCount:input_type -> remote.NetPeerCountRequest
-	47, // 21: remote.ETHBACKEND.Version:input_type -> google.protobuf.Empty
-	47, // 22: remote.ETHBACKEND.Syncing:input_type -> google.protobuf.Empty
-	8,  // 23: remote.ETHBACKEND.ProtocolVersion:input_type -> remote.ProtocolVersionRequest
-	10, // 24: remote.ETHBACKEND.ClientVersion:input_type -> remote.ClientVersionRequest
-	18, // 25: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
-	20, // 26: remote.ETHBACKEND.SubscribeLogs:input_type -> remote.LogsFilterRequest
-	22, // 27: remote.ETHBACKEND.Block:input_type -> remote.BlockRequest
-	16, // 28: remote.ETHBACKEND.CanonicalBodyForStorage:input_type -> remote.CanonicalBodyForStorageRequest
-	12, // 29: remote.ETHBACKEND.CanonicalHash:input_type -> remote.CanonicalHashRequest
-	14, // 30: remote.ETHBACKEND.HeaderNumber:input_type -> remote.HeaderNumberRequest
-	24, // 31: remote.ETHBACKEND.TxnLookup:input_type -> remote.TxnLookupRequest
-	26, // 32: remote.ETHBACKEND.NodeInfo:input_type -> remote.NodesInfoRequest
-	47, // 33: remote.ETHBACKEND.Peers:input_type -> google.protobuf.Empty
-	27, // 34: remote.ETHBACKEND.AddPeer:input_type -> remote.AddPeerRequest
-	28, // 35: remote.ETHBACKEND.RemovePeer:input_type -> remote.RemovePeerRequest
-	47, // 36: remote.ETHBACKEND.PendingBlock:input_type -> google.protobuf.Empty
-	48, // 37: remote.ETHBACKEND.BorTxnLookup:input_type -> remote.BorTxnLookupRequest
-	49, // 38: remote.ETHBACKEND.BorEvents:input_type -> remote.BorEventsRequest
-	36, // 39: remote.ETHBACKEND.AAValidation:input_type -> remote.AAValidationRequest
-	38, // 40: remote.ETHBACKEND.BlockForTxNum:input_type -> remote.BlockForTxNumRequest
-	47, // 41: remote.ETHBACKEND.MinimumBlockAvailable:input_type -> google.protobuf.Empty
-	2,  // 42: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
-	4,  // 43: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
-	7,  // 44: remote.ETHBACKEND.NetPeerCount:output_type -> remote.NetPeerCountReply
-	50, // 45: remote.ETHBACKEND.Version:output_type -> types.VersionReply
-	5,  // 46: remote.ETHBACKEND.Syncing:output_type -> remote.SyncingReply
-	9,  // 47: remote.ETHBACKEND.ProtocolVersion:output_type -> remote.ProtocolVersionReply
-	11, // 48: remote.ETHBACKEND.ClientVersion:output_type -> remote.ClientVersionReply
-	19, // 49: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
-	21, // 50: remote.ETHBACKEND.SubscribeLogs:output_type -> remote.SubscribeLogsReply
-	23, // 51: remote.ETHBACKEND.Block:output_type -> remote.BlockReply
-	17, // 52: remote.ETHBACKEND.CanonicalBodyForStorage:output_type -> remote.CanonicalBodyForStorageReply
-	13, // 53: remote.ETHBACKEND.CanonicalHash:output_type -> remote.CanonicalHashReply
-	15, // 54: remote.ETHBACKEND.HeaderNumber:output_type -> remote.HeaderNumberReply
-	25, // 55: remote.ETHBACKEND.TxnLookup:output_type -> remote.TxnLookupReply
-	29, // 56: remote.ETHBACKEND.NodeInfo:output_type -> remote.NodesInfoReply
-	30, // 57: remote.ETHBACKEND.Peers:output_type -> remote.PeersReply
-	31, // 58: remote.ETHBACKEND.AddPeer:output_type -> remote.AddPeerReply
-	32, // 59: remote.ETHBACKEND.RemovePeer:output_type -> remote.RemovePeerReply
-	33, // 60: remote.ETHBACKEND.PendingBlock:output_type -> remote.PendingBlockReply
-	51, // 61: remote.ETHBACKEND.BorTxnLookup:output_type -> remote.BorTxnLookupReply
-	52, // 62: remote.ETHBACKEND.BorEvents:output_type -> remote.BorEventsReply
-	37, // 63: remote.ETHBACKEND.AAValidation:output_type -> remote.AAValidationReply
-	39, // 64: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
-	40, // 65: remote.ETHBACKEND.MinimumBlockAvailable:output_type -> remote.MinimumBlockAvailableReply
-	42, // [42:66] is the sub-list for method output_type
-	18, // [18:42] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	44, // 6: remote.LogsFilterRequest.addresses:type_name -> types.H160
+	45, // 7: remote.LogsFilterRequest.topics:type_name -> types.H256
+	44, // 8: remote.SubscribeLogsReply.address:type_name -> types.H160
+	45, // 9: remote.SubscribeLogsReply.block_hash:type_name -> types.H256
+	45, // 10: remote.SubscribeLogsReply.topics:type_name -> types.H256
+	45, // 11: remote.SubscribeLogsReply.transaction_hash:type_name -> types.H256
+	45, // 12: remote.ReceiptsFilterRequest.transaction_hashes:type_name -> types.H256
+	45, // 13: remote.SubscribeReceiptsReply.block_hash:type_name -> types.H256
+	45, // 14: remote.SubscribeReceiptsReply.transaction_hash:type_name -> types.H256
+	44, // 15: remote.SubscribeReceiptsReply.contract_address:type_name -> types.H160
+	21, // 16: remote.SubscribeReceiptsReply.logs:type_name -> remote.SubscribeLogsReply
+	44, // 17: remote.SubscribeReceiptsReply.from:type_name -> types.H160
+	44, // 18: remote.SubscribeReceiptsReply.to:type_name -> types.H160
+	45, // 19: remote.SubscribeReceiptsReply.base_fee:type_name -> types.H256
+	45, // 20: remote.SubscribeReceiptsReply.blob_gas_price:type_name -> types.H256
+	45, // 21: remote.BlockRequest.block_hash:type_name -> types.H256
+	45, // 22: remote.TxnLookupRequest.txn_hash:type_name -> types.H256
+	46, // 23: remote.NodesInfoReply.nodes_info:type_name -> types.NodeInfoReply
+	47, // 24: remote.PeersReply.peers:type_name -> types.PeerInfo
+	45, // 25: remote.EngineGetPayloadBodiesByHashV1Request.hashes:type_name -> types.H256
+	48, // 26: remote.AAValidationRequest.tx:type_name -> types.AccountAbstractionTransaction
+	1,  // 27: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
+	3,  // 28: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
+	6,  // 29: remote.ETHBACKEND.NetPeerCount:input_type -> remote.NetPeerCountRequest
+	49, // 30: remote.ETHBACKEND.Version:input_type -> google.protobuf.Empty
+	49, // 31: remote.ETHBACKEND.Syncing:input_type -> google.protobuf.Empty
+	8,  // 32: remote.ETHBACKEND.ProtocolVersion:input_type -> remote.ProtocolVersionRequest
+	10, // 33: remote.ETHBACKEND.ClientVersion:input_type -> remote.ClientVersionRequest
+	18, // 34: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
+	20, // 35: remote.ETHBACKEND.SubscribeLogs:input_type -> remote.LogsFilterRequest
+	22, // 36: remote.ETHBACKEND.SubscribeReceipts:input_type -> remote.ReceiptsFilterRequest
+	24, // 37: remote.ETHBACKEND.Block:input_type -> remote.BlockRequest
+	16, // 38: remote.ETHBACKEND.CanonicalBodyForStorage:input_type -> remote.CanonicalBodyForStorageRequest
+	12, // 39: remote.ETHBACKEND.CanonicalHash:input_type -> remote.CanonicalHashRequest
+	14, // 40: remote.ETHBACKEND.HeaderNumber:input_type -> remote.HeaderNumberRequest
+	26, // 41: remote.ETHBACKEND.TxnLookup:input_type -> remote.TxnLookupRequest
+	28, // 42: remote.ETHBACKEND.NodeInfo:input_type -> remote.NodesInfoRequest
+	49, // 43: remote.ETHBACKEND.Peers:input_type -> google.protobuf.Empty
+	29, // 44: remote.ETHBACKEND.AddPeer:input_type -> remote.AddPeerRequest
+	30, // 45: remote.ETHBACKEND.RemovePeer:input_type -> remote.RemovePeerRequest
+	49, // 46: remote.ETHBACKEND.PendingBlock:input_type -> google.protobuf.Empty
+	50, // 47: remote.ETHBACKEND.BorTxnLookup:input_type -> remote.BorTxnLookupRequest
+	51, // 48: remote.ETHBACKEND.BorEvents:input_type -> remote.BorEventsRequest
+	38, // 49: remote.ETHBACKEND.AAValidation:input_type -> remote.AAValidationRequest
+	40, // 50: remote.ETHBACKEND.BlockForTxNum:input_type -> remote.BlockForTxNumRequest
+	49, // 51: remote.ETHBACKEND.MinimumBlockAvailable:input_type -> google.protobuf.Empty
+	2,  // 52: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
+	4,  // 53: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
+	7,  // 54: remote.ETHBACKEND.NetPeerCount:output_type -> remote.NetPeerCountReply
+	52, // 55: remote.ETHBACKEND.Version:output_type -> types.VersionReply
+	5,  // 56: remote.ETHBACKEND.Syncing:output_type -> remote.SyncingReply
+	9,  // 57: remote.ETHBACKEND.ProtocolVersion:output_type -> remote.ProtocolVersionReply
+	11, // 58: remote.ETHBACKEND.ClientVersion:output_type -> remote.ClientVersionReply
+	19, // 59: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
+	21, // 60: remote.ETHBACKEND.SubscribeLogs:output_type -> remote.SubscribeLogsReply
+	23, // 61: remote.ETHBACKEND.SubscribeReceipts:output_type -> remote.SubscribeReceiptsReply
+	25, // 62: remote.ETHBACKEND.Block:output_type -> remote.BlockReply
+	17, // 63: remote.ETHBACKEND.CanonicalBodyForStorage:output_type -> remote.CanonicalBodyForStorageReply
+	13, // 64: remote.ETHBACKEND.CanonicalHash:output_type -> remote.CanonicalHashReply
+	15, // 65: remote.ETHBACKEND.HeaderNumber:output_type -> remote.HeaderNumberReply
+	27, // 66: remote.ETHBACKEND.TxnLookup:output_type -> remote.TxnLookupReply
+	31, // 67: remote.ETHBACKEND.NodeInfo:output_type -> remote.NodesInfoReply
+	32, // 68: remote.ETHBACKEND.Peers:output_type -> remote.PeersReply
+	33, // 69: remote.ETHBACKEND.AddPeer:output_type -> remote.AddPeerReply
+	34, // 70: remote.ETHBACKEND.RemovePeer:output_type -> remote.RemovePeerReply
+	35, // 71: remote.ETHBACKEND.PendingBlock:output_type -> remote.PendingBlockReply
+	53, // 72: remote.ETHBACKEND.BorTxnLookup:output_type -> remote.BorTxnLookupReply
+	54, // 73: remote.ETHBACKEND.BorEvents:output_type -> remote.BorEventsReply
+	39, // 74: remote.ETHBACKEND.AAValidation:output_type -> remote.AAValidationReply
+	41, // 75: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
+	42, // 76: remote.ETHBACKEND.MinimumBlockAvailable:output_type -> remote.MinimumBlockAvailableReply
+	52, // [52:77] is the sub-list for method output_type
+	27, // [27:52] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_remote_ethbackend_proto_init() }
@@ -2564,7 +2602,7 @@ func file_remote_ethbackend_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_remote_ethbackend_proto_rawDesc), len(file_remote_ethbackend_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   41,
+			NumMessages:   43,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
