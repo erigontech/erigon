@@ -71,12 +71,7 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 		return err
 	}
 	for block := fromBlock; block <= toBlock; block++ {
-		blockOutputDir := path.Join(runOutputDir, fmt.Sprintf("block_%d", block))
-		err = os.MkdirAll(blockOutputDir, 0755)
-		if err != nil {
-			return err
-		}
-		err = bt.backtestBlock(ctx, tx, block, tnr, blockOutputDir)
+		err = bt.backtestBlock(ctx, tx, block, tnr, runOutputDir)
 		if err != nil {
 			return err
 		}
@@ -85,9 +80,14 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 	return nil
 }
 
-func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, blockOutputDir string) error {
+func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, runOutputDir string) error {
 	start := time.Now()
 	bt.logger.Info("backtesting block commitment", "block", block)
+	blockOutputDir := path.Join(runOutputDir, fmt.Sprintf("block_%d", block))
+	err := os.MkdirAll(blockOutputDir, 0755)
+	if err != nil {
+		return err
+	}
 	fromTxNum, err := tnr.Min(tx, block)
 	if err != nil {
 		return err
