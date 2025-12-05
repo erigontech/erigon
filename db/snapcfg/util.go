@@ -373,6 +373,10 @@ func (p *PreverifiedItems) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (p PreverifiedItems) Sort() {
+	slices.SortFunc(p, preverifiedItemCompare)
+}
+
 func fromToml(in []byte) PreverifiedItems {
 	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
@@ -381,12 +385,13 @@ func fromToml(in []byte) PreverifiedItems {
 	return doSort(outMap)
 }
 
-func doSort(in map[string]string) []PreverifiedItem {
+func doSort(in map[string]string) (ret PreverifiedItems) {
 	out := make([]PreverifiedItem, 0, len(in))
 	for k, v := range in {
 		out = append(out, PreverifiedItem{k, v})
 	}
-	slices.SortFunc(out, preverifiedItemCompare)
+	ret = out
+	ret.Sort()
 	return out
 }
 
@@ -549,8 +554,10 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
+const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
+
 func LoadRemotePreverified(ctx context.Context) (err error) {
-	if s, ok := os.LookupEnv("ERIGON_REMOTE_PREVERIFIED"); ok {
+	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
 		log.Info("Loading local preverified override file", "file", s)
 
 		b, err := os.ReadFile(s)
