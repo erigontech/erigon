@@ -45,6 +45,8 @@ var ourCapabilities = []string{
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
+	"engine_newPayloadV5",
+	"engine_getPayloadV6",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -99,6 +101,14 @@ func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes
 	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
 }
 
+// Same as [GetPayloadV5], but returning ExecutionPayloadV4
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6
+func (e *EngineServer) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	e.logger.Info("Received GetPayloadV6", "payloadId", decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.GloasVersion)
+}
+
 // Updates the forkchoice state after validating the headBlockHash
 // Additionally, builds and returns a unique identifier for an initial version of a payload
 // (asynchronously updated with transactions), if payloadAttributes is not nil and passes validation
@@ -116,7 +126,26 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 // Successor of [ForkchoiceUpdatedV2] post Cancun, with stricter check on params
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, e.deriveForkchoiceVersion(payloadAttributes))
+}
+
+// deriveForkchoiceVersion infers the forkchoice version based on the payloadAttributes
+// timestamp and configured fork times. This allows newer forks to reuse the V3 RPC.
+func (e *EngineServer) deriveForkchoiceVersion(payloadAttributes *engine_types.PayloadAttributes) clparams.StateVersion {
+	if payloadAttributes == nil {
+		return clparams.DenebVersion
+	}
+	ts := uint64(payloadAttributes.Timestamp)
+	switch {
+	case e.config.AmsterdamTime != nil && e.config.IsAmsterdam(ts):
+		return clparams.GloasVersion
+	case e.config.OsakaTime != nil && e.config.IsOsaka(ts):
+		return clparams.FuluVersion
+	case e.config.PragueTime != nil && e.config.IsPrague(ts):
+		return clparams.ElectraVersion
+	default:
+		return clparams.DenebVersion
+	}
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
@@ -145,6 +174,13 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 	// TODO(racytech): add proper version or refactor this part
 	// add all version ralated checks here so the newpayload doesn't have to deal with checks
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
+}
+
+// NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and block access list.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5
+func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.GloasVersion)
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes

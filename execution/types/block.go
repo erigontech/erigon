@@ -1185,8 +1185,7 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, blockAccessList BlockAccessList) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
-	b.SetBlockAccessList(blockAccessList)
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, blockAccessList: blockAccessList}
 	return b
 }
 
