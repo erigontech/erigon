@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -130,8 +131,9 @@ func (m *Metrics) logMetrics() []any {
 	}
 }
 
-func (m *Metrics) Headers() []string {
+func metricsHeaders() []string {
 	return []string{
+		"batchStart",
 		"updates",
 		"address plainKey",
 		"account plainKeys",
@@ -151,9 +153,14 @@ func (m *Metrics) Headers() []string {
 	}
 }
 
+func (m *Metrics) Headers() []string {
+	return metricsHeaders()
+}
+
 func (m *Metrics) Values() [][]string {
 	return [][]string{
 		{
+			strconv.FormatInt(m.batchStart.Unix(), 10),
 			strconv.FormatUint(m.updates.Load(), 10),
 			strconv.FormatUint(m.addressKeys.Load(), 10),
 			strconv.FormatUint(m.storageKeys.Load(), 10),
@@ -175,8 +182,54 @@ func (m *Metrics) Values() [][]string {
 }
 
 func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
-	//TODO implement me
-	panic("implement me")
+	return unmarshallCsvMetrics(filePath, metricsHeaders(), func(records [][]string) ([]*Metrics, error) {
+		var metrics []*Metrics
+		var current *Metrics
+		for i, row := range records {
+			var col int
+			batchStart := mustParseUnixTimeCsvCell(row, col, filePath)
+			if current == nil || current.batchStart != batchStart {
+				current = &Metrics{batchStart: batchStart}
+				metrics = append(metrics, current)
+			}
+			col++
+			current.updates.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.addressKeys.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.storageKeys.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.loadBranch.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.loadAccount.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.loadStorage.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.updateBranch.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			for k := range 5 {
+				depthsPair := row[col]
+				depthsSplit := strings.Split(depthsPair, "/")
+				if len(depthsSplit) != 2 {
+					return nil, fmt.Errorf("invalid depths pair: %s", depthsPair)
+				}
+				current.loadDepths[k*2] = mustParseUintCsvCell(depthsSplit, 0, filePath)
+				current.loadDepths[k*2+1] = mustParseUintCsvCell(depthsSplit, 1, filePath)
+				col++
+			}
+			current.unfolds.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.spentUnfolding = mustParseMillisecondsCsvCell(row, col, filePath)
+			col++
+			current.spentFolding = mustParseMillisecondsCsvCell(row, col, filePath)
+			col++
+			current.spentProcessing = mustParseMillisecondsCsvCell(row, col, filePath)
+			if col != len(row) {
+				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d", i, col, len(row))
+			}
+		}
+		return metrics, nil
+	})
 }
 
 func (m *Metrics) Reset() {
@@ -332,21 +385,23 @@ func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
 	fn(as)
 }
 
-var accountMetricsHeaders = []string{
-	"batchStart",
-	"account",
-	"storage updates",
-	"loading branch",
-	"loading account",
-	"loading storage",
-	"total unfolds",
-	"total unfolding time (μs)",
-	"total folds",
-	"total folding time (μs)",
+func (am *AccountMetrics) Headers() []string {
+	return accountMetricsHeaders()
 }
 
-func (am *AccountMetrics) Headers() []string {
-	return accountMetricsHeaders
+func accountMetricsHeaders() []string {
+	return []string{
+		"batchStart",
+		"account",
+		"storage updates",
+		"loading branch",
+		"loading account",
+		"loading storage",
+		"total unfolds",
+		"total unfolding time (μs)",
+		"total folds",
+		"total folding time (μs)",
+	}
 }
 
 func (am *AccountMetrics) Values() [][]string {
@@ -372,99 +427,46 @@ func (am *AccountMetrics) Values() [][]string {
 	return values
 }
 
-func AccountMetricsUnmarshallCsv(filePath string) ([]*AccountMetrics, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := f.Close(); err != nil {
-			log.Error("failed to close commitment account metrics csv file", "err", err)
-		}
-	}()
-	reader := csv.NewReader(f)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-	var metrics []*AccountMetrics
-	var current *AccountMetrics
-	for i, row := range records {
-		if i == 0 {
-			if len(row) != len(accountMetricsHeaders) {
-				return nil, fmt.Errorf("headers len don't match: got=%d, wanted=%d", len(row), len(accountMetricsHeaders))
-			}
-			for j, header := range row {
-				if header != accountMetricsHeaders[j] {
-					return nil, fmt.Errorf("headers sequence doesn't match: got=%s, wanted=%s, idx=%d", header, accountMetricsHeaders[j], j)
-				}
-			}
-		} else {
+func UnmarshallAccountMetricsCsv(filePath string) ([]*AccountMetrics, error) {
+	return unmarshallCsvMetrics(filePath, accountMetricsHeaders(), func(records [][]string) ([]*AccountMetrics, error) {
+		var metrics []*AccountMetrics
+		var current *AccountMetrics
+		for i, row := range records {
 			var col int
-			batchStart, err := strconv.ParseInt(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			batchStartTime := time.Unix(batchStart, 0)
-			if current == nil || current.BatchStart != batchStartTime {
-				current = &AccountMetrics{BatchStart: batchStartTime}
+			batchStart := mustParseUnixTimeCsvCell(row, col, filePath)
+			if current == nil || current.BatchStart != batchStart {
+				current = &AccountMetrics{BatchStart: batchStart}
 				metrics = append(metrics, current)
 			}
 			col++
 			addr := row[col]
 			if _, ok := current.AccountStats[addr]; ok {
-				return nil, fmt.Errorf("duplicate account address in metrics batch: addr=%s, batchStart=%d", addr, batchStart)
+				return nil, fmt.Errorf("duplicate account address in metrics batch: addr=%s, batchStart=%d", addr, batchStart.Unix())
 			}
 			accStats := &AccountStats{}
 			current.AccountStats[addr] = accStats
 			col++
-			accStats.StorageUpates, err = strconv.ParseUint(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
+			accStats.StorageUpates = mustParseUintCsvCell(row, col, filePath)
 			col++
-			accStats.LoadBranch, err = strconv.ParseUint(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
+			accStats.LoadBranch = mustParseUintCsvCell(row, col, filePath)
 			col++
-			accStats.LoadAccount, err = strconv.ParseUint(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
+			accStats.LoadAccount = mustParseUintCsvCell(row, col, filePath)
 			col++
-			accStats.LoadStorage, err = strconv.ParseUint(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
+			accStats.LoadStorage = mustParseUintCsvCell(row, col, filePath)
 			col++
-			accStats.Unfolds, err = strconv.ParseUint(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
+			accStats.Unfolds = mustParseUintCsvCell(row, col, filePath)
 			col++
-			spentUnfolding, err := strconv.ParseInt(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			accStats.SpentUnfolding = time.Duration(spentUnfolding) * time.Microsecond
+			accStats.SpentUnfolding = mustParseMicrosecondsCsvCell(row, col, filePath)
 			col++
-			accStats.Folds, err = strconv.ParseUint(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
+			accStats.Folds = mustParseUintCsvCell(row, col, filePath)
 			col++
-			spentFolding, err := strconv.ParseInt(row[col], 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			accStats.SpentFolding = time.Duration(spentFolding) * time.Microsecond
-			if col != len(accountMetricsHeaders) {
-				return nil, fmt.Errorf("haven't processed correct number of columns in metrics row: got=%d, wanted=%d", col, len(accountMetricsHeaders))
+			accStats.SpentFolding = mustParseMicrosecondsCsvCell(row, col, filePath)
+			if col != len(row) {
+				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d", i, col, len(row))
 			}
 		}
-	}
-	return metrics, nil
+		return metrics, nil
+	})
 }
 
 func (am *AccountMetrics) Reset(batchStart time.Time) {
@@ -480,7 +482,12 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			log.Error("failed to close metrics file while writing", "err", err, "filePath", filePath)
+		}
+	}()
 
 	// Create a new writer
 	writer := csv.NewWriter(file)
@@ -503,4 +510,92 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 		}
 	}
 	return nil
+}
+
+func unmarshallCsvMetrics[T any](filePath string, headers []string, extractor func([][]string) ([]T, error)) ([]T, error) {
+	records, err := readMetricsFromCSV(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, fmt.Errorf("no metrics found in file: %s", filePath)
+	}
+	err = validateMetricsHeader(records[0], headers)
+	if err != nil {
+		return nil, err
+	}
+	return extractor(records[1:])
+}
+
+func readMetricsFromCSV(filePath string) ([][]string, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err := f.Close()
+		if err != nil {
+			log.Error("failed to close metrics file while reading", "err", err, "filePath", filePath)
+		}
+	}()
+	reader := csv.NewReader(f)
+	return reader.ReadAll()
+}
+
+func validateMetricsHeader(have []string, want []string) error {
+	if len(have) != len(want) {
+		return fmt.Errorf("invalid number of headers: have=%d, want=%d", len(have), len(want))
+	}
+	for i := range have {
+		if have[i] != want[i] {
+			return fmt.Errorf("invalid header at idx=%d: have=%s, want=%s", i, have[i], want[i])
+		}
+	}
+	return nil
+}
+
+func mustParseUintCsvCell(row []string, col int, filePath string) uint64 {
+	n, err := parseUintCsvCell(row, col, filePath)
+	if err != nil {
+		panic(err)
+	}
+	return n
+}
+
+func parseUintCsvCell(row []string, col int, filePath string) (uint64, error) {
+	c := row[col]
+	n, err := strconv.ParseUint(c, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse uint csv cell: cell=%s, col=%d, file=%s, row=%v", c, col, filePath, row)
+	}
+	return n, nil
+}
+
+func mustParseIntCsvCell(row []string, col int, filePath string) int64 {
+	n, err := parseIntCsvCell(row, col, filePath)
+	if err != nil {
+		panic(err)
+	}
+	return n
+}
+
+func parseIntCsvCell(row []string, col int, filePath string) (int64, error) {
+	c := row[col]
+	n, err := strconv.ParseInt(c, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse int csv cell: cell=%s, col=%d, file=%s, row=%v", c, col, filePath, row)
+	}
+	return n, nil
+}
+
+func mustParseMillisecondsCsvCell(row []string, col int, filePath string) time.Duration {
+	return time.Duration(mustParseIntCsvCell(row, col, filePath)) * time.Millisecond
+}
+
+func mustParseMicrosecondsCsvCell(row []string, col int, filePath string) time.Duration {
+	return time.Duration(mustParseIntCsvCell(row, col, filePath)) * time.Microsecond
+}
+
+func mustParseUnixTimeCsvCell(row []string, col int, filePath string) time.Time {
+	return time.Unix(mustParseIntCsvCell(row, col, filePath), 0)
 }
