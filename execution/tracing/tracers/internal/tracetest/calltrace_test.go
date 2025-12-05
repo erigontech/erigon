@@ -51,12 +51,12 @@ import (
 )
 
 type callContext struct {
-	Number     math.HexOrDecimal64   `json:"number"`
-	Difficulty *math.HexOrDecimal256 `json:"difficulty"`
-	Time       math.HexOrDecimal64   `json:"timestamp"`
-	GasLimit   math.HexOrDecimal64   `json:"gasLimit"`
-	BaseFee    *math.HexOrDecimal256 `json:"baseFeePerGas"`
-	Miner      common.Address        `json:"miner"`
+	Number     math.HexOrDecimal64 `json:"number"`
+	Difficulty *uint256.Int        `json:"difficulty"`
+	Time       math.HexOrDecimal64 `json:"timestamp"`
+	GasLimit   math.HexOrDecimal64 `json:"gasLimit"`
+	BaseFee    *uint256.Int        `json:"baseFeePerGas"`
+	Miner      common.Address      `json:"miner"`
 }
 
 // callLog is the result of LOG opCode
@@ -143,11 +143,13 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
+			if test.Context.Difficulty != nil {
+				context.Difficulty = *test.Context.Difficulty
+			}
 			if test.Context.BaseFee != nil {
-				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee := test.Context.BaseFee
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
@@ -163,7 +165,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
 			statedb.SetHooks(tracer.Hooks)
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
@@ -250,7 +252,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		b.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	origin, _ := signer.Sender(tx)
-	baseFee := uint256.MustFromBig((*big.Int)(test.Context.BaseFee))
+	baseFee := test.Context.BaseFee
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
 		GasPrice: *tx.GetEffectiveGasTip(baseFee),
@@ -261,8 +263,10 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		Coinbase:    accounts.InternAddress(test.Context.Miner),
 		BlockNumber: uint64(test.Context.Number),
 		Time:        uint64(test.Context.Time),
-		Difficulty:  (*big.Int)(test.Context.Difficulty),
 		GasLimit:    uint64(test.Context.GasLimit),
+	}
+	if test.Context.Difficulty != nil {
+		context.Difficulty = *test.Context.Difficulty
 	}
 	m := mock.Mock(b)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -322,7 +326,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,
-		Difficulty:  big.NewInt(0x30000),
+		Difficulty:  *uint256.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 	}
 	var code = []byte{

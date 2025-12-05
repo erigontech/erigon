@@ -5,7 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -329,7 +330,7 @@ func CreateAAReceipt(txnHash common.Hash, status, gasUsed, cumGasUsed, blockNum,
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = logs
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	receipt.BlockNumber = big.NewInt(int64(blockNum))
+	receipt.BlockNumber = uint256.NewInt(blockNum)
 	receipt.TransactionIndex = uint(txnIndex)
 
 	return receipt

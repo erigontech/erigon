@@ -79,7 +79,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		// Sum TDs.
-		td := parentTd.Add(parentTd, header.Difficulty)
+		td := parentTd.Add(parentTd, header.Difficulty.ToBig())
 		if err := rawdb.WriteHeader(tx, header); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}

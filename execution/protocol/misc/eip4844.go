@@ -22,7 +22,6 @@ package misc
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"reflect"
 
 	"github.com/holiman/uint256"
@@ -43,8 +42,8 @@ var (
 )
 
 var (
-	blobBaseCost = big.NewInt(int64(params.BlobBaseCost))
-	gasPerBlob   = big.NewInt(int64(params.GasPerBlob))
+	blobBaseCost = uint256.NewInt(params.BlobBaseCost)
+	gasPerBlob   = uint256.NewInt(params.GasPerBlob)
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
@@ -71,7 +70,7 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 		if err != nil {
 			panic(err) // should never happen assuming the parent is valid
 		}
-		if big.NewInt(0).Mul(blobBaseCost, parent.BaseFee).Cmp(big.NewInt(0).Mul(gasPerBlob, refBlobBaseFee.ToBig())) > 0 {
+		if uint256.NewInt(0).Mul(blobBaseCost, parent.BaseFee).Cmp(uint256.NewInt(0).Mul(gasPerBlob, &refBlobBaseFee)) > 0 {
 			return parentExcessBlobGas + parentBlobGasUsed*(max-target)/max
 		}
 	}

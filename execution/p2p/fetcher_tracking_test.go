@@ -18,11 +18,11 @@ package p2p
 
 import (
 	"context"
-	"math/big"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -190,7 +190,7 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
 	requestId3 := uint64(1236)
-	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
+	mockHeaders := []*types.Header{{Number: *uint256.NewInt(1)}}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
 	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{

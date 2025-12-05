@@ -18,7 +18,6 @@ package stagedsync_test
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 	"time"
 
@@ -73,7 +72,7 @@ func TestBodiesCanonical(t *testing.T) {
 			err = bw.MakeBodiesCanonical(tx, 1)
 			require.NoError(err)
 		}
-		h.Number = new(big.Int).SetUint64(i)
+		h.Number.SetUint64(i)
 		hash := h.Hash()
 		err = rawdb.WriteHeader(tx, h)
 		require.NoError(err)
@@ -109,7 +108,7 @@ func TestBodiesUnwind(t *testing.T) {
 	defer logEvery.Stop()
 
 	for i := uint64(1); i <= 10; i++ {
-		h.Number = new(big.Int).SetUint64(i)
+		h.Number.SetUint64(i)
 		hash := h.Hash()
 		err = rawdb.WriteHeader(tx, h)
 		require.NoError(err)
