@@ -316,3 +316,15 @@ func (me *reset) decideRemove(file resetItemInfo) bool {
 		return false
 	}
 }
+
+func removeAllFiles(anFs fs.StatFS) error {
+	filepath.Localize()
+	fs.WalkDir()
+	fi, err := os.Stat()
+	if err != nil {
+		return
+	}
+	fi.Mode().IsDir()
+	filepath.Abs()
+	filepath.
+}
