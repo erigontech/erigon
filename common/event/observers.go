@@ -70,9 +70,13 @@ func (o *Observers[TEvent]) Close() {
 // Notify all observers in parallel without waiting for them to process the event.
 func (o *Observers[TEvent]) Notify(event TEvent) {
 	o.observersMu.Lock()
-	defer o.observersMu.Unlock()
-
+	observers := make([]Observer[TEvent], 0, len(o.observers))
 	for _, observer := range o.observers {
+		observers = append(observers, observer)
+	}
+	o.observersMu.Unlock()
+
+	for _, observer := range observers {
 		go observer(event)
 	}
 }
@@ -80,10 +84,14 @@ func (o *Observers[TEvent]) Notify(event TEvent) {
 // NotifySync all observers in parallel and wait until all of them process the event.
 func (o *Observers[TEvent]) NotifySync(event TEvent) {
 	o.observersMu.Lock()
-	defer o.observersMu.Unlock()
+	observers := make([]Observer[TEvent], 0, len(o.observers))
+	for _, observer := range o.observers {
+		observers = append(observers, observer)
+	}
+	o.observersMu.Unlock()
 
 	var wg sync.WaitGroup
-	for _, observer := range o.observers {
+	for _, observer := range observers {
 		wg.Add(1)
 		go func(observer Observer[TEvent]) {
 			defer wg.Done()

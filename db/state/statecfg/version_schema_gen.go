@@ -12,8 +12,8 @@ func InitSchemasGen() {
 	Schema.AccountsDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.AccountsDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.AccountsDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.BodiesBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.BodiesBlock.Version.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.BodiesBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
+	Schema.BodiesBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
@@ -27,8 +27,8 @@ func InitSchemasGen() {
 	Schema.CommitmentDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CommitmentDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.CommitmentDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.HeadersBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.HeadersBlock.Version.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.HeadersBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
+	Schema.HeadersBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.LogAddrIdx.FileVersion.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.LogAddrIdx.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.LogTopicIdx.FileVersion.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
@@ -57,7 +57,7 @@ func InitSchemasGen() {
 	Schema.TracesFromIdx.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.TracesToIdx.FileVersion.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.TracesToIdx.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.TransactionsBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.TransactionsBlock.Version.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.TxnHash2BlockNumBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.TransactionsBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
+	Schema.TransactionsBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.TxnHash2BlockNumBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 }

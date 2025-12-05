@@ -787,7 +787,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			comp.DisableFsync()
 		}
-		pagedWr := ht.datarWriter(comp)
+		pagedWr := ht.datarWriter(comp, ht.h.HistoryValuesOnCompressedPage)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -865,7 +865,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps, OverrideCompactOpts{}); err != nil {
 			return nil, nil, err
 		}
 

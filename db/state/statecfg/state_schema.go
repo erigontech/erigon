@@ -69,7 +69,7 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
 	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
 
-	//a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
+	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	return nil
 }
 

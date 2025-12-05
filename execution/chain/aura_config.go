@@ -33,7 +33,7 @@ type ValidatorSetJson struct {
 	Multi map[uint64]*ValidatorSetJson `json:"multi"`
 }
 
-// AuRaConfig is the consensus engine configs for proof-of-authority based sealing.
+// AuRaConfig is the rules engine configs for proof-of-authority based sealing.
 type AuRaConfig struct {
 	StepDuration *uint64           `json:"stepDuration"` // Block duration, in seconds.
 	Validators   *ValidatorSetJson `json:"validators"`   // Valid authorities
@@ -74,7 +74,7 @@ type AuRaConfig struct {
 	// The addresses of contracts that determine the block gas limit starting from the block number
 	// associated with each of those contracts.
 	BlockGasLimitContractTransitions map[uint64]common.Address `json:"blockGasLimitContractTransitions"`
-	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
+	// The block number at which the rules engine switches from AuRa to AuRa with POSDAO
 	// modifications.
 	PosdaoTransition *uint64 `json:"PosdaoTransition"`
 	// Stores human-readable keys associated with addresses, like DNS information.
@@ -87,7 +87,7 @@ type AuRaConfig struct {
 	RewriteBytecode map[uint64]map[common.Address]hexutil.Bytes `json:"rewriteBytecode"`
 }
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *AuRaConfig) String() string {
 	return "aura"
 }

@@ -40,8 +40,8 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -88,7 +88,7 @@ func NewProduce(produceList []string) Produce {
 }
 
 func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader,
-	cc *chain.Config, engine consensus.Engine,
+	cc *chain.Config, engine rules.Engine,
 	genesis *types.Genesis, syncCfg ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec.ExecArgs{
 		ChainDB:     db,
@@ -226,7 +226,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		}
 		defer tx.Rollback()
 
-		doms, err := execctx.NewSharedDomains(tx, logger)
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 		if err != nil {
 			return err
 		}
@@ -348,7 +348,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 					}
 				}
 
-				logger.Info("Append Reciept", "block", txTask.BlockNumber(), "tx", txTask.TxNum, "logidx", logIndexAfterTx, "gas", cumGasUsed)
 				if err := rawtemporaldb.AppendReceipt(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
@@ -393,14 +392,16 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			}
 			if produce.TraceFrom {
 				for addr := range result.TraceFroms {
-					if err := doms.IndexAdd(kv.TracesFromIdx, addr[:], txTask.TxNum); err != nil {
+					addrValue := addr.Value()
+					if err := doms.IndexAdd(kv.TracesFromIdx, addrValue[:], txTask.TxNum); err != nil {
 						return err
 					}
 				}
 			}
 			if produce.TraceTo {
 				for addr := range result.TraceTos {
-					if err := doms.IndexAdd(kv.TracesToIdx, addr[:], txTask.TxNum); err != nil {
+					addrValue := addr.Value()
+					if err := doms.IndexAdd(kv.TracesToIdx, addrValue[:], txTask.TxNum); err != nil {
 						return err
 					}
 				}

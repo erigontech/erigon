@@ -103,8 +103,7 @@ func BenchEthCreateAccessList(erigonURL, gethURL string, needCompare, latest boo
 
 			nTransactions = nTransactions + 1
 
-			var request string
-			request = reqGen.ethCreateAccessList(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)
+			request := reqGen.ethCreateAccessList(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
 
 			if err := requestAndCompare(request, "eth_createAccessList", errCtx, reqGen, needCompare, rec, errs, resultsCh,

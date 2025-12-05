@@ -352,10 +352,10 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	var (
 		hash      = header.Hash()
 		number    = header.Number.Uint64()
-		encoded   = hexutil.EncodeTs(number)
 		headerKey = dbutils.HeaderKey(number, hash)
 	)
-	if err := db.Put(kv.HeaderNumber, hash[:], encoded); err != nil {
+
+	if err := WriteHeaderNumber(db, hash, number); err != nil {
 		return fmt.Errorf("HeaderNumber mapping: %w", err)
 	}
 
@@ -376,7 +376,7 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, header
 	if skipIndexing {
 		return nil
 	}
-	if err := db.Put(kv.HeaderNumber, hash[:], hexutil.EncodeTs(number)); err != nil {
+	if err := WriteHeaderNumber(db, hash, number); err != nil {
 		return err
 	}
 	return nil
@@ -406,7 +406,7 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
-		log.Error("ReadBodyRLP failed", "err", err)
+		log.Error("ReadStorageBodyRLP failed", "err", err)
 	}
 	return bodyRlp
 }
@@ -472,13 +472,12 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 // Write transactions into DB and use txnID as first identifier
 func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, baseTxnID types.BaseTxnID) error {
 	rawTxs := make([][]byte, len(txs))
-	buf := bytes.NewBuffer(nil)
 	for i, txn := range txs {
-		buf.Reset()
-		if err := rlp.Encode(buf, txn); err != nil {
+		raw, err := rlp.EncodeToBytes(txn)
+		if err != nil {
 			return fmt.Errorf("broken txn rlp: %w", err)
 		}
-		rawTxs[i] = common.Copy(buf.Bytes())
+		rawTxs[i] = raw
 	}
 	return WriteRawTransactions(rwTx, rawTxs, baseTxnID)
 }
@@ -1085,7 +1084,7 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 	}
 	defer c.Close()
 
-	logEvery := time.NewTimer(30 * time.Second)
+	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	i := 0

@@ -46,7 +46,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -80,7 +80,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     uint256.Int{},
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -162,7 +162,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -191,7 +191,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(txNum * 1e6),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)

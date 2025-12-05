@@ -45,16 +45,16 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/genesiswrite"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -105,6 +105,7 @@ type stTransaction struct {
 	Data                 []string                  `json:"data"`
 	Value                []string                  `json:"value"`
 	AccessLists          []*types.AccessList       `json:"accessLists,omitempty"`
+	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
 	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
 }
@@ -208,7 +209,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
@@ -233,23 +234,13 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	if err != nil {
 		return nil, common.Hash{}, 0, err
 	}
-	if len(post.Tx) != 0 {
-		txn, err := types.UnmarshalTransactionFromBinary(post.Tx, false /* blobTxnsAreWrappedWithBlobs */)
-		if err != nil {
-			return nil, common.Hash{}, 0, err
-		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, (&evmtypes.BlockContext{}).Rules(config))
-		if err != nil {
-			return nil, common.Hash{}, 0, err
-		}
-	}
 
 	// Prepare the EVM.
-	txContext := core.NewEVMTxContext(msg)
+	txContext := protocol.NewEVMTxContext(msg)
 	header := block.HeaderNoCopy()
 	//blockNum, txNum := header.Number.Uint64(), 1
 
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.Json.Env.Coinbase, config)
+	context := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = uint256.Int{}
@@ -271,14 +262,14 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
-		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, common.Address{})
+		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 
 	// Execute the message.
-	snapshot := statedb.Snapshot()
-	gaspool := new(core.GasPool)
+	snapshot := statedb.PushSnapshot()
+	gaspool := new(protocol.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
-	res, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
+	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	gasUsed := uint64(0)
 	if res != nil {
 		gasUsed = res.GasUsed
@@ -286,6 +277,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	if err != nil {
 		statedb.RevertToSnapshot(snapshot, err)
 	}
+	statedb.PopSnapshot(snapshot)
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
 		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
 	}
@@ -305,30 +297,31 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)
-	for addr, a := range accounts {
-		statedb.SetCode(addr, a.Code)
-		statedb.SetNonce(addr, a.Nonce)
+	for addr, a := range alloc {
+		address := accounts.InternAddress(addr)
+		statedb.SetCode(address, a.Code)
+		statedb.SetNonce(address, a.Nonce)
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)
 		}
-		statedb.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+		statedb.SetBalance(address, balance, tracing.BalanceChangeUnspecified)
 		for k, v := range a.Storage {
-			key := k
+			key := accounts.InternKey(k)
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
-			statedb.SetState(addr, key, *val)
+			statedb.SetState(address, key, *val)
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
-			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+			statedb.SetIncarnation(address, state.FirstContractIncarnation)
 		}
 	}
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -380,24 +373,25 @@ func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 }
 
-func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {
+func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (protocol.Message, error) {
 	// Derive sender from private key if present.
-	var from common.Address
+	var from accounts.Address
 	if len(tx.PrivateKey) > 0 {
 		key, err := crypto.ToECDSA(tx.PrivateKey)
 		if err != nil {
 			return nil, fmt.Errorf("invalid private key: %v", err)
 		}
-		from = crypto.PubkeyToAddress(key.PublicKey)
+		from = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 	}
 
 	// Parse recipient if present.
-	var to *common.Address
+	var to accounts.Address
 	if tx.To != "" {
-		to = new(common.Address)
-		if err := to.UnmarshalText([]byte(tx.To)); err != nil {
+		var txto common.Address
+		if err := txto.UnmarshalText([]byte(tx.To)); err != nil {
 			return nil, fmt.Errorf("invalid to address: %v", err)
 		}
+		to = accounts.InternAddress(txto)
 	}
 
 	// Get values specific to this post state.
@@ -500,6 +494,11 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 			}
 		}
 		msg.SetAuthorizations(authorizations)
+	}
+
+	// Add blob versioned hashes if present.
+	if len(tx.BlobVersionedHashes) > 0 {
+		msg.SetBlobVersionedHashes(tx.BlobVersionedHashes)
 	}
 
 	return msg, nil

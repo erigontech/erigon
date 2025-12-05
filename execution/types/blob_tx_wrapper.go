@@ -30,8 +30,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -357,13 +358,13 @@ func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 	return txw.Tx.RawSignatureValues()
 }
 
-func (txw *BlobTxWrapper) cachedSender() (common.Address, bool) { return txw.Tx.cachedSender() }
+func (txw *BlobTxWrapper) cachedSender() (accounts.Address, bool) { return txw.Tx.cachedSender() }
 
-func (txw *BlobTxWrapper) Sender(s Signer) (common.Address, error) { return txw.Tx.Sender(s) }
+func (txw *BlobTxWrapper) Sender(s Signer) (accounts.Address, error) { return txw.Tx.Sender(s) }
 
-func (txw *BlobTxWrapper) GetSender() (common.Address, bool) { return txw.Tx.GetSender() }
+func (txw *BlobTxWrapper) GetSender() (accounts.Address, bool) { return txw.Tx.GetSender() }
 
-func (txw *BlobTxWrapper) SetSender(address common.Address) { txw.Tx.SetSender(address) }
+func (txw *BlobTxWrapper) SetSender(address accounts.Address) { txw.Tx.SetSender(address) }
 
 func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDeploy() }
 

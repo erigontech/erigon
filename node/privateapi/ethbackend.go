@@ -29,14 +29,15 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/direct"
@@ -469,14 +470,14 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	stateReader.SetTxNum(maxTxNum)
 	ibs := state.New(stateReader)
 
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &common.Address{}, s.chainConfig)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
 
-	senderCodeSize, err := ibs.GetCodeSize(*aaTxn.SenderAddress)
+	senderCodeSize, err := ibs.GetCodeSize(aaTxn.SenderAddress)
 	if err != nil {
 		return nil, err
 	}
 
-	validationTracer := aa.NewValidationRulesTracer(*aaTxn.SenderAddress, senderCodeSize != 0)
+	validationTracer := aa.NewValidationRulesTracer(aaTxn.SenderAddress, senderCodeSize != 0)
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
 	ibs.SetHooks(validationTracer.Hooks())
 
@@ -490,7 +491,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	}
 
 	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
-	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
+	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
 		log.Info("RIP-7560 validation err", "err", err.Error())
 		return &remoteproto.AAValidationReply{Valid: false}, nil

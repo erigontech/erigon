@@ -22,9 +22,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -36,8 +35,6 @@ import (
 // WebSeeds - allow use HTTP-based infrastructure to support Bittorrent network
 // it allows download .torrent files and data files from trusted url's (for example: S3 signed url)
 type WebSeeds struct {
-	lock sync.Mutex
-
 	seeds []*url.URL
 
 	logger    log.Logger
@@ -147,8 +144,8 @@ type WebSeedCheckReport struct {
 }
 
 func (w *WebSeedCheckReport) sort() {
-	sort.Strings(w.missingTorrents)
-	sort.Strings(w.danglingTorrents)
+	slices.Sort(w.missingTorrents)
+	slices.Sort(w.danglingTorrents)
 }
 
 func (w *WebSeedCheckReport) OK() bool {

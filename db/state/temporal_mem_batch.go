@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sort"
 	"sync"
 	"unsafe"
 
@@ -27,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
@@ -59,7 +61,11 @@ type TemporalMemBatch struct {
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
-	metrics                   *changeset.DomainMetrics
+
+	unwindToTxNum   uint64
+	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+
+	metrics *changeset.DomainMetrics
 }
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
@@ -109,66 +115,99 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
-	valWithStep := dataWithStep{data: val, step: kv.Step(txNum / sd.stepSize)}
-	putSize := 0
-	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Set(key, valWithStep); ok {
-			putSize += len(val) - len(old.data)
-		} else {
-			putSize += len(key) + len(val)
-		}
 
+	var updateMetrics = func(domain kv.Domain, putKeySize int, putValueSize int) {
 		sd.metrics.Lock()
+		defer sd.metrics.Unlock()
 		sd.metrics.CachePutCount++
-		sd.metrics.CachePutSize += putSize
+		sd.metrics.CachePutSize += putKeySize + putValueSize
+		sd.metrics.CachePutKeySize += putKeySize
+		sd.metrics.CachePutValueSize += putValueSize
 		if dm, ok := sd.metrics.Domains[domain]; ok {
 			dm.CachePutCount++
-			dm.CachePutSize += putSize
+			dm.CachePutSize += putKeySize + putValueSize
+			dm.CachePutKeySize += putKeySize
+			dm.CachePutValueSize += putValueSize
 		} else {
 			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
-				CachePutCount: 1,
-				CachePutSize:  putSize,
+				CachePutCount:     1,
+				CachePutSize:      putKeySize + putValueSize,
+				CachePutKeySize:   putKeySize,
+				CachePutValueSize: putValueSize,
 			}
 		}
-		sd.metrics.Unlock()
+	}
+
+	valWithStep := dataWithStep{data: val, step: kv.Step(txNum / sd.stepSize)}
+	putKeySize := 0
+	putValueSize := 0
+	if domain == kv.StorageDomain {
+		if old, ok := sd.storage.Set(key, valWithStep); ok {
+			putValueSize += len(val) - len(old.data)
+		} else {
+			putKeySize += len(key)
+			putValueSize += len(val)
+		}
+
+		updateMetrics(domain, putKeySize, putValueSize)
 		return
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		putSize += len(val) - len(old.data)
+		putValueSize += len(val) - len(old.data)
 	} else {
-		putSize += len(key) + len(val)
+		putKeySize += len(key)
+		putValueSize += len(val)
 	}
 	sd.domains[domain][key] = valWithStep
 
-	if dm, ok := sd.metrics.Domains[domain]; ok {
-		dm.CachePutCount++
-		dm.CachePutSize += putSize
-	} else {
-		sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
-			CachePutCount: 1,
-			CachePutSize:  putSize,
-		}
-	}
-	sd.metrics.Lock()
-	sd.metrics.CachePutCount++
-	sd.metrics.CachePutSize += putSize
-	sd.metrics.Unlock()
+	updateMetrics(domain, putKeySize, putValueSize)
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
+	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
+		if sd.unwindChangeset != nil {
+			if values := sd.unwindChangeset[domain]; values != nil {
+				if value, ok := values[key]; ok {
+					prevStep := ^binary.BigEndian.Uint64(value.PrevStepBytes)
+
+					if len(value.Value) == 0 {
+						keyStep := ^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:]))
+
+						if keyStep != prevStep {
+							if prevStep != 0 {
+								return nil, kv.Step(prevStep), false
+							}
+						}
+
+						return nil, kv.Step(prevStep), true
+					}
+					return value.Value, kv.Step(prevStep), true
+				}
+			}
+		}
+
+		return nil, 0, false
+	}
+
 	keyS := toStringZeroCopy(key)
 	var dataWithStep dataWithStep
 	if domain == kv.StorageDomain {
 		dataWithStep, ok = sd.storage.Get(keyS)
+		if !ok {
+			return unwoundLatest(domain, keyS)
+		}
 		return dataWithStep.data, dataWithStep.step, ok
 
 	}
 
 	dataWithStep, ok = sd.domains[domain][keyS]
+	if !ok {
+		return unwoundLatest(domain, keyS)
+	}
 	return dataWithStep.data, dataWithStep.step, ok
 }
 
@@ -189,13 +228,20 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithStep](128)
+	sd.unwindToTxNum = 0
+	sd.unwindChangeset = nil
+
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
-	sd.metrics.CachePutSize = 0
 	sd.metrics.CachePutCount = 0
+	sd.metrics.CachePutSize = 0
+	sd.metrics.CachePutKeySize = 0
+	sd.metrics.CachePutValueSize = 0
 	for _, dm := range sd.metrics.Domains {
 		dm.CachePutCount = 0
 		dm.CachePutSize = 0
+		dm.CachePutKeySize = 0
+		dm.CachePutValueSize = 0
 	}
 }
 
@@ -245,6 +291,27 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
 
+func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.unwindToTxNum = unwindToTxNum
+	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+
+	if changeset != nil {
+		unwindChangeset = &[kv.DomainLen]map[string]kv.DomainEntryDiff{}
+
+		for domain, changes := range changeset {
+			if unwindChangeset[domain] == nil {
+				unwindChangeset[domain] = map[string]kv.DomainEntryDiff{}
+			}
+
+			for _, change := range changes {
+				unwindChangeset[domain][change.Key[:len(change.Key)-8]] = change
+			}
+		}
+	}
+
+	sd.unwindChangeset = unwindChangeset
+}
+
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
@@ -272,8 +339,23 @@ func (sd *TemporalMemBatch) Close() {
 	for _, fWriter := range sd.forkableWriters {
 		fWriter.Close()
 	}
+	sd.ClearRam()
 }
+
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+	if sd.unwindChangeset != nil {
+		var changeSet [kv.DomainLen][]kv.DomainEntryDiff
+		for domain, diffEntries := range sd.unwindChangeset {
+			for _, entry := range diffEntries {
+				changeSet[domain] = append(changeSet[domain], entry)
+			}
+			sort.Slice(changeSet[domain], func(i, j int) bool {
+				return changeSet[domain][i].Key < changeSet[domain][j].Key
+			})
+		}
+		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, &changeSet)
+	}
+
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
@@ -281,10 +363,13 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}
+	if _, err := rawdb.IncrementStateVersion(tx); err != nil {
+		return fmt.Errorf("can't write plain state version: %w", err)
+	}
 	return nil
 }
 
-func (sd *TemporalMemBatch) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
+func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 	for key, changeSet := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))

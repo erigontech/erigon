@@ -37,7 +37,7 @@ func TestLegacyBlockchain(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
+		t.Skip("fix me on win please") // after remove ChainReader from rules engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 
 	bt := new(testMatcher)
@@ -86,7 +86,17 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	// Tested in the state test format by TestState
 	bt.skipLoad(`^static/state_tests/`)
 
+	//one := false
+
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+		// import pre accounts & construct test genesis block & state root
+		//if !strings.Contains(name, "eip7702_set_code_tx/test_invalid_transaction_after_authorization.json") {
+		//	return
+		//}
+		//if one {
+		//	return
+		//}
+		//one = true
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)

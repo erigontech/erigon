@@ -28,11 +28,12 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -165,7 +166,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	if tracer != nil && tracer.Hooks.OnTxStart != nil {
 		tracer.Hooks.OnTxStart(vmenv.GetVMContext(), txn, msg.From())
 	}
-	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
+	result, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
 	if err != nil {
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
 			tracer.Hooks.OnTxEnd(nil, err)
@@ -307,9 +308,9 @@ type internalIssuance struct {
 	Issuance    string `json:"issuance,omitempty"`
 }
 
-func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, engine consensus.EngineReader) (internalIssuance, error) {
+func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader) (internalIssuance, error) {
 	// TODO: aura seems to be already broken in the original version of this RPC method
-	rewards, err := engine.CalculateRewards(chainConfig, block.HeaderNoCopy(), block.Uncles(), func(contract common.Address, data []byte) ([]byte, error) {
+	rewards, err := engine.CalculateRewards(chainConfig, block.HeaderNoCopy(), block.Uncles(), func(contract accounts.Address, data []byte) ([]byte, error) {
 		return nil, nil
 	})
 	if err != nil {
@@ -319,10 +320,10 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	blockReward := uint256.NewInt(0)
 	uncleReward := uint256.NewInt(0)
 	for _, r := range rewards {
-		if r.Kind == consensus.RewardAuthor {
+		if r.Kind == rules.RewardAuthor {
 			blockReward.Add(blockReward, &r.Amount)
 		}
-		if r.Kind == consensus.RewardUncle {
+		if r.Kind == rules.RewardUncle {
 			uncleReward.Add(uncleReward, &r.Amount)
 		}
 	}

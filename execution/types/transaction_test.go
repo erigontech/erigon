@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -59,7 +59,7 @@ var (
 		testAddr,
 		uint256.NewInt(10),
 		2000,
-		u256.Num1,
+		&u256.Num1,
 		common.FromHex("5544"),
 	).WithSignature(
 		*LatestSignerForChainID(nil),
@@ -67,7 +67,7 @@ var (
 	)
 
 	emptyEip2718Tx = &AccessListTx{
-		ChainID: u256.Num1,
+		ChainID: &u256.Num1,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
 				Nonce:    3,
@@ -93,7 +93,7 @@ var (
 			GasLimit: 25000,
 			Data:     common.FromHex("5544"),
 		},
-		ChainID: u256.Num1,
+		ChainID: &u256.Num1,
 		TipCap:  uint256.NewInt(1),
 		FeeCap:  uint256.NewInt(1),
 	}
@@ -229,8 +229,8 @@ func TestEIP2930Signer(t *testing.T) {
 		signer1 = LatestSignerForChainID(big.NewInt(1))
 		signer2 = LatestSignerForChainID(big.NewInt(2))
 		tx0     = &AccessListTx{LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
-		tx1     = &AccessListTx{ChainID: u256.Num1, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
-		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{ChainID: u256.Num2, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}})
+		tx1     = &AccessListTx{ChainID: &u256.Num1, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
+		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{ChainID: &u256.Num2, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}})
 	)
 
 	tests := []struct {
@@ -287,7 +287,7 @@ func TestEIP2930Signer(t *testing.T) {
 		if !errors.Is(err, test.wantSenderErr) {
 			t.Errorf("test %d: wrong Sender error %q", i, err)
 		}
-		if err == nil && sender != keyAddr {
+		if err == nil && sender.Value() != keyAddr {
 			t.Errorf("test %d: wrong sender address %x", i, sender)
 		}
 		signedTx, err := SignTx(test.tx, *test.signer, key)
@@ -372,7 +372,7 @@ func TestRecipientEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if addr != from {
+	if addr != from.Value() {
 		t.Fatal("derived address doesn't match")
 	}
 }
@@ -390,7 +390,7 @@ func TestRecipientNormal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if addr != from {
+	if addr != from.Value() {
 		t.Fatal("derived address doesn't match")
 	}
 }
@@ -451,7 +451,7 @@ func TestTransactionCoding(t *testing.T) {
 					GasLimit: 1,
 					Data:     []byte("abcdef"),
 				},
-				GasPrice: u256.Num2,
+				GasPrice: &u256.Num2,
 			}
 		case 1:
 			// Legacy txn contract creation.
@@ -461,7 +461,7 @@ func TestTransactionCoding(t *testing.T) {
 					GasLimit: 1,
 					Data:     []byte("abcdef"),
 				},
-				GasPrice: u256.Num2,
+				GasPrice: &u256.Num2,
 			}
 		case 2:
 			// txn with non-zero access list.

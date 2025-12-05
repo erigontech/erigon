@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -110,10 +109,10 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	return block, err
 }
 func (back *RemoteBackend) TxsV3Enabled() bool { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() snapshotsync.BlockSnapshots {
+func (back *RemoteBackend) Snapshots() services.BlockSnapshots {
 	return back.blockReader.Snapshots()
 }
-func (back *RemoteBackend) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 
 func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)

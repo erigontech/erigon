@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -507,7 +507,7 @@ func Test_mergeEliasFano(t *testing.T) {
 	t.Skip()
 
 	firstList := []int{1, 298164, 298163, 13, 298160, 298159}
-	sort.Ints(firstList)
+	slices.Sort(firstList)
 	uniq := make(map[int]struct{})
 
 	first := eliasfano32.NewEliasFano(uint64(len(firstList)), uint64(firstList[len(firstList)-1]))
@@ -529,7 +529,7 @@ func Test_mergeEliasFano(t *testing.T) {
 		644988, 644987, 644946, 644994,
 		644942, 644945, 644941, 644940,
 		644939, 644938, 644792, 644787}
-	sort.Ints(secondList)
+	slices.Sort(secondList)
 	second := eliasfano32.NewEliasFano(uint64(len(secondList)), uint64(secondList[len(secondList)-1]))
 
 	for _, v := range secondList {
@@ -553,7 +553,7 @@ func Test_mergeEliasFano(t *testing.T) {
 	require.EqualValues(t, len(uniq), merged.Count())
 	require.Equal(t, merged.Count(), eliasfano32.Count(menc))
 	mergedLists := append(firstList, secondList...)
-	sort.Ints(mergedLists)
+	slices.Sort(mergedLists)
 	require.EqualValues(t, mergedLists[len(mergedLists)-1], merged.Max())
 	require.Equal(t, merged.Max(), eliasfano32.Max(menc))
 

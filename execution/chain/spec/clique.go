@@ -13,7 +13,7 @@ var (
 	// and accepted by the Ethereum core developers into the Clique consensus.
 	AllCliqueProtocolChanges = &chain.Config{
 		ChainID:               big.NewInt(1337),
-		Consensus:             chain.CliqueConsensus,
+		Rules:                 chain.CliqueRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),

@@ -55,6 +55,7 @@ var DefaultFlags = []cli.Flag{
 	&TLSKeyFlag,
 	&TLSCACertFlag,
 	&StateStreamDisableFlag,
+	&ExperimentalBALFlag,
 	&SyncLoopThrottleFlag,
 	&BadBlockFlag,
 
@@ -154,16 +155,10 @@ var DefaultFlags = []cli.Flag{
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,
 	&utils.CliqueSnapshotInmemorySignaturesFlag,
 	&utils.CliqueDataDirFlag,
-	&utils.MiningEnabledFlag,
 	&utils.ProposingDisableFlag,
-	&utils.MinerNotifyFlag,
 	&utils.MinerGasLimitFlag,
 	&utils.MinerEtherbaseFlag,
-	&utils.MinerGasPriceFlag,
 	&utils.MinerExtraDataFlag,
-	&utils.MinerNoVerfiyFlag,
-	&utils.MinerSigningKeyFileFlag,
-	&utils.MinerRecommitIntervalFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
@@ -257,7 +252,4 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
-
-	&utils.ErigonDBStepSizeFlag,
-	&utils.ErigonDBStepsInFrozenFileFlag,
 }

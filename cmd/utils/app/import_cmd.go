@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/direct"
@@ -185,7 +185,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 		}
 
 		// RLP decoding worked, try to insert into chain:
-		missingChain := &core.ChainPack{
+		missingChain := &blockgen.ChainPack{
 			Blocks:   missing,
 			TopBlock: missing[len(missing)-1],
 		}
@@ -232,14 +232,14 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 	return nil
 }
 
-func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, setHead bool) error {
+func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
 	for _, block := range chain.Blocks {
 		if err := block.HashCheck(true); err != nil {
 			return err
 		}
 	}
 
-	chainRW := eth1_chain_reader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
+	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
 
 	ctx := context.Background()
 	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {

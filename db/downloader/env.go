@@ -12,6 +12,7 @@ func initIntFromEnv[T constraints.Signed](key string, defaultValue T, bitSize in
 	return strconvFromEnv(key, defaultValue, bitSize, strconv.ParseInt)
 }
 
+//nolint:unused
 func initUIntFromEnv[T constraints.Unsigned](key string, defaultValue T, bitSize int) T {
 	return strconvFromEnv(key, defaultValue, bitSize, strconv.ParseUint)
 }
