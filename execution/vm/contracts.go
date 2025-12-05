@@ -475,6 +475,7 @@ func modExpMultComplexityEip198(x uint32) uint64 {
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp) RequiredGas(input []byte) uint64 {
+
 	var minGas uint64
 	var adjExpFactor uint64
 	var finalDivisor uint64
