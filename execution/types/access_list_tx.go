@@ -110,50 +110,39 @@ func (tx *AccessListTx) Unwrap() Transaction {
 
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
 func (tx *AccessListTx) EncodingSize() int {
-	payloadSize, _, _, _ := tx.payloadSize()
+	payloadSize, _ := tx.payloadSize()
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 // payloadSize calculates the RLP encoding size of transaction, without TxType and envelope
-func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
-	// size of ChainID
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.ChainID)
+func (tx *AccessListTx) payloadSize() (payloadSize int, accessListLen int) {
+	payloadSize += rlp.Uint256Len(*tx.ChainID)
 	// size of Nonce
 	payloadSize++
-	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
-	payloadSize += nonceLen
+	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
 	// size of GasPrice
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.GasPrice)
+	payloadSize += rlp.Uint256Len(*tx.GasPrice)
 	// size of GasLimit
 	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
-	payloadSize += gasLen
+	payloadSize += rlp.IntLenExcludingHead(tx.GasLimit)
 	// size of To
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
 	// size of Value
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.Value)
+	payloadSize += rlp.Uint256Len(*tx.Value)
 	// size of Data
 	payloadSize += rlp.StringLen(tx.Data)
 	// size of AccessList
 	accessListLen = accessListSize(tx.AccessList)
 	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
-	// size of V
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.V)
-	// size of R
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.R)
-	// size of S
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.S)
-	return payloadSize, nonceLen, gasLen, accessListLen
+
+	payloadSize += rlp.Uint256Len(tx.V)
+	payloadSize += rlp.Uint256Len(tx.R)
+	payloadSize += rlp.Uint256Len(tx.S)
+	return payloadSize, accessListLen
 }
 
 func accessListSize(al AccessList) int {
@@ -201,7 +190,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	payloadSize, accessListLen := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode TxType
@@ -209,13 +198,13 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -284,7 +273,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 
 // EncodeRLP implements rlp.Encoder
 func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
@@ -298,7 +287,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return nil
