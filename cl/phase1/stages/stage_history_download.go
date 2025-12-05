@@ -303,7 +303,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					case <-ctx.Done():
 						return
 					case <-ticker.C:
-						if err := downloadBlobHistoryWorker(cfg, ctx, false, logger); err != nil {
+						if err := downloadBlobHistoryWorker(cfg, ctx, true, logger); err != nil {
 							logger.Error("Error downloading blobs", "err", err)
 						}
 					}
