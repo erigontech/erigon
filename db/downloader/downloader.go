@@ -18,6 +18,7 @@ package downloader
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -114,7 +115,8 @@ type Downloader struct {
 	lock                   sync.RWMutex
 	initedBackgroundLogger bool
 	torrentsByName         map[snapshotName]*torrent.Torrent
-	// Torrents that were added for download.
+	// Torrents that were added for download. The first time a torrent is added here, the adder is
+	// responsible for fetching metainfo and executing after-add handlers.
 	downloads map[*torrent.Torrent]struct{}
 }
 
@@ -756,6 +758,9 @@ func (d *Downloader) startSnapshotsDownload(
 		for _, t := range torrents {
 			select {
 			case <-t.Complete().On():
+			case <-t.Closed():
+				// Might have been asynchronously deleted. Don't want to get stuck.
+				return cmp.Or(context.Cause(ctx), fmt.Errorf("torrent unexpectedly closed: %q", t.Name()))
 			case <-ctx.Done():
 				return context.Cause(ctx)
 			}
@@ -849,8 +854,8 @@ func (d *Downloader) logDownload(ctx context.Context, ts []preverifiedSnapshot, 
 	}
 }
 
-// testingAddPreverifiedUnlocked Starts a snapshot download bug doesn't care about waiting.
-func (d *Downloader) testingAddPreverifiedUnlocked(
+// testingStartSingleSnapshotDownload Starts a snapshot download bug doesn't care about waiting.
+func (d *Downloader) testingStartSingleSnapshotDownload(
 	ctx context.Context,
 	infoHash metainfo.Hash,
 	name string,
@@ -876,8 +881,7 @@ func (d *Downloader) invalidateData(name snapshotName, infoHash metainfo.Hash) (
 	return
 }
 
-// Download a preverified file. That means it has a published manifest (metainfo), and a known info
-// hash. Caller is responsible for flushing missing metainfos to disk when complete.
+// Add a torrent for download. Invalidates data if existing metainfo doesn't match.
 func (d *Downloader) addTorrentForDownload(
 	infoHash metainfo.Hash,
 	name string,
@@ -911,8 +915,6 @@ func (d *Downloader) addTorrentForDownload(
 	return
 }
 
-// Download a preverified file. That means it has a published manifest (metainfo), and a known info
-// hash. Caller is responsible for flushing missing metainfos to disk when complete.
 func (d *Downloader) loadMatchingMetainfoOrInvalidateData(
 	infoHash metainfo.Hash,
 	name string,
