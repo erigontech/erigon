@@ -38,9 +38,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/grafana/pyroscope-go"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/grafana/pyroscope-go"
 )
 
 // Handler is the global debugging handler.
@@ -207,9 +208,9 @@ func (h *HandlerT) StopPyroscopeProfiler() error {
 	if h.profiler != nil {
 		err := h.profiler.Stop()
 		h.profiler = nil
+		log.Info("Pyroscope profiling stopped", "err", err)
 		return err
 	}
-	log.Info("Pyroscope profiling stopped")
 	return nil
 }
 
