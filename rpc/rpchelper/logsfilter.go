@@ -289,6 +289,9 @@ func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []comm
 		return false
 	}
 	for i, sub := range filter.topicsOriginal {
+		if len(sub) == 0 {  // empty rule set == wildcard
+			continue  // Match any topic, so continue to next position
+		}
 		if !slices.Contains(sub, logTopics[i]) {
 			return false
 		}
