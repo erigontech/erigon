@@ -410,7 +410,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			prevLogSlot = currentSlot
 			prevTime = time.Now()
 
-			logger.Info("[Blobs-Downloader] Downloading blobs backwards", "slot", currentSlot, "blks/sec", blkSecStr)
+			logger.Info("[Blobs-Downloader] Downloading blobs backwards", "slot", currentSlot, "targetSlot", targetSlot, "blks/sec", blkSecStr)
 		default:
 		}
 		// Generate the request
