@@ -45,6 +45,9 @@ func sigToPub(hash, sig []byte) (*secp256k1.PublicKey, error) {
 	if len(sig) != SignatureLength {
 		return nil, errors.New("invalid signature")
 	}
+	if len(hash) != DigestLength {
+		return nil, fmt.Errorf("hash is required to be exactly %d bytes (%d)", DigestLength, len(hash))
+	}
 	// Convert to secp256k1 input format with 'recovery id' v at the beginning.
 	btcsig := make([]byte, SignatureLength)
 	btcsig[0] = sig[RecoveryIDOffset] + 27
@@ -78,7 +81,7 @@ func SigToPub(hash, sig []byte) (*ecdsa.PublicKey, error) {
 //
 // The produced signature is in the [R || S || V] format where V is 0 or 1.
 func Sign(hash []byte, prv *ecdsa.PrivateKey) ([]byte, error) {
-	if len(hash) != 32 {
+	if len(hash) != DigestLength {
 		return nil, fmt.Errorf("hash is required to be exactly 32 bytes (%d)", len(hash))
 	}
 	if prv.Curve != S256() {

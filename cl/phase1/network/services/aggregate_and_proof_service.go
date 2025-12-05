@@ -363,7 +363,7 @@ func AggregateMessageSignature(
 			return err
 		}
 		pk := val.PublicKeyBytes()
-		pks = append(pks, common.CopyBytes(pk))
+		pks = append(pks, common.Copy(pk))
 		return nil
 	}); err != nil {
 		return nil, nil, nil, err

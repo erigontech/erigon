@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
@@ -66,7 +66,7 @@ type Service struct {
 	servers   []*sentry.GrpcServer // Peer-to-peer server to retrieve networking infos
 	chaindb   kv.RoDB
 	networkid uint64
-	engine    consensus.Engine // Consensus engine to retrieve variadic block fields
+	engine    rules.Engine // Rules engine to retrieve variadic block fields
 
 	node string // Name of the node to display on the monitoring page
 	pass string // Password to authorize access to the monitoring page
@@ -133,7 +133,7 @@ func (w *connWrapper) Close() error {
 
 // New returns a monitoring service ready for stats reporting.
 func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader services.FullBlockReader,
-	engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient) error {
+	engine rules.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient) error {
 	// Parse the netstats connection url
 	parts := urlRegex.FindStringSubmatch(url)
 	if len(parts) != 5 {

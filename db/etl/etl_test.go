@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -539,7 +539,7 @@ func TestAppendAndSortPrefixes(t *testing.T) {
 		require.NoError(collector.Collect(key1[:kl], key1[len(key):]))
 	}
 
-	sort.Strings(keys)
+	slices.Sort(keys)
 	i := 0
 
 	err := collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {

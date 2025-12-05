@@ -5,8 +5,10 @@ set -e # Enable exit on error
 WORKSPACE="$1"
 # The result directory, no default because run_rpc_tests has it
 RESULT_DIR="$2"
-# The REFERENCE_HOST that hosts the reference client
+# The host address where the reference client runs
 REFERENCE_HOST="$3"
+# The response dump mode
+DUMP_RESPONSE="$4"
 
 if [ -z "$REFERENCE_HOST" ]; then
     echo "*WARNING*: REFERENCE_HOST is not set, RPC tests on latest will run without reference comparison"
@@ -32,4 +34,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.95.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message" "$DUMP_RESPONSE"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.107.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message" "$DUMP_RESPONSE"

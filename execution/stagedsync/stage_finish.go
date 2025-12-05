@@ -161,7 +161,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 		}
 		headerRLP := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)
 		if headerRLP != nil {
-			headersRlp = append(headersRlp, common.CopyBytes(headerRLP))
+			headersRlp = append(headersRlp, common.Copy(headerRLP))
 		}
 		return common.Stopped(ctx.Done())
 	}); err != nil {

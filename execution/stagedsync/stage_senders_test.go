@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -68,10 +68,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    1,
 						To:       &testAddr,
-						Value:    u256.Num1,
+						Value:    &u256.Num1,
 						GasLimit: 1,
 					},
-					GasPrice: u256.Num1,
+					GasPrice: &u256.Num1,
 				},
 			}, *signer1),
 			mustSign(&types.AccessListTx{
@@ -79,10 +79,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    2,
 						To:       &testAddr,
-						Value:    u256.Num1,
+						Value:    &u256.Num1,
 						GasLimit: 2,
 					},
-					GasPrice: u256.Num1,
+					GasPrice: &u256.Num1,
 				},
 			}, *signer1),
 		},
@@ -100,10 +100,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    3,
 						To:       &testAddr,
-						Value:    u256.Num1,
+						Value:    &u256.Num1,
 						GasLimit: 3,
 					},
-					GasPrice: u256.Num1,
+					GasPrice: &u256.Num1,
 				},
 			}, *signer2),
 			mustSign(&types.AccessListTx{
@@ -111,10 +111,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    4,
 						To:       &testAddr,
-						Value:    u256.Num1,
+						Value:    &u256.Num1,
 						GasLimit: 4,
 					},
-					GasPrice: u256.Num1,
+					GasPrice: &u256.Num1,
 				},
 			}, *signer2),
 			mustSign(&types.AccessListTx{
@@ -122,10 +122,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    5,
 						To:       &testAddr,
-						Value:    u256.Num1,
+						Value:    &u256.Num1,
 						GasLimit: 5,
 					},
-					GasPrice: u256.Num1,
+					GasPrice: &u256.Num1,
 				},
 			}, *signer2),
 		},

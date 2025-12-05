@@ -1154,7 +1154,7 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		// source index
 		sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
 		if !exist {
-			log.Warn("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
+			log.Debug("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
 			return nil
 		}
 		if err := switchToCompoundingValidator(s, sourceIndex); err != nil {
@@ -1177,12 +1177,12 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 	// source/target index and validator
 	sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
 	if !exist {
-		log.Warn("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
+		log.Debug("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
 		return nil
 	}
 	targetIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.TargetPubKey)
 	if !exist {
-		log.Warn("Validator index not found for target pubkey", "pubkey", consolidationRequest.TargetPubKey)
+		log.Debug("Validator index not found for target pubkey", "pubkey", consolidationRequest.TargetPubKey)
 		return nil
 	}
 	sourceValidator, err := s.ValidatorForValidatorIndex(int(sourceIndex))

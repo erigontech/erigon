@@ -22,7 +22,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -67,8 +66,9 @@ func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
 
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
-func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address[:], hr.txNum)
+func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	addressValue := address.Value()
+	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => []\n", address)
@@ -87,12 +87,14 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
-func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return hr.ReadAccountData(address)
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
-	hr.composite = append(append(hr.composite[:0], address[:]...), key[:]...)
+func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	addressValue := address.Value()
+	keyValue := key.Value()
+	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)
 	enc, ok, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key, enc)
@@ -104,13 +106,14 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key common
 	return res, ok, err
 }
 
-func (hr *HistoryReaderV3) HasStorage(address common.Address) (bool, error) {
-	to, ok := kv.NextSubtree(address.Bytes())
+func (hr *HistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
+	addressValue := address.Value()
+	to, ok := kv.NextSubtree(addressValue[:])
 	if !ok {
 		to = nil
 	}
 
-	it, err := hr.ttx.RangeAsOf(kv.StorageDomain, address.Bytes(), to, hr.txNum, order.Asc, kv.Unlim)
+	it, err := hr.ttx.RangeAsOf(kv.StorageDomain, addressValue[:], to, hr.txNum, order.Asc, kv.Unlim)
 	if err != nil {
 		return false, err
 	}
@@ -134,23 +137,27 @@ func (hr *HistoryReaderV3) HasStorage(address common.Address) (bool, error) {
 	return false, nil
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
-	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
+	addressValue := address.Value()
+	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, addressValue[:], hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, code)
+		lenc, cs := printCode(code)
+		fmt.Printf("ReadAccountCode [%x] => [%d:%s]\n", address, lenc, cs)
 	}
 	return code, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address) (int, error) {
-	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	addressValue := address.Value()
+	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, addressValue[:], hr.txNum)
 	return len(enc), err
 }
 
-func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address.Bytes(), hr.txNum)
+func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	addressValue := address.Value()
+	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountIncarnation [%x] => [0]\n", address)

@@ -30,24 +30,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/sysutils"
 )
 
-var (
-	ExportPathFlag = cli.StringFlag{
-		Name:     "export.path",
-		Aliases:  []string{"ep"},
-		Usage:    "Path to folder for export result",
-		Required: true,
-		Value:    "",
-	}
-
-	ExportFileNameFlag = cli.StringFlag{
-		Name:     "export.file",
-		Aliases:  []string{"ef"},
-		Usage:    "File name to export result default is sysinfo.txt",
-		Required: false,
-		Value:    "sysinfo.txt",
-	}
-)
-
 var Command = cli.Command{
 	Name:      "sysinfo",
 	Aliases:   []string{"sinfo"},
@@ -55,8 +37,6 @@ var Command = cli.Command{
 	Action:    collectInfo,
 	Flags: []cli.Flag{
 		&flags.DebugURLFlag,
-		&ExportPathFlag,
-		&ExportFileNameFlag,
 	},
 	Description: "Collect information about system and save it to file in order to provide to support person",
 }
@@ -73,7 +53,6 @@ type SortType int
 const (
 	SortByCPU SortType = iota
 	SortByMemory
-	SortByPID
 )
 
 func collectInfo(cliCtx *cli.Context) error {
@@ -100,13 +79,7 @@ func collectInfo(cliCtx *cli.Context) error {
 	writeCPUInfoToStringBuilder(data.CPU, cpuusage, &builder)
 
 	writeProcessesToStringBuilder(processes, cpuusage.Total, totalMemory, &builder)
-
-	// Save data to file
-	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
-	if err != nil {
-		util.RenderError(err)
-	}
-
+	fmt.Println(builder.String())
 	return nil
 }
 
@@ -192,14 +165,6 @@ func sortProcesses(prcInfo []*sysutils.ProcessInfo, sorting SortType) []*sysutil
 
 func sortProcessesByCPU(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
 	return sortProcesses(prcInfo, SortByCPU)
-}
-
-func sortProcessesByMemory(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
-	return sortProcesses(prcInfo, SortByMemory)
-}
-
-func sortProcessesByPID(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
-	return sortProcesses(prcInfo, SortByPID)
 }
 
 func getData(cliCtx *cli.Context) (diaglib.HardwareInfo, error) {

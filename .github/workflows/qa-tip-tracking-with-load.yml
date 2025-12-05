@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  mainnet-tip-tracking-test:
+  mainnet-tip-tracking-with-load-test:
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     timeout-minutes: 300 # 5 hours
     env:
@@ -34,10 +34,19 @@ jobs:
       TRACKING_TIME_SECONDS: 1800 # 0.5 hours
       TOTAL_TIME_SECONDS: 7200 # 2 hours
       CHAIN: mainnet
+      EXECUTION_NAME: ${{ github.event.inputs.execution_name || 'eth_getBlockByNumber' }}
+      LOAD_PATTERN: ${{ github.event.inputs.load_pattern || 'stress_test_eth_getBlockByNumber_13M.tar' }}
+      LOAD_SEQUENCE: ${{ github.event.inputs.load_sequence || '100:300,500:300,1000:300,2000:300,1:300,3000:300,1:300' }}
 
     steps:
+    - name: Print job parameters
+      run: |
+        echo "Execution name: ${{ env.EXECUTION_NAME }}"
+        echo "Load pattern: ${{ env.LOAD_PATTERN }}"
+        echo "Load sequence: ${{ env.LOAD_SEQUENCE }}"
+
     - name: Check out Erigon repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Checkout RPC Tests Repository & Install Requirements
       run: |
@@ -101,9 +110,9 @@ jobs:
     - name: Run Erigon, wait sync and check ability to maintain sync with load
       id: test_step
       env:
-        SAFE_EXECUTION_NAME: ${{ inputs.execution_name }}
-        SAFE_LOAD_PATTERN: ${{ inputs.load_pattern }}
-        SAFE_LOAD_SEQUENCE: ${{ inputs.load_sequence }}
+        SAFE_EXECUTION_NAME: ${{ env.EXECUTION_NAME }}
+        SAFE_LOAD_PATTERN: ${{ env.LOAD_PATTERN }}
+        SAFE_LOAD_SEQUENCE: ${{ env.LOAD_SEQUENCE }}
         RPC_TESTS_DIR: ${{ runner.workspace }}/rpc-tests
       run: |
         set +e # Disable exit on error
@@ -132,18 +141,21 @@ jobs:
           wait $ERIGON_PID
         fi
         
-        # This is a load test that looks for the breaking point, so it makes no sense (for now) to consider 
-        # the correct outcome of the test (=ability to track the tip). So the next lines are commented out
         # Check test runner script exit status
-        #if [ $test_exit_status -eq 0 ]; then
-        #  echo "Upgrade & tip-tracking test completed successfully"
-        #  echo "::notice::Upgrade & tip-tracking test completed successfully"
-        #  echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
-        #else
-        #  echo "Upgrade & tip-tracking test encountered an error"
-        #  echo "::error::Upgrade & tip-tracking test encountered an error"
-        #  echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-        #fi 
+        if [ $test_exit_status -eq 0 ]; then
+          echo "Tip-tracking w/ load test completed successfully"
+          echo "::notice::Tip-tracking w/ load test completed successfully"
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          if reason=$(python3 print_reason.py ${{ github.workspace }}/result-$CHAIN.json); then
+            echo "Error detected during tests: $reason"
+            echo "::error::Tip-tracking w/ load test encountered an error: $reason"
+          else
+            echo "Tip-tracking w/ load test encountered an error"
+            echo "::error::Tip-tracking w/ load test encountered an error"
+          fi
+        fi 
         
         PLOT_FILE="metrics-${{ env.CHAIN }}-plots_sync_with_load_combined_gauge.png"
         if [ -f "${{ github.workspace }}/$PLOT_FILE" ]; then
@@ -205,10 +217,17 @@ jobs:
 
     - name: Upload profiling data
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: profiling-data
         path: ${{ github.workspace }}/profiling-data*
+
+    - name: Upload FD Leak Analysis
+      if: always()
+      uses: actions/upload-artifact@v5
+      with:
+        name: fd-leak-analysis
+        path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
     - name: Delete Erigon Testbed Data Directory
       if: ${{ always() }}

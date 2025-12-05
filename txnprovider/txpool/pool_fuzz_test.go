@@ -206,7 +206,7 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 		senderIDs[senders.AddressAt(i%senders.Len())] = senderID
 	}
 	txns.Txns = make([]*TxnSlot, len(txnNonce))
-	parseCtx := NewTxnParseContext(*u256.N1)
+	parseCtx := NewTxnParseContext(u256.N1)
 	parseCtx.WithSender(false)
 	for i := range txnNonce {
 		txns.Txns[i] = &TxnSlot{

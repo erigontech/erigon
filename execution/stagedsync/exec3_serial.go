@@ -19,12 +19,13 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -60,7 +61,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	}
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
+		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
 			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", se.inMemExec)
@@ -92,7 +93,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
-		blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			getHashFnMutex.Lock()
 			defer getHashFnMutex.Unlock()
 			return se.getHeader(ctx, hash, number)
@@ -147,12 +148,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return b.HeaderNoCopy(), rwTx, nil
 		}
 
-		if !dbg.BatchCommitments || shouldGenerateChangesets {
+		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
 			}
-			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum, se.logPrefix, nil)
+			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
 			if err != nil {
@@ -160,10 +161,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 
 			computeCommitmentDuration += time.Since(start)
-			se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-			if !se.inMemExec {
-				if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
-					return nil, rwTx, err
+			if shouldGenerateChangesets {
+				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
+				if !se.inMemExec {
+					if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
+						return nil, rwTx, err
+					}
 				}
 			}
 			se.doms.SetChangesetAccumulator(nil)
@@ -190,7 +193,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				break
 			}
 
-			se.LogExecuted()
+			se.LogExecution()
 
 			//TODO: https://github.com/erigontech/erigon/issues/10724
 			//if executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).CanPrune(executor.tx(), doms.TxNum()) {
@@ -219,7 +222,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				pruneDuration time.Duration
 			)
 
-			ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, b.NumberU64(), false, se.logger, u, se.inMemExec)
+			ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.inMemExec)
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {
@@ -270,7 +273,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 
 			if !useExternalTx {
-				se.LogCommitted(commitStart, 0, 0, uncommitedGas, stepsInDb, commitment.CommitProgress{})
+				se.LogCommitments(commitStart, 0, 0, uncommitedGas, stepsInDb, commitment.CommitProgress{})
 			}
 
 			se.logger.Info("Committed", "time", time.Since(commitStart),
@@ -300,15 +303,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	return b.HeaderNoCopy(), rwTx, nil
 }
 
-func (se *serialExecutor) LogExecuted() {
-	se.progress.LogExecuted(se.rs.StateV3, se)
+func (se *serialExecutor) LogExecution() {
+	se.progress.LogExecution(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	se.committedGas += int64(committedGas)
 	se.txExecutor.lastCommittedBlockNum += committedBlocks
 	se.txExecutor.lastCommittedTxNum += committedTransactions
-	se.progress.LogCommitted(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
+	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {
@@ -324,7 +327,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 	if se.worker == nil {
 		se.taskExecMetrics = exec.NewWorkerMetrics()
 		se.worker = exec.NewWorker(context.Background(), false, se.taskExecMetrics,
-			se.cfg.db, nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
+			se.cfg.db.(kv.TemporalRoDB), nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
 	}
 
 	if se.applyTx != applyTx {
@@ -369,12 +372,12 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
-	var gasPool *core.GasPool
+	var gasPool *protocol.GasPool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
-			gasPool = core.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
+			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
 		}
 
 		txTask.ResetGasPool(gasPool)
@@ -388,7 +391,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return result.Err
 			}
 			if result.Err != nil {
-				return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
+				return fmt.Errorf("%w, txnIdx=%d, %v", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
 			}
 
 			se.txCount++
@@ -404,8 +407,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					ret, err := core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
+				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
 					if err != nil {
 						return nil, err
 					}
@@ -426,7 +429,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				}
 
 				if err != nil {
-					return fmt.Errorf("%w, txnIdx=%d, %w", consensus.ErrInvalidBlock, txTask.TxIndex, err)
+					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
 				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
@@ -435,8 +438,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
-						return fmt.Errorf("%w, txnIdx=%d, %w", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+					if err := protocol.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
 
@@ -480,7 +483,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
-			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
+			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
 			if se.cfg.badBlockHalt {
@@ -489,7 +492,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 			if se.u != nil {
 				unwindReason := ExecUnwind
-				if errors.Is(err, consensus.ErrInvalidBlock) {
+				if errors.Is(err, rules.ErrInvalidBlock) {
 					unwindReason = BadBlock(txTask.Header.Hash(), err)
 				}
 				if err := se.u.UnwindTo(txTask.BlockNumber()-1, unwindReason, se.applyTx); err != nil {

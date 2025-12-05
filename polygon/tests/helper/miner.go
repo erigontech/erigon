@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/version"
@@ -144,22 +142,16 @@ func InitMiner(
 		Miner: buildercfg.MiningConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
 			GasLimit:   &genesis.GasLimit,
-			GasPrice:   big.NewInt(1),
-			Recommit:   ethconfig.Defaults.Miner.Recommit,
-			SigKey:     privKey,
-			Enabled:    true,
 			EnabledPOS: true,
 		},
-		Sync:                      ethconfig.Defaults.Sync,
-		Downloader:                downloaderConfig,
-		WithoutHeimdall:           withoutHeimdall,
-		ImportMode:                ethconfig.Defaults.ImportMode,
-		RPCGasCap:                 50000000,
-		RPCTxFeeCap:               1, // 1 ether
-		Snapshot:                  ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
-		StateStream:               true,
-		ErigonDBStepSize:          config3.DefaultStepSize,
-		ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		Sync:            ethconfig.Defaults.Sync,
+		Downloader:      downloaderConfig,
+		WithoutHeimdall: withoutHeimdall,
+		ImportMode:      ethconfig.Defaults.ImportMode,
+		RPCGasCap:       50000000,
+		RPCTxFeeCap:     1, // 1 ether
+		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
+		StateStream:     true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.TxPool.CommitEvery = 15 * time.Second

@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"path/filepath"
 	"strings"
@@ -79,7 +80,7 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 
 	h := History{
 		HistCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:    btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
 	}
 
@@ -221,14 +222,14 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 	}
 	idxPath := h.vAccessorNewFilePath(item.StepRange(h.stepSize))
 
-	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
+	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps, OverrideCompactOpts{})
 	if err != nil {
 		return fmt.Errorf("buildVI: %w", err)
 	}
 	return nil
 }
 
-func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
+func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet, opts OverrideCompactOpts) error {
 	var histKey []byte
 	var valOffset uint64
 
@@ -297,11 +298,18 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				if err = rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
-				if h.HistoryValuesOnCompressedPage == 0 {
+
+				historyValuesOnCompressedPage := h.HistoryValuesOnCompressedPage
+
+				if opts.HistoryValuesOnCompressedPage != nil {
+					historyValuesOnCompressedPage = *opts.HistoryValuesOnCompressedPage
+				}
+
+				if historyValuesOnCompressedPage == 0 {
 					valOffset, _ = histReader.Skip()
 				} else {
 					i++
-					if i%h.HistoryValuesOnCompressedPage == 0 {
+					if i%historyValuesOnCompressedPage == 0 {
 						valOffset, _ = histReader.Skip()
 					}
 				}
@@ -335,6 +343,27 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 			return h.buildVi(ctx, item, ps)
 		})
 	}
+}
+
+func (h *History) Scan(toTxNum uint64) error {
+	scanResult, err := scanDirs(h.dirs)
+	if err != nil {
+		return err
+	}
+
+	if err := h.openFolder(scanResult); err != nil {
+		return err
+	}
+
+	h.reCalcVisibleFiles(toTxNum)
+
+	salt, err := GetStateIndicesSalt(h.dirs, false, h.logger)
+	if err != nil {
+		return err
+	}
+
+	h.salt.Store(salt)
+	return nil
 }
 
 func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
@@ -511,7 +540,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_histComp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp)
+	historyWriter := h.dataWriter(_histComp, h.HistoryValuesOnCompressedPage)
 
 	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -793,7 +822,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
-	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
+	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps, OverrideCompactOpts{})
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)
 	}
@@ -837,14 +866,16 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
-func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
+func (h *History) dataWriter(f *seg.Compressor, historyValuesOnCompressedPage int) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), h.HistoryValuesOnCompressedPage, true)
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), historyValuesOnCompressedPage, true)
 }
-func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader     { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter { return ht.h.dataWriter(f) }
+func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
+func (ht *HistoryRoTx) datarWriter(f *seg.Compressor, historyValuesOnCompressedPage int) *seg.PagedWriter {
+	return ht.h.dataWriter(f, historyValuesOnCompressedPage)
+}
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	k, err := kv.FirstKey(tx, h.ValuesTable)
@@ -1338,7 +1369,92 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if err != nil {
 		return nil, err
 	}
-	return stream.UnionKV(itOnDB, itOnFiles, limit), nil
+	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
+}
+
+func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) error {
+	if len(ht.iit.files) == 0 {
+		return nil
+	}
+
+	if fromTxNum >= 0 && ht.iit.files.EndTxNum() <= uint64(fromTxNum) {
+		return nil
+	}
+
+	for _, item := range ht.iit.files {
+		if fromTxNum >= 0 && item.endTxNum <= uint64(fromTxNum) {
+			continue
+		}
+		if toTxNum >= 0 && item.startTxNum >= uint64(toTxNum) {
+			break
+		}
+
+		efGetter := ht.iit.dataReader(item.src.decompressor)
+		efGetter.Reset(0)
+
+		for efGetter.HasNext() {
+			key, _ := efGetter.Next(nil)
+			val, _ := efGetter.Next(nil) // encoded EF sequence
+
+			seq := multiencseq.ReadMultiEncSeq(item.startTxNum, val)
+			ss := seq.Iterator(0)
+
+			for ss.HasNext() {
+				txNum, _ := ss.Next()
+
+				var txNumKey [8]byte
+				binary.BigEndian.PutUint64(txNumKey[:], txNum)
+
+				viFile, ok := ht.getFile(txNum)
+				if !ok {
+					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
+				}
+
+				viReader := ht.statelessIdxReader(viFile.i)
+				vOffset, ok := viReader.Lookup2(txNumKey[:], key)
+				if !ok {
+					return fmt.Errorf("HistoryDump: failed to resolve offset in .vi %s file for key [%x]", viFile.Fullpath(), key)
+				}
+
+				vGetter := seg.NewPagedReader(
+					ht.statelessGetter(viFile.i),
+					ht.h.HistoryValuesOnCompressedPage,
+					true,
+				)
+
+				vGetter.Reset(vOffset)
+				val, _ := vGetter.Next(nil)
+
+				fmt.Fprintf(dumpTo, "key: %x, txn: %d, val: %x\n", key, txNum, val)
+			}
+		}
+	}
+
+	return nil
+}
+
+type OverrideCompactOpts struct {
+	HistoryValuesOnCompressedPage *int
+}
+
+// CompactRange rebuilds the history files within the specified transaction range by performing a forced self-merge.
+// If the range contains existing static files, the method collects all files belonging to that span and merges them.
+func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint64, opts OverrideCompactOpts) error {
+	if len(ht.iit.files) == 0 {
+		return nil
+	}
+
+	mergeRange := NewHistoryRanges(
+		*NewMergeRange("", true, fromTxNum, toTxNum),
+		*NewMergeRange("", true, fromTxNum, toTxNum),
+	)
+
+	efFiles, vFiles, err := ht.staticFilesInRange(mergeRange)
+	if err != nil {
+		return err
+	}
+
+	return ht.deduplicateFiles(ctx, efFiles, vFiles, mergeRange, background.NewProgressSet(), opts)
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
@@ -1398,5 +1514,5 @@ func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.
 	if err != nil {
 		return nil, err
 	}
-	return stream.Union[uint64](frozenIt, recentIt, asc, limit), nil
+	return stream.Union(frozenIt, recentIt, asc, limit), nil
 }
