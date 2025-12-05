@@ -78,7 +78,7 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 		Dirs: dirs,
 		Http: httpConfig,
 		P2P: p2p.Config{
-			ListenAddr:      fmt.Sprintf("127.0.0.1:0"),
+			ListenAddr:      "127.0.0.1:0",
 			MaxPeers:        1,
 			MaxPendingPeers: 1,
 			NoDiscovery:     true,
