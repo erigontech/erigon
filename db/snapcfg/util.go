@@ -510,8 +510,10 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
+const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
+
 func LoadRemotePreverified(ctx context.Context) (err error) {
-	if s, ok := os.LookupEnv("ERIGON_REMOTE_PREVERIFIED"); ok {
+	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
 		log.Info("Loading local preverified override file", "file", s)
 
 		b, err := os.ReadFile(s)
