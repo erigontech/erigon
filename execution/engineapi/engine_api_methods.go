@@ -126,7 +126,26 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 // Successor of [ForkchoiceUpdatedV2] post Cancun, with stricter check on params
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, e.deriveForkchoiceVersion(payloadAttributes))
+}
+
+// deriveForkchoiceVersion infers the forkchoice version based on the payloadAttributes
+// timestamp and configured fork times. This allows newer forks to reuse the V3 RPC.
+func (e *EngineServer) deriveForkchoiceVersion(payloadAttributes *engine_types.PayloadAttributes) clparams.StateVersion {
+	if payloadAttributes == nil {
+		return clparams.DenebVersion
+	}
+	ts := uint64(payloadAttributes.Timestamp)
+	switch {
+	case e.config.AmsterdamTime != nil && e.config.IsAmsterdam(ts):
+		return clparams.GloasVersion
+	case e.config.OsakaTime != nil && e.config.IsOsaka(ts):
+		return clparams.FuluVersion
+	case e.config.PragueTime != nil && e.config.IsPrague(ts):
+		return clparams.ElectraVersion
+	default:
+		return clparams.DenebVersion
+	}
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
