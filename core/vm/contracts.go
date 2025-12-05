@@ -26,12 +26,14 @@ import (
 	"math/big"
 	"math/bits"
 
+	//lint:ignore SA1019 Needed for precompile
+	"golang.org/x/crypto/ripemd160"
+
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-	"github.com/erigontech/erigon/arb/multigas"
 	patched_big "github.com/ethereum/go-bigmodexpfix/src/math/big"
 	"github.com/holiman/uint256"
 
@@ -42,12 +44,10 @@ import (
 	libbn254 "github.com/erigontech/erigon-lib/crypto/bn254"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/crypto/secp256r1"
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
-
-	//lint:ignore SA1019 Needed for precompile
-	"golang.org/x/crypto/ripemd160"
 )
 
 // PrecompiledContract is the basic interface for native Go contracts. The implementation
@@ -60,17 +60,21 @@ type PrecompiledContract interface {
 }
 
 func Precompiles(chainRules *chain.Rules) map[common.Address]PrecompiledContract {
+	if chainRules.IsArbitrum {
+		if chainRules.IsStylus {
+			return PrecompiledContractsStartingFromArbOS30
+		}
+		if chainRules.IsDia {
+			return PrecompiledContractsStartingFromArbOS50
+		}
+		return PrecompiledContractsBeforeArbOS30
+	}
+
 	switch {
-	case chainRules.IsDia:
-		return PrecompiledContractsStartingFromArbOS50
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
 	case chainRules.IsBhilai:
 		return PrecompiledContractsBhilai
-	case chainRules.IsStylus:
-		return PrecompiledContractsStartingFromArbOS30
-	case chainRules.IsArbitrum:
-		return PrecompiledContractsBeforeArbOS30
 	case chainRules.IsPrague:
 		return PrecompiledContractsPrague
 	case chainRules.IsNapoli:
