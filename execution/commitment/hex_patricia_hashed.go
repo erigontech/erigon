@@ -1346,30 +1346,20 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				// path has diverged due to the hashedKey not leading to any account or storage
 				// the traversal can be stopped at this level
 				pathDivergenceFound = true
-				// special handling only if consuming the diverging hashed extension doesn't lead to account or storage
-				if pathDivergenceFound && fullPathLength != 64 && fullPathLength != 128 {
-					fullDivergingPath := make([]byte, fullPathLength)
-					for i := 0; i < int(keyPos+1); i++ {
-						fullDivergingPath[i] = hashedKey[i]
-					}
-					for i := 0; i < len(hashedExtKey); i++ {
-						fullDivergingPath[int(keyPos)+1+i] = hashedExtKey[i]
-					}
-					// // Code left commented out in case it might be needed in the future
-					// rowData, err := readBranchData(hph, fullDivergingPath)
-					// if err != nil {
-					// 	return nil, fmt.Errorf("failed to read branchdata: %w", err)
-					// }
-					// terminalNode, err := terminalRowToNode(hph, rowData, hph.depths[row])
-					// if err != nil {
-					// 	return nil, fmt.Errorf("failed to parse terminal node: %w", err)
-					// }
-					// nextNode = &trie.ShortNode{Key: hashedExtKey, Val: terminalNode}
+				// // Code left commented out in case it might be needed in the future
+				// rowData, err := readBranchData(hph, fullDivergingPath)
+				// if err != nil {
+				// 	return nil, fmt.Errorf("failed to read branchdata: %w", err)
+				// }
+				// terminalNode, err := terminalRowToNode(hph, rowData, hph.depths[row])
+				// if err != nil {
+				// 	return nil, fmt.Errorf("failed to parse terminal node: %w", err)
+				// }
+				// nextNode = &trie.ShortNode{Key: hashedExtKey, Val: terminalNode}
 
-					// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
-					// Currently necessary, because the commented out code above which reads branch data and converts it
-					nextNode = &trie.ShortNode{Key: hashedExtKey}
-				}
+				// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
+				// Currently necessary, because the commented out code above which reads branch data and converts it
+				nextNode = &trie.ShortNode{Key: hashedExtKey}
 			} else {
 				keyPos += extKeyLength // jump ahead
 
