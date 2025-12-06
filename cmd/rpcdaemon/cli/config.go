@@ -1067,12 +1067,11 @@ func (e *remoteRulesEngine) Close() error {
 	return e.engine.Close()
 }
 
-func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
 	if err := e.validateEngineReady(); err != nil {
-		panic(err)
+		return err
 	}
-
-	e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
+	return e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 }
 
 func (e *remoteRulesEngine) GetTransferFunc() evmtypes.TransferFunc {
