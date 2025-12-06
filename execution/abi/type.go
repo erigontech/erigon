@@ -164,9 +164,9 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			fields     []reflect.StructField
 			elems      []*Type
 			names      []string
-			expression string // canonical parameter expression
+			expression strings.Builder // canonical parameter expression
 		)
-		expression += "("
+		expression.WriteString("(")
 		overloadedNames := make(map[string]string)
 		for idx, c := range components {
 			cType, err := NewType(c.Type, c.InternalType, c.Components)
@@ -185,18 +185,18 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			})
 			elems = append(elems, &cType)
 			names = append(names, c.Name)
-			expression += cType.stringKind
+			expression.WriteString(cType.stringKind)
 			if idx != len(components)-1 {
-				expression += ","
+				expression.WriteString(",")
 			}
 		}
-		expression += ")"
+		expression.WriteString(")")
 
 		typ.TupleType = reflect.StructOf(fields)
 		typ.TupleElems = elems
 		typ.TupleRawNames = names
 		typ.T = TupleTy
-		typ.stringKind = expression
+		typ.stringKind = expression.String()
 
 		const structPrefix = "struct "
 		// After solidity 0.5.10, a new field of abi "internalType"
