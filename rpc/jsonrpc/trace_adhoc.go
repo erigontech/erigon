@@ -1114,7 +1114,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	ot.compat = api.compatibility
-	if traceTypeTrace || traceTypeVmTrace {
+	if traceTypeTrace || traceTypeVmTrace || traceTypeStateDiff {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
 	}
