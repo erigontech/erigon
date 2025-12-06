@@ -171,12 +171,6 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
 	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
 
-	// Convert slice of hexutil.Bytes to a slice of slice of bytes
-	transactions := make([]hexutil.Bytes, len(body.Transactions))
-	for i, transaction := range body.Transactions {
-		transactions[i] = transaction
-	}
-
 	res := &ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertH256ToHash(header.ParentHash),
 		FeeRecipient:  gointerfaces.ConvertH160toAddress(header.Coinbase),
@@ -191,7 +185,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		ExtraData:     header.ExtraData,
 		BaseFeePerGas: (*hexutil.Big)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
-		Transactions:  transactions,
+		Transactions:  body.Transactions,
 	}
 	if header.WithdrawalHash != nil {
 		res.Withdrawals = ConvertWithdrawalsFromRpc(body.Withdrawals)
@@ -209,12 +203,6 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
 	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
 
-	// Convert slice of hexutil.Bytes to a slice of slice of bytes
-	transactions := make([]hexutil.Bytes, len(payload.Transactions))
-	for i, transaction := range payload.Transactions {
-		transactions[i] = transaction
-	}
-
 	res := &ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertH256ToHash(payload.ParentHash),
 		FeeRecipient:  gointerfaces.ConvertH160toAddress(payload.Coinbase),
@@ -229,7 +217,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		ExtraData:     payload.ExtraData,
 		BaseFeePerGas: (*hexutil.Big)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
-		Transactions:  transactions,
+		Transactions:  payload.Transactions,
 	}
 	if payload.Version >= 2 {
 		res.Withdrawals = ConvertWithdrawalsFromRpc(payload.Withdrawals)
