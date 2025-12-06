@@ -90,8 +90,9 @@ type preverifiedSnapshot = snapshot
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
 type Downloader struct {
-	addWebSeedOpts []torrent.AddWebSeedsOpt
-	torrentClient  *torrent.Client
+	addWebSeedOpts     []torrent.AddWebSeedsOpt
+	metainfoHttpClient *http.Client
+	torrentClient      *torrent.Client
 
 	cfg *downloadercfg.Cfg
 
@@ -278,17 +279,18 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		cfg.ClientConfig.WebTransport = requestHandler
 		// requestHandler.downloader is set later.
 	}
-	{
-		metainfoSourcesTransport := makeTransport()
+	metainfoSourcesHttpClient := func() *http.Client {
+		tr := makeTransport()
 		// Separate transport so webseed requests and metainfo fetching don't block each other.
 		// Additionally, we can tune for their specific workloads.
-		cfg.ClientConfig.MetainfoSourcesClient = &http.Client{
+		return &http.Client{
 			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 				insertCloudflareHeaders(req)
-				return metainfoSourcesTransport.RoundTrip(req)
+				return tr.RoundTrip(req)
 			}),
 		}
-	}
+	}()
+	cfg.ClientConfig.MetainfoSourcesClient = metainfoSourcesHttpClient
 
 	db, err := openMdbx(ctx, cfg.Dirs.Downloader, cfg.MdbxWriteMap)
 	if err != nil {
@@ -326,13 +328,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 
 	d := &Downloader{
-		cfg:            cfg,
-		torrentStorage: m,
-		torrentClient:  torrentClient,
-		addWebSeedOpts: addWebSeedOpts,
-		logger:         logger,
-		verbosity:      verbosity,
-		torrentFS:      &AtomicTorrentFS{dir: cfg.Dirs.Snap},
+		metainfoHttpClient: metainfoSourcesHttpClient,
+		cfg:                cfg,
+		torrentStorage:     m,
+		torrentClient:      torrentClient,
+		addWebSeedOpts:     addWebSeedOpts,
+		logger:             logger,
+		verbosity:          verbosity,
+		torrentFS:          &AtomicTorrentFS{dir: cfg.Dirs.Snap},
 	}
 
 	d.zeroActiveDownloadRequests.L = &d.activeDownloadRequestsLock
@@ -979,7 +982,7 @@ func (d *Downloader) addedFirstDownloader(
 	// Try again, we would have invalidated data for changed infohashes now.
 	if !miOpt.Ok {
 		// Yes I mean for this error to be scoped here.
-		err := d.fetchMetainfoFromWebseeds(name, infoHash)
+		err := d.fetchMetainfoFromWebseeds(ctx, name, infoHash)
 		if err == nil {
 			// Always reuse code paths to ensure no surprises later. I.e. load the metainfo again
 			// through the same path that is used on a good run.
@@ -1054,13 +1057,13 @@ func (d *Downloader) webseedMetainfoUrls(snapshotName string) iter.Seq[string] {
 	}
 }
 
-func (d *Downloader) fetchMetainfoFromWebseeds(name string, ih metainfo.Hash) (err error) {
+func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string, ih metainfo.Hash) (err error) {
 	err = errors.New("no webseed urls")
 	var buf bytes.Buffer
 	for base := range d.webSeedUrlStrs() {
 		buf.Reset()
 		var mi metainfo.MetaInfo
-		mi, err = d.fetchMetainfoFromWebseed(name, base, &buf)
+		mi, err = d.fetchMetainfoFromWebseed(ctx, name, base, &buf)
 		if err != nil {
 			d.logger.Debug("error fetching metainfo from webseed", "err", err, "name", name, "webseed", base)
 			// Whither error?
@@ -1084,17 +1087,15 @@ func (d *Downloader) webseedMetainfoUrl(webseedUrlBase, snapshotName string) str
 	return webseedUrlBase + snapshotName + ".torrent"
 }
 
-// TODO: Maybe don't clobber the metainfo file if this is run in parallel. Remove before merge PR
-// if that's not the route taken.
-func (d *Downloader) fetchMetainfoFromWebseed(name string, webseedUrlBase string, w io.Writer) (
+func (d *Downloader) fetchMetainfoFromWebseed(ctx context.Context, name string, webseedUrlBase string, w io.Writer) (
 	mi metainfo.MetaInfo,
 	err error,
 ) {
-	// TODO: Use context request
-	resp, err := http.Get(d.webseedMetainfoUrl(webseedUrlBase, name))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.webseedMetainfoUrl(webseedUrlBase, name), nil)
 	if err != nil {
 		return
 	}
+	resp, err := d.metainfoHttpClient.Do(req)
 	defer resp.Body.Close()
 	tr := io.TeeReader(resp.Body, w)
 	dec := bencode.NewDecoder(tr)
