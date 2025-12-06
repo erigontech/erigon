@@ -17,6 +17,7 @@ type EventTopic string
 // Operation event topics
 const (
 	OpAttestation       EventTopic = "attestation"
+	OpSingleAttestation EventTopic = "single_attestation"
 	OpVoluntaryExit     EventTopic = "voluntary_exit"
 	OpProposerSlashing  EventTopic = "proposer_slashing"
 	OpAttesterSlashing  EventTopic = "attester_slashing"
