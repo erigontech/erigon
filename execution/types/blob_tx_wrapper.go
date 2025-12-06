@@ -411,7 +411,7 @@ func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
 }
 func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
-	l, _, _, _, _ := txw.Tx.payloadSize()
+	l, _, _ := txw.Tx.payloadSize()
 	payloadSize += l + rlp.ListPrefixLen(l)
 	if txw.WrapperVersion != 0 {
 		payloadSize += 1

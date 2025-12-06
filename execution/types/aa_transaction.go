@@ -222,11 +222,8 @@ func (tx *AccountAbstractionTransaction) RawSignatureValues() (*uint256.Int, *ui
 }
 
 func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListLen, authorizationsLen int) {
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.ChainID)
-
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.NonceKey)
+	payloadSize += rlp.Uint256Len(*tx.ChainID)
+	payloadSize += rlp.Uint256Len(*tx.NonceKey)
 
 	payloadSize++
 	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
@@ -251,17 +248,10 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	}
 
 	payloadSize += rlp.StringLen(tx.PaymasterData)
-
 	payloadSize += rlp.StringLen(tx.ExecutionData)
-
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.BuilderFee)
-
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.Tip)
-
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.FeeCap)
+	payloadSize += rlp.Uint256Len(*tx.BuilderFee)
+	payloadSize += rlp.Uint256Len(*tx.Tip)
+	payloadSize += rlp.Uint256Len(*tx.FeeCap)
 
 	payloadSize++
 	payloadSize += rlp.IntLenExcludingHead(tx.ValidationGasLimit)

@@ -226,8 +226,7 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (sc *StorageChange) EncodingSize() int {
-	return 1 + rlp.IntLenExcludingHead(uint64(sc.Index)) +
-		1 + rlp.Uint256LenExcludingHead(sc.Value)
+	return 1 + rlp.IntLenExcludingHead(uint64(sc.Index)) + rlp.Uint256Len(sc.Value)
 }
 
 func (sc *StorageChange) EncodeRLP(w io.Writer) error {
@@ -265,8 +264,7 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 
 func (bc *BalanceChange) EncodingSize() int {
 	size := 1 + rlp.IntLenExcludingHead(uint64(bc.Index))
-	size++
-	size += rlp.Uint256LenExcludingHead(bc.Value)
+	size += rlp.Uint256Len(bc.Value)
 	return size
 }
 
