@@ -21,6 +21,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -179,14 +180,20 @@ func gasExtCodeCopyEIP2929(evm *EVM, contract *Contract, stack *Stack, mem *Memo
 func gasEip2929AccountCheck(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (multigas.MultiGas, error) {
 	addr := common.Address(stack.peek().Bytes20())
 	// If the caller cannot afford the cost, this change will be rolled back
-	if !evm.IntraBlockState().AddressInAccessList(addr) {
+	inAccessList := evm.IntraBlockState().AddressInAccessList(addr)
+	fmt.Printf("[ACL TRACE AccountCheck] block=%d addr=%s inAccessList=%v\n",
+		evm.Context.BlockNumber, addr.Hex(), inAccessList)
+	if !inAccessList {
 		evm.IntraBlockState().AddAddressToAccessList(addr)
 
 		// The warm storage read cost is already charged as constantGas
 		// charge cold -> warm delta as storage access
 		// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
-		return multigas.StorageAccessGas(params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929), nil
+		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+		fmt.Printf("[ACL TRACE AccountCheck]   COLD: charging %d\n", coldCost)
+		return multigas.StorageAccessGas(coldCost), nil
 	}
+	fmt.Printf("[ACL TRACE AccountCheck]   WARM: no charge\n")
 	return multigas.ZeroGas(), nil
 }
 
@@ -199,12 +206,20 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) g
 
 		addrMod := evm.IntraBlockState().AddAddressToAccessList(addr)
 		warmAccess := !addrMod
+
+		// Debug trace for cold/warm access
+		fmt.Printf("[ACL TRACE] block=%d addr=%s addrMod=%v warmAccess=%v coldCost=%d contractGas=%d\n",
+			evm.Context.BlockNumber, addr.Hex(), addrMod, warmAccess, coldCost, contract.Gas)
+
 		if addrMod {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
+			fmt.Printf("[ACL TRACE]   COLD access: charging coldCost=%d\n", coldCost)
 			if !contract.UseMultiGas(multigas.StorageAccessGas(coldCost), evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
 				return multigas.ZeroGas(), ErrOutOfGas
 			}
+		} else {
+			fmt.Printf("[ACL TRACE]   WARM access: no extra charge\n")
 		}
 
 		// Now call the old calculator, which takes into account
@@ -214,6 +229,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) g
 		// - 63/64ths rule
 		multiGas, err := oldCalculator(evm, contract, stack, mem, memorySize)
 		if warmAccess || err != nil {
+			fmt.Printf("[ACL TRACE]   returning (warm/err): multiGas=%d err=%v\n", multiGas.SingleGas(), err)
 			return multiGas, err
 		}
 		// In case of a cold access, we temporarily add the cold charge back, and also
@@ -230,6 +246,8 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) g
 			return multigas.ZeroGas(), ErrGasUintOverflow
 		}
 
+		fmt.Printf("[ACL TRACE]   returning (cold): multiGas=%d (includes coldCost=%d), contractGas=%d, RetainedMultiGas=%d\n",
+			multiGas.SingleGas(), coldCost, contract.Gas, contract.RetainedMultiGas.SingleGas())
 		return multiGas, nil
 	}
 }
