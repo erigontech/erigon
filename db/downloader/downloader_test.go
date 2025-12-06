@@ -47,13 +47,26 @@ func TestConcurrentDownload(t *testing.T) {
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
 	defer d.Close()
+	const conc = 2
+	waits := make(chan func(ctx context.Context) error, conc)
 	g, ctx := errgroup.WithContext(t.Context())
-	g.Go(func() error {
-		return d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
-	})
-	g.Go(func() error {
-		return d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
-	})
+	for range conc {
+		g.Go(func() error {
+			wait, err := d.testStartSingleDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+			if err != nil {
+				return err
+			}
+			waits <- wait
+			return nil
+		})
+	}
+	require.NoError(g.Wait())
+	close(waits)
+	d.Close()
+	for w := range waits {
+		// Make sure we don't get stuck. The torrents shouldn't exist, and the Downloader is closed.
+		w(t.Context())
+	}
 }
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
@@ -69,14 +82,14 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
 	defer d.Close()
-	err = d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 	tt, ok := d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 
 	// adding same file twice is ok
-	err = d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 
 	// adding same file with another infoHash - is ok, must be skipped
@@ -84,7 +97,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//	- release of re-compressed version of same file,
 	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
-	err = d.testingStartSingleSnapshotDownload(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
 	//require.Error(err)
 	_ = err
