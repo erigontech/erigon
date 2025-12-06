@@ -276,6 +276,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
 		trace   = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
 	)
+	if in.evm.Context.BlockNumber == 216130861 {
+		trace = true
+	}
 
 	contract.Input = input
 
