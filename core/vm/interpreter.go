@@ -414,7 +414,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				str = op.String()
 			}
 
-			fmt.Printf("(%d, %d) pc %5d c %5d gas %8d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.Depth(), _pc, cost, contract.Gas+cost, str)
+			fmt.Printf("(%d, %d) pc %5d c %5d gas %8d %s\n", in.evm.intraBlockState.TxIndex(), in.Depth(), _pc, cost, contract.Gas+cost, str)
 		}
 
 		if memorySize > 0 {
