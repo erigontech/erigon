@@ -9,7 +9,7 @@ Erigon features a sophisticated logging framework that offers detailed visibilit
 The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.&#x20;
 
 {% hint style="success" %}
-Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](../fundamentals/creating-a-dashboard.md/).
+Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](creating-a-dashboard.md).
 {% endhint %}
 
 ## Logging Framework Architecture

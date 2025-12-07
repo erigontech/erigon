@@ -12,7 +12,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [sync mode](fundamentals/sync-modes.md) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](fundamentals/caplin.md) configuration, with the sole exception of the `--prune.mode` flag.
+The amount of disk space recommended and RAM you need depends on the [sync mode](../fundamentals/sync-modes.md) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin.md) configuration, with the sole exception of the `--prune.mode` flag.
 
 {% hint style="info" %}
 Please note that these figures are from September 2025, and the blockchain data size is continuously increasing.

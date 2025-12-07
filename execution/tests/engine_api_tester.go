@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -165,9 +164,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		Miner: buildercfg.MiningConfig{
 			EnabledPOS: true,
 		},
-		KeepStoredChainConfig:     true,
-		ErigonDBStepSize:          config3.DefaultStepSize,
-		ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		KeepStoredChainConfig: true,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)

@@ -17,6 +17,7 @@
 package rpchelper
 
 import (
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -288,14 +289,10 @@ func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []comm
 		return false
 	}
 	for i, sub := range filter.topicsOriginal {
-		match := len(sub) == 0 // empty rule set == wildcard
-		for _, topic := range sub {
-			if logTopics[i] == topic {
-				match = true
-				break
-			}
+		if len(sub) == 0 { // empty rule set == wildcard
+			continue // Match any topic, so continue to next position
 		}
-		if !match {
+		if !slices.Contains(sub, logTopics[i]) {
 			return false
 		}
 	}
