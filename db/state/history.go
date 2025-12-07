@@ -1016,6 +1016,8 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
+	ht.h.logger.Info("history pruning", "name", ht.h.FilenameBase, "txFrom", txFrom, "txTo", txTo, "limit", limit)
+
 	var (
 		seek     = make([]byte, 8, 256)
 		valsCDup kv.RwCursorDupSort
@@ -1060,7 +1062,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
 			}
-			if err = valsCDup.DeleteCurrent(); err != nil {
+			if err = valsCDup.DeleteCurrentDuplicates(); err != nil {
 				return err
 			}
 		}
@@ -1068,6 +1070,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		pruned++
 		return nil
 	}
+	ht.h.logger.Info("history pruning res:", "name", ht.h.FilenameBase, "pruned", pruned)
 	mxPruneSizeHistory.AddInt(pruned)
 
 	if !forced && ht.h.SnapshotsDisabled {

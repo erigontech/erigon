@@ -182,11 +182,12 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		require.NoError(t, err)
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
+		println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn[:]))
 
-		prunedInSep0 := 16 - 1
+		prunedInStep0 := 16 - 1
 		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
 		// If we would prune by txnum then txTo prune should be available after prune is finished
-		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInSep0, int(binary.BigEndian.Uint64(txn)-1))
+		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
 		icc.Close()
 
 		// check second table
@@ -197,7 +198,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		require.NoError(t, err)
 		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
 		// If we would prune by txnum then txTo prune should be available after prune is finished
-		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInSep0, int(binary.BigEndian.Uint64(txn)-1))
+		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
 		icc.Close()
 	})
 
