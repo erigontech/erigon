@@ -280,7 +280,6 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	if dbg.EnvBool("CHECK_COMMITMENT_KVS_DEREF_SEQUENTIAL", false) {
 		eg.SetLimit(1)
 	}
-	var integrityErr error
 	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
@@ -316,7 +315,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		"referencedStorages", referencedStorages.Load(),
 		"plainStorages", plainStorages.Load(),
 	)
-	return integrityErr
+	return nil
 }
 
 type derefCounts struct {
@@ -580,7 +579,6 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	} else {
 		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
-	var integrityErr error
 	var totalVals atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
@@ -611,7 +609,7 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	total := totalVals.Load()
 	rate := float64(total) / dur.Seconds()
 	logger.Info("checked commitment history vals", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate)
-	return integrityErr
+	return nil
 }
 
 func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, failFast bool, logger log.Logger) (uint64, error) {
