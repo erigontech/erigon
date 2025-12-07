@@ -999,7 +999,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 				stat.PruneCountValues++
 				limit--
 			}
-			fmt.Printf("stat %+iiVal %d %d\n", stat, stat.PruneCountTx, stat.MaxTxNum)
+			fmt.Printf("stat %+v Val %d %d\n", stat, stat.PruneCountTx, stat.MaxTxNum)
 		}
 
 		select {
