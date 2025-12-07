@@ -937,11 +937,11 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	for v, k, err := idxDelCursor.First(); k != nil; v, k, err = idxDelCursor.NextNoDup() {
+	for iiVal, txNumBytes, err := idxDelCursor.First(); txNumBytes != nil; iiVal, txNumBytes, err = idxDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 		}
-		txNum := binary.BigEndian.Uint64(k)
+		txNum := binary.BigEndian.Uint64(txNumBytes)
 		lastDupTxNumB, err := idxDelCursor.LastDup()
 		if err != nil {
 			return nil, fmt.Errorf("LastDup iterate over %s index keys: %w", ii.FilenameBase, err)
@@ -966,8 +966,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 		}
 		if dupsDelete && dups <= limit && fn == nil {
-			println("dups dups")
-
 			err = idxDelCursor.DeleteCurrentDuplicates()
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
@@ -976,16 +974,16 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			stat.PruneCountValues += dups
 			limit -= dups
 		} else {
-			for ; k != nil; _, k, err = idxDelCursor.NextDup() {
+			for ; txNumBytes != nil; _, txNumBytes, err = idxDelCursor.NextDup() {
 				if fn != nil {
-					if err = fn(k, v); err != nil {
+					if err = fn(txNumBytes, iiVal); err != nil {
 						return nil, fmt.Errorf("fn error: %w", err)
 					}
 				}
 				if err != nil {
 					return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 				}
-				txNumDup := binary.BigEndian.Uint64(k)
+				txNumDup := binary.BigEndian.Uint64(txNumBytes)
 				if txNumDup < txFrom {
 					continue
 				}
@@ -994,19 +992,19 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 				}
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-				if err = idxDelCursor.DeleteExact(v, k); err != nil {
+				if err = idxDelCursor.DeleteCurrent(); err != nil {
 					return nil, err
 				}
 				mxPruneSizeIndex.Inc()
 				stat.PruneCountValues++
 				limit--
 			}
-			fmt.Printf("stat %+v %d %d\n", stat, stat.PruneCountTx, stat.MaxTxNum)
+			fmt.Printf("stat %+iiVal %d %d\n", stat, stat.PruneCountTx, stat.MaxTxNum)
 		}
 
 		select {
 		case <-logEvery.C:
-			txNum := binary.BigEndian.Uint64(k)
+			txNum := binary.BigEndian.Uint64(txNumBytes)
 			ii.logger.Info("[snapshots] prune index", "name", ii.FilenameBase, "pruned tx", stat.PruneCountTx,
 				"pruned values", stat.PruneCountValues,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.stepSize), float64(txNum)/float64(ii.stepSize)))
