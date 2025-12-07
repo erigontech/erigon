@@ -128,8 +128,9 @@ func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum
 func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
-func (sd *SharedDomains) TrieCtxForTests() *commitmentdb.SharedDomainsCommitmentContext {
-	return sd.sdCtx
+
+func (sd *SharedDomains) Merge(other *SharedDomains) error {
+	return sd.mem.Merge(other.mem)
 }
 
 type temporalGetter struct {

@@ -141,21 +141,15 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) FlushExtendingFork(tx kv.TemporalRwTx, accumulator *shards.Accumulator, recentLogs *shards.RecentLogs) error {
+func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, accumulator *shards.Accumulator, recentLogs *shards.RecentLogs) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
-		_, err := fv.sharedDom.ComputeCommitment(context.Background(), tx, true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment", nil)
+		sd.Merge(fv.sharedDom)
+		_, err := sd.ComputeCommitment(ctx, tx, true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment", nil)
 		if err != nil {
-			return err
-		}
-		if err := fv.sharedDom.Flush(fv.ctx, tx); err != nil {
-			return err
-		}
-		fv.sharedDom.Close()
-		if err := stages.SaveStageProgress(tx, stages.Execution, fv.extendingForkNumber); err != nil {
 			return err
 		}
 	}

@@ -1071,6 +1071,8 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		select {
 		case <-localTimeout.C: //must be first to improve responsivness
 			return true, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
 		case <-logEvery.C:
 			if furiousPrune {
 				at.a.logger.Info("[prune] state",
@@ -1089,9 +1091,6 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 					//"pruned", fullStat.String(),
 				)
 			}
-
-		case <-ctx.Done():
-			return false, ctx.Err()
 		default:
 		}
 	}
