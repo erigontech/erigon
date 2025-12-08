@@ -26,19 +26,12 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon/cmd/snapshots/cmp"
-	"github.com/erigontech/erigon/cmd/snapshots/copy"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
-	"github.com/erigontech/erigon/cmd/snapshots/manifest"
-	"github.com/erigontech/erigon/cmd/snapshots/sync"
-	"github.com/erigontech/erigon/cmd/snapshots/torrents"
-	"github.com/erigontech/erigon/cmd/snapshots/verify"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -49,14 +42,9 @@ func main() {
 
 	app := cli.NewApp()
 	app.Name = "snapshots"
-	app.Version = params.VersionWithCommit(params.GitCommit)
+	app.Version = version.VersionWithCommit(version.GitCommit)
 
 	app.Commands = []*cli.Command{
-		&cmp.Command,
-		&copy.Command,
-		&verify.Command,
-		&torrents.Command,
-		&manifest.Command,
 		&genfromrpc.Command,
 	}
 
@@ -89,7 +77,7 @@ func main() {
 
 			var cancel context.CancelFunc
 
-			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger)) //nolint
+			ctx.Context, cancel = context.WithCancel(ctx.Context) //nolint
 
 			// setup periodic logging and prometheus updates
 			go mem.LogMemStats(ctx.Context, logger)

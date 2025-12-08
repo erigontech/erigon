@@ -9,14 +9,14 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/arb"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 const (
@@ -31,8 +31,18 @@ const AA_GAS_PENALTY_PCT = 10
 var AA_ENTRY_POINT = common.HexToAddress("0x0000000000000000000000000000000000007560")
 var AA_SENDER_CREATOR = common.HexToAddress("0x00000000000000000000000000000000ffff7560")
 
+type NoTimeBoosted bool
+
+func (tx *NoTimeBoosted) IsTimeBoosted() *bool {
+	return nil
+}
+
+func (tx *NoTimeBoosted) SetTimeboosted(_ *bool) {
+
+}
+
 type AccountAbstractionTransaction struct {
-	arb.NoTimeBoosted
+	NoTimeBoosted
 
 	TransactionMisc
 	Nonce      uint64
@@ -67,6 +77,10 @@ func (tx *AccountAbstractionTransaction) GetAccessList() AccessList {
 	return tx.AccessList
 }
 
+func (tx *AccountAbstractionTransaction) GetAuthorizations() []Authorization {
+	return tx.Authorizations
+}
+
 func (tx *AccountAbstractionTransaction) Protected() bool {
 	return true
 }
@@ -75,7 +89,7 @@ func (tx *AccountAbstractionTransaction) Sender(signer Signer) (common.Address, 
 	return *tx.SenderAddress, nil
 }
 
-func (tx *AccountAbstractionTransaction) cachedSender() (common.Address, bool) {
+func (tx *AccountAbstractionTransaction) CachedSender() (common.Address, bool) {
 	return *tx.SenderAddress, true
 }
 
@@ -131,7 +145,7 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 }
 
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	return params2.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	return params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
@@ -167,6 +181,8 @@ func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, r
 		to:         nil,
 		gasPrice:   *tx.FeeCap,
 		blobHashes: []common.Hash{},
+
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}, nil
 }
 
@@ -178,7 +194,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
+	hash := PrefixedRlpHash(AccountAbstractionTxType, []interface{}{
 		tx.ChainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress, tx.SenderValidationData,
@@ -198,7 +214,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 }
 
 func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
-	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
+	hash := PrefixedRlpHash(AccountAbstractionTxType, []interface{}{
 		chainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress, tx.SenderValidationData,
@@ -291,8 +307,8 @@ func (tx *AccountAbstractionTransaction) EncodingSize() int {
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err
@@ -521,8 +537,8 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccountAbstractionTxType
 	if _, err := w.Write(b[:1]); err != nil {

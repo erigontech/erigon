@@ -2,7 +2,7 @@
 
 scriptDir=$(dirname "${BASH_SOURCE[0]}")
 scriptName=$(basename "${BASH_SOURCE[0]}")
-version="v2.1.6"
+version="v2.4.0"
 
 if [[ "$1" == "--install-deps" ]]
 then
@@ -18,4 +18,5 @@ then
 	exit 2
 fi
 
+golangci-lint run --config ./.golangci.yml --fast-only
 golangci-lint run --config ./.golangci.yml

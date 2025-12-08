@@ -18,17 +18,24 @@ package peers
 
 import (
 	"errors"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/ring"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+type PeeredObject[T any] struct {
+	Peer string
+	Data T
+}
+
 var (
-	ErrNoPeers = errors.New("no peers")
+	MaxBadResponses = 50
+	ErrNoPeers      = errors.New("no peers")
 )
 
 // Item is an item in the pool
@@ -56,22 +63,16 @@ func (i *Item) Add(n int) int {
 
 // PeerPool is a pool of peers
 type Pool struct {
-
-	// allowedPeers are the peers that are allowed.
-	// peers not on this list will be silently discarded
-	// when returned, and skipped when requesting
-	peerData map[peer.ID]*Item
+	host host.Host
 
 	bannedPeers *lru.CacheWithTTL[peer.ID, struct{}]
-	queue       *ring.Buffer[*Item]
 
 	mu sync.Mutex
 }
 
-func NewPool() *Pool {
+func NewPool(h host.Host) *Pool {
 	return &Pool{
-		peerData:    make(map[peer.ID]*Item),
-		queue:       ring.NewBuffer[*Item](0, 1024),
+		host:        h,
 		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 30*time.Minute),
 	}
 }
@@ -86,22 +87,6 @@ func (p *Pool) LenBannedPeers() int {
 }
 
 func (p *Pool) AddPeer(pid peer.ID) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// if peer banned, return immediately
-	if _, ok := p.bannedPeers.Get(pid); ok {
-		return
-	}
-	// if peer already here, return immediately
-	if _, ok := p.peerData[pid]; ok {
-		return
-	}
-	newItem := &Item{
-		id: pid,
-	}
-	p.peerData[pid] = newItem
-	// add it to our queue as a new item
-	p.queue.PushBack(newItem)
 }
 
 func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {
@@ -109,43 +94,12 @@ func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {
 	defer p.mu.Unlock()
 	if banned {
 		p.bannedPeers.Add(pid, struct{}{})
-		delete(p.peerData, pid)
 	} else {
 		p.bannedPeers.Remove(pid)
 	}
 }
 
 func (p *Pool) RemovePeer(pid peer.ID) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	delete(p.peerData, pid)
-}
-
-// returnPeer is an internal function to return per to the pool. assume has lock
-func (p *Pool) returnPeer(i *Item) {
-	// if peer not in our map, return and do not return peer
-	if _, ok := p.peerData[i.id]; !ok {
-		return
-	}
-	// append peer to the end of our ring buffer
-	p.queue.PushBack(i)
-}
-
-// nextPeer gets next peer, skipping bad peers. assume has lock
-func (p *Pool) nextPeer() (i *Item, ok bool) {
-	val, ok := p.queue.PopFront()
-	if !ok {
-		return nil, false
-	}
-	// if peer been banned, get next peer
-	if p.bannedPeers.Contains(val.id) {
-		return p.nextPeer()
-	}
-	// if peer not in set, get next peer
-	if _, ok := p.peerData[val.id]; !ok {
-		return p.nextPeer()
-	}
-	return val, true
 }
 
 // Request a peer from the pool
@@ -153,15 +107,15 @@ func (p *Pool) nextPeer() (i *Item, ok bool) {
 func (p *Pool) Request() (pid *Item, done func(), err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	//grab a peer from our ringbuffer
-	val, ok := p.queue.PopFront()
-	if !ok {
+	peers := p.host.Network().Peers()
+	// select a random peer index from the list
+	if len(peers) == 0 {
 		return nil, nil, ErrNoPeers
 	}
-	return val, func() {
+	randIndex := rand.Intn(len(peers))
+	randPeer := peers[randIndex]
+	return &Item{id: randPeer}, func() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		val.uses = val.uses + 1
-		p.returnPeer(val)
 	}, nil
 }

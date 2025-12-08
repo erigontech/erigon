@@ -38,7 +38,7 @@ func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 	}
 
 	// The commitments and proofs lengths must match
-	if sidecar.KzgCommitments.Len() != sidecar.KzgProofs.Len() {
+	if sidecar.KzgCommitments.Len() != sidecar.KzgProofs.Len() || sidecar.KzgCommitments.Len() != sidecar.Column.Len() {
 		return false
 	}
 

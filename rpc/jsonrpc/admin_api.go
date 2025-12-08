@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -72,7 +72,7 @@ func (api *AdminAPIImpl) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 }
 
 func (api *AdminAPIImpl) AddPeer(ctx context.Context, url string) (bool, error) {
-	result, err := api.ethBackend.AddPeer(ctx, &remote.AddPeerRequest{Url: url})
+	result, err := api.ethBackend.AddPeer(ctx, &remoteproto.AddPeerRequest{Url: url})
 	if err != nil {
 		return false, err
 	}
@@ -83,7 +83,7 @@ func (api *AdminAPIImpl) AddPeer(ctx context.Context, url string) (bool, error) 
 }
 
 func (api *AdminAPIImpl) RemovePeer(ctx context.Context, url string) (bool, error) {
-	result, err := api.ethBackend.RemovePeer(ctx, &remote.RemovePeerRequest{Url: url})
+	result, err := api.ethBackend.RemovePeer(ctx, &remoteproto.RemovePeerRequest{Url: url})
 	if err != nil {
 		return false, err
 	}

@@ -164,11 +164,11 @@ func (c *MockExecutionEngineFrozenBlocksCall) DoAndReturn(f func(context.Context
 }
 
 // GetAssembledBlock mocks base method.
-func (m *MockExecutionEngine) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error) {
+func (m *MockExecutionEngine) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetAssembledBlock", ctx, id)
 	ret0, _ := ret[0].(*cltypes.Eth1Block)
-	ret1, _ := ret[1].(*engine_types.BlobsBundleV1)
+	ret1, _ := ret[1].(*engine_types.BlobsBundle)
 	ret2, _ := ret[2].(*typesproto.RequestsBundle)
 	ret3, _ := ret[3].(*big.Int)
 	ret4, _ := ret[4].(error)
@@ -188,19 +188,19 @@ type MockExecutionEngineGetAssembledBlockCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockExecutionEngineGetAssembledBlockCall) Return(arg0 *cltypes.Eth1Block, arg1 *engine_types.BlobsBundleV1, arg2 *typesproto.RequestsBundle, arg3 *big.Int, arg4 error) *MockExecutionEngineGetAssembledBlockCall {
+func (c *MockExecutionEngineGetAssembledBlockCall) Return(arg0 *cltypes.Eth1Block, arg1 *engine_types.BlobsBundle, arg2 *typesproto.RequestsBundle, arg3 *big.Int, arg4 error) *MockExecutionEngineGetAssembledBlockCall {
 	c.Call = c.Call.Return(arg0, arg1, arg2, arg3, arg4)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineGetAssembledBlockCall) Do(f func(context.Context, []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
+func (c *MockExecutionEngineGetAssembledBlockCall) Do(f func(context.Context, []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineGetAssembledBlockCall) DoAndReturn(f func(context.Context, []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
+func (c *MockExecutionEngineGetAssembledBlockCall) DoAndReturn(f func(context.Context, []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

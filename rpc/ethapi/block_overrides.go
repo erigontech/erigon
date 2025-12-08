@@ -36,7 +36,7 @@ type BlockOverrides struct {
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
 }
 
-func (overrides *BlockOverrides) Override(context evmtypes.BlockContext) error {
+func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error {
 
 	if overrides.Number != nil {
 		context.BlockNumber = overrides.Number.Uint64()

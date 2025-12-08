@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -69,7 +70,7 @@ func prefixGroups1() {
 		panic(err)
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -98,7 +99,7 @@ func prefixGroups2() {
 		panic(err)
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-O", filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -194,7 +195,7 @@ q_%x->q_%x;
 		panic(err)
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}

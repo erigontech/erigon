@@ -19,18 +19,14 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/kv"
-
-	"github.com/erigontech/erigon-lib/common/paths"
+	"github.com/erigontech/erigon/node/paths"
 )
 
 var (
-	datadirCli  string
-	chaindata   string
-	statsfile   string
-	block       uint64
-	indexBucket string
-	chain       string
+	datadirCli string
+	chaindata  string
+	block      uint64
+	chain      string
 )
 
 func must(err error) {
@@ -49,13 +45,4 @@ func withDataDir(cmd *cobra.Command) {
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
-}
-
-func withStatsfile(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&statsfile, "statsfile", "stateless.csv", "path where to write the stats file")
-	must(cmd.MarkFlagFilename("statsfile", "csv"))
-}
-
-func withIndexBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.E2AccountsHistory, kv.E2AccountsHistory+" for account and "+kv.E2StorageHistory+" for storage")
 }

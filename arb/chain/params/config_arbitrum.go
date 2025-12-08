@@ -17,10 +17,10 @@
 package params
 
 import (
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/arb/chain/types"
 	"github.com/erigontech/erigon/arb/osver"
+	"github.com/erigontech/erigon/execution/chain"
 
 	"math/big"
 )

@@ -20,15 +20,14 @@ import (
 	_ "embed"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/eth2shuffle"
-
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
-	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth2shuffle"
 )
 
 func BenchmarkLambdaShuffledIndex(b *testing.B) {

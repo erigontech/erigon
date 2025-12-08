@@ -50,7 +50,8 @@ func init() {
 		With("slashings_reset", slashingsResetTest).
 		With("participation_record_updates", participationRecordUpdatesTest).
 		With("pending_deposits", pendingDepositTest).
-		With("pending_consolidations", PendingConsolidationTest)
+		With("pending_consolidations", PendingConsolidationTest).
+		With("proposer_lookahead", ProposerLookaheadTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").

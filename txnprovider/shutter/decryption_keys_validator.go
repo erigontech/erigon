@@ -24,13 +24,13 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 var (

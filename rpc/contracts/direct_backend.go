@@ -54,7 +54,7 @@ func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMs
 	blockNumberOrHash := BlockNumArg(blockNum)
 	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
 
-	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil)
+	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil, nil)
 }
 
 func (b DirectBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {

@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	crand "crypto/rand"
+	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
@@ -30,8 +31,6 @@ import (
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/goccy/go-json"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"

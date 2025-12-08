@@ -3,8 +3,8 @@ package state
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // aggregate set level snapshot creation config
@@ -104,8 +104,6 @@ type SnapInfo struct {
 	// Path     string // full path
 	Ext string // extension
 }
-
-type Version = version.Version
 
 // func (f *SnapInfo) IsSeg() bool      { return strings.Compare(f.Ext, ".seg") == 0 }
 // func (f *SnapInfo) IsV() bool        { return strings.Compare(f.Ext, ".v") == 0 }

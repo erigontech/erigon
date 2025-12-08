@@ -24,16 +24,17 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
-func NewClient(ctx context.Context, downloaderAddr string) (proto_downloader.DownloaderClient, error) {
+func NewClient(ctx context.Context, downloaderAddr string) (downloaderproto.DownloaderClient, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 
@@ -51,11 +52,11 @@ func NewClient(ctx context.Context, downloaderAddr string) (proto_downloader.Dow
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
 	}
-	return proto_downloader.NewDownloaderClient(conn), nil
+	return downloaderproto.NewDownloaderClient(conn), nil
 }
 
-func InfoHashes2Proto(in []metainfo.Hash) []*prototypes.H160 {
-	infoHashes := make([]*prototypes.H160, len(in))
+func InfoHashes2Proto(in []metainfo.Hash) []*typesproto.H160 {
+	infoHashes := make([]*typesproto.H160, len(in))
 	i := 0
 	for _, h := range in {
 		infoHashes[i] = gointerfaces.ConvertAddressToH160(h)
@@ -64,8 +65,8 @@ func InfoHashes2Proto(in []metainfo.Hash) []*prototypes.H160 {
 	return infoHashes
 }
 
-func Strings2Proto(in []string) []*prototypes.H160 {
-	infoHashes := make([]*prototypes.H160, len(in))
+func Strings2Proto(in []string) []*typesproto.H160 {
+	infoHashes := make([]*typesproto.H160, len(in))
 	i := 0
 	for _, h := range in {
 		infoHashes[i] = String2Proto(h)
@@ -74,14 +75,14 @@ func Strings2Proto(in []string) []*prototypes.H160 {
 	return infoHashes
 }
 
-func String2Proto(in string) *prototypes.H160 {
+func String2Proto(in string) *typesproto.H160 {
 	var infoHash [20]byte
 	inHex, _ := hex.DecodeString(in)
 	copy(infoHash[:], inHex)
 	return gointerfaces.ConvertAddressToH160(infoHash)
 }
 
-func Proto2String(in *prototypes.H160) string {
+func Proto2String(in *typesproto.H160) string {
 	addr := gointerfaces.ConvertH160toAddress(in)
 	return hex.EncodeToString(addr[:])
 }

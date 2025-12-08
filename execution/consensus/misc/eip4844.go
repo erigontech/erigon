@@ -24,10 +24,11 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/blocks"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -47,14 +48,14 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	if parent.BlobGasUsed != nil {
 		parentBlobGasUsed = *parent.BlobGasUsed
 	}
-	arbOsVersion := types.GetArbOSVersion(parent, config)
+	arbOsVersion := arbBlocks.GetArbOSVersion(parent, config)
 	target := config.GetTargetBlobsPerBlock(currentHeaderTime, arbOsVersion)
 	targetBlobGas := target * params.GasPerBlob
 
 	if parentExcessBlobGas+parentBlobGasUsed < targetBlobGas {
 		return 0
 	}
-	if config.IsOsaka(currentHeaderTime) {
+	if config.IsOsaka(currentHeaderTime, arbOsVersion) {
 		// EIP-7918: Blob base fee bounded by execution cost
 		max := config.GetMaxBlobsPerBlock(currentHeaderTime, arbOsVersion)
 		parentBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, parent.Time)

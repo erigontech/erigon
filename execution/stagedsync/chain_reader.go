@@ -20,14 +20,12 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -113,21 +111,4 @@ func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 func (cr ChainReader) FrozenBlocks() uint64 { return cr.BlockReader.FrozenBlocks() }
 func (cr ChainReader) FrozenBorBlocks(align bool) uint64 {
 	return cr.BlockReader.FrozenBorBlocks(align)
-}
-
-func (cr ChainReader) BorStartEventId(_ common.Hash, _ uint64) uint64 {
-	panic("bor events by block not implemented")
-}
-func (cr ChainReader) BorEventsByBlock(_ common.Hash, _ uint64) []rlp.RawValue {
-	panic("bor events by block not implemented")
-}
-
-func (cr ChainReader) BorSpan(spanId uint64) *heimdall.Span {
-	span, _, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
-	if err != nil {
-		cr.Logger.Error("BorSpan failed", "err", err)
-		return nil
-	}
-
-	return span
 }

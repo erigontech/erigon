@@ -8,10 +8,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type Reader struct {
@@ -21,15 +21,16 @@ type Reader struct {
 }
 
 type ReaderConfig struct {
-	Store     Store
-	BorConfig *borcfg.BorConfig
-	DataDir   string
-	Logger    log.Logger
+	Store       Store
+	ChainConfig *chain.Config
+	BorConfig   *borcfg.BorConfig
+	DataDir     string
+	Logger      log.Logger
 }
 
 // AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
 func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
-	reader := NewReader(config.BorConfig, config.Store, config.Logger)
+	reader := NewReader(config.ChainConfig, config.BorConfig, config.Store, config.Logger)
 
 	err := reader.Prepare(ctx)
 	if err != nil {
@@ -39,11 +40,11 @@ func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	return reader, nil
 }
 
-func NewReader(borConfig *borcfg.BorConfig, store Store, logger log.Logger) *Reader {
+func NewReader(chainConfig *chain.Config, borConfig *borcfg.BorConfig, store Store, logger log.Logger) *Reader {
 	return &Reader{
 		logger:                    logger,
 		store:                     store,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, chainConfig, borConfig, store.SpanBlockProducerSelections()),
 	}
 }
 
@@ -63,7 +64,7 @@ func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]
 	return r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 }
 
-func (r *Reader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+func (r *Reader) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error) {
 	return r.spanBlockProducersTracker.Producers(ctx, blockNum)
 }
 
@@ -72,12 +73,12 @@ func (r *Reader) Close() {
 }
 
 type RemoteReader struct {
-	client  remote.HeimdallBackendClient
+	client  remoteproto.HeimdallBackendClient
 	logger  log.Logger
 	version gointerfaces.Version
 }
 
-func NewRemoteReader(client remote.HeimdallBackendClient) *RemoteReader {
+func NewRemoteReader(client remoteproto.HeimdallBackendClient) *RemoteReader {
 	return &RemoteReader{
 		client:  client,
 		logger:  log.New("remote_service", "heimdall"),
@@ -85,8 +86,8 @@ func NewRemoteReader(client remote.HeimdallBackendClient) *RemoteReader {
 	}
 }
 
-func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
-	reply, err := r.client.Producers(ctx, &remote.BorProducersRequest{BlockNum: blockNum})
+func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error) {
+	reply, err := r.client.Producers(ctx, &remoteproto.BorProducersRequest{BlockNum: blockNum})
 	if err != nil {
 		return nil, err
 	}
@@ -97,12 +98,12 @@ func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.
 	validators := reply.Validators
 	proposer := reply.Proposer
 
-	v := make([]*valset.Validator, len(validators))
+	v := make([]*Validator, len(validators))
 	for i, validator := range validators {
 		v[i] = decodeValidator(validator)
 	}
 
-	validatorSet := valset.ValidatorSet{
+	validatorSet := ValidatorSet{
 		Proposer:   decodeValidator(proposer),
 		Validators: v,
 	}
@@ -130,8 +131,8 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func decodeValidator(v *remote.Validator) *valset.Validator {
-	return &valset.Validator{
+func decodeValidator(v *remoteproto.Validator) *Validator {
+	return &Validator{
 		ID:               v.Id,
 		Address:          gointerfaces.ConvertH160toAddress(v.Address),
 		VotingPower:      v.VotingPower,

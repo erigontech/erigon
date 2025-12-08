@@ -4,23 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"math/big"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/arb/txn"
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -361,7 +363,7 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 }
 
 func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumLegacyTxData{LegacyTx: &types.LegacyTx{CommonTx: *commonTx}}
+	tx := &txn.ArbitrumLegacyTxData{LegacyTx: &types.LegacyTx{CommonTx: *commonTx}}
 
 	if gasPriceHex, ok := rawTx["gasPrice"].(string); ok {
 		tx.GasPrice = uint256.MustFromHex(gasPriceHex)
@@ -392,7 +394,7 @@ func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interfa
 }
 
 func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumSubmitRetryableTx{}
+	tx := &txn.ArbitrumSubmitRetryableTx{}
 
 	// Chain ID: required field (hex string)
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -462,7 +464,7 @@ func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{})
 }
 
 func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumRetryTx{}
+	tx := &txn.ArbitrumRetryTx{}
 
 	// ChainId (expected as a hex string, e.g., "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -526,7 +528,7 @@ func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{})
 // makeArbitrumContractTx builds an ArbitrumContractTx from the common transaction fields
 // and the raw JSON transaction data.
 func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumContractTx{}
+	tx := &txn.ArbitrumContractTx{}
 
 	// ChainId (expected as a hex string, e.g. "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -570,7 +572,7 @@ func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface
 }
 
 func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumUnsignedTx{GasFeeCap: big.NewInt(0)}
+	tx := &txn.ArbitrumUnsignedTx{GasFeeCap: big.NewInt(0)}
 
 	// ChainId: expected as a hex string (e.g., "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -612,7 +614,7 @@ func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface
 }
 
 func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumDepositTx{}
+	tx := &txn.ArbitrumDepositTx{}
 
 	// ChainId: expected as a hex string (e.g., "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
@@ -726,7 +728,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite)
+	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite, nil)
 	return err
 }
 
@@ -735,7 +737,7 @@ var (
 	prevReceiptTime = new(atomic.Uint64)
 )
 
-func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool) (lastBlockNum uint64, err error) {
+func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool, f func(tx kv.RwTx, lastBlockNum uint64) error) (lastBlockNum uint64, err error) {
 	var (
 		batchSize                = uint64(5)
 		blockRPS, blockBurst     = 5000, 5 // rps, amount of simultaneous requests
@@ -788,8 +790,23 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 
 		if rwTx != nil {
 			err = commitUpdate(rwTx, blocks)
+			if err != nil {
+				return 0, err
+			}
+			if f != nil {
+				err = f(rwTx, lastBlockNum)
+			}
+
 		} else {
-			err = db.Update(ctx, func(tx kv.RwTx) error { return commitUpdate(tx, blocks) })
+			err = db.Update(ctx, func(tx kv.RwTx) error {
+				if err := commitUpdate(tx, blocks); err != nil {
+					return err
+				}
+				if f != nil {
+					err = f(tx, lastBlockNum)
+				}
+				return err
+			})
 		}
 		if err != nil {
 			return 0, err
@@ -801,31 +818,52 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 	var latest *types.Block
 	var blockNum uint64
+	var firstBlockNum uint64
 	for _, blk := range blocks {
 		blockNum = blk.NumberU64()
+		if firstBlockNum == 0 {
+			firstBlockNum = blockNum
+		}
 
-		if err := rawdb.WriteBlock(tx, blk); err != nil {
+		//if err := rawdb.WriteBlock(tx, blk); err != nil {
+		if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
 			return fmt.Errorf("error writing block %d: %w", blockNum, err)
 		}
 		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
 			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 		}
-		if err := rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-			return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+		if _, err := rawdb.WriteRawBodyIfNotExists(tx, blk.Hash(), blockNum, blk.RawBody()); err != nil {
+			return fmt.Errorf("cannot write body: %s", err)
 		}
-		latest = blk
-	}
 
-	if latest != nil {
+		parentTd, err := rawdb.ReadTd(tx, blk.Header().ParentHash, blockNum-1)
+		if err != nil || parentTd == nil {
+			return fmt.Errorf("failed to read parent total difficulty for block %d: %w", blockNum, err)
+		}
+		td := new(big.Int).Add(parentTd, blk.Difficulty())
+		if err := rawdb.WriteTd(tx, blk.Hash(), blockNum, td); err != nil {
+			return fmt.Errorf("failed to write total difficulty %d: %w", blockNum, err)
+		}
+
+		latest = blk
 		rawdb.WriteHeadBlockHash(tx, latest.Hash())
 		if err := rawdb.WriteHeadHeaderHash(tx, latest.Hash()); err != nil {
 			return err
 		}
+	}
+
+	if latest != nil {
+		if err := rawdbv3.TxNums.Truncate(tx, firstBlockNum); err != nil {
+			return err
+		}
+		if err := rawdb.AppendCanonicalTxNums(tx, firstBlockNum); err != nil {
+			return err
+		}
 
 		syncStages := []stages.SyncStage{
-			stages.Headers,
-			stages.BlockHashes,
+			stages.Headers, // updated by  cfg.bodyDownload.UpdateFromDb(tx);
 			stages.Bodies,
+			stages.BlockHashes,
 			stages.Senders,
 		}
 		for _, stage := range syncStages {
@@ -943,7 +981,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				} else {
 					return fmt.Errorf("missing chainId in ArbitrumInternalTxType at index %d", idx)
 				}
-				tx = &types.ArbitrumInternalTx{
+				tx = &txn.ArbitrumInternalTx{
 					Data:    commonTx.Data,
 					ChainId: chainID,
 				}
@@ -1003,9 +1041,9 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				if receipt.Timeboosted != nil {
 					tx.SetTimeboosted(receipt.Timeboosted)
 				}
-				if tx.Type() == types.ArbitrumSubmitRetryableTxType {
+				if tx.Type() == txn.ArbitrumSubmitRetryableTxType {
 					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
-						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
+						if srtx, ok := tx.(*txn.ArbitrumSubmitRetryableTx); ok {
 							srtx.EffectiveGasUsed = egu.Uint64()
 							tx = srtx
 						}

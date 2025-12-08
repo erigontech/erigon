@@ -28,12 +28,8 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/direct"
-	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p/enode"
-
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -41,7 +37,10 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 const AttestationSubnetSubscriptions = 2
@@ -193,7 +192,7 @@ func StartSentinelService(
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	PeerDasStateReader peerdasstate.PeerDasStateReader,
-	logger log.Logger) (sentinelrpc.SentinelClient, *enode.LocalNode, error) {
+	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
 	ctx := context.Background()
 	sent, localNode, err := createSentinel(
 		cfg,
@@ -233,7 +232,7 @@ func StartServe(
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
 	go server.ListenToGossip()
 	// Regiser our server as a gRPC server
-	sentinelrpc.RegisterSentinelServer(gRPCserver, server)
+	sentinelproto.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}

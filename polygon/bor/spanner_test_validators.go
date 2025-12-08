@@ -17,16 +17,16 @@
 package bor
 
 import (
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // NetworkNameVals is a map of network name to validator set for tests/devnets
-var NetworkNameVals = make(map[string][]*valset.Validator)
+var NetworkNameVals = make(map[string][]*heimdall.Validator)
 
 // Validator set for bor e2e test chain with 2 validator configuration
-var BorE2ETestChain2Valset = []*valset.Validator{
+var BorE2ETestChain2Valset = []*heimdall.Validator{
 	{
 		ID:               1,
 		Address:          common.HexToAddress("71562b71999873DB5b286dF957af199Ec94617F7"),
@@ -42,7 +42,7 @@ var BorE2ETestChain2Valset = []*valset.Validator{
 }
 
 // Validator set for bor devnet-chain with 1 validator configuration
-var BorDevnetChainVals = []*valset.Validator{
+var BorDevnetChainVals = []*heimdall.Validator{
 	{
 		ID:               1,
 		Address:          common.HexToAddress("0x67b1d87101671b127f5f8714789C7192f7ad340e"),

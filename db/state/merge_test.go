@@ -21,20 +21,21 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestDomainRoTx_findMergeRange(t *testing.T) {
@@ -42,10 +43,10 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 	newDomainRoTx := func(aggStep uint64, files []visibleFile) *DomainRoTx {
 		return &DomainRoTx{
-			name:    kv.AccountsDomain,
-			files:   files,
-			aggStep: aggStep,
-			ht:      &HistoryRoTx{iit: &InvertedIndexRoTx{}},
+			name:     kv.AccountsDomain,
+			files:    files,
+			stepSize: aggStep,
+			ht:       &HistoryRoTx{iit: &InvertedIndexRoTx{}},
 		}
 	}
 
@@ -114,16 +115,12 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
-	cfg := Schema.AccountsDomain.hist.iiCfg
+	cfg := statecfg.Schema.AccountsDomain.Hist.IiCfg
 
-	if cfg.salt == nil {
-		cfg.salt = new(atomic.Pointer[uint32])
-	}
-	cfg.salt.Store(&salt)
-	cfg.dirs = datadir.New(os.TempDir())
-
-	ii, err := NewInvertedIndex(cfg, aggStep, log.New())
+	dirs := datadir.New(os.TempDir())
+	ii, err := NewInvertedIndex(cfg, aggStep, dirs, log.New())
 	ii.Accessors = 0
+	ii.salt.Store(&salt)
 	if err != nil {
 		panic(err)
 	}
@@ -159,7 +156,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, 0, int(mr.from))
 		assert.Equal(t, 4, int(mr.to))
-		assert.Equal(t, ii.name.String(), mr.name)
+		assert.Equal(t, ii.Name.String(), mr.name)
 
 		idxF := ic.staticFilesInRange(mr.from, mr.to)
 		assert.Len(t, idxF, 3)
@@ -500,7 +497,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, mr.needMerge)
 		require.Zero(t, int(mr.from))
 		require.Equal(t, 4, int(mr.to))
-		require.Equal(t, ii.name.String(), mr.name)
+		require.Equal(t, ii.Name.String(), mr.name)
 		idxFiles := ic.staticFilesInRange(mr.from, mr.to)
 		require.Len(t, idxFiles, 3)
 	})
@@ -580,7 +577,7 @@ func TestMergeFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 
-	txs := d.aggregationStep * 8
+	txs := d.stepSize * 8
 	data := generateTestData(t, 20, 52, txs, txs, 100)
 
 	rwTx, err := db.BeginRw(context.Background())
@@ -590,12 +587,12 @@ func TestMergeFiles(t *testing.T) {
 	w := dc.NewWriter()
 
 	prev := []byte{}
-	prevStep := uint64(0)
+	prevStep := kv.Step(0)
 	for key, upd := range data {
 		for _, v := range upd {
 			err := w.PutWithPrev([]byte(key), v.value, v.txNum, prev, prevStep)
 
-			prev, prevStep = v.value, v.txNum/d.aggregationStep
+			prev, prevStep = v.value, kv.Step(v.txNum/d.stepSize)
 			require.NoError(t, err)
 		}
 	}
@@ -619,21 +616,18 @@ func TestMergeFilesWithDependency(t *testing.T) {
 	t.Parallel()
 
 	newTestDomain := func(dom kv.Domain) *Domain {
-		cfg := Schema.GetDomainCfg(dom)
+		cfg := statecfg.Schema.GetDomainCfg(dom)
 
 		salt := uint32(1)
-		if cfg.hist.iiCfg.salt == nil {
-			cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
-		}
-		cfg.hist.iiCfg.salt.Store(&salt)
-		cfg.hist.iiCfg.dirs = datadir.New(os.TempDir())
-		cfg.hist.iiCfg.name = kv.InvertedIdx(0)
-		cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+		dirs := datadir.New(os.TempDir())
+		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
+		cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
-		d, err := NewDomain(cfg, 1, log.New())
+		d, err := NewDomain(cfg, 1, dirs, log.New())
 		if err != nil {
 			panic(err)
 		}
+		d.salt.Store(&salt)
 
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
@@ -643,23 +637,23 @@ func TestMergeFilesWithDependency(t *testing.T) {
 
 	setup := func() (account, storage, commitment *Domain) {
 		account, storage, commitment = newTestDomain(0), newTestDomain(1), newTestDomain(3)
-		checker := NewDependencyIntegrityChecker(account.hist.iiCfg.dirs, log.New())
+		checker := NewDependencyIntegrityChecker(account.dirs, log.New())
 		info := &DependentInfo{
-			entity: FromDomain(commitment.name),
+			entity: FromDomain(commitment.Name),
 			filesGetter: func() *btree2.BTreeG[*FilesItem] {
 				return commitment.dirtyFiles
 			},
 			accessors: commitment.Accessors,
 		}
-		checker.AddDependency(FromDomain(account.name), info)
-		checker.AddDependency(FromDomain(storage.name), info)
+		checker.AddDependency(FromDomain(account.Name), info)
+		checker.AddDependency(FromDomain(storage.Name), info)
 		account.SetChecker(checker)
 		storage.SetChecker(checker)
 		return
 	}
 
 	setupFiles := func(d *Domain, mergedMissing bool) {
-		kvf := fmt.Sprintf("v1.0-%s", d.name.String()) + ".%d-%d.kv"
+		kvf := fmt.Sprintf("v1.0-%s", d.Name.String()) + ".%d-%d.kv"
 		files := []string{fmt.Sprintf(kvf, 0, 1), fmt.Sprintf(kvf, 1, 2)}
 		if !mergedMissing {
 			files = append(files, fmt.Sprintf(kvf, 0, 2))
@@ -873,12 +867,12 @@ func TestMergeFilesWithDependency(t *testing.T) {
 func TestHistoryAndIIAlignment(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, _ := newAggregatorOld(context.Background(), dirs, 1, db, logger)
+	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
 	setup := func() (account *Domain) {
-		agg.registerDomain(kv.AccountsDomain, nil, dirs, logger)
+		agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
 		domain := agg.d[kv.AccountsDomain]
 		domain.History.InvertedIndex.Accessors = 0
 		domain.History.Accessors = 0

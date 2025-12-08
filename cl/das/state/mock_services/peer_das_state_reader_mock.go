@@ -12,6 +12,7 @@ package mock_services
 import (
 	reflect "reflect"
 
+	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -19,6 +20,7 @@ import (
 type MockPeerDasStateReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockPeerDasStateReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockPeerDasStateReaderMockRecorder is the mock recorder for MockPeerDasStateReader.
@@ -115,10 +117,10 @@ func (c *MockPeerDasStateReaderGetEarliestAvailableSlotCall) DoAndReturn(f func(
 }
 
 // GetMyCustodyColumns mocks base method.
-func (m *MockPeerDasStateReader) GetMyCustodyColumns() (map[uint64]bool, error) {
+func (m *MockPeerDasStateReader) GetMyCustodyColumns() (map[cltypes.CustodyIndex]bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetMyCustodyColumns")
-	ret0, _ := ret[0].(map[uint64]bool)
+	ret0, _ := ret[0].(map[cltypes.CustodyIndex]bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -136,19 +138,19 @@ type MockPeerDasStateReaderGetMyCustodyColumnsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) Return(arg0 map[uint64]bool, arg1 error) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
+func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) Return(arg0 map[cltypes.CustodyIndex]bool, arg1 error) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) Do(f func() (map[uint64]bool, error)) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
+func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) Do(f func() (map[cltypes.CustodyIndex]bool, error)) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) DoAndReturn(f func() (map[uint64]bool, error)) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
+func (c *MockPeerDasStateReaderGetMyCustodyColumnsCall) DoAndReturn(f func() (map[cltypes.CustodyIndex]bool, error)) *MockPeerDasStateReaderGetMyCustodyColumnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -187,6 +189,44 @@ func (c *MockPeerDasStateReaderGetRealCgcCall) Do(f func() uint64) *MockPeerDasS
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPeerDasStateReaderGetRealCgcCall) DoAndReturn(f func() uint64) *MockPeerDasStateReaderGetRealCgcCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// IsSupernode mocks base method.
+func (m *MockPeerDasStateReader) IsSupernode() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsSupernode")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsSupernode indicates an expected call of IsSupernode.
+func (mr *MockPeerDasStateReaderMockRecorder) IsSupernode() *MockPeerDasStateReaderIsSupernodeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsSupernode", reflect.TypeOf((*MockPeerDasStateReader)(nil).IsSupernode))
+	return &MockPeerDasStateReaderIsSupernodeCall{Call: call}
+}
+
+// MockPeerDasStateReaderIsSupernodeCall wrap *gomock.Call
+type MockPeerDasStateReaderIsSupernodeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasStateReaderIsSupernodeCall) Return(arg0 bool) *MockPeerDasStateReaderIsSupernodeCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasStateReaderIsSupernodeCall) Do(f func() bool) *MockPeerDasStateReaderIsSupernodeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasStateReaderIsSupernodeCall) DoAndReturn(f func() bool) *MockPeerDasStateReaderIsSupernodeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

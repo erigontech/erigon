@@ -31,21 +31,21 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -318,12 +318,12 @@ func TestAccountRange(t *testing.T) {
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
 		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 2)
 
 		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 3)
 	})
@@ -331,17 +331,17 @@ func TestAccountRange(t *testing.T) {
 		addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 1)
 
 		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 2)
 
 		n = rpc.BlockNumber(10)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 2)
 	})
@@ -349,17 +349,17 @@ func TestAccountRange(t *testing.T) {
 		addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 
 		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false, nil)
 		require.NoError(t, err)
 		require.Empty(t, result.Accounts)
 
 		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false, nil)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts[addr].Storage, 35)
 
 		n = rpc.BlockNumber(10)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false, nil)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts[addr].Storage, 35)
 		require.Equal(t, 1, int(result.Accounts[addr].Nonce))
@@ -554,7 +554,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
-		signer1 := types.MakeSigner(chainspec.MainnetChainConfig, number, number-1)
+		signer1 := types.MakeSigner(chainspec.Mainnet.Config, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
 				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),

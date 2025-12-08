@@ -26,11 +26,12 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 type CursorType uint8
@@ -53,7 +54,7 @@ type CursorItem struct {
 	btCursor     *Cursor
 	key          []byte
 	val          []byte
-	step         uint64
+	step         kv.Step
 	startTxNum   uint64
 	endTxNum     uint64
 	latestOffset uint64     // offset of the latest value in the file
@@ -128,12 +129,12 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
-	hi.largeVals = dc.d.largeValues
+	hi.largeVals = dc.d.LargeValues
 	heap.Init(hi.h)
 	var key, value []byte
 
-	if dc.d.largeValues {
-		valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable) //nolint:gocritic
+	if dc.d.LargeValues {
+		valsCursor, err := hi.roTx.Cursor(dc.d.ValuesTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}
@@ -144,12 +145,12 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 			k := key[:len(key)-8]
 			stepBytes := key[len(key)-8:]
 			step := ^binary.BigEndian.Uint64(stepBytes)
-			endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+			endTxNum := step * dc.d.stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 
 			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
 		}
 	} else {
-		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable) //nolint:gocritic
+		valsCursor, err := hi.roTx.CursorDupSort(dc.d.ValuesTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}
@@ -161,7 +162,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 			stepBytes := value[:8]
 			value = value[8:]
 			step := ^binary.BigEndian.Uint64(stepBytes)
-			endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+			endTxNum := step * dc.d.stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 
 			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
 		}
@@ -304,7 +305,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, dataWithPrevStep], it func(k []byte, v []byte, step uint64) (cont bool, err error), stepSize uint64, roTx kv.Tx) error {
+func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, dataWithPrevStep], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
@@ -329,7 +330,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		}
 	}
 
-	valsCursor, err := roTx.CursorDupSort(dt.d.valuesTable)
+	valsCursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
 	if err != nil {
 		return err
 	}
@@ -338,7 +339,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		return err
 	}
 	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-		step := ^binary.BigEndian.Uint64(v[:8])
+		step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
 		val := v[8:]
 		//endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 		//if haveRamUpdates && endTxNum >= txNum {
@@ -384,7 +385,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 				}
 			case FILE_CURSOR:
 				indexList := dt.d.Accessors
-				if indexList.Has(AccessorBTree) {
+				if indexList.Has(statecfg.AccessorBTree) {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
@@ -395,7 +396,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 						ci1.btCursor.Close()
 					}
 				}
-				if indexList.Has(AccessorHashMap) {
+				if indexList.Has(statecfg.AccessorHashMap) {
 					ci1.idx.Reset(ci1.latestOffset)
 					if !ci1.idx.HasNext() {
 						break
@@ -417,8 +418,8 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 
 				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
-					step := ^binary.BigEndian.Uint64(v[:8])
-					endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+					endTxNum := step.ToTxNum(dt.stepSize) // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					ci1.endTxNum = endTxNum
 					ci1.val = common.Copy(v[8:])
 					ci1.step = step

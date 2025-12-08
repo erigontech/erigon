@@ -29,18 +29,17 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -127,24 +126,11 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 
 	externalState := cfg.State != nil
 	if !externalState {
-		db := memdb.NewStateDB(tempdir)
-		defer db.Close()
 		dirs := datadir.New(tempdir)
-		logger := log.New()
-		salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
-		if err != nil {
-			return nil, nil, err
-		}
-		agg, err := dbstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-		if err != nil {
-			return nil, nil, err
-		}
-		defer agg.Close()
-		_db, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, nil, err
-		}
-		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		db := temporaltest.NewTestDB(nil, dirs)
+		defer db.Close()
+
+		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, nil, err
 		}
@@ -171,7 +157,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
 	}
-	ret, _, err := vmenv.Call(
+	ret, _, _, err := vmenv.Call(
 		sender,
 		common.BytesToAddress([]byte("contract")),
 		input,
@@ -196,20 +182,12 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	externalState := cfg.State != nil
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer os.RemoveAll(tmp) //nolint
+		defer dir.RemoveAll(tmp) //nolint
 
-		db := memdb.NewStateDB(tmp)
+		dirs := datadir.New(tmp)
+		db := temporaltest.NewTestDB(nil, dirs)
 		defer db.Close()
-		agg, err := dbstate.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		defer agg.Close()
-		_db, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -230,13 +208,14 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
-	code, address, leftOverGas, err := vmenv.Create(
+	code, address, leftOverGas, usedMultiGas, err := vmenv.Create(
 		sender,
 		input,
 		cfg.GasLimit,
 		cfg.Value,
 		false,
 	)
+	_ = usedMultiGas
 	return code, address, leftOverGas, err
 }
 
@@ -263,7 +242,7 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 	}
 
 	// Call the code with the given configuration.
-	ret, leftOverGas, err := vmenv.Call(
+	ret, leftOverGas, _, err := vmenv.Call(
 		sender,
 		address,
 		input,

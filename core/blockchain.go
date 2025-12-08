@@ -27,22 +27,21 @@ import (
 	"slices"
 	"time"
 
-	"golang.org/x/crypto/sha3"
-
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/arb/blocks"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
@@ -99,7 +98,7 @@ func ExecuteBlockEphemerally(
 	gasUsed := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	arbOsVersion := types.GetArbOSVersion(header, chainConfig)
+	arbOsVersion := arbBlocks.GetArbOSVersion(header, chainConfig)
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time(), arbOsVersion))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
@@ -197,7 +196,7 @@ func ExecuteBlockEphemerally(
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
+		LogsHash:    rlp.RlpHash(blockLogs),
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
 		GasUsed:     math.HexOrDecimal64(*gasUsed),
@@ -257,13 +256,6 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 	logger.Info("marshalled receipts", "result", string(result))
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
-	rlp.Encode(hw, x) //nolint:errcheck
-	hw.Sum(h[:0])
-	return h
-}
-
 func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
 	var author *common.Address
@@ -285,9 +277,11 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 		SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true, // isFree
-		nil,  // maxFeePerBlobGas
+		data, nil,
+		false, // checkNonce
+		false, // checkGas
+		true,  // isFree
+		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
 	vmConfig.NoReceipts = true
@@ -305,7 +299,7 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
-	ret, _, err := evm.Call(
+	ret, _, _, err := evm.Call(
 		vm.AccountRef(msg.From()),
 		*msg.To(),
 		msg.Data(),
@@ -329,9 +323,11 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 		SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true, // isFree
-		nil,  // maxFeePerBlobGas
+		data, nil,
+		false, // checkNonce
+		false, // checkGas
+		true,  // isFree
+		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
@@ -340,7 +336,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
-	ret, _, err := evm.SysCreate(
+	ret, _, _, err := evm.SysCreate(
 		vm.AccountRef(msg.From()),
 		msg.Data(),
 		msg.Gas(),
@@ -374,12 +370,8 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	var arbosVersion int
-	if cc.IsArbitrum() {
-		arbosVersion = int(types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion)
-	}
-
-	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time, uint64(arbosVersion)), stateWriter); err != nil {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
@@ -396,12 +388,8 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
-
-	var arbosVersion uint64
-	if cc.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time, arbosVersion), stateWriter)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 	return nil
 }
 

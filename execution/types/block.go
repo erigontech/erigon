@@ -30,11 +30,11 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 const (
@@ -197,8 +197,8 @@ func (h *Header) EncodingSize() int {
 func (h *Header) EncodeRLP(w io.Writer) error {
 	encodingSize := h.EncodingSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// Prefix
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
@@ -611,6 +611,32 @@ type Body struct {
 	Withdrawals  []*Withdrawal
 }
 
+func (b *Body) MatchesHeader(h *Header) error {
+	if hash := DeriveSha(Transactions(b.Transactions)); hash != h.TxHash {
+		return fmt.Errorf("body has invalid transaction hash: have %x, exp: %x", hash, h.TxHash)
+	}
+
+	if hash := CalcUncleHash(b.Uncles); hash != h.UncleHash {
+		return fmt.Errorf("body has invalid uncle hash: have %x, exp: %x", hash, h.UncleHash)
+	}
+
+	if h.WithdrawalsHash == nil {
+		if b.Withdrawals != nil {
+			return errors.New("body has unexpected withdrawals")
+		}
+	} else {
+		if b.Withdrawals == nil {
+			return errors.New("body is missing withdrawals")
+		}
+
+		if hash := DeriveSha(Withdrawals(b.Withdrawals)); hash != *h.WithdrawalsHash {
+			return fmt.Errorf("body has invalid withdrawals hash: have %x, exp: %x", hash, h.WithdrawalsHash)
+		}
+	}
+
+	return nil
+}
+
 // RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
 // It is useful in the situations when actual transaction context is not important, for example
 // when downloading Block bodies from other peers or serving them to other peers
@@ -801,8 +827,8 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
@@ -887,8 +913,8 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -972,8 +998,8 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 func (bb Body) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
@@ -1228,8 +1254,8 @@ func (bb *Block) EncodingSize() int {
 func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
@@ -1364,8 +1390,8 @@ func (b *Block) SanityCheck() error {
 
 // HashCheck checks that transactions, receipts, uncles, and withdrawals hashes are correct.
 func (b *Block) HashCheck(fullCheck bool) error {
-	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
-		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
+	if err := b.Body().MatchesHeader(b.header); err != nil {
+		return err
 	}
 
 	if fullCheck {
@@ -1379,24 +1405,6 @@ func (b *Block) HashCheck(fullCheck bool) error {
 
 	if len(b.transactions) == 0 && b.ReceiptHash() != empty.RootHash {
 		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
-	}
-
-	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
-		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
-	}
-
-	if b.WithdrawalsHash() == nil {
-		if b.Withdrawals() != nil {
-			return errors.New("header missing WithdrawalsHash")
-		}
-		return nil
-	}
-	if b.Withdrawals() == nil {
-		return errors.New("body missing Withdrawals")
-	}
-
-	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
-		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
 
 	return nil

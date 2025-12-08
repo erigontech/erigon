@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"hash"
 	"slices"
@@ -28,13 +29,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // Config are the configuration options for the Interpreter
@@ -43,7 +43,6 @@ type Config struct {
 	JumpDestCache *JumpDestCache
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
-	SkipAnalysis  bool // Whether we can skip jumpdest analysis based on the checked history
 	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts    bool // Do not calculate receipts
 	ReadOnly      bool // Do no perform any block finalisation
@@ -52,6 +51,7 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
+	ExposeMultiGas bool // Arbitrum: Expose multi-gas used in transaction receipts
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -276,6 +276,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
 		trace   = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
 	)
+	if in.evm.Context.BlockNumber == 216130861 {
+		trace = true
+	}
 
 	contract.Input = input
 
@@ -328,6 +331,19 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}
+
+		// TODO ARBITRUM DO WE NEED THIS
+		//if isEIP4762 && !contract.IsDeployment && !contract.IsSystemCall {
+		//	// if the PC ends up in a new "chunk" of verkleized code, charge the
+		//	// associated costs.
+		//	contractAddr := contract.Address()
+		//	consumed, wanted := in.evm.TxContext.AccessEvents.CodeChunksRangeGas(contractAddr, pc, 1, uint64(len(contract.Code)), false, contract.Gas)
+		//	contract.UseMultiGas(multigas.StorageGrowthGas(consumed), in.evm.Config().Tracer, tracing.GasChangeWitnessCodeChunk)
+		//	if consumed < wanted {
+		//		return nil, ErrOutOfGas
+		//	}
+		//}
+
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(_pc)
@@ -342,6 +358,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if !contract.UseGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
+		addConstantMultiGas(&contract.UsedMultiGas, cost, op)
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64
@@ -363,15 +380,18 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 			// Consume the gas and return an error if not enough gas is available.
 			// cost is explicitly set so that the capture state defer method can get the proper cost
-			var dynamicCost uint64
-			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
-			cost += dynamicCost // for tracing
+			multigasDynamicCost, err := operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
+			dynamicCost := multigasDynamicCost.SingleGas()
+
+			cost += dynamicCost // for tracing
+			// TODO seems it should be once UseMultiGas call
 			if !contract.UseGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
+			contract.UsedMultiGas.SaturatingAddInto(multigasDynamicCost)
 		}
 
 		// Do tracing before memory expansion
@@ -394,7 +414,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				str = op.String()
 			}
 
-			fmt.Printf("(%d.%d) %5d %5d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, cost, str)
+			fmt.Printf("(%d, %d) pc %5d c %5d gas %8d %s\n", in.evm.intraBlockState.TxIndex(), in.Depth(), _pc, cost, contract.Gas+cost, str)
 		}
 
 		if memorySize > 0 {
@@ -410,7 +430,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		_pc++
 	}
 
-	if err == errStopToken {
+	if errors.Is(err, errStopToken) {
 		err = nil // clear stop token error
 	}
 

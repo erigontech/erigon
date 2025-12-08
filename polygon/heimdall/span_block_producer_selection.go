@@ -16,10 +16,6 @@
 
 package heimdall
 
-import (
-	"github.com/erigontech/erigon/polygon/bor/valset"
-)
-
 // SpanBlockProducerSelection represents the block producer selection at each epoch
 // with their corresponding accumulated ProposerPriority.
 //
@@ -39,14 +35,14 @@ import (
 // heimdall at https://github.com/maticnetwork/heimdall/tree/master/bor#how-does-it-work.
 //
 // However, to correctly calculate the accumulated proposer priorities, one has to start
-// from span zero, create a valset.ValidatorSet, call IncrementProposerPriority(spanSprintCount)
+// from span zero, create a ValidatorSet, call IncrementProposerPriority(spanSprintCount)
 // and at every next span call bor.GetUpdatedValidatorSet(oldValidatorSet, span.SelectedProducers)
 // and repeat.
 type SpanBlockProducerSelection struct {
 	SpanId     SpanId
 	StartBlock uint64
 	EndBlock   uint64
-	Producers  *valset.ValidatorSet
+	Producers  *ValidatorSet
 }
 
 var _ Entity = (*SpanBlockProducerSelection)(nil)

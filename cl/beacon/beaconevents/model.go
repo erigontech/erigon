@@ -23,6 +23,7 @@ const (
 	OpBlsToExecution    EventTopic = "bls_to_execution_change"
 	OpContributionProof EventTopic = "contribution_and_proof"
 	OpBlobSidecar       EventTopic = "blob_sidecar"
+	OpDataColumnSidecar EventTopic = "data_column_sidecar"
 )
 
 type (
@@ -35,6 +36,7 @@ type (
 	BlsToExecutionChangesData = cltypes.SignedBLSToExecutionChange
 	ContributionAndProofData  = cltypes.SignedContributionAndProof
 	BlobSidecarData           = cltypes.BlobSidecar
+	DataColumnSidecarData     = cltypes.DataColumnSidecar
 )
 
 // State event topics

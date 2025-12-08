@@ -33,9 +33,9 @@ jobs:
           echo "Pruning docker system..."
           docker system prune -af --volumes
       - name: Checkout Hive
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          repository: erigontech/hive
+          repository: ethereum/hive
           ref: master
           path: hive
     
@@ -46,7 +46,7 @@ jobs:
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
     
       - name: Setup go env and cache
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '>=1.24'
 
@@ -99,7 +99,7 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            if (( failed > 3 )); then
+            if (( failed > 0 )); then
               echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1

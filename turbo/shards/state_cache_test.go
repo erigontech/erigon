@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
