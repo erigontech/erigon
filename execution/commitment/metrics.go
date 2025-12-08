@@ -156,7 +156,7 @@ func (m *Metrics) Headers() []string {
 }
 
 func (m *Metrics) Values() [][]string {
-	return [][]string{
+	vals := [][]string{
 		{
 			strconv.FormatUint(m.updates.Load(), 10),
 			strconv.FormatUint(m.addressKeys.Load(), 10),
@@ -176,6 +176,10 @@ func (m *Metrics) Values() [][]string {
 			strconv.FormatInt(m.spentProcessing.Milliseconds(), 10),
 		},
 	}
+	if have, want := len(vals[0]), len(m.Headers()); have != want {
+		panic(fmt.Errorf("invalid number of values in metrics row: have=%d, want=%d", have, want))
+	}
+	return vals
 }
 
 func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
@@ -413,7 +417,7 @@ func (am *AccountMetrics) Values() [][]string {
 			strconv.Itoa(int(stat.SpentFolding.Microseconds())),
 		}
 		if len(values[vi]) != headersLen {
-			panic(fmt.Sprintf("invalid number of values in account metrics row: have=%d, want=%d", len(values[vi]), headersLen))
+			panic(fmt.Errorf("invalid number of values in account metrics row: have=%d, want=%d", len(values[vi]), headersLen))
 		}
 		vi++
 	}
