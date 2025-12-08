@@ -17,7 +17,7 @@ jobs:
     runs-on: [self-hosted, qa, Gnosis, tip-tracking]
     timeout-minutes: 1200
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.2/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.3/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours

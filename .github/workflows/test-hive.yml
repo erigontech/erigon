@@ -3,13 +3,13 @@ name: Test Hive
 on:
   push:
     branches:
-        - main
-        - 'release/**'
+      - main
+      - 'release/**'
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
 
-  
+
 jobs:
   test-hive:
     runs-on: ubuntu-latest
@@ -103,10 +103,10 @@ jobs:
           run_suite engine withdrawals 0
           run_suite engine cancun 0
           run_suite engine api 0
-          # 3 failures out of 8 tests at time of writing
-          run_suite engine auth 3
+          run_suite engine auth 0
           # 8 failures out of 194 tests, see https://github.com/ethereum/hive/pull/1355
-          run_suite rpc compat 8
+          # 10 failures out of 199 tests, see https://github.com/ethereum/execution-apis/pull/712 
+          run_suite rpc compat 10
         continue-on-error: true
 
       - name: Upload output log

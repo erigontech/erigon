@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -788,14 +789,7 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 func compareCapabilities(from []string, to []string) []string {
 	result := make([]string, 0)
 	for _, f := range from {
-		found := false
-		for _, t := range to {
-			if f == t {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(to, f) {
 			result = append(result, f)
 		}
 	}
