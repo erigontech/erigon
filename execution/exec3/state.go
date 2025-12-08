@@ -24,10 +24,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/arb/gethhook"
 	"github.com/erigontech/nitro-erigon/arbos"
 	"github.com/erigontech/nitro-erigon/arbos/arbosState"
 	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
-	"github.com/erigontech/nitro-erigon/gethhook"
 	"github.com/erigontech/nitro-erigon/statetransfer"
 
 	"github.com/erigontech/erigon-lib/common"
