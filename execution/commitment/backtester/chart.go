@@ -45,7 +45,14 @@ func renderChartsPage(md []MetricValues, outputDir string) (string, error) {
 			log.Error("failed to close charts file while rendering", "file", f.Name(), "err", err)
 		}
 	}()
-	err = generateChartsPage(md).Render(bufio.NewWriter(f))
+	w := bufio.NewWriter(f)
+	defer func() {
+		err := w.Flush()
+		if err != nil {
+			log.Error("failed to flush charts file while rendering", "file", f.Name(), "err", err)
+		}
+	}()
+	err = generateChartsPage(md).Render(w)
 	if err != nil {
 		return "", err
 	}
