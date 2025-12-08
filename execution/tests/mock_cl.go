@@ -138,7 +138,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 	// get the newly built block
-	newPayload, err := cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
+	newPayload, err := cl.engineApiClient.GetPayloadV6(ctx, *fcuRes.PayloadId)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*engi
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
 	return retryEngineSyncing(ctx, func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-		r, err := cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
+		r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
 		if err != nil {
 			return nil, "", err
 		}
@@ -300,5 +300,22 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r[1:]})
 	}
 	header.RequestsHash = requests.Hash()
+
+	if elPayload.BlockAccessList != nil {
+		var balHash common.Hash
+		if len(*elPayload.BlockAccessList) == 0 {
+			balHash = empty.BlockAccessListHash
+		} else {
+			bal, err := types.DecodeBlockAccessListBytes(*elPayload.BlockAccessList)
+			if err != nil {
+				panic(fmt.Sprintf("could not decode blockAccessList when rebuilding header: %s", err))
+			}
+			if err := bal.Validate(); err != nil {
+				panic(fmt.Sprintf("invalid blockAccessList when rebuilding header: %s", err))
+			}
+			balHash = bal.Hash()
+		}
+		header.BlockAccessListHash = &balHash
+	}
 	return header
 }

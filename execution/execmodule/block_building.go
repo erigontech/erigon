@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
@@ -151,6 +152,22 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		return nil, err
 	}
 
+	includeBAL := e.config.IsAmsterdam(header.Time)
+	var bal types.BlockAccessList
+	var balHash common.Hash
+	if includeBAL {
+		bal = block.BlockAccessList()
+		if bal == nil {
+			bal = types.BlockAccessList{}
+		}
+		balHash = bal.Hash()
+		if balHash == (common.Hash{}) {
+			balHash = empty.BlockAccessListHash
+		}
+		header.BlockAccessListHash = &balHash
+	}
+	blockHash := header.Hash()
+
 	payload := &typesproto.ExecutionPayload{
 		Version:       1,
 		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
@@ -165,7 +182,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
+		BlockHash:     gointerfaces.ConvertHashToH256(blockHash),
 		Transactions:  encodedTransactions,
 	}
 	if block.Withdrawals() != nil {
@@ -177,6 +194,17 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		payload.Version = 3
 		payload.BlobGasUsed = header.BlobGasUsed
 		payload.ExcessBlobGas = header.ExcessBlobGas
+	}
+	if includeBAL {
+		payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(balHash)
+		if payload.Version < 4 {
+			payload.Version = 4
+		}
+		balProto := types.ConvertBlockAccessListToTypesProto(bal)
+		if balProto == nil {
+			balProto = make([]*typesproto.BlockAccessListAccount, 0)
+		}
+		payload.BlockAccessList = balProto
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)

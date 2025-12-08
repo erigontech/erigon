@@ -1107,6 +1107,75 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 	return out
 }
 
+func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.BlockAccessListAccount {
+	out := make([]*typesproto.BlockAccessListAccount, 0, len(bal))
+	if len(bal) == 0 {
+		return out
+	}
+
+	for _, account := range bal {
+		if account == nil {
+			continue
+		}
+		rpcAccount := &typesproto.BlockAccessListAccount{
+			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
+		}
+		for _, storageChange := range account.StorageChanges {
+			if storageChange == nil {
+				continue
+			}
+			slotChanges := &typesproto.BlockAccessListSlotChanges{
+				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
+			}
+			for _, change := range storageChange.Changes {
+				if change == nil {
+					continue
+				}
+				slotChanges.Changes = append(slotChanges.Changes, &typesproto.BlockAccessListStorageChange{
+					Index: uint32(change.Index),
+					Value: gointerfaces.ConvertHashToH256(change.Value),
+				})
+			}
+			rpcAccount.StorageChanges = append(rpcAccount.StorageChanges, slotChanges)
+		}
+		for _, read := range account.StorageReads {
+			rpcAccount.StorageReads = append(rpcAccount.StorageReads, gointerfaces.ConvertHashToH256(read.Value()))
+		}
+		for _, balanceChange := range account.BalanceChanges {
+			if balanceChange == nil {
+				continue
+			}
+			val := balanceChange.Value
+			rpcAccount.BalanceChanges = append(rpcAccount.BalanceChanges, &typesproto.BlockAccessListBalanceChange{
+				Index: uint32(balanceChange.Index),
+				Value: gointerfaces.ConvertUint256IntToH256(&val),
+			})
+		}
+		for _, nonceChange := range account.NonceChanges {
+			if nonceChange == nil {
+				continue
+			}
+			rpcAccount.NonceChanges = append(rpcAccount.NonceChanges, &typesproto.BlockAccessListNonceChange{
+				Index: uint32(nonceChange.Index),
+				Value: nonceChange.Value,
+			})
+		}
+		for _, codeChange := range account.CodeChanges {
+			if codeChange == nil {
+				continue
+			}
+			data := make([]byte, len(codeChange.Data))
+			copy(data, codeChange.Data)
+			rpcAccount.CodeChanges = append(rpcAccount.CodeChanges, &typesproto.BlockAccessListCodeChange{
+				Index: uint32(codeChange.Index),
+				Data:  data,
+			})
+		}
+		out = append(out, rpcAccount)
+	}
+	return out
+}
+
 func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAccessListAccount) (BlockAccessList, error) {
 	if len(protoList) == 0 {
 		return nil, nil
