@@ -28,9 +28,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -295,7 +295,7 @@ func (s *Sync) RunSnapshots(db kv.TemporalRwDB) error {
 	return nil
 }
 
-func (s *Sync) RunUnwind(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+func (s *Sync) RunUnwind(db kv.RwDB, sd *state.ExecutionContext, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
@@ -316,7 +316,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRw
 	return nil
 }
 
-func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) (bool, error) {
+func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *state.ExecutionContext, tx kv.TemporalRwTx) (bool, error) {
 	var hasMore bool
 	initialCycle, firstCycle := false, false
 	s.prevUnwindPoint = nil
@@ -403,7 +403,7 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
+func (s *Sync) Run(db kv.TemporalRwDB, sd *state.ExecutionContext, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -532,7 +532,7 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, doms *state.ExecutionContext, rwTx kv.TemporalRwTx, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
 	start := time.Now()
 	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
 	stageState, err := s.StageState(stage.ID, rwTx, db, initialCycle, firstCycle)
@@ -567,7 +567,7 @@ func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
 	s.metricsCache.stageRunDurationSummary(stageState.ID).Observe(took.Seconds())
 }
 
-func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, sd *state.ExecutionContext, tx kv.TemporalRwTx) error {
 	start := time.Now()
 	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
 	if err != nil {

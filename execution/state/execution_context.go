@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package execctx
+package state
 
 import (
 	"bytes"
@@ -40,36 +40,12 @@ var (
 	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 )
 
-// KvList sort.Interface to sort write list by keys
-type KvList struct {
-	Keys []string
-	Vals [][]byte
-}
-
-func (l *KvList) Push(key string, val []byte) {
-	l.Keys = append(l.Keys, key)
-	l.Vals = append(l.Vals, val)
-}
-
-func (l *KvList) Len() int {
-	return len(l.Keys)
-}
-
-func (l *KvList) Less(i, j int) bool {
-	return l.Keys[i] < l.Keys[j]
-}
-
-func (l *KvList) Swap(i, j int) {
-	l.Keys[i], l.Keys[j] = l.Keys[j], l.Keys[i]
-	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
-}
-
 type accHolder interface {
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
-type SharedDomains struct {
+type ExecutionContext struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
 	stepSize uint64
@@ -84,8 +60,8 @@ type SharedDomains struct {
 	metrics           changeset.DomainMetrics
 }
 
-func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
-	sd := &SharedDomains{
+func NewExecutionContext(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*ExecutionContext, error) {
+	sd := &ExecutionContext{
 		logger: logger,
 		//trace:   true,
 		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
@@ -109,7 +85,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 }
 
 type temporalPutDel struct {
-	sd *SharedDomains
+	sd *ExecutionContext
 	tx kv.TemporalTx
 }
 
@@ -125,16 +101,16 @@ func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum
 	return pd.sd.DomainDelPrefix(domain, pd.tx, prefix, txNum)
 }
 
-func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
+func (sd *ExecutionContext) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
 
-func (sd *SharedDomains) Merge(other *SharedDomains) error {
+func (sd *ExecutionContext) Merge(other *ExecutionContext) error {
 	return sd.mem.Merge(other.mem)
 }
 
 type temporalGetter struct {
-	sd *SharedDomains
+	sd *ExecutionContext
 	tx kv.TemporalTx
 }
 
@@ -151,11 +127,11 @@ func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 }
 
 type unmarkedPutter struct {
-	sd         *SharedDomains
+	sd         *ExecutionContext
 	forkableId kv.ForkableId
 }
 
-func (sd *SharedDomains) AsUnmarkedPutter(id kv.ForkableId) kv.UnmarkedPutter {
+func (sd *ExecutionContext) AsUnmarkedPutter(id kv.ForkableId) kv.UnmarkedPutter {
 	return &unmarkedPutter{sd, id}
 }
 
@@ -163,80 +139,80 @@ func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
 	return up.sd.mem.PutForkable(up.forkableId, num, v)
 }
 
-func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
+func (sd *ExecutionContext) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd, tx}
 }
 
-func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
+func (sd *ExecutionContext) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
 	sd.mem.(accHolder).SetChangesetAccumulator(acc)
 }
 
-func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
+func (sd *ExecutionContext) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	sd.mem.(accHolder).SavePastChangesetAccumulator(blockHash, blockNumber, acc)
 }
 
-func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
+func (sd *ExecutionContext) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
 }
 
-func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+func (sd *ExecutionContext) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
 }
 
-func (sd *SharedDomains) Trace() bool {
+func (sd *ExecutionContext) Trace() bool {
 	return sd.trace
 }
 
-func (sd *SharedDomains) CommitmentCapture() bool {
+func (sd *ExecutionContext) CommitmentCapture() bool {
 	return sd.commitmentCapture
 }
 
-func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
-func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
+func (sd *ExecutionContext) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
+func (sd *ExecutionContext) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
 }
-func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
+func (sd *ExecutionContext) Logger() log.Logger { return sd.logger }
 
-func (sd *SharedDomains) ClearRam(resetCommitment bool) {
+func (sd *ExecutionContext) ClearRam(resetCommitment bool) {
 	if resetCommitment {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
 }
 
-func (sd *SharedDomains) SizeEstimate() uint64 {
+func (sd *ExecutionContext) SizeEstimate() uint64 {
 	return sd.mem.SizeEstimate()
 }
 
 const CodeSizeTableFake = "CodeSize"
 
-func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
+func (sd *ExecutionContext) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
 }
 
-func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
+func (sd *ExecutionContext) StepSize() uint64 { return sd.stepSize }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
-func (sd *SharedDomains) SetTxNum(txNum uint64) {
+func (sd *ExecutionContext) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
 }
 
-func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
+func (sd *ExecutionContext) TxNum() uint64 { return sd.txNum }
 
-func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
+func (sd *ExecutionContext) BlockNum() uint64 { return sd.blockNum.Load() }
 
-func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
+func (sd *ExecutionContext) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) SetTrace(b, capture bool) []string {
+func (sd *ExecutionContext) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture
 	return sd.sdCtx.GetCapture(true)
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
+func (sd *ExecutionContext) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
 	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
@@ -248,11 +224,11 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 	return firstKey, firstVal, hasPrefix, err
 }
 
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+func (sd *ExecutionContext) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
 }
 
-func (sd *SharedDomains) Close() {
+func (sd *ExecutionContext) Close() {
 	if sd.sdCtx == nil { //idempotency
 		return
 	}
@@ -269,13 +245,13 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+func (sd *ExecutionContext) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.mem.Flush(ctx, tx)
 }
 
 // TemporalDomain satisfaction
-func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+func (sd *ExecutionContext) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
@@ -307,11 +283,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	return v, step, nil
 }
 
-func (sd *SharedDomains) Metrics() *changeset.DomainMetrics {
+func (sd *ExecutionContext) Metrics() *changeset.DomainMetrics {
 	return &sd.metrics
 }
 
-func (sd *SharedDomains) LogMetrics() []any {
+func (sd *ExecutionContext) LogMetrics() []any {
 	var metrics []any
 
 	sd.metrics.RLock()
@@ -337,7 +313,7 @@ func (sd *SharedDomains) LogMetrics() []any {
 	return metrics
 }
 
-func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
+func (sd *ExecutionContext) DomainLogMetrics() map[kv.Domain][]any {
 	var logMetrics = map[kv.Domain][]any{}
 
 	sd.metrics.RLock()
@@ -371,7 +347,7 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (sd *ExecutionContext) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -405,7 +381,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 //   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (sd *ExecutionContext) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, nil)
 	if prevVal == nil {
@@ -435,7 +411,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	return sd.mem.DomainDel(domain, ks, txNum, prevVal, prevStep)
 }
 
-func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, prefix []byte, txNum uint64) error {
+func (sd *ExecutionContext) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, prefix []byte, txNum uint64) error {
 	if domain != kv.StorageDomain {
 		return errors.New("DomainDelPrefix: not supported")
 	}
@@ -475,7 +451,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 
 // DiscardWrites disables updates collection for further flushing into db.
 // Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
-func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
+func (sd *ExecutionContext) DiscardWrites(d kv.Domain) {
 	// TODO: Deprecated - need convert this method to Constructor-Builder configuration
 	if d >= kv.DomainLen {
 		return
@@ -483,12 +459,12 @@ func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
 	sd.mem.DiscardWrites(d)
 }
 
-func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommitmentContext {
+func (sd *ExecutionContext) GetCommitmentContext() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
+func (sd *ExecutionContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
 	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err
@@ -496,6 +472,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	return nil
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+func (sd *ExecutionContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
 }

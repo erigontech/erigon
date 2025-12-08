@@ -1,4 +1,4 @@
-package temporal
+package temporal_test
 
 import (
 	"encoding/binary"
@@ -14,8 +14,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
+	execstate "github.com/erigontech/erigon/execution/state"
 )
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
@@ -28,7 +29,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
 
-	temporalDb, err := New(mdbxDb, agg)
+	temporalDb, err := temporal.New(mdbxDb, agg)
 	require.NoError(t, err)
 	defer temporalDb.Close()
 
@@ -36,7 +37,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
+	sd, err := execstate.NewExecutionContext(ctx, rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -225,7 +226,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	stepSize := uint64(1)
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
-	temporalDb, err := New(mdbxDb, agg)
+	temporalDb, err := temporal.New(mdbxDb, agg)
 	require.NoError(t, err)
 	defer temporalDb.Close()
 
@@ -241,7 +242,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
+	sd, err := execstate.NewExecutionContext(ctx, rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 

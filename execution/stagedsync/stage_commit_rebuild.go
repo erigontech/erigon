@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	execstate "github.com/erigontech/erigon/execution/state"
 )
 
 type TrieCfg struct {
@@ -52,7 +53,19 @@ var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
 	txNumsReader := cfg.blockReader.TxnumReader(ctx)
-	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New(), squeeze)
+
+	tx, err := cfg.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return trie.EmptyRoot, err
+	}
+	defer tx.Rollback()
+	ec, err := execstate.NewExecutionContext(ctx, tx, log.New())
+	if err != nil {
+		return trie.EmptyRoot, err
+	}
+	ec.Close()
+
+	rh, err := state.RebuildCommitmentFiles(ctx, ec, cfg.db, &txNumsReader, log.New(), squeeze)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}

@@ -18,7 +18,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
@@ -249,7 +248,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
-		var sharedDomains *execctx.SharedDomains
+		var sharedDomains *state.ExecutionContext
 		defer func() {
 			if sharedDomains != nil {
 				sharedDomains.Close()
@@ -259,7 +258,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+			sharedDomains, err = state.NewExecutionContext(ctx, tx, log.Root())
 			if err != nil {
 				return nil, err
 			}
@@ -428,7 +427,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
-	var sharedDomains *execctx.SharedDomains
+	var sharedDomains *state.ExecutionContext
 	defer func() {
 		if sharedDomains != nil {
 			sharedDomains.Close()
@@ -438,7 +437,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	var stateWriter state.StateWriter
 	var minTxNum uint64
 	if calculatePostState {
-		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+		sharedDomains, err = state.NewExecutionContext(ctx, tx, log.Root())
 		if err != nil {
 			return nil, err
 		}

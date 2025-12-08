@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -38,13 +37,13 @@ import (
 )
 
 type StateV3 struct {
-	domains *execctx.SharedDomains
+	domains *ExecutionContext
 	logger  log.Logger
 	syncCfg ethconfig.Sync
 	trace   bool
 }
 
-func NewStateV3(domains *execctx.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
+func NewStateV3(domains *ExecutionContext, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains: domains,
 		logger:  logger,
@@ -177,7 +176,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 	return nil
 }
 
-func (rs *StateV3) Domains() *execctx.SharedDomains {
+func (rs *StateV3) Domains() *ExecutionContext {
 	return rs.domains
 }
 
@@ -380,7 +379,7 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	return bufferedState
 }
 
-func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Buffered {
+func (s *StateV3Buffered) WithDomains(domains *ExecutionContext) *StateV3Buffered {
 	return &StateV3Buffered{
 		StateV3:       NewStateV3(domains, s.syncCfg, s.logger),
 		accounts:      s.accounts,
@@ -698,6 +697,9 @@ type ReaderV3 struct {
 	trace       bool
 	tracePrefix string
 	getter      kv.TemporalGetter
+	//accountGetter kv.TemporalGetter[accounts.Address, *accounts.Account]
+	//storageGetter kv.TemporalGetter[accounts.StorageLocation, uint256.Int]
+	//codeGetter    kv.TemporalGetter[accounts.CodeHash, []byte]
 }
 
 func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
@@ -737,6 +739,9 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 	if !address.IsNil() {
 		value = address.Value()
 	}
+
+	//acc, err := r.accountGetter.GetLatest(kv.AccountsDomain, account)
+
 	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:])
 	if err != nil {
 		return nil, nil, err
@@ -1014,40 +1019,4 @@ func (r *bufferedReader) SetGetter(getter kv.TemporalGetter) {
 
 func (r *bufferedReader) DiscardReadList() {
 	r.reader.DiscardReadList()
-}
-
-type ReadLists map[string]*execctx.KvList
-
-func (v ReadLists) Return() {
-	returnReadList(v)
-}
-
-var readListPool = sync.Pool{
-	New: func() any {
-		return ReadLists{
-			kv.AccountsDomain.String(): {},
-			kv.CodeDomain.String():     {},
-			kv.StorageDomain.String():  {},
-		}
-	},
-}
-
-func newReadList() ReadLists {
-	v := readListPool.Get().(ReadLists)
-	for _, tbl := range v {
-		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	}
-	return v
-	//return readListPool.Get().(map[string]*state.KvList)
-}
-func returnReadList(v ReadLists) {
-	if v == nil {
-		return
-	}
-	//for _, tbl := range v {
-	//	clear(tbl.Keys)
-	//	clear(tbl.Vals)
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
-	readListPool.Put(v)
 }

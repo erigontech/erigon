@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -147,12 +146,12 @@ func testTemporalDB(t testing.TB) kv.TemporalRwDB {
 	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 }
 
-func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execctx.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *state.ExecutionContext) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	sd, err := state.NewExecutionContext(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 

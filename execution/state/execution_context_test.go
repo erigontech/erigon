@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package execctx_test
+package state_test
 
 import (
 	"context"
@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/db/state/execctx"
+	execstate "github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -68,7 +68,7 @@ func composite(k, k2 []byte) []byte {
 	return append(common.Copy(k), k2...)
 }
 
-func TestSharedDomain_Unwind(t *testing.T) {
+func TestExecutionContext_Unwind(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -84,7 +84,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err := execstate.NewExecutionContext(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -103,7 +103,7 @@ Loop:
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -167,7 +167,7 @@ Loop:
 	goto Loop
 }
 
-func TestSharedDomain_StorageIter(t *testing.T) {
+func TestExecutionContext_StorageIter(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -185,7 +185,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err := execstate.NewExecutionContext(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -263,7 +263,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 
-	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -311,7 +311,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	rwTx.Rollback()
 }
 
-func TestSharedDomain_IteratePrefix(t *testing.T) {
+func TestExecutionContext_IteratePrefix(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -327,7 +327,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	require.NoError(err)
 	defer rwTx.Rollback()
 
-	iterCount := func(domains *execctx.SharedDomains) int {
+	iterCount := func(domains *execstate.ExecutionContext) int {
 		var list [][]byte
 		require.NoError(domains.IteratePrefix(kv.StorageDomain, nil, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
 			list = append(list, k)
@@ -343,7 +343,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err := execstate.NewExecutionContext(ctx, rwTx, log.New())
 	require.NoError(err)
 	defer domains.Close()
 
@@ -373,7 +373,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -382,7 +382,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete marker is in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -412,7 +412,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -433,7 +433,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -442,7 +442,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete/update more keys in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 
@@ -462,7 +462,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -472,7 +472,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
@@ -481,7 +481,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	}
 }
 
-func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
+func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -493,7 +493,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	rwTtx1, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTtx1.Rollback)
-	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.New())
+	sd, err := execstate.NewExecutionContext(ctx, rwTtx1, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -513,7 +513,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Nil(t, firstVal)
 	}
 
-	// --- check 2: storage exists in DB - SharedDomains.HasPrefix should catch this ---
+	// --- check 2: storage exists in DB - ExecutionContexts.HasPrefix should catch this ---
 	{
 		// write to storage
 		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
@@ -550,7 +550,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Nil(t, v)
 
 		// all good
-		// now move on to SharedDomains
+		// now move on to ExecutionContexts
 		roTtx1, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx1.Rollback)
@@ -558,7 +558,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		// make sure there are no files yet and we are only hitting the DB
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
 
-		// finally, verify SharedDomains.HasPrefix returns true
+		// finally, verify ExecutionContexts.HasPrefix returns true
 		sd.SetTxNum(2) // needed for HasPrefix (in-mem has to be ahead of tx num)
 		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx1)
 		require.NoError(t, err)
@@ -576,7 +576,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx1.Rollback()
 	}
 
-	// --- check 3: storage exists in files only - SharedDomains.HasPrefix should catch this
+	// --- check 3: storage exists in files only - ExecutionContexts.HasPrefix should catch this
 	{
 		// move data to files and trigger prune (need one more step for prune so write to some other storage)
 		rwTtx2, err := db.BeginTemporalRw(ctx)
@@ -635,7 +635,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		t.Cleanup(roTtx2.Rollback)
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
-		// finally, verify SharedDomains.HasPrefix returns true
+		// finally, verify ExecutionContexts.HasPrefix returns true
 		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -644,7 +644,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx2.Rollback()
 	}
 
-	// --- check 4: delete storage - SharedDomains.HasPrefix should catch this and say it does not exist
+	// --- check 4: delete storage - ExecutionContexts.HasPrefix should catch this and say it does not exist
 	{
 		rwTtx4, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
@@ -675,7 +675,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx3.Rollback()
 	}
 
-	// --- check 5: write to it again after deletion - SharedDomains.HasPrefix should catch
+	// --- check 5: write to it again after deletion - ExecutionContexts.HasPrefix should catch
 	{
 		rwTtx5, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)

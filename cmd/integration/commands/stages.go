@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -69,6 +68,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -607,7 +607,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := state.NewExecutionContext(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
@@ -931,7 +931,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 	if execProgress == 0 {
-		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		doms, err := state.NewExecutionContext(ctx, tx, log.New())
 		if err != nil {
 			panic(err)
 		}
@@ -947,7 +947,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	doms, err := state.NewExecutionContext(ctx, tx, log.New())
 	if err != nil {
 		return err
 	}
@@ -1088,13 +1088,35 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}
 
-	str, err := dbstate.CheckCommitmentForPrint(ctx, db)
+	str, err := checkCommitmentForPrint(ctx, db)
 	if err != nil {
 		return fmt.Errorf("failed to check commitment: %w", err)
 	}
 	fmt.Printf("\n%s", str)
 
 	return nil
+}
+
+func checkCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {
+	a := rwDb.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+
+	rwTx, err := rwDb.BeginTemporalRw(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer rwTx.Rollback()
+
+	domains, err := state.NewExecutionContext(ctx, rwTx, log.New())
+	if err != nil {
+		return "", err
+	}
+	rootHash, err := domains.GetCommitmentCtx().Trie().RootHash()
+	if err != nil {
+		return "", err
+	}
+	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
+	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues)
+	return s, nil
 }
 
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {

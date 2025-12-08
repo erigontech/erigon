@@ -6,13 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/c2h5oh/datasize"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -311,32 +311,21 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	return nil
 }
 
-func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {
-	a := rwDb.(HasAgg).Agg().(*Aggregator)
-
-	rwTx, err := rwDb.BeginTemporalRw(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer rwTx.Rollback()
-
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	if err != nil {
-		return "", err
-	}
-	rootHash, err := domains.GetCommitmentCtx().Trie().RootHash()
-	if err != nil {
-		return "", err
-	}
-	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
-	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues)
-	return s, nil
+type execContext interface {
+	SetBlockNum(blockNum uint64)
+	SetTxNum(blockNum uint64)
+	BlockNum() uint64
+	TxNum() uint64
+	GetMemBatch() kv.TemporalMemBatch
+	GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext
+	Logger() log.Logger
+	DiscardWrites(d kv.Domain)
 }
 
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
-func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+func RebuildCommitmentFiles(ctx context.Context, ec execContext, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
 	// disable hard alignment; allowing commitment and storage/account to have
@@ -468,36 +457,30 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return true, k
 			}
 
-			rwTx, err := rwDb.BeginTemporalRw(ctx)
+			rwTx, err := rwDb.BeginTemporalRo(ctx)
 			if err != nil {
 				return nil, err
 			}
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-			if err != nil {
-				return nil, err
-			}
+			ec.SetBlockNum(blockNum)
+			ec.SetTxNum(lastTxnumInShard - 1)
+			ec.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
 
-			domains.SetBlockNum(blockNum)
-			domains.SetTxNum(lastTxnumInShard - 1)
-			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
-
-			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
+			rebuiltCommit, err = rebuildCommitmentShard(ctx, ec, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  rangeFromTxNum,
 				TxnTo:    rangeToTxNum,
 				Keys:     totalKeys,
 
-				BlockNumber: domains.BlockNum(),
-				TxnNumber:   domains.TxNum(),
+				BlockNumber: ec.BlockNum(),
+				TxnNumber:   ec.TxNum(),
 				LogPrefix:   fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
 			})
 			if err != nil {
 				return nil, err
 			}
-			domains.Close()
 
 			// make new file visible for all aggregator transactions
 			a.dirtyFilesLock.Lock()
@@ -576,13 +559,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, ec execContext, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
-	sd.DiscardWrites(kv.AccountsDomain)
-	sd.DiscardWrites(kv.StorageDomain)
-	sd.DiscardWrites(kv.CodeDomain)
+	ec.DiscardWrites(kv.AccountsDomain)
+	ec.DiscardWrites(kv.StorageDomain)
+	ec.DiscardWrites(kv.CodeDomain)
 
-	logger := sd.Logger()
+	logger := ec.Logger()
 
 	visComFiles := tx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info(cfg.LogPrefix+" started", "totalKeys", common.PrettyCounter(cfg.Keys), "block", cfg.BlockNumber, "txn", cfg.TxnNumber,
@@ -591,7 +574,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+		ec.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
 		processed++
 		if !ok {
 			break
@@ -599,7 +582,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	}
 
 	collectionSpent := time.Since(sf)
-	rh, err := sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+	rh, err := ec.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -607,7 +590,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil)
+	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, ec.GetMemBatch().(*TemporalMemBatch), nil)
 	if err != nil {
 		return nil, err
 	}

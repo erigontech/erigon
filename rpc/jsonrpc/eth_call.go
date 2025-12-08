@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -431,7 +430,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := state.NewExecutionContext(ctx, tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -713,7 +712,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
+	domains, err := state.NewExecutionContext(ctx, txBatch2, log.New())
 	if err != nil {
 		return nil, err
 	}

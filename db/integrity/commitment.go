@@ -40,11 +40,11 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	execstate "github.com/erigontech/erigon/execution/state"
 )
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
@@ -192,9 +192,9 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	return info, nil
 }
 
-func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
+func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execstate.ExecutionContext, error) {
 	maxTxNum := f.EndRootNum() - 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	sd, err := execstate.NewExecutionContext(ctx, tx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	return sd, nil
 }
 
-func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
+func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execstate.ExecutionContext, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
 	touchLoggingVisitor := func(k []byte) {
 		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum(), "file", filepath.Base(f.Fullpath()))
 	}
@@ -738,7 +738,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	toTxNum := maxTxNum + 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	sd, err := execstate.NewExecutionContext(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
@@ -816,7 +816,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	return nil
 }
 
-func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
+func touchHistoricalKeys(sd *execstate.ExecutionContext, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
 	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
 	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {

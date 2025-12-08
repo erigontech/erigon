@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
@@ -57,7 +56,7 @@ import (
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *execctx.SharedDomains, maxBlockNum uint64) (
+func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *state.ExecutionContext, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
 	txNumsReader := cfg.blockReader.TxnumReader(ctx)
@@ -121,7 +120,7 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, cfg ExecuteBlockCfg,
-	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
+	doms *state.ExecutionContext, rwTx kv.TemporalRwTx,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
@@ -157,7 +156,7 @@ func ExecV3(ctx context.Context,
 	var err error
 	if !inMemExec {
 		var err error
-		doms, err = execctx.NewSharedDomains(ctx, applyTx, log.New())
+		doms, err = state.NewExecutionContext(ctx, applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
@@ -440,7 +439,7 @@ type txExecutor struct {
 	cfg              ExecuteBlockCfg
 	agg              *dbstate.Aggregator
 	rs               *state.StateV3Buffered
-	doms             *execctx.SharedDomains
+	doms             *state.ExecutionContext
 	u                Unwinder
 	isMining         bool
 	inMemExec        bool
@@ -475,7 +474,7 @@ func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
 }
 
-func (te *txExecutor) domains() *execctx.SharedDomains {
+func (te *txExecutor) domains() *state.ExecutionContext {
 	return te.doms
 }
 
@@ -740,7 +739,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
+func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *state.ExecutionContext) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx)
 	}
@@ -836,7 +835,7 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *state.ExecutionContext, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
 	}

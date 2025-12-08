@@ -27,10 +27,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -77,7 +77,7 @@ func TestHeaderStep(t *testing.T) {
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 
 		initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 		if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-			sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+			sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 			if err != nil {
 				return err
 			}
@@ -207,7 +207,7 @@ func TestReorg(t *testing.T) {
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}
@@ -269,7 +269,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}
@@ -323,7 +323,7 @@ func TestReorg(t *testing.T) {
 
 	// This is unwind step
 	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}
@@ -369,7 +369,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}
@@ -477,7 +477,7 @@ func TestAnchorReplace(t *testing.T) {
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}
@@ -594,7 +594,7 @@ func TestAnchorReplace2(t *testing.T) {
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
 	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}
