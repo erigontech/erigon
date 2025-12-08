@@ -25,6 +25,7 @@ import (
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -33,12 +34,22 @@ type MetricValues struct {
 	BatchId uint64
 }
 
-func renderChartsPage(md []MetricValues, outputDir string) error {
+func renderChartsPage(md []MetricValues, outputDir string) (string, error) {
 	f, err := os.Create(path.Join(outputDir, "charts.html"))
 	if err != nil {
 		panic(err)
 	}
-	return generateChartsPage(md).Render(bufio.NewWriter(f))
+	defer func() {
+		err := f.Close()
+		if err != nil {
+			log.Error("failed to close charts file while rendering", "file", f.Name(), "err", err)
+		}
+	}()
+	err = generateChartsPage(md).Render(bufio.NewWriter(f))
+	if err != nil {
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func generateChartsPage(md []MetricValues) *components.Page {

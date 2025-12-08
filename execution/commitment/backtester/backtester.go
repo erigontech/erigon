@@ -188,7 +188,12 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 			MetricValues: mVals[0],
 		})
 	}
-	return renderChartsPage(metrics, runOutputDir)
+	chartsPageFilePath, err := renderChartsPage(metrics, runOutputDir)
+	if err != nil {
+		return err
+	}
+	bt.logger.Info("results page rendered", "open", fmt.Sprintf("file://%s", chartsPageFilePath))
+	return nil
 }
 
 func checkHistoryAvailable(tx kv.TemporalTx, fromBlock uint64, tnr rawdbv3.TxNumsReader) error {
