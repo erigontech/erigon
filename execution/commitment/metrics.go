@@ -226,8 +226,8 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 			current.spentFolding = mustParseMillisecondsCsvCell(row, col, filePath)
 			col++
 			current.spentProcessing = mustParseMillisecondsCsvCell(row, col, filePath)
-			if col != len(row) {
-				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d", i, col, len(row))
+			if cols := col + 1; cols != len(row) {
+				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d, file=%s", i, cols, len(row), filePath)
 			}
 		}
 		return metrics, nil
@@ -437,13 +437,13 @@ func UnmarshallAccountMetricsCsv(filePath string) ([]*AccountMetrics, error) {
 			var col int
 			batchStart := mustParseUintCsvCell(row, col, filePath)
 			if current == nil || current.BatchStart != batchStart {
-				current = &AccountMetrics{BatchStart: batchStart}
+				current = &AccountMetrics{BatchStart: batchStart, AccountStats: make(map[string]*AccountStats)}
 				metrics = append(metrics, current)
 			}
 			col++
 			addr := row[col]
 			if _, ok := current.AccountStats[addr]; ok {
-				return nil, fmt.Errorf("duplicate account address in metrics batch: addr=%s, batchStart=%d", addr, batchStart)
+				return nil, fmt.Errorf("duplicate account address in metrics batch: addr=%s, batchStart=%d, file=%s", addr, batchStart, filePath)
 			}
 			accStats := &AccountStats{}
 			current.AccountStats[addr] = accStats
@@ -463,8 +463,8 @@ func UnmarshallAccountMetricsCsv(filePath string) ([]*AccountMetrics, error) {
 			accStats.Folds = mustParseUintCsvCell(row, col, filePath)
 			col++
 			accStats.SpentFolding = mustParseMicrosecondsCsvCell(row, col, filePath)
-			if col != len(row) {
-				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d", i, col, len(row))
+			if cols := col + 1; cols != len(row) {
+				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d, file=%s", i, cols, len(row), filePath)
 			}
 		}
 		return metrics, nil
