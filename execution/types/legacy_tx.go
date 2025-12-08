@@ -20,7 +20,6 @@
 package types
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -191,63 +190,44 @@ func (tx *LegacyTx) copy() *LegacyTx {
 }
 
 func (tx *LegacyTx) EncodingSize() int {
-	payloadSize, _, _ := tx.payloadSize()
-	return payloadSize
+	return tx.payloadSize()
 }
 
-func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
+func (tx *LegacyTx) payloadSize() (payloadSize int) {
 	payloadSize++
-	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
-	payloadSize += nonceLen
+	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
+	payloadSize += rlp.Uint256Len(*tx.GasPrice)
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.GasPrice)
-	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
-	payloadSize += gasLen
+	payloadSize += rlp.IntLenExcludingHead(tx.GasLimit)
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.Value)
-	// size of Data
+	payloadSize += rlp.Uint256Len(*tx.Value)
 	payloadSize += rlp.StringLen(tx.Data)
-	// size of V
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.V)
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.R)
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.S)
-	return payloadSize, nonceLen, gasLen
+	payloadSize += rlp.Uint256Len(tx.V)
+	payloadSize += rlp.Uint256Len(tx.R)
+	payloadSize += rlp.Uint256Len(tx.S)
+	return payloadSize
 }
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	payloadSize := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
-	if tx.Nonce > 0 && tx.Nonce < 128 {
-		b[0] = byte(tx.Nonce)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
-		b[8-nonceLen] = 128 + byte(nonceLen)
-		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+		return err
 	}
 	if err := rlp.EncodeUint256(*tx.GasPrice, w, b); err != nil {
 		return err
@@ -288,10 +268,10 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
-	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	payloadSize := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
 	return nil

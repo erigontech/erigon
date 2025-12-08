@@ -269,8 +269,7 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 
 func (bc *BalanceChange) EncodingSize() int {
 	size := 1 + rlp.IntLenExcludingHead(uint64(bc.Index))
-	size++
-	size += rlp.Uint256LenExcludingHead(bc.Value)
+	size += rlp.Uint256Len(bc.Value)
 	return size
 }
 
