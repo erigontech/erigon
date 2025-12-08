@@ -654,6 +654,12 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.AllProtocolChanges
+
+	// disable post-cancun forks
+	chainConfig.PragueTime = nil
+	chainConfig.OsakaTime = nil
+	chainConfig.AmsterdamTime = nil
+
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
