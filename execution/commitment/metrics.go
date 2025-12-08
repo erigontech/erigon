@@ -375,7 +375,7 @@ type AccountMetrics struct {
 func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
 	var addr string
 	if len(plainKey) > 0 {
-		addr = toStringZeroCopy(plainKey[:min(length.Addr, len(plainKey))])
+		addr = string(plainKey[:min(length.Addr, len(plainKey))])
 	}
 	am.m.Lock()
 	defer am.m.Unlock()
