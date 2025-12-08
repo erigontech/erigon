@@ -89,7 +89,7 @@ func gatherTotalUpdatesBarData(md []MetricValues) []opts.BarData {
 func gatherAccountUpdatesBarData(md []MetricValues) []opts.BarData {
 	data := make([]opts.BarData, len(md))
 	for i := range md {
-		data[i] = opts.BarData{Value: md[i].Accounts}
+		data[i] = opts.BarData{Value: md[i].AddressKeys}
 	}
 	return data
 }
