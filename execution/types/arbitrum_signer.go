@@ -52,6 +52,7 @@ func (s ArbitrumSigner) Sender(tx Transaction) (common.Address, error) {
 		if inner.OverrideSender != nil {
 			return *inner.OverrideSender, nil
 		}
+		// TODO Arbitrum: not sure this check is needed for arb1
 		if inner.LegacyTx.V.IsZero() && inner.LegacyTx.R.IsZero() && inner.LegacyTx.S.IsZero() {
 			return common.Address{}, nil
 		}
@@ -67,15 +68,15 @@ func (s ArbitrumSigner) Equal(s2 ArbitrumSigner) bool {
 }
 
 func (s ArbitrumSigner) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
-	switch tx.(type) {
+	switch dataTx := tx.(type) {
 	case *ArbitrumUnsignedTx, *ArbitrumContractTx, *ArbitrumDepositTx,
 		*ArbitrumInternalTx, *ArbitrumRetryTx, *ArbitrumSubmitRetryableTx:
 
 		return nil, nil, nil, nil
 	case *ArbitrumLegacyTxData:
-		legacyData := tx.(*ArbitrumLegacyTxData)
-		fakeTx := NewArbTx(legacyData.LegacyTx)
-		return s.Signer.SignatureValues(fakeTx, sig)
+		// legacyData := tx.(*ArbitrumLegacyTxData)
+		// fakeTx := NewArbTx(legacyData.LegacyTx)
+		return s.Signer.SignatureValues(dataTx.LegacyTx, sig)
 	default:
 		return s.Signer.SignatureValues(tx, sig)
 	}

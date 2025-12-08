@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 // AccessTuple is the element type of an access list.
@@ -55,7 +56,7 @@ type AccessListTx struct {
 	LegacyTx
 	ChainID     *uint256.Int
 	AccessList  AccessList // EIP-2930 access list
-	Timeboosted bool
+	Timeboosted *bool
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -77,7 +78,9 @@ func (tx *AccessListTx) copy() *AccessListTx {
 		AccessList: make(AccessList, len(tx.AccessList)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
-	cpy.Timeboosted = tx.Timeboosted
+	if tx.Timeboosted != nil {
+		cpy.Timeboosted = &(*tx.Timeboosted)
+	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -104,28 +107,22 @@ func (tx *AccessListTx) GetAuthorizations() []Authorization {
 func (tx *AccessListTx) Protected() bool {
 	return true
 }
-
 func (tx *AccessListTx) Unwrap() Transaction {
 	return tx
 }
 
-func (tx *AccessListTx) IsTimeBoosted() bool {
-	return tx.Timeboosted
-}
-
-func (tx *AccessListTx) SetTimeboosted(val bool) {
-	tx.Timeboosted = val
-}
+func (tx *AccessListTx) IsTimeBoosted() *bool     { return tx.Timeboosted }
+func (tx *AccessListTx) SetTimeboosted(val *bool) { tx.Timeboosted = val }
 
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
 func (tx *AccessListTx) EncodingSize() int {
-	payloadSize, _, _, _ := tx.payloadSize()
+	payloadSize, _, _, _ := tx.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 // payloadSize calculates the RLP encoding size of transaction, without TxType and envelope
-func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
+func (tx *AccessListTx) payloadSize(hashingOnly bool) (payloadSize, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
@@ -163,8 +160,7 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 
-	if tx.Timeboosted {
-		// Timeboosted
+	if !hashingOnly && tx.Timeboosted != nil {
 		payloadSize++
 		payloadSize += rlp.BoolLen()
 	}
@@ -217,7 +213,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode TxType
@@ -225,13 +221,28 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, false); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *AccessListTx) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(true)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = AccessListTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -256,7 +267,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 	if tx.To == nil {
 		b[0] = 128
 	} else {
-		b[0] = 128 + 20
+		b[0] = 128 + length.Addr
 	}
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
@@ -295,9 +306,8 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 
-	if tx.Timeboosted {
-		// encode Timeboosted
-		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+	if tx.Timeboosted != nil && !hashingOnly {
+		if err := rlp.EncodeBool(*tx.Timeboosted, w, b); err != nil {
 			return err
 		}
 	}
@@ -308,7 +318,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 
 // EncodeRLP implements rlp.Encoder
 func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
@@ -322,7 +332,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, false); err != nil {
 		return err
 	}
 	return nil
@@ -435,11 +445,8 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		if err != nil {
 			return err
 		}
-		tx.Timeboosted = boolVal
-		return s.ListEnd()
+		tx.Timeboosted = &boolVal
 	}
-	// List already completed, set default.
-	tx.Timeboosted = false
 	return s.ListEnd()
 }
 

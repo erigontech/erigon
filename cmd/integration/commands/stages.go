@@ -503,7 +503,7 @@ func init() {
 	withHeimdall(cmdStageHeaders)
 	withChaosMonkey(cmdStageHeaders)
 	withL2RPCaddress(cmdStageHeaders)
-	// cmdStageHeaders.Flags().StringVar()
+	withL2RPCReceiptAddress(cmdStageHeaders)
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withConfig(cmdStageBodies)

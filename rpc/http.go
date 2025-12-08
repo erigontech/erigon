@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -59,6 +60,13 @@ type httpConn struct {
 	closeCh   chan interface{}
 	mu        sync.Mutex // protects headers
 	headers   http.Header
+	limiter   *rate.Limiter
+}
+
+// sets limit of r requests per second
+func (hc *httpConn) SetLimit(r rate.Limit, b int) {
+	hc.limiter.SetLimit(r)
+	hc.limiter.SetBurst(b)
 }
 
 // httpConn implements ServerCodec, but it is treated specially by Client
@@ -109,6 +117,7 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 			headers: headers,
 			url:     endpoint,
 			closeCh: make(chan interface{}),
+			limiter: rate.NewLimiter(rate.Inf, 100), // no limit by default
 		}
 		return hc, nil
 	}, logger)
@@ -149,6 +158,13 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 	return nil
 }
 
+// SetRequestLimit sets a rate limit for requests: r requests per second with a burst of b.
+// b means limit on concurrent requests.
+func (c *Client) SetRequestLimit(r rate.Limit, b int) {
+	hc := c.writeConn.(*httpConn)
+	hc.SetLimit(r, b)
+}
+
 func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, error) {
 	body, err := json.Marshal(msg)
 	if err != nil {
@@ -165,6 +181,9 @@ func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, err
 	req.Header = hc.headers.Clone()
 	hc.mu.Unlock()
 
+	if err = hc.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
 	// do request
 	resp, err := hc.client.Do(req)
 	if err != nil {
