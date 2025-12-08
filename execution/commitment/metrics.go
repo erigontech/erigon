@@ -36,7 +36,7 @@ type Metrics struct {
 	spentUnfolding  time.Duration
 	spentFolding    time.Duration
 	spentProcessing time.Duration
-	batchStart      time.Time // used to tell which metrics belong to the same processed batch
+	batchStart      uint64 // used to tell which metrics belong to the same processed batch
 	// metric config related
 	metricsFilePrefix        string
 	collectCommitmentMetrics bool
@@ -58,6 +58,7 @@ type MetricValues struct {
 	SpentUnfolding  time.Duration
 	SpentFolding    time.Duration
 	SpentProcessing time.Duration
+	BatchStart      uint64
 }
 
 func (m MetricValues) RLock() {
@@ -106,6 +107,7 @@ func (m *Metrics) AsValues() MetricValues {
 		SpentUnfolding:  m.spentUnfolding,
 		SpentFolding:    m.spentFolding,
 		SpentProcessing: m.spentProcessing,
+		BatchStart:      m.batchStart,
 	}
 }
 
@@ -160,7 +162,7 @@ func (m *Metrics) Headers() []string {
 func (m *Metrics) Values() [][]string {
 	return [][]string{
 		{
-			strconv.FormatInt(m.batchStart.Unix(), 10),
+			strconv.FormatUint(m.batchStart, 10),
 			strconv.FormatUint(m.updates.Load(), 10),
 			strconv.FormatUint(m.addressKeys.Load(), 10),
 			strconv.FormatUint(m.storageKeys.Load(), 10),
@@ -187,7 +189,7 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 		var current *Metrics
 		for i, row := range records {
 			var col int
-			batchStart := mustParseUnixTimeCsvCell(row, col, filePath)
+			batchStart := mustParseUintCsvCell(row, col, filePath)
 			if current == nil || current.batchStart != batchStart {
 				current = &Metrics{batchStart: batchStart}
 				metrics = append(metrics, current)
@@ -236,7 +238,7 @@ func (m *Metrics) Reset() {
 	if !m.collectCommitmentMetrics {
 		return
 	}
-	m.batchStart = time.Now()
+	m.batchStart = uint64(time.Now().Unix())
 	m.Accounts.Reset(m.batchStart)
 	m.updates.Store(0)
 	m.addressKeys.Store(0)
@@ -367,7 +369,7 @@ type AccountMetrics struct {
 	m sync.RWMutex
 	// will be separate value for each key in parallel processing
 	AccountStats map[string]*AccountStats
-	BatchStart   time.Time
+	BatchStart   uint64
 }
 
 func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
@@ -411,7 +413,7 @@ func (am *AccountMetrics) Values() [][]string {
 	vi := 1
 	for addr, stat := range am.AccountStats {
 		values[vi] = []string{
-			fmt.Sprintf("%d", am.BatchStart.Unix()),
+			fmt.Sprintf("%d", am.BatchStart),
 			fmt.Sprintf("%x", addr),
 			strconv.FormatUint(stat.StorageUpates, 10),
 			strconv.FormatUint(stat.LoadBranch, 10),
@@ -433,7 +435,7 @@ func UnmarshallAccountMetricsCsv(filePath string) ([]*AccountMetrics, error) {
 		var current *AccountMetrics
 		for i, row := range records {
 			var col int
-			batchStart := mustParseUnixTimeCsvCell(row, col, filePath)
+			batchStart := mustParseUintCsvCell(row, col, filePath)
 			if current == nil || current.BatchStart != batchStart {
 				current = &AccountMetrics{BatchStart: batchStart}
 				metrics = append(metrics, current)
@@ -441,7 +443,7 @@ func UnmarshallAccountMetricsCsv(filePath string) ([]*AccountMetrics, error) {
 			col++
 			addr := row[col]
 			if _, ok := current.AccountStats[addr]; ok {
-				return nil, fmt.Errorf("duplicate account address in metrics batch: addr=%s, batchStart=%d", addr, batchStart.Unix())
+				return nil, fmt.Errorf("duplicate account address in metrics batch: addr=%s, batchStart=%d", addr, batchStart)
 			}
 			accStats := &AccountStats{}
 			current.AccountStats[addr] = accStats
@@ -469,7 +471,7 @@ func UnmarshallAccountMetricsCsv(filePath string) ([]*AccountMetrics, error) {
 	})
 }
 
-func (am *AccountMetrics) Reset(batchStart time.Time) {
+func (am *AccountMetrics) Reset(batchStart uint64) {
 	am.m.Lock()
 	defer am.m.Unlock()
 	am.AccountStats = make(map[string]*AccountStats)
@@ -510,6 +512,29 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 		}
 	}
 	return nil
+}
+
+func UnmarshallMetricValuesCsv(filePathPrefix string) ([]MetricValues, error) {
+	metrics, err := UnmarshallMetricsCsv(filePathPrefix + "_process.csv")
+	if err != nil {
+		return nil, err
+	}
+	accMetrics, err := UnmarshallAccountMetricsCsv(filePathPrefix + "_accounts.csv")
+	if err != nil {
+		return nil, err
+	}
+	if len(metrics) != len(accMetrics) {
+		return nil, fmt.Errorf("different number of batch metrics: metrics=%d, accMetrics=%d", len(metrics), len(accMetrics))
+	}
+	metricValues := make([]MetricValues, len(metrics))
+	for i, m := range metrics {
+		if m.batchStart != accMetrics[i].BatchStart {
+			return nil, fmt.Errorf("different batchStart in metrics and accMetrics: metrics=%d, accMetrics=%d, idx=%d", m.batchStart, accMetrics[i].BatchStart, i)
+		}
+		m.Accounts = accMetrics[i]
+		metricValues[i] = m.AsValues()
+	}
+	return metricValues, nil
 }
 
 func unmarshallCsvMetrics[T any](filePath string, headers []string, extractor func([][]string) ([]T, error)) ([]T, error) {
@@ -594,8 +619,4 @@ func mustParseMillisecondsCsvCell(row []string, col int, filePath string) time.D
 
 func mustParseMicrosecondsCsvCell(row []string, col int, filePath string) time.Duration {
 	return time.Duration(mustParseIntCsvCell(row, col, filePath)) * time.Microsecond
-}
-
-func mustParseUnixTimeCsvCell(row []string, col int, filePath string) time.Time {
-	return time.Unix(mustParseIntCsvCell(row, col, filePath), 0)
 }

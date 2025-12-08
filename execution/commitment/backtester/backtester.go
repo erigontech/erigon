@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type Backtester struct {
@@ -77,13 +78,13 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 		}
 	}
 	bt.logger.Info("finished commitment backtest", "blocks", toBlock-fromBlock+1, "in", time.Since(start), "output", runOutputDir)
-	return nil
+	return bt.processResults(fromBlock, toBlock, runOutputDir)
 }
 
 func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, runOutputDir string) error {
 	start := time.Now()
 	bt.logger.Info("backtesting block commitment", "block", block)
-	blockOutputDir := path.Join(runOutputDir, fmt.Sprintf("block_%d", block))
+	blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
 	err := os.MkdirAll(blockOutputDir, 0755)
 	if err != nil {
 		return err
@@ -105,7 +106,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	defer sd.Close()
 	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
-	sd.GetCommitmentCtx().EnableCsvMetrics(path.Join(blockOutputDir, "commitment_metrics"))
+	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
 	err = sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err
@@ -169,6 +170,25 @@ func (bt Backtester) replayChanges(tx kv.TemporalTx, d kv.Domain, sd *execctx.Sh
 	return nil
 }
 
+func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputDir string) error {
+	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
+	var metrics []commitment.MetricValues
+	for block := fromBlock; block <= toBlock; block++ {
+		blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
+		commitmentMetricsFilePrefix := deriveBlockMetricsFilePrefix(blockOutputDir)
+		mVals, err := commitment.UnmarshallMetricValuesCsv(commitmentMetricsFilePrefix)
+		if err != nil {
+			return err
+		}
+		if len(mVals) != 1 {
+			return fmt.Errorf("expected metrics for 1 batch: got %d", len(mVals))
+		}
+		mVals[0].BatchStart = block // make it blockNum-based instead of time-based
+		metrics = append(metrics, mVals[0])
+	}
+	return renderChartsPage(metrics, runOutputDir)
+}
+
 func checkHistoryAvailable(tx kv.TemporalTx, fromBlock uint64, tnr rawdbv3.TxNumsReader) error {
 	fromTxNum, err := tnr.Min(tx, fromBlock)
 	if err != nil {
@@ -179,4 +199,12 @@ func checkHistoryAvailable(tx kv.TemporalTx, fromBlock uint64, tnr rawdbv3.TxNum
 		return fmt.Errorf("history not available for given start: %d < %d", fromTxNum, historyAvailabilityTxNum)
 	}
 	return nil
+}
+
+func deriveBlockOutputDir(runOutputDir string, block uint64) string {
+	return path.Join(runOutputDir, fmt.Sprintf("block_%d", block))
+}
+
+func deriveBlockMetricsFilePrefix(blockOutputDir string) string {
+	return path.Join(blockOutputDir, "commitment_metrics")
 }
