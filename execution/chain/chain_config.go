@@ -71,11 +71,11 @@ type Config struct {
 	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime    *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime      *big.Int `json:"cancunTime,omitempty"`
-	PragueTime      *big.Int `json:"pragueTime,omitempty"`
-	OsakaTime       *big.Int `json:"osakaTime,omitempty"`
-	GlamsterdamTime *big.Int `json:"glamsterdamTime,omitempty"`
+	ShanghaiTime  *big.Int `json:"shanghaiTime,omitempty"`
+	CancunTime    *big.Int `json:"cancunTime,omitempty"`
+	PragueTime    *big.Int `json:"pragueTime,omitempty"`
+	OsakaTime     *big.Int `json:"osakaTime,omitempty"`
+	AmsterdamTime *big.Int `json:"amsterdamTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -166,7 +166,8 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
-		GlamsterdamTime:               big.NewInt(0),
+		OsakaTime:                     big.NewInt(0),
+		AmsterdamTime:                 big.NewInt(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
@@ -213,13 +214,14 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Amsterdam: %v, Engine: %v}",
 		c.ChainID,
 		c.TerminalTotalDifficulty,
 		timestampToTime(c.ShanghaiTime),
 		timestampToTime(c.CancunTime),
 		timestampToTime(c.PragueTime),
 		timestampToTime(c.OsakaTime),
+		timestampToTime(c.AmsterdamTime),
 		timestampToTime(c.Bpo1Time),
 		timestampToTime(c.Bpo2Time),
 		timestampToTime(c.Bpo3Time),
@@ -339,9 +341,9 @@ func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
 }
 
-// IsGlamsterdam returns whether time is either equal to the Glamsterdam fork time or greater.
-func (c *Config) IsGlamsterdam(time uint64) bool {
-	return isForked(c.GlamsterdamTime, time)
+// IsAmsterdam returns whether time is either equal to the Amsterdam fork time or greater.
+func (c *Config) IsAmsterdam(time uint64) bool {
+	return isForked(c.AmsterdamTime, time)
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
@@ -394,6 +396,10 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 		val, ok = c.BlobSchedule["osaka"]
 		if ok && c.OsakaTime != nil {
 			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["gloas"]
+		if ok && c.AmsterdamTime != nil {
+			c.parsedBlobSchedule[c.AmsterdamTime.Uint64()] = val
 		}
 		val, ok = c.BlobSchedule["bpo1"]
 		if ok && c.Bpo1Time != nil {
@@ -699,7 +705,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka, IsGlamsterdam                  bool
+	IsPrague, IsOsaka, IsAmsterdam                    bool
 	IsAura                                            bool
 }
 
