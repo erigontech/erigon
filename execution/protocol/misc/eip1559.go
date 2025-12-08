@@ -26,7 +26,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -123,11 +122,10 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *uint256.Int {
 		gasUsedDelta := uint256.NewInt(parent.GasUsed - parentGasTarget)
 		x := new(uint256.Int).Mul(parent.BaseFee, gasUsedDelta)
 		y := x.Div(x, parentGasTargetU256)
-		baseFeeDelta := math.U256Min(
-			x.Div(y, baseFeeChangeDenominator),
-			common.Num1,
-		)
-
+		baseFeeDelta := x.Div(y, baseFeeChangeDenominator)
+		if baseFeeDelta.IsZero() {
+			baseFeeDelta.SetUint64(1)
+		}
 		return x.Add(parent.BaseFee, baseFeeDelta)
 	} else {
 		// Otherwise if the parent block used less gas than its target, the baseFee should decrease.
