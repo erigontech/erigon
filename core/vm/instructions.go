@@ -1074,7 +1074,8 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
-	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
+	_ = ogGas
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -1123,7 +1124,8 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	// Use original gas value, since evm.callGasTemp may be updated by a nested call.
-	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
+	_ = ogGas
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
 
 	interpreter.returnData = ret
 	return ret, nil

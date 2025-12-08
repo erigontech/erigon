@@ -276,6 +276,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
 		trace   = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
 	)
+	if in.evm.Context.BlockNumber == 216130861 {
+		trace = true
+	}
 
 	contract.Input = input
 
@@ -411,7 +414,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				str = op.String()
 			}
 
-			fmt.Printf("(%d, %d) pc %5d c %5d gas %8d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.Depth(), _pc, cost, contract.Gas+cost, str)
+			fmt.Printf("(%d, %d) pc %5d c %5d gas %8d %s\n", in.evm.intraBlockState.TxIndex(), in.Depth(), _pc, cost, contract.Gas+cost, str)
 		}
 
 		if memorySize > 0 {
