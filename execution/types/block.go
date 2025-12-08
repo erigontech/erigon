@@ -134,17 +134,14 @@ func (h *Header) EncodingSize() int {
 	if h.Number != nil {
 		encodingSize += rlp.BigIntLenExcludingHead(h.Number)
 	}
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasLimit)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasUsed)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.Time)
-	// size of Extra
+
+	encodingSize += rlp.U64Len(h.GasLimit)
+	encodingSize += rlp.U64Len(h.GasUsed)
+	encodingSize += rlp.U64Len(h.Time)
 	encodingSize += rlp.StringLen(h.Extra)
 
 	if len(h.AuRaSeal) != 0 {
-		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep)
+		encodingSize += rlp.U64Len(h.AuRaStep)
 		encodingSize += rlp.ListPrefixLen(len(h.AuRaSeal)) + len(h.AuRaSeal)
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
@@ -160,12 +157,10 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.BlobGasUsed != nil {
-		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.BlobGasUsed)
+		encodingSize += rlp.U64Len(*h.BlobGasUsed)
 	}
 	if h.ExcessBlobGas != nil {
-		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.ExcessBlobGas)
+		encodingSize += rlp.U64Len(*h.ExcessBlobGas)
 	}
 
 	if h.ParentBeaconBlockRoot != nil {
@@ -938,11 +933,8 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, blockAccessListLen int) {
-	baseTxnIDLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxnID.U64())
-	txCountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxCount))
-
-	payloadSize += baseTxnIDLen
-	payloadSize += txCountLen
+	payloadSize += rlp.U64Len(bfs.BaseTxnID.U64())
+	payloadSize += rlp.U64Len(uint64(bfs.TxCount))
 
 	// size of Uncles
 	unclesLen += EncodingSizeGenericList(bfs.Uncles)

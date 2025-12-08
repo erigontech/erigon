@@ -566,14 +566,6 @@ func intsize(i uint64) (size int) {
 	return common.BitLenToByteLen(bits.Len64(i))
 }
 
-// TODO(yperbasis): replace with U64Len
-func IntLenExcludingHead(i uint64) int {
-	if i < 0x80 {
-		return 0
-	}
-	return intsize(i)
-}
-
 func BigIntLenExcludingHead(i *big.Int) int {
 	bitLen := i.BitLen()
 	if bitLen < 8 {

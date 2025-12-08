@@ -117,22 +117,20 @@ func (tx *DynamicFeeTransaction) EncodingSize() int {
 
 func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, accessListLen int) {
 	payloadSize += rlp.Uint256Len(*tx.ChainID)
-	// size of Nonce
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
+	payloadSize += rlp.U64Len(tx.Nonce)
 	payloadSize += rlp.Uint256Len(*tx.TipCap)
 	payloadSize += rlp.Uint256Len(*tx.FeeCap)
-	// size of GasLimit
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.GasLimit)
+	payloadSize += rlp.U64Len(tx.GasLimit)
+
 	// size of To
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
+
 	payloadSize += rlp.Uint256Len(*tx.Value)
-	// size of Data
 	payloadSize += rlp.StringLen(tx.Data)
+
 	// size of AccessList
 	accessListLen = accessListSize(tx.AccessList)
 	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
