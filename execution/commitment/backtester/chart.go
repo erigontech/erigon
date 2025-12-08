@@ -28,7 +28,12 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func renderChartsPage(md []commitment.MetricValues, outputDir string) error {
+type MetricValues struct {
+	commitment.MetricValues
+	BatchId uint64
+}
+
+func renderChartsPage(md []MetricValues, outputDir string) error {
 	f, err := os.Create(path.Join(outputDir, "charts.html"))
 	if err != nil {
 		panic(err)
@@ -36,7 +41,7 @@ func renderChartsPage(md []commitment.MetricValues, outputDir string) error {
 	return generateChartsPage(md).Render(bufio.NewWriter(f))
 }
 
-func generateChartsPage(md []commitment.MetricValues) *components.Page {
+func generateChartsPage(md []MetricValues) *components.Page {
 	page := components.NewPage()
 	page.AddCharts(
 		generateUpdatesBarChart(md),
@@ -44,25 +49,25 @@ func generateChartsPage(md []commitment.MetricValues) *components.Page {
 	return page
 }
 
-func generateUpdatesBarChart(md []commitment.MetricValues) *charts.Bar {
+func generateUpdatesBarChart(md []MetricValues) *charts.Bar {
 	bar := charts.NewBar()
 	bar.SetGlobalOptions(charts.WithTitleOpts(opts.Title{Title: "trie updates"}))
-	bar.SetXAxis(gatherBatchStarts(md)).
+	bar.SetXAxis(gatherBatchIds(md)).
 		AddSeries("updates", gatherTotalUpdatesBarData(md)).
 		AddSeries("account", gatherAccountUpdatesBarData(md)).
 		AddSeries("storage", gatherStorageUpdatesBarData(md))
 	return bar
 }
 
-func gatherBatchStarts(md []commitment.MetricValues) []uint64 {
-	blockNums := make([]uint64, len(md))
+func gatherBatchIds(md []MetricValues) []uint64 {
+	data := make([]uint64, len(md))
 	for i := range md {
-		blockNums[i] = md[i].BatchStart
+		data[i] = md[i].BatchId
 	}
-	return blockNums
+	return data
 }
 
-func gatherTotalUpdatesBarData(md []commitment.MetricValues) []opts.BarData {
+func gatherTotalUpdatesBarData(md []MetricValues) []opts.BarData {
 	data := make([]opts.BarData, len(md))
 	for i := range md {
 		data[i] = opts.BarData{Value: md[i].Updates}
@@ -70,7 +75,7 @@ func gatherTotalUpdatesBarData(md []commitment.MetricValues) []opts.BarData {
 	return data
 }
 
-func gatherAccountUpdatesBarData(md []commitment.MetricValues) []opts.BarData {
+func gatherAccountUpdatesBarData(md []MetricValues) []opts.BarData {
 	data := make([]opts.BarData, len(md))
 	for i := range md {
 		data[i] = opts.BarData{Value: md[i].Accounts}
@@ -78,7 +83,7 @@ func gatherAccountUpdatesBarData(md []commitment.MetricValues) []opts.BarData {
 	return data
 }
 
-func gatherStorageUpdatesBarData(md []commitment.MetricValues) []opts.BarData {
+func gatherStorageUpdatesBarData(md []MetricValues) []opts.BarData {
 	data := make([]opts.BarData, len(md))
 	for i := range md {
 		data[i] = opts.BarData{Value: md[i].StorageKeys}

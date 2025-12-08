@@ -172,7 +172,7 @@ func (bt Backtester) replayChanges(tx kv.TemporalTx, d kv.Domain, sd *execctx.Sh
 
 func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputDir string) error {
 	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
-	var metrics []commitment.MetricValues
+	var metrics []MetricValues
 	for block := fromBlock; block <= toBlock; block++ {
 		blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
 		commitmentMetricsFilePrefix := deriveBlockMetricsFilePrefix(blockOutputDir)
@@ -181,10 +181,12 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 			return err
 		}
 		if len(mVals) != 1 {
-			return fmt.Errorf("expected metrics for 1 batch: got %d", len(mVals))
+			return fmt.Errorf("expected metrics for 1 batch: got=%d, block=%d", len(mVals), block)
 		}
-		mVals[0].BatchStart = block // make it blockNum-based instead of time-based
-		metrics = append(metrics, mVals[0])
+		metrics = append(metrics, MetricValues{
+			BatchId:      block,
+			MetricValues: mVals[0],
+		})
 	}
 	return renderChartsPage(metrics, runOutputDir)
 }
