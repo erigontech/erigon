@@ -310,9 +310,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) ||
-		(!s.config.IsOsaka(header.Time) && version >= clparams.FuluVersion) ||
-		(s.config.IsOsaka(header.Time) && version < clparams.FuluVersion) ||
+		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
 		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
@@ -681,12 +679,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
-		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
-	if !s.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion {
-		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
-	if s.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 

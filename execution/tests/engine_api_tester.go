@@ -82,9 +82,7 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	var chainConfig chain.Config
 	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
 	require.NoError(t, err)
-	// tests target Prague; disable post-Deneb forks to avoid UnsupportedFork during FCU.
-	chainConfig.OsakaTime = nil
-	chainConfig.AmsterdamTime = nil
+	chainConfig.AmsterdamTime = nil // test uses osaka spec, unset amsterdam config to prevent "unsupported fork" error
 	genesis := &types.Genesis{
 		Config:     &chainConfig,
 		Coinbase:   coinbaseAddr,
