@@ -61,7 +61,7 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 	}
 	defer tx.Rollback()
 	tnr := bt.blockReader.TxnumReader(ctx)
-	err = checkHistoryAvailable(tx, fromBlock, tnr)
+	err = checkDataAvailable(tx, fromBlock, toBlock, tnr)
 	if err != nil {
 		return err
 	}
@@ -196,14 +196,36 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 	return nil
 }
 
-func checkHistoryAvailable(tx kv.TemporalTx, fromBlock uint64, tnr rawdbv3.TxNumsReader) error {
+func checkDataAvailable(tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr rawdbv3.TxNumsReader) error {
+	firstBlockNum, _, err := tnr.First(tx)
+	if err != nil {
+		return err
+	}
+	if fromBlock < firstBlockNum {
+		return fmt.Errorf("block not available for given start: %d < %d", fromBlock, firstBlockNum)
+	}
+	lastBlockNum, _, err := tnr.Last(tx)
+	if err != nil {
+		return err
+	}
+	if toBlock > lastBlockNum {
+		return fmt.Errorf("block not available for given end: %d > %d", toBlock, lastBlockNum)
+	}
 	fromTxNum, err := tnr.Min(tx, fromBlock)
 	if err != nil {
 		return err
 	}
-	historyAvailabilityTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if fromTxNum < historyAvailabilityTxNum {
-		return fmt.Errorf("history not available for given start: %d < %d", fromTxNum, historyAvailabilityTxNum)
+	historyAvailableFromTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if fromTxNum < historyAvailableFromTxNum {
+		return fmt.Errorf("history not available for given start: %d < %d", fromTxNum, historyAvailableFromTxNum)
+	}
+	toTxNum, err := tnr.Max(tx, toBlock)
+	if err != nil {
+		return err
+	}
+	historyAvailableToTxNum := tx.Debug().DomainProgress(kv.CommitmentDomain)
+	if toTxNum > historyAvailableToTxNum {
+		return fmt.Errorf("history not available for given end: %d > %d", toTxNum, historyAvailableToTxNum)
 	}
 	return nil
 }
