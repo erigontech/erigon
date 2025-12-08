@@ -118,23 +118,19 @@ func (tx *AccessListTx) EncodingSize() int {
 // payloadSize calculates the RLP encoding size of transaction, without TxType and envelope
 func (tx *AccessListTx) payloadSize() (payloadSize int, accessListLen int) {
 	payloadSize += rlp.Uint256Len(*tx.ChainID)
-	// size of Nonce
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
-	// size of GasPrice
+	payloadSize += rlp.U64Len(tx.Nonce)
 	payloadSize += rlp.Uint256Len(*tx.GasPrice)
-	// size of GasLimit
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.GasLimit)
+	payloadSize += rlp.U64Len(tx.GasLimit)
+
 	// size of To
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
-	// size of Value
+
 	payloadSize += rlp.Uint256Len(*tx.Value)
-	// size of Data
 	payloadSize += rlp.StringLen(tx.Data)
+
 	// size of AccessList
 	accessListLen = accessListSize(tx.AccessList)
 	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen

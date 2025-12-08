@@ -194,11 +194,9 @@ func (tx *LegacyTx) EncodingSize() int {
 }
 
 func (tx *LegacyTx) payloadSize() (payloadSize int) {
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
+	payloadSize += rlp.U64Len(tx.Nonce)
 	payloadSize += rlp.Uint256Len(*tx.GasPrice)
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.GasLimit)
+	payloadSize += rlp.U64Len(tx.GasLimit)
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
