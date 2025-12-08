@@ -20,7 +20,7 @@
 package builder
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -33,8 +33,7 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	header := types.NewEmptyHeaderForAssembling()
 	header.Root = parent.Root
 	header.ParentHash = parent.Hash()
-	header.Number = new(big.Int).Add(parent.Number, common.Big1)
-	header.Difficulty = common.Big0
+	header.Number = *new(uint256.Int).Add(&parent.Number, common.Num1)
 	header.Time = timestamp
 
 	parentGasLimit := parent.GasLimit

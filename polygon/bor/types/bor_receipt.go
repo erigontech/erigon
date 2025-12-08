@@ -17,8 +17,6 @@
 package types
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -58,7 +56,7 @@ func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash common.Hash, bl
 	receipt.TxHash = txHash
 	receipt.TransactionIndex = txIndex
 	receipt.BlockHash = blockHash
-	receipt.BlockNumber = big.NewInt(0).SetUint64(blockNumber)
+	receipt.BlockNumber = uint256.NewInt(blockNumber)
 
 	logIndex := 0
 	for i := 0; i < len(receipts); i++ {

@@ -20,9 +20,10 @@
 package ethash
 
 import (
-	"math/big"
 	"testing"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -37,7 +38,7 @@ func TestRemoteSealer(t *testing.T) {
 	if _, err := api.GetWork(); err != errNoMiningWork {
 		t.Error("expect to return an error indicate there is no mining work")
 	}
-	header := &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(100)}
+	header := &types.Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(100)}
 	block := types.NewBlockWithHeader(header)
 	blockWithReceipts := &types.BlockWithReceipts{Block: block}
 	sealhash := ethash.SealHash(header)
@@ -59,7 +60,7 @@ func TestRemoteSealer(t *testing.T) {
 		t.Error("expect to return false when submit a fake solution")
 	}
 	// Push new block with same block number to replace the original one.
-	header = &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(1000)}
+	header = &types.Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(1000)}
 	block = types.NewBlockWithHeader(header)
 	blockWithReceipts = &types.BlockWithReceipts{Block: block}
 	sealhash = ethash.SealHash(header)

@@ -83,7 +83,7 @@ func TestReimportMirroredState(t *testing.T) {
 		// We want to simulate an empty middle block, having the same state as the
 		// first one. The last is needs a state change again to force a reorg.
 		if i != 1 {
-			baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
+			baseFee := block.GetHeader().BaseFee
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
 			if err != nil {
 				panic(err)
@@ -100,7 +100,7 @@ func TestReimportMirroredState(t *testing.T) {
 			header.ParentHash = chain.Blocks[i-1].Hash()
 		}
 		header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
-		header.Difficulty = clique.DiffInTurn
+		header.Difficulty.SetUint64(clique.DiffInTurn)
 
 		sig, _ := crypto.Sign(clique.SealHash(header).Bytes(), key)
 		copy(header.Extra[len(header.Extra)-clique.ExtraSeal:], sig)

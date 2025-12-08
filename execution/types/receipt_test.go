@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"errors"
 	"math"
-	"math/big"
 	"reflect"
 	"testing"
 
@@ -81,7 +80,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		TxHash:          tx.Hash(),
 		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
-		BlockNumber:     big.NewInt(1),
+		BlockNumber:     uint256.NewInt(1),
 	}
 	receipt.Bloom = CreateBloom(Receipts{receipt})
 
@@ -209,16 +208,16 @@ func TestDeriveFields(t *testing.T) {
 		},
 	}
 	// Clear all the computed fields and re-derive them
-	number := big.NewInt(1)
+	number := uint64(1)
 	hash := common.BytesToHash([]byte{0x03, 0x14})
 
 	t.Run("DeriveV1", func(t *testing.T) {
 		clearComputedFieldsOnReceipts(t, receipts)
-		if err := receipts.DeriveFields(hash, number.Uint64(), txs, []common.Address{common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0})}); err != nil {
+		if err := receipts.DeriveFields(hash, number, txs, []common.Address{common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0})}); err != nil {
 			t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
 		}
 		// Iterate over all the computed fields and check that they're correct
-		signer := MakeSigner(chain.TestChainConfig, number.Uint64(), 0)
+		signer := MakeSigner(chain.TestChainConfig, number, 0)
 
 		logIndex := uint(0)
 		for i, r := range receipts {
@@ -231,8 +230,8 @@ func TestDeriveFields(t *testing.T) {
 			if r.BlockHash != hash {
 				t.Errorf("receipts[%d].BlockHash = %s, want %s", i, r.BlockHash.String(), hash.String())
 			}
-			if r.BlockNumber.Cmp(number) != 0 {
-				t.Errorf("receipts[%c].BlockNumber = %s, want %s", i, r.BlockNumber.String(), number.String())
+			if r.BlockNumber.CmpUint64(number) != 0 {
+				t.Errorf("receipts[%c].BlockNumber = %s, want %d", i, r.BlockNumber.String(), number)
 			}
 			if r.TransactionIndex != uint(i) {
 				t.Errorf("receipts[%d].TransactionIndex = %d, want %d", i, r.TransactionIndex, i)
@@ -249,8 +248,8 @@ func TestDeriveFields(t *testing.T) {
 				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), contractAddress.String())
 			}
 			for j := range r.Logs {
-				if r.Logs[j].BlockNumber != number.Uint64() {
-					t.Errorf("receipts[%d].Logs[%d].BlockNumber = %d, want %d", i, j, r.Logs[j].BlockNumber, number.Uint64())
+				if r.Logs[j].BlockNumber != number {
+					t.Errorf("receipts[%d].Logs[%d].BlockNumber = %d, want %d", i, j, r.Logs[j].BlockNumber, number)
 				}
 				if r.Logs[j].BlockHash != hash {
 					t.Errorf("receipts[%d].Logs[%d].BlockHash = %s, want %s", i, j, r.Logs[j].BlockHash.String(), hash.String())
@@ -381,7 +380,7 @@ func clearComputedFieldsOnReceipt(t *testing.T, receipt *Receipt) {
 
 	receipt.TxHash = common.Hash{}
 	receipt.BlockHash = common.Hash{}
-	receipt.BlockNumber = big.NewInt(math.MaxUint32)
+	receipt.BlockNumber = uint256.NewInt(math.MaxUint32)
 	receipt.TransactionIndex = math.MaxUint32
 	receipt.ContractAddress = common.Address{}
 	receipt.GasUsed = 0

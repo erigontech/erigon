@@ -216,7 +216,7 @@ func (api *API) Status(ctx context.Context) (*status, error) {
 		if h == nil {
 			return nil, fmt.Errorf("missing block %d", n)
 		}
-		if h.Difficulty.Cmp(DiffInTurn) == 0 {
+		if h.Difficulty.CmpUint64(DiffInTurn) == 0 {
 			optimals++
 		}
 		diff += h.Difficulty.Uint64()

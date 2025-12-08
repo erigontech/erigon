@@ -217,7 +217,7 @@ func compareForkTreeNodes(node1 *forkTreeNode, node2 *forkTreeNode) int {
 	if difficultyDiff != 0 {
 		return int(difficultyDiff)
 	}
-	blockNumDiff := node1.header.Number.Cmp(node2.header.Number)
+	blockNumDiff := node1.header.Number.Cmp(&node2.header.Number)
 	if blockNumDiff != 0 {
 		return -blockNumDiff
 	}
@@ -258,7 +258,7 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 	}
 
 	var isBehindRoot = func(h *types.Header) bool {
-		return h.Number.Cmp(ccb.root.header.Number) < 0
+		return h.Number.Cmp(&ccb.root.header.Number) < 0
 	}
 
 	// early return check: if last header is behind root, there is no connection point
@@ -266,7 +266,7 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 		return nil, nil
 	}
 	var connectionIdx = 0
-	if headers[0].Number.Cmp(ccb.root.header.Number) <= 0 {
+	if headers[0].Number.Cmp(&ccb.root.header.Number) <= 0 {
 		// try to find connection point: i.e. smallest idx such that the header[idx] is not behind the root
 		for ; connectionIdx < len(headers) && isBehindRoot(headers[connectionIdx]); connectionIdx++ {
 		}
@@ -325,19 +325,19 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 		// IMPORTANT: in case of errors, remember to return the connected headers so far in the loop for insertion
 		// by the caller because we've already mutated the in-mem tree within the previous loop iterations
 		processed := headers[:i]
-		if (header.Number == nil) || (header.Number.Uint64() != parent.header.Number.Uint64()+1) {
-			return processed, fmt.Errorf("can't connect %s: invalid number: expected %d", header.Number, parent.header.Number.Uint64()+1)
+		if header.Number.Uint64() != parent.header.Number.Uint64()+1 {
+			return processed, fmt.Errorf("can't connect %v: invalid number: expected %d", header.Number, parent.header.Number.Uint64()+1)
 		}
 
 		if err := ccb.headerValidator.ValidateHeader(ctx, header, parent.header, time.Now()); err != nil {
-			return processed, fmt.Errorf("can't connect %s: invalid header: error %w", header.Number, err)
+			return processed, fmt.Errorf("can't connect %v: invalid header: error %w", header.Number, err)
 		}
 
 		difficulty, err := ccb.difficultyCalc.HeaderDifficulty(ctx, header)
 		if err != nil {
-			return processed, fmt.Errorf("can't connect %s: header difficulty error %w", header.Number, err)
+			return processed, fmt.Errorf("can't connect %v: header difficulty error %w", header.Number, err)
 		}
-		if (header.Difficulty == nil) || (header.Difficulty.Uint64() != difficulty) {
+		if header.Difficulty.Uint64() != difficulty {
 			err := &bor.WrongDifficultyError{
 				Number:   header.Number.Uint64(),
 				Expected: difficulty,
@@ -349,7 +349,7 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 
 		slot := producerSlotIndex(difficulty)
 		if _, ok := parent.children[slot]; ok {
-			return processed, fmt.Errorf("can't connect %s: producer slot is already filled by a different header", header.Number)
+			return processed, fmt.Errorf("can't connect %v: producer slot is already filled by a different header", header.Number)
 		}
 
 		node := &forkTreeNode{
