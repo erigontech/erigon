@@ -167,11 +167,11 @@ func TestVerifyDataDownloaderClosed(t *testing.T) {
 func TestAddDel(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	cfg, err := downloadercfg.New(ctx, dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
+	d, err := New(ctx, cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
 
