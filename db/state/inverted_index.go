@@ -1055,7 +1055,9 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		stat.PruneCountTx++
 		if fn != nil {
 			for ; txnb != nil; txnb, iiVal, err = keysCursor.NextDup() {
-
+				if err != nil {
+					return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
+				}
 				if err = fn(iiVal, txnb); err != nil {
 					return nil, fmt.Errorf("fn error: %w", err)
 				}
