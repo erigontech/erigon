@@ -34,7 +34,7 @@ type MetricValues struct {
 	BatchId uint64
 }
 
-func renderChartsPage(md []MetricValues, outputDir string) (string, error) {
+func renderChartsPage(mv []MetricValues, outputDir string) (string, error) {
 	f, err := os.Create(path.Join(outputDir, "charts.html"))
 	if err != nil {
 		panic(err)
@@ -52,59 +52,100 @@ func renderChartsPage(md []MetricValues, outputDir string) (string, error) {
 			log.Error("failed to flush charts file while rendering", "file", f.Name(), "err", err)
 		}
 	}()
-	err = generateChartsPage(md).Render(w)
+	err = generateChartsPage(mv).Render(w)
 	if err != nil {
 		return "", err
 	}
 	return f.Name(), nil
 }
 
-func generateChartsPage(md []MetricValues) *components.Page {
+func generateChartsPage(mv []MetricValues) *components.Page {
 	page := components.NewPage()
+	page.SetPageTitle("commitment backtest charts")
+	sharedGlobalOpts := []charts.GlobalOpts{
+		charts.WithInitializationOpts(opts.Initialization{Width: "100%"}),
+		charts.WithLegendOpts(opts.Legend{Bottom: "5%", Left: "center"}),
+		charts.WithGridOpts(opts.Grid{Bottom: "15%"}),
+	}
 	page.AddCharts(
-		generateUpdatesBarChart(md),
+		generateProcessingTimesChart(mv, sharedGlobalOpts...),
+		generateTrieUpdatesChart(mv, sharedGlobalOpts...),
+		generateDbRwChart(mv, sharedGlobalOpts...),
 	)
 	return page
 }
 
-func generateUpdatesBarChart(md []MetricValues) *charts.Bar {
-	bar := charts.NewBar()
-	bar.SetGlobalOptions(charts.WithTitleOpts(opts.Title{Title: "trie updates"}))
-	bar.SetXAxis(gatherBatchIds(md)).
-		AddSeries("updates", gatherTotalUpdatesBarData(md)).
-		AddSeries("account", gatherAccountUpdatesBarData(md)).
-		AddSeries("storage", gatherStorageUpdatesBarData(md))
-	return bar
+func generateProcessingTimesChart(mv []MetricValues, globalOpts ...charts.GlobalOpts) *charts.Line {
+	batchIds := make([]uint64, len(mv))
+	totalProcessingTime := make([]opts.LineData, len(mv))
+	unfoldingProcessingTime := make([]opts.LineData, len(mv))
+	foldingProcessingTime := make([]opts.LineData, len(mv))
+	for i := range mv {
+		batchIds[i] = mv[i].BatchId
+		totalProcessingTime[i] = opts.LineData{Value: mv[i].SpentProcessing.Milliseconds()}
+		unfoldingProcessingTime[i] = opts.LineData{Value: mv[i].SpentUnfolding.Milliseconds()}
+		foldingProcessingTime[i] = opts.LineData{Value: mv[i].SpentFolding.Milliseconds()}
+	}
+	chart := charts.NewLine()
+	chart.SetGlobalOptions(charts.WithTitleOpts(opts.Title{Title: "processing times", Left: "center", Top: "5%"}))
+	chart.SetGlobalOptions(globalOpts...)
+	stackOpts := []charts.SeriesOpts{
+		charts.WithLineChartOpts(opts.LineChart{Stack: "total"}),
+		charts.WithAreaStyleOpts(opts.AreaStyle{Opacity: opts.Float(0.2)}),
+	}
+	chart.SetXAxis(batchIds).
+		AddSeries("unfolding(ms)", unfoldingProcessingTime, stackOpts...).
+		AddSeries("folding(ms)", foldingProcessingTime, stackOpts...).
+		AddSeries("total(ms)", totalProcessingTime)
+	return chart
 }
 
-func gatherBatchIds(md []MetricValues) []uint64 {
-	data := make([]uint64, len(md))
-	for i := range md {
-		data[i] = md[i].BatchId
+func generateTrieUpdatesChart(mv []MetricValues, globalOpts ...charts.GlobalOpts) *charts.Line {
+	batchIds := make([]uint64, len(mv))
+	accountUpdates := make([]opts.LineData, len(mv))
+	storageUpdates := make([]opts.LineData, len(mv))
+	for i := range mv {
+		batchIds[i] = mv[i].BatchId
+		accountUpdates[i] = opts.LineData{Value: mv[i].AddressKeys}
+		storageUpdates[i] = opts.LineData{Value: mv[i].StorageKeys}
 	}
-	return data
+	chart := charts.NewLine()
+	chart.SetGlobalOptions(charts.WithTitleOpts(opts.Title{Title: "trie updates", Left: "center", Top: "5%"}))
+	chart.SetGlobalOptions(globalOpts...)
+	chart.SetXAxis(batchIds).
+		AddSeries("account", accountUpdates).
+		AddSeries("storage", storageUpdates).
+		SetSeriesOptions(
+			charts.WithLineChartOpts(opts.LineChart{Stack: "total"}),
+			charts.WithAreaStyleOpts(opts.AreaStyle{Opacity: opts.Float(0.2)}),
+		)
+	return chart
 }
 
-func gatherTotalUpdatesBarData(md []MetricValues) []opts.BarData {
-	data := make([]opts.BarData, len(md))
-	for i := range md {
-		data[i] = opts.BarData{Value: md[i].Updates}
+func generateDbRwChart(mv []MetricValues, globalOpts ...charts.GlobalOpts) *charts.Line {
+	batchIds := make([]uint64, len(mv))
+	accountReads := make([]opts.LineData, len(mv))
+	storageReads := make([]opts.LineData, len(mv))
+	branchReads := make([]opts.LineData, len(mv))
+	branchWrites := make([]opts.LineData, len(mv))
+	for i := range mv {
+		batchIds[i] = mv[i].BatchId
+		accountReads[i] = opts.LineData{Value: mv[i].LoadAccount}
+		storageReads[i] = opts.LineData{Value: mv[i].LoadStorage}
+		branchReads[i] = opts.LineData{Value: mv[i].LoadBranch}
+		branchWrites[i] = opts.LineData{Value: mv[i].UpdateBranch}
 	}
-	return data
-}
-
-func gatherAccountUpdatesBarData(md []MetricValues) []opts.BarData {
-	data := make([]opts.BarData, len(md))
-	for i := range md {
-		data[i] = opts.BarData{Value: md[i].AddressKeys}
-	}
-	return data
-}
-
-func gatherStorageUpdatesBarData(md []MetricValues) []opts.BarData {
-	data := make([]opts.BarData, len(md))
-	for i := range md {
-		data[i] = opts.BarData{Value: md[i].StorageKeys}
-	}
-	return data
+	chart := charts.NewLine()
+	chart.SetGlobalOptions(charts.WithTitleOpts(opts.Title{Title: "db reads/writes", Left: "center", Top: "5%"}))
+	chart.SetGlobalOptions(globalOpts...)
+	chart.SetXAxis(batchIds).
+		AddSeries("account_r", accountReads).
+		AddSeries("storage_r", storageReads).
+		AddSeries("branch_r", branchReads).
+		AddSeries("branch_w", branchWrites).
+		SetSeriesOptions(
+			charts.WithLineChartOpts(opts.LineChart{Stack: "total"}),
+			charts.WithAreaStyleOpts(opts.AreaStyle{Opacity: opts.Float(0.2)}),
+		)
+	return chart
 }
