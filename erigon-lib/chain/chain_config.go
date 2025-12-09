@@ -707,7 +707,7 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
-	IsArbitrum, IsStylus                              bool
+	IsArbitrum, IsStylus, IsDia                       bool
 	ArbOSVersion                                      uint64
 }
 
@@ -739,6 +739,7 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		ArbOSVersion:       currentArbosVersion,
 		IsArbitrum:         c.IsArbitrum(),
 		IsStylus:           c.IsArbitrum() && currentArbosVersion >= osver.ArbosVersion_Stylus,
+		IsDia:              c.IsArbitrum() && currentArbosVersion >= osver.ArbosVersion_50,
 	}
 }
 

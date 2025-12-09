@@ -4,6 +4,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/arb/multigas"
 )
 
 var (
@@ -29,6 +30,6 @@ type AdvancedPrecompileCall struct {
 }
 
 type AdvancedPrecompile interface {
-	RunAdvanced(input []byte, suppliedGas uint64, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, err error)
+	RunAdvanced(input []byte, suppliedGas uint64, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, usedMultiGas multigas.MultiGas, err error)
 	PrecompiledContract
 }

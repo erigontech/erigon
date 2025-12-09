@@ -51,5 +51,6 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		ArbOSVersion:       bc.ArbOSVersion,
 		IsArbitrum:         c.IsArbitrum(),
 		IsStylus:           c.IsArbitrum() && bc.ArbOSVersion >= osver.ArbosVersion_Stylus,
+		IsDia:              c.IsArbitrum() && bc.ArbOSVersion >= osver.ArbosVersion_Dia,
 	}
 }
