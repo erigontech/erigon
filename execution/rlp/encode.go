@@ -567,7 +567,10 @@ func intsize(i uint64) (size int) {
 }
 
 func BigIntLen(i *big.Int) int {
-	bitLen := i.BitLen()
+	bitLen := 0 // treat nil as 0
+	if i != nil {
+		bitLen = i.BitLen()
+	}
 	if bitLen < 8 {
 		return 1
 	}
