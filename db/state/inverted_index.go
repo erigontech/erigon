@@ -989,11 +989,11 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
-		dups, err := idxDelCursor.CountDuplicates()
-		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
-		}
 		if dupsDelete && fn == nil {
+			dups, err := idxDelCursor.CountDuplicates()
+			if err != nil {
+				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
+			}
 			err = idxDelCursor.DeleteCurrentDuplicates()
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
