@@ -166,7 +166,7 @@ func DoCall(
 	}
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
-		if err := stateOverrides.OverrideAndCommit(state, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(state, nil, blockCtx.Rules(chainConfig)); err != nil {
 			return nil, err
 		}
 	}
@@ -273,7 +273,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	txCtx := protocol.NewEVMTxContext(r.message)
 	ibs := state.New(r.stateReader)
 	if r.stateOverrides != nil {
-		if err := r.stateOverrides.OverrideAndCommit(ibs, r.rules); err != nil {
+		if err := r.stateOverrides.Override(ibs, nil, r.rules); err != nil {
 			return nil, err
 		}
 	}
