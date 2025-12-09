@@ -16,16 +16,13 @@ import (
 const wordSize = int(unsafe.Sizeof(uintptr(0)))
 const supportsUnaligned = runtime.GOARCH == "386" || runtime.GOARCH == "amd64" || runtime.GOARCH == "ppc64" || runtime.GOARCH == "ppc64le" || runtime.GOARCH == "s390x"
 
-// XORBytes xors the bytes in a and b. The destination is assumed to have enough
-// space. Returns the number of bytes xor'd.
+// XORBytes xors the bytes in a and b and writes the result into dst.
+// The number of bytes XORed is min(len(a), len(b)), and that value is returned.
 //
-// If dst does not have length at least n,
-// XORBytes panics without writing anything to dst.
+// dst must have length >= min(len(a), len(b)) or the function will panic.
+// dst may exactly overlap with a or with b, but partial overlaps are not allowed.
 //
-// dst and x or y may overlap exactly or not at all,
-// otherwise XORBytes may panic.
-//
-// Deprecated: use crypto/subtle.XORBytes
+// Deprecated: use crypto/subtle.XORBytes.
 func XORBytes(dst, a, b []byte) int {
 	return subtle.XORBytes(dst, a, b)
 }
