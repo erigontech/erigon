@@ -138,14 +138,21 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if !ok {
 			continue
 		}
-		if historyItem.src.decompressor.CompressedPageValuesCount() <= 1 {
+
+		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
+
+		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+			compressedPageValuesCount = hi.hc.h.HistoryValuesOnCompressedPage
+		}
+
+		if compressedPageValuesCount <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
 			hi.nextVal, _ = g.Next(nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), historyItem.src.decompressor.CompressedPageValuesCount(), true)
+			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), compressedPageValuesCount, true)
 			g.Reset(offset)
-			for i := 0; i < historyItem.src.decompressor.CompressedPageValuesCount() && g.HasNext(); i++ {
+			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
 				histKey := historyKey(txNum, hi.nextKey, nil)
 				if bytes.Equal(histKey, k) {
@@ -432,14 +439,20 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			continue
 		}
 
-		if historyItem.src.decompressor.CompressedPageValuesCount() <= 1 {
+		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
+
+		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+			compressedPageValuesCount = hi.hc.h.HistoryValuesOnCompressedPage
+		}
+
+		if compressedPageValuesCount <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
 			hi.nextVal, _ = g.Next(nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), historyItem.src.decompressor.CompressedPageValuesCount(), true)
+			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), compressedPageValuesCount, true)
 			g.Reset(offset)
-			for i := 0; i < historyItem.src.decompressor.CompressedPageValuesCount() && g.HasNext(); i++ {
+			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
 				histKey := historyKey(txNum, hi.nextKey, nil)
 				if bytes.Equal(histKey, k) {

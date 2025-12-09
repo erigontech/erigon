@@ -24,7 +24,10 @@ const (
 	CompressVals FileCompression = 0b100
 )
 
-const FileCompressionFormatV1 = uint8(1)
+const (
+	FileCompressionFormatV0 = uint8(0)
+	FileCompressionFormatV1 = uint8(1)
+)
 
 const (
 	PageLevelCompressionEnabled = 1 << iota // 0b001

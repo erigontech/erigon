@@ -484,11 +484,12 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
-func (d *Decompressor) SerializedDictSize() uint64     { return d.serializedDictSize }
-func (d *Decompressor) SerializedLenSize() uint64      { return d.lenDictSize }
-func (d *Decompressor) DictWords() int                 { return d.dictWords }
-func (d *Decompressor) DictLens() int                  { return d.dictLens }
-func (d *Decompressor) CompressedPageValuesCount() int { return int(d.compPageValuesCount) }
+func (d *Decompressor) SerializedDictSize() uint64      { return d.serializedDictSize }
+func (d *Decompressor) SerializedLenSize() uint64       { return d.lenDictSize }
+func (d *Decompressor) DictWords() int                  { return d.dictWords }
+func (d *Decompressor) DictLens() int                   { return d.dictLens }
+func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
+func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 
 func (d *Decompressor) Size() int64 {
 	return d.size

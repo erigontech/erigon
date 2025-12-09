@@ -1147,7 +1147,13 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
 
-	if historyItem.src.decompressor.CompressedPageValuesCount() > 1 {
+	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
+
+	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+	}
+
+	if compressedPageValuesCount > 1 {
 		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 	}
 	return v, true, nil
@@ -1410,9 +1416,15 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 					return fmt.Errorf("HistoryDump: failed to resolve offset in .vi %s file for key [%x]", viFile.Fullpath(), key)
 				}
 
+				compressedPageValuesCount := viFile.src.decompressor.CompressedPageValuesCount()
+
+				if viFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+					compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+				}
+
 				vGetter := seg.NewPagedReader(
 					ht.statelessGetter(viFile.i),
-					viFile.src.decompressor.CompressedPageValuesCount(),
+					compressedPageValuesCount,
 					true,
 				)
 

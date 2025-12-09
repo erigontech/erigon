@@ -267,7 +267,8 @@ var Schema = SchemaGen{
 			HistoryIdx: kv.CommitmentHistoryIdx,
 			Accessors:  AccessorHashMap,
 
-			HistoryLargeValues: false,
+			HistoryLargeValues:            false,
+			HistoryValuesOnCompressedPage: 64,
 
 			SnapshotsDisabled: true,
 			HistoryDisabled:   true,
@@ -316,7 +317,8 @@ var Schema = SchemaGen{
 			HistoryLargeValues: true,
 			HistoryIdx:         kv.RCacheHistoryIdx,
 
-			SnapshotsDisabled: true,
+			SnapshotsDisabled:             true,
+			HistoryValuesOnCompressedPage: 16,
 
 			IiCfg: InvIdxCfg{
 				Disable:      true, // disable everything by default
