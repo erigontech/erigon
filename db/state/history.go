@@ -1062,7 +1062,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
 			}
-			if err = valsCDup.DeleteCurrentDuplicates(); err != nil {
+			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err
 			}
 		}
