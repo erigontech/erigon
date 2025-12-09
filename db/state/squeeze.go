@@ -325,9 +325,7 @@ type execContext interface {
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
-func RebuildCommitmentFiles(ctx context.Context, ec execContext, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
-	a := rwDb.(HasAgg).Agg().(*Aggregator)
-
+func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, ec execContext, roTx kv.TemporalTx, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles
 	a.DisableAllDependencies()
@@ -377,12 +375,6 @@ func RebuildCommitmentFiles(ctx context.Context, ec execContext, rwDb kv.Tempora
 			logger.Info("[commitment_rebuild] skipping existing range", "range", r.String("", a.StepSize()))
 			continue
 		}
-
-		roTx, err := a.db.BeginRo(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer roTx.Rollback()
 
 		// count keys in accounts and storage domains
 		accKeys := acRo.KeyCountInFiles(kv.AccountsDomain, rangeFromTxNum, rangeToTxNum)
@@ -438,7 +430,6 @@ func RebuildCommitmentFiles(ctx context.Context, ec execContext, rwDb kv.Tempora
 				return nil, fmt.Errorf("CommitmentRebuild: Last() %w", err)
 			}
 		}
-		roTx.Rollback()
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
@@ -457,17 +448,11 @@ func RebuildCommitmentFiles(ctx context.Context, ec execContext, rwDb kv.Tempora
 				return true, k
 			}
 
-			rwTx, err := rwDb.BeginTemporalRo(ctx)
-			if err != nil {
-				return nil, err
-			}
-			defer rwTx.Rollback()
-
 			ec.SetBlockNum(blockNum)
 			ec.SetTxNum(lastTxnumInShard - 1)
-			ec.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			ec.GetCommitmentCtx().SetLimitedHistoryStateReader(roTx, lastTxnumInShard) // this helps to read state from correct file during commitment
 
-			rebuiltCommit, err = rebuildCommitmentShard(ctx, ec, rwTx, nextKey, &rebuiltCommitment{
+			rebuiltCommit, err = rebuildCommitmentShard(ctx, ec, roTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  rangeFromTxNum,
@@ -486,7 +471,6 @@ func RebuildCommitmentFiles(ctx context.Context, ec execContext, rwDb kv.Tempora
 			a.dirtyFilesLock.Lock()
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 			a.dirtyFilesLock.Unlock()
-			rwTx.Rollback()
 
 			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
 				shardStepsSize /= 2

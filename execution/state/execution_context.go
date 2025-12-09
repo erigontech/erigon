@@ -127,7 +127,7 @@ func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 }
 
 type unmarkedPutter struct {
-	sd         *ExecutionContext
+	ec         *ExecutionContext
 	forkableId kv.ForkableId
 }
 
@@ -136,7 +136,7 @@ func (sd *ExecutionContext) AsUnmarkedPutter(id kv.ForkableId) kv.UnmarkedPutter
 }
 
 func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
-	return up.sd.mem.PutForkable(up.forkableId, num, v)
+	return up.ec.mem.PutForkable(up.forkableId, num, v)
 }
 
 func (sd *ExecutionContext) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {

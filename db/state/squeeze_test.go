@@ -297,7 +297,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	ec.Close()
 
-	finalRoot, err := state.RebuildCommitmentFiles(ctx, ec, db, &rawdbv3.TxNums, log.New(), true)
+	finalRoot, err := agg.RebuildCommitmentFiles(ctx, ec, tx, &rawdbv3.TxNums, log.New(), true)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
 	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)

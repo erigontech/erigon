@@ -65,7 +65,9 @@ func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze b
 	}
 	ec.Close()
 
-	rh, err := state.RebuildCommitmentFiles(ctx, ec, cfg.db, &txNumsReader, log.New(), squeeze)
+	a := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
+
+	rh, err := a.RebuildCommitmentFiles(ctx, ec, tx, &txNumsReader, log.New(), squeeze)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
