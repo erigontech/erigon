@@ -62,7 +62,7 @@ func (asc By) AssertList(keys [][]byte) {
 	if len(keys) < 2 {
 		return
 	}
-	for i := 0; i < len(keys)-2; i++ {
+	for i := 0; i < len(keys)-1; i++ {
 		asc.Assert(keys[i], keys[i+1])
 	}
 }
