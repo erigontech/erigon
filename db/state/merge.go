@@ -800,7 +800,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
+						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), hi.decompressor.CompressedPageValuesCount(), true)
 						break
 					}
 				}
@@ -865,7 +865,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps, OverrideCompactOpts{}); err != nil {
+		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 

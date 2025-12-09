@@ -77,6 +77,9 @@ type Cfg struct {
 
 	// arbitrary bytes set by user at start of the file
 	ExpectMetadata bool
+
+	// number of values on compressed page. if > 0 then page level compression is enabled
+	ValuesOnCompressedPage int
 }
 
 var DefaultCfg = Cfg{
@@ -123,7 +126,10 @@ type Compressor struct {
 	logger           log.Logger
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
 
-	metadata []byte
+	version             uint8
+	featureFlagBitmask  uint8
+	compPageValuesCount uint8
+	metadata            []byte
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
@@ -151,7 +157,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		go extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, wg, logger)
 	}
 	_, outputFileName := filepath.Split(outputFile)
-	return &Compressor{
+	cc := &Compressor{
 		Cfg:              cfg,
 		uncompressedFile: uncompressedFile,
 		outputFile:       outputFile,
@@ -164,7 +170,15 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		lvl:              lvl,
 		wg:               wg,
 		logger:           logger,
-	}, nil
+		version:          FileCompressionFormatV1,
+	}
+
+	if cfg.ValuesOnCompressedPage > 0 {
+		cc.featureFlagBitmask |= PageLevelCompressionEnabled
+		cc.compPageValuesCount = uint8(cfg.ValuesOnCompressedPage)
+	}
+
+	return cc, nil
 }
 
 func (c *Compressor) Close() {
@@ -276,6 +290,19 @@ func (c *Compressor) Compress() error {
 	tmpFileName := cf.Name()
 	defer dir.RemoveFile(tmpFileName)
 	defer cf.Close()
+
+	if c.version == FileCompressionFormatV1 {
+		if _, err := cf.Write([]byte{c.version, c.featureFlagBitmask}); err != nil {
+			return err
+		}
+
+		if c.featureFlagBitmask&PageLevelCompressionEnabled == PageLevelCompressionEnabled {
+			if _, err := cf.Write([]byte{c.compPageValuesCount}); err != nil {
+				return err
+			}
+		}
+	}
+
 	if c.ExpectMetadata {
 		dataLen := uint32(len(c.metadata))
 		var dataLenB [4]byte

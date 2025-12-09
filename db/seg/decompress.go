@@ -121,19 +121,22 @@ func (e ErrCompressedFileCorrupted) Is(err error) bool {
 
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
-	f               *os.File
-	mmapHandle2     *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
-	dict            *patternTable
-	posDict         *posTable
-	mmapHandle1     []byte // mmap handle for unix (this is used to close mmap)
-	data            []byte // slice of correct size for the decompressor to work with
-	wordsStart      uint64 // Offset of whether the superstrings actually start
-	size            int64
-	modTime         time.Time
-	wordsCount      uint64
-	emptyWordsCount uint64
-	hasMetadata     bool
-	metadata        []byte
+	f                   *os.File
+	mmapHandle2         *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
+	dict                *patternTable
+	posDict             *posTable
+	mmapHandle1         []byte // mmap handle for unix (this is used to close mmap)
+	data                []byte // slice of correct size for the decompressor to work with
+	wordsStart          uint64 // Offset of whether the superstrings actually start
+	size                int64
+	modTime             time.Time
+	wordsCount          uint64
+	emptyWordsCount     uint64
+	hasMetadata         bool
+	metadata            []byte
+	version             uint8
+	featureFlagBitmask  uint8
+	compPageValuesCount uint8
 
 	serializedDictSize uint64
 	lenDictSize        uint64 // huffman encoded lengths
@@ -230,6 +233,21 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
 	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
+
+	d.version = d.data[0]
+
+	// 1st byte: version,
+	// 2nd byte: defines how exactly the file is compressed
+	// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
+	if d.version == FileCompressionFormatV1 {
+		d.featureFlagBitmask = d.data[1]
+		d.data = d.data[2:]
+	}
+
+	if d.featureFlagBitmask&PageLevelCompressionEnabled == PageLevelCompressionEnabled {
+		d.compPageValuesCount = d.data[0]
+		d.data = d.data[1:]
+	}
 
 	if hasMetadata {
 		metadataLen := binary.BigEndian.Uint32(d.data[:4])
@@ -466,10 +484,11 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
-func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
-func (d *Decompressor) SerializedLenSize() uint64  { return d.lenDictSize }
-func (d *Decompressor) DictWords() int             { return d.dictWords }
-func (d *Decompressor) DictLens() int              { return d.dictLens }
+func (d *Decompressor) SerializedDictSize() uint64     { return d.serializedDictSize }
+func (d *Decompressor) SerializedLenSize() uint64      { return d.lenDictSize }
+func (d *Decompressor) DictWords() int                 { return d.dictWords }
+func (d *Decompressor) DictLens() int                  { return d.dictLens }
+func (d *Decompressor) CompressedPageValuesCount() int { return int(d.compPageValuesCount) }
 
 func (d *Decompressor) Size() int64 {
 	return d.size

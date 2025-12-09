@@ -201,8 +201,9 @@ var Schema = SchemaGen{
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
-			HistoryLargeValues: false,
-			HistoryIdx:         kv.AccountsHistoryIdx,
+			HistoryLargeValues:            false,
+			HistoryValuesOnCompressedPage: 16,
+			HistoryIdx:                    kv.AccountsHistoryIdx,
 
 			IiCfg: InvIdxCfg{
 				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,

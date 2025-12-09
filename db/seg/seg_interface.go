@@ -24,6 +24,14 @@ const (
 	CompressVals FileCompression = 0b100
 )
 
+const FileCompressionFormatV1 = uint8(1)
+
+const (
+	PageLevelCompressionEnabled = 1 << iota // 0b001
+	KeyCompressionEnabled                   // 0b010
+	ValCompressionEnabled                   // 0b100
+)
+
 func ParseFileCompression(s string) (FileCompression, error) {
 	// Implementation would be here
 	return CompressNone, nil
