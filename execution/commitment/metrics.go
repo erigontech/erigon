@@ -87,6 +87,7 @@ func (m *Metrics) EnableCsvMetrics(filePathPrefix string) {
 	m.metricsFilePrefix = filePathPrefix
 	m.writeCommitmentMetrics = true
 	m.collectCommitmentMetrics = true
+	m.Accounts.writeCommitmentMetrics = true
 }
 
 func (m *Metrics) AsValues() MetricValues {
@@ -363,9 +364,14 @@ type AccountMetrics struct {
 	m sync.RWMutex
 	// will be separate value for each key in parallel processing
 	AccountStats map[string]*AccountStats
+	// metric config related
+	writeCommitmentMetrics bool
 }
 
 func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
+	if !am.writeCommitmentMetrics {
+		return
+	}
 	var addr string
 	if len(plainKey) > 0 {
 		addr = string(plainKey[:min(length.Addr, len(plainKey))])
