@@ -340,7 +340,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
-	ret, _, err := evm.SysCreate(
+	ret, _, _, err := evm.SysCreate(
 		vm.AccountRef(msg.From()),
 		msg.Data(),
 		msg.Gas(),

@@ -230,13 +230,14 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
-	code, address, leftOverGas, err := vmenv.Create(
+	code, address, leftOverGas, usedMultiGas, err := vmenv.Create(
 		sender,
 		input,
 		cfg.GasLimit,
 		cfg.Value,
 		false,
 	)
+	_ = usedMultiGas
 	return code, address, leftOverGas, err
 }
 
