@@ -70,7 +70,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
 			if err := s.ConnectWithPeer(s.ctx, peerInfo, nil); err != nil {
-				log.Trace("[Sentinel] Could not connect with peer", "err", err)
+				log.Debug("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
 	}
