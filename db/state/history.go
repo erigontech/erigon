@@ -299,11 +299,11 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					return err
 				}
 
-				if h.HistoryValuesOnCompressedPage == 0 {
+				if h.CompressorCfg.ValuesOnCompressedPage == 0 {
 					valOffset, _ = histReader.Skip()
 				} else {
 					i++
-					if i%h.HistoryValuesOnCompressedPage == 0 {
+					if i%h.CompressorCfg.ValuesOnCompressedPage == 0 {
 						valOffset, _ = histReader.Skip()
 					}
 				}
@@ -534,7 +534,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_histComp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp, h.HistoryValuesOnCompressedPage)
+	historyWriter := h.dataWriter(_histComp)
 
 	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -860,15 +860,15 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
-func (h *History) dataWriter(f *seg.Compressor, historyValuesOnCompressedPage int) *seg.PagedWriter {
+func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), historyValuesOnCompressedPage, true)
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) datarWriter(f *seg.Compressor, historyValuesOnCompressedPage int) *seg.PagedWriter {
-	return ht.h.dataWriter(f, historyValuesOnCompressedPage)
+func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter {
+	return ht.h.dataWriter(f)
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {

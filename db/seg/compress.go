@@ -82,6 +82,11 @@ type Cfg struct {
 	ValuesOnCompressedPage int
 }
 
+func (c Cfg) WithValuesOnCompressedPage(n int) Cfg {
+	c.ValuesOnCompressedPage = n
+	return c
+}
+
 var DefaultCfg = Cfg{
 	MinPatternScore: 1024,
 	MinPatternLen:   5,
@@ -189,9 +194,10 @@ func (c *Compressor) Close() {
 	c.suffixCollectors = nil
 }
 
-func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
-func (c *Compressor) FileName() string    { return c.outputFileName }
-func (c *Compressor) WorkersAmount() int  { return c.Workers }
+func (c *Compressor) SetTrace(trace bool)            { c.trace = trace }
+func (c *Compressor) FileName() string               { return c.outputFileName }
+func (c *Compressor) WorkersAmount() int             { return c.Workers }
+func (c *Compressor) GetValuesOnCompressedPage() int { return int(c.ValuesOnCompressedPage) }
 func (c *Compressor) SetMetadata(metadata []byte) {
 	if !c.ExpectMetadata {
 		panic("metadata not expected in compressor")

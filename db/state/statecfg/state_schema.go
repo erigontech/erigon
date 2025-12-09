@@ -198,12 +198,11 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg.WithValuesOnCompressedPage(16), Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
-			HistoryLargeValues:            false,
-			HistoryValuesOnCompressedPage: 16,
-			HistoryIdx:                    kv.AccountsHistoryIdx,
+			HistoryLargeValues: false,
+			HistoryIdx:         kv.AccountsHistoryIdx,
 
 			IiCfg: InvIdxCfg{
 				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
@@ -264,12 +263,11 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
-			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: HistoryCompressCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			HistoryIdx: kv.CommitmentHistoryIdx,
 			Accessors:  AccessorHashMap,
 
-			HistoryLargeValues:            false,
-			HistoryValuesOnCompressedPage: 64,
+			HistoryLargeValues: false,
 
 			SnapshotsDisabled: true,
 			HistoryDisabled:   true,
@@ -311,15 +309,14 @@ var Schema = SchemaGen{
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 		Hist: HistCfg{
-			ValuesTable: kv.TblRCacheHistoryVals,
-			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-			Accessors:   AccessorHashMap,
+			ValuesTable:   kv.TblRCacheHistoryVals,
+			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,
 			HistoryIdx:         kv.RCacheHistoryIdx,
 
-			SnapshotsDisabled:             true,
-			HistoryValuesOnCompressedPage: 16,
+			SnapshotsDisabled: true,
 
 			IiCfg: InvIdxCfg{
 				Disable:      true, // disable everything by default
