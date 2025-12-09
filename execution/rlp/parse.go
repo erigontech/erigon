@@ -219,9 +219,6 @@ func U256Len(z *uint256.Int) int {
 		return 1
 	}
 	nBits := z.BitLen()
-	if nBits == 0 {
-		return 1
-	}
 	if nBits <= 7 {
 		return 1
 	}

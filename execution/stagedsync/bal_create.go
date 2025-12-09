@@ -10,6 +10,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -41,6 +42,12 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 
 	bal := make([]*types.AccountChanges, 0, len(ac))
 	for _, account := range ac {
+		// The system address shows up as a touched address due to a balance check in IBS
+		// during a system call, however this should not be included in the BAL.
+		if isSystemBALAddress(account.changes.Address) {
+			continue
+		}
+
 		account.finalize()
 		normalizeAccountChanges(account.changes)
 		bal = append(bal, account.changes)
@@ -62,14 +69,22 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 
 	switch vr.Path {
 	case state.StoragePath:
+		if hasStorageWrite(account.changes, vr.Key) {
+			return
+		}
 		account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
+	case state.BalancePath:
+		if val, ok := vr.Val.(uint256.Int); ok {
+			account.setBalanceValue(val)
+		}
 	default:
 		// Only track storage reads for BAL. Balance/nonce/code changes are tracked via writes, others are ignored
 	}
 }
 
 func addStorageUpdate(ac *types.AccountChanges, vw *state.VersionedWrite, txIndex uint16) {
-	value := vw.Val.(uint256.Int)
+	val := vw.Val.(uint256.Int)
+	value := common.Hash(val.Bytes32())
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,
@@ -110,11 +125,24 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 	case state.StoragePath:
 		addStorageUpdate(account.changes, vw, accessIndex)
 	case state.BalancePath:
-		if val, ok := vw.Val.(uint256.Int); ok {
-			account.balance.recordWrite(accessIndex, val, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
-				return a.Eq(&b)
-			})
+		val, ok := vw.Val.(uint256.Int)
+		if !ok {
+			return
 		}
+		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
+		if account.balanceValue == nil && val.IsZero() {
+			account.setBalanceValue(val)
+			return
+		}
+		// Skip no-op writes.
+		if account.balanceValue != nil && val.Eq(account.balanceValue) {
+			account.setBalanceValue(val)
+			return
+		}
+		account.setBalanceValue(val)
+		account.balance.recordWrite(accessIndex, val, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
+			return a.Eq(&b)
+		})
 	case state.NoncePath:
 		if val, ok := vw.Val.(uint64); ok {
 			account.nonce.recordWrite(accessIndex, val, func(v uint64) uint64 { return v }, func(a, b uint64) bool {
@@ -129,15 +157,29 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 	}
 }
 
+func isSystemBALAddress(addr accounts.Address) bool {
+	return addr == state.SystemAddress
+}
+
+func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
+	for _, sc := range ac.StorageChanges {
+		if sc != nil && sc.Slot == slot {
+			return true
+		}
+	}
+	return false
+}
+
 func blockAccessIndex(txIndex int) uint16 {
 	return uint16(txIndex + 1)
 }
 
 type accountState struct {
-	changes *types.AccountChanges
-	balance *fieldTracker[uint256.Int]
-	nonce   *fieldTracker[uint64]
-	code    *fieldTracker[[]byte]
+	changes      *types.AccountChanges
+	balance      *fieldTracker[uint256.Int]
+	nonce        *fieldTracker[uint64]
+	code         *fieldTracker[[]byte]
+	balanceValue *uint256.Int // tracks latest seen balance
 }
 
 // check pre- and post-values, add to BAL if different
@@ -310,6 +352,13 @@ func cloneBytes(input []byte) []byte {
 	out := make([]byte, len(input))
 	copy(out, input)
 	return out
+}
+
+func (a *accountState) setBalanceValue(v uint256.Int) {
+	if a.balanceValue == nil {
+		a.balanceValue = &uint256.Int{}
+	}
+	*a.balanceValue = v
 }
 
 // writeBALToFile writes the Block Access List to a text file for debugging/analysis

@@ -566,13 +566,6 @@ func intsize(i uint64) (size int) {
 	return common.BitLenToByteLen(bits.Len64(i))
 }
 
-func IntLenExcludingHead(i uint64) int {
-	if i < 0x80 {
-		return 0
-	}
-	return intsize(i)
-}
-
 func BigIntLenExcludingHead(i *big.Int) int {
 	bitLen := i.BitLen()
 	if bitLen < 8 {
@@ -581,15 +574,16 @@ func BigIntLenExcludingHead(i *big.Int) int {
 	return common.BitLenToByteLen(bitLen)
 }
 
-func Uint256LenExcludingHead(i uint256.Int) int {
+func Uint256Len(i uint256.Int) int {
 	bitLen := i.BitLen()
 	if bitLen < 8 {
-		return 0
+		return 1
 	}
-	return common.BitLenToByteLen(bitLen)
+	return 1 + common.BitLenToByteLen(bitLen)
 }
 
 // precondition: len(buffer) >= 9
+// TODO(yperbasis): replace with EncodeU64?
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
 	if 0 < i && i < 0x80 {
 		buffer[0] = byte(i)
