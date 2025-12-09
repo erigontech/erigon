@@ -33,3 +33,9 @@ type AdvancedPrecompile interface {
 	RunAdvanced(input []byte, suppliedGas uint64, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, usedMultiGas multigas.MultiGas, err error)
 	PrecompiledContract
 }
+
+// TODO move into arbitrum package
+type ArbosAwarePrecompile interface {
+	SetArbosVersion(arbosVersion uint64)
+	PrecompiledContract
+}

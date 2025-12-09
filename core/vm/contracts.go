@@ -302,26 +302,25 @@ func ActivePrecompiles(rules *chain.Rules) []common.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks, advancedInfoForArbos *AdvancedPrecompileCall,
-) (ret []byte, remainingGas uint64, err error) {
-	// Arbitrum
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, logger *tracing.Hooks, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, usedMultiGas multigas.MultiGas, err error) {
 	advanced, isAdvanced := p.(AdvancedPrecompile)
 	if isAdvanced {
-		return advanced.RunAdvanced(input, suppliedGas, advancedInfoForArbos)
+		return advanced.RunAdvanced(input, suppliedGas, advancedInfo)
 	}
-
+	precompileArbosAware, isPrecompileArbosAware := p.(ArbosAwarePrecompile)
+	if isPrecompileArbosAware && advancedInfo != nil {
+		precompileArbosAware.SetArbosVersion(advancedInfo.Evm.Context.ArbOSVersion)
+	}
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
-		return nil, 0, ErrOutOfGas
+		return nil, 0, multigas.ComputationGas(suppliedGas), ErrOutOfGas
 	}
-
-	if tracer != nil && tracer.OnGasChange != nil {
-		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+	if logger != nil && logger.OnGasChange != nil {
+		logger.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
 	}
-
 	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	return output, suppliedGas, err
+	return output, suppliedGas, multigas.ComputationGas(gasCost), err
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.

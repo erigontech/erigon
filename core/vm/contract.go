@@ -122,6 +122,9 @@ func NewContract(caller ContractRef, addr common.Address, value *uint256.Int, ga
 		// This pointer will be off the state transition
 		Gas:       gas,
 		jumpdests: jumpDest,
+
+		UsedMultiGas:     multigas.ZeroGas(),
+		RetainedMultiGas: multigas.ZeroGas(),
 	}
 }
 
@@ -132,10 +135,12 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
 	if overflow || udest >= uint64(len(c.Code)) {
+		fmt.Printf("invalid jump dest: %s (code size: %d)\n", dest.Hex(), len(c.Code))
 		return false, false
 	}
 	// Only JUMPDESTs allowed for destinations
 	if OpCode(c.Code[udest]) != JUMPDEST {
+		fmt.Printf("invalid jump dest opcode: %s at %d\n", OpCode(c.Code[udest]).String(), udest)
 		return false, false
 	}
 	if c.skipAnalysis {
@@ -148,9 +153,9 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
 	// Do we already have an analysis laying around?
-	if c.analysis != nil {
-		return c.analysis.codeSegment(udest)
-	}
+	//if c.analysis != nil {
+	//	return c.analysis.codeSegment(udest)
+	//}
 	// Do we have a contract hash already?
 	// If we do have a hash, that means it's a 'regular' contract. For regular
 	// contracts ( not temporary initcode), we store the analysis in a map

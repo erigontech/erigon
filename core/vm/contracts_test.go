@@ -107,7 +107,7 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		if res, _, err := RunPrecompiledContract(p, in, gas, nil, nil); err != nil {
+		if res, _, _, err := RunPrecompiledContract(p, in, gas, nil, nil); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
 			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
@@ -130,7 +130,7 @@ func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, gas, nil, nil)
+		_, _, _, err := RunPrecompiledContract(p, in, gas, nil, nil)
 		if err.Error() != "out of gas" {
 			t.Errorf("Expected error [out of gas], got [%v]", err)
 		}
@@ -148,7 +148,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, gas, nil, nil)
+		_, _, _, err := RunPrecompiledContract(p, in, gas, nil, nil)
 		if err == nil || err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
@@ -180,7 +180,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		bench.ResetTimer()
 		for i := 0; i < bench.N; i++ {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, reqGas, nil, nil)
+			res, _, _, err = RunPrecompiledContract(p, data, reqGas, nil, nil)
 		}
 		bench.StopTimer()
 		elapsed := uint64(time.Since(start))
@@ -202,16 +202,6 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 			return
 		}
 	})
-}
-
-// Benchmarks the sample inputs from the ECRECOVER precompile.
-func BenchmarkPrecompiledEcrecover(bench *testing.B) {
-	t := precompiledTest{
-		Input:    "38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e000000000000000000000000000000000000000000000000000000000000001b38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e789d1dd423d25f0772d2748d60f7e4b81bb14d086eba8e8e8efb6dcff8a4ae02",
-		Expected: "000000000000000000000000ceaccac640adf55b2028469bd36ba501f28b699d",
-		Name:     "",
-	}
-	benchmarkPrecompiled(bench, "01", t)
 }
 
 // Benchmarks the sample inputs from the SHA256 precompile.
@@ -254,6 +244,8 @@ func BenchmarkPrecompiledModExpEip2565(b *testing.B) { benchJson("modexp_eip2565
 func TestPrecompiledModExpEip7883(t *testing.T)      { testJson("modexp_eip7883", "b5", t) }
 func BenchmarkPrecompiledModExpEip7883(b *testing.B) { benchJson("modexp_eip7883", "b5", b) }
 
+func TestPrecompiledModExpEip7823Fail(t *testing.T) { testJsonFail("modexp-eip7823", "b5", t) }
+
 // Tests the sample inputs from the elliptic curve addition EIP 213.
 func TestPrecompiledBn254Add(t *testing.T)      { testJson("bn254Add", "06", t) }
 func BenchmarkPrecompiledBn254Add(b *testing.B) { benchJson("bn254Add", "06", b) }
@@ -275,23 +267,63 @@ func TestPrecompiledModExpPotentialOutOfRange(t *testing.T) {
 	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
 	input := hexutil.MustDecode(hexString)
 	maxGas := uint64(math.MaxUint64)
-	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil, nil)
+	_, _, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil, nil)
 	require.NoError(t, err)
 }
 
 func TestPrecompiledModExpInputEip7823(t *testing.T) {
-	// length_of_EXPONENT = 2048; everything else is zero
-	in := common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
-
 	pragueModExp := allPrecompiles[common.BytesToAddress([]byte{0xa5})]
+	osakaModExp := allPrecompiles[common.BytesToAddress([]byte{0xb5})]
+
+	// length_of_EXPONENT = 1024; everything else is zero
+	in := common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000")
 	gas := pragueModExp.RequiredGas(in)
-	res, _, err := RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
+	res, _, _, err := RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
+	gas = osakaModExp.RequiredGas(in)
+	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 
-	osakaModExp := allPrecompiles[common.BytesToAddress([]byte{0xb5})]
+	// length_of_EXPONENT = 1025; everything else is zero
+	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004010000000000000000000000000000000000000000000000000000000000000000")
+	gas = pragueModExp.RequiredGas(in)
+	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
+	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
+	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+
+	// length_of_EXPONENT = 2048; everything else is zero
+	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
+	gas = pragueModExp.RequiredGas(in)
+	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
+	gas = osakaModExp.RequiredGas(in)
+	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
+	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+
+	// length_of_EXPONENT = 2^32; everything else is zero
+	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000")
+	gas = pragueModExp.RequiredGas(in)
+	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
+	gas = osakaModExp.RequiredGas(in)
+	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
+	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+
+	// length_of_EXPONENT = 2^64; everything else is zero
+	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000")
+	gas = pragueModExp.RequiredGas(in)
+	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
+	gas = osakaModExp.RequiredGas(in)
+	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 }
 
@@ -314,7 +346,8 @@ func TestPrecompileBlake2FMalformedInput(t *testing.T) {
 	}
 }
 
-func TestPrecompiledEcrecover(t *testing.T) { testJson("ecRecover", "01", t) }
+func TestPrecompiledEcrecover(t *testing.T)      { testJson("ecRecover", "01", t) }
+func BenchmarkPrecompiledEcrecover(b *testing.B) { benchJson("ecRecover", "01", b) }
 
 func testJson(name, addr string, t *testing.T) {
 	tests, err := loadJson(name)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -96,6 +97,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
+			os.Exit(1)
 			if se.cfg.badBlockHalt {
 				return false, err
 			}

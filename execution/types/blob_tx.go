@@ -60,7 +60,8 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		data:       stx.Data,
 		accessList: stx.AccessList,
 		checkNonce: true,
-		Tx:         stx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           stx,
 	}
 	if !rules.IsCancun {
 		return nil, errors.New("BlobTx transactions require Cancun")
@@ -142,6 +143,29 @@ func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
 			stx.MaxFeePerBlobGas,
 			stx.BlobVersionedHashes,
 		})
+}
+
+func (stx *BlobTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+	cpy := stx.copy()
+	r, s, v, err := signer.SignatureValues(stx, sig)
+	if err != nil {
+		return nil, err
+	}
+	cpy.R.Set(r)
+	cpy.S.Set(s)
+	cpy.V.Set(v)
+	cpy.ChainID = signer.ChainID()
+	return cpy, nil
+}
+
+func (stx *BlobTx) copy() *BlobTx {
+	cpy := &BlobTx{
+		DynamicFeeTransaction: *stx.DynamicFeeTransaction.copy(),
+		MaxFeePerBlobGas:      new(uint256.Int).Set(stx.MaxFeePerBlobGas),
+		BlobVersionedHashes:   make([]common.Hash, len(stx.BlobVersionedHashes)),
+	}
+	copy(cpy.BlobVersionedHashes, stx.BlobVersionedHashes)
+	return cpy
 }
 
 func (stx *BlobTx) EncodingSize() int {
