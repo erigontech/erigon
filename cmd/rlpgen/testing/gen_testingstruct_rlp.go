@@ -19,10 +19,9 @@ func (obj *TestingStruct) EncodingSize() (size int) {
 	if obj.aa != nil {
 		size += rlp.U64Len(uint64(*obj.aa))
 	}
-	size += rlp.BigIntLenExcludingHead(&obj.b) + 1
-	size += 1
+	size += rlp.BigIntLen(&obj.b)
 	if obj.bb != nil {
-		size += rlp.BigIntLenExcludingHead(obj.bb)
+		size += rlp.BigIntLen(obj.bb)
 	}
 	size += rlp.Uint256Len(obj.c)
 	size += rlp.Uint256Len(*obj.cc)
