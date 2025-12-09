@@ -965,7 +965,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	for iiVal, txNumBytes, err := idxDelCursor.First(); txNumBytes != nil; iiVal, txNumBytes, err = idxDelCursor.NextNoDup() {
+	for iiVal, txNumBytes, err := idxDelCursor.First(); iiVal != nil; iiVal, txNumBytes, err = idxDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 		}
