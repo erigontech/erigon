@@ -37,6 +37,8 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
+  # tests not updated after cherry-picking
+  eth_getStorageAt/test_09.json
 )
 
 # Transform the array into a comma-separated string

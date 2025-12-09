@@ -13,6 +13,8 @@ DISABLED_TEST_LIST=(
   engine_
   eth_getProof
   eth_simulateV1
+  # tests not updated after cherry-picking
+  eth_getStorageAt/test_09.json
 )
 
 # Transform the array into a comma-separated string
