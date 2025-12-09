@@ -431,7 +431,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
 
-	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
+	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 
 	result := &evmtypes.ExecutionResult{
 		GasUsed:             st.gasUsed(),
@@ -630,7 +630,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ret, *deployedContract, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 		//usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	} else {
-		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		// TODO multiGas was not updated since last addition, why add again?
 		//usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	}
