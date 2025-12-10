@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -114,9 +113,6 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-
-	ErigonDBStepSize:          config3.DefaultStepSize,
-	ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -276,10 +272,6 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
-
-	// ErigonDB geometry settings
-	ErigonDBStepSize          int
-	ErigonDBStepsInFrozenFile int
 
 	// fork choice update timeout
 	FcuTimeout time.Duration

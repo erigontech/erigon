@@ -277,7 +277,6 @@ var snapshotCommand = cli.Command{
 			// parent commands.
 			Flags: []cli.Flag{
 				&utils.DataDirFlag,
-				&utils.ChainFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
 			},
@@ -1118,6 +1117,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.CheckCommitmentKvDeref(ctx, db, failFast, logger); err != nil {
 				return err
 			}
+		case integrity.CommitmentHistVal:
+			if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
@@ -1179,27 +1182,37 @@ func CheckBorChain(chainName string) bool {
 	return slices.Contains([]string{networkname.BorMainnet, networkname.Amoy, networkname.BorE2ETestChain2Val, networkname.BorDevnet}, chainName)
 }
 
-func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs) error {
+func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
 	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
 	to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
-		uto, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), to)
+		uto, empty, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), to, emptyOk)
 		if err != nil {
 			return err
+		}
+		if empty {
+			continue
 		}
 
 		to = int64(uto)
 	}
 
+	somethingPresent, somethingEmpty := false, false
 	for table := range stateSnapTypes.KeyValueGetters {
-		uto, err := CheckFilesForSchema(caplinSchema.GetState(table), to)
+		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), to, emptyOk)
 		if err != nil {
 			return err
 		}
+		somethingPresent = somethingPresent || !empty
+		somethingEmpty = somethingEmpty || empty
 
 		to = int64(uto)
+	}
+
+	if somethingEmpty && somethingPresent {
+		return fmt.Errorf("some state snapshot files are empty while others are present")
 	}
 
 	return nil
@@ -1596,7 +1609,7 @@ func doPublishable(cliCtx *cli.Context) error {
 	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
 		return err
 	}
-	if err := checkIfCaplinSnapshotsPublishable(dat); err != nil {
+	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {
 		return err
 	}
 	// check if salt-state.txt and salt-blocks.txt exist

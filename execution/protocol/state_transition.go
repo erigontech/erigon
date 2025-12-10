@@ -615,7 +615,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	result = &evmtypes.ExecutionResult{
 		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
-		Reverted:            vmerr == vm.ErrExecutionReverted,
+		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
