@@ -126,15 +126,8 @@ func (h *Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
-	encodingSize++
-	if h.Difficulty != nil {
-		encodingSize += rlp.BigIntLenExcludingHead(h.Difficulty)
-	}
-	encodingSize++
-	if h.Number != nil {
-		encodingSize += rlp.BigIntLenExcludingHead(h.Number)
-	}
-
+	encodingSize += rlp.BigIntLen(h.Difficulty)
+	encodingSize += rlp.BigIntLen(h.Number)
 	encodingSize += rlp.U64Len(h.GasLimit)
 	encodingSize += rlp.U64Len(h.GasUsed)
 	encodingSize += rlp.U64Len(h.Time)
@@ -148,8 +141,7 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.BaseFee != nil {
-		encodingSize++
-		encodingSize += rlp.BigIntLenExcludingHead(h.BaseFee)
+		encodingSize += rlp.BigIntLen(h.BaseFee)
 	}
 
 	if h.WithdrawalsHash != nil {
