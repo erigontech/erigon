@@ -137,7 +137,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 			return err
 		}
 	}
-	return nil
+	return
 }
 
 func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
