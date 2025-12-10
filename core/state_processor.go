@@ -315,7 +315,7 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 	//evm.SetTxContext(NewEVMTxContext(msg))
 	//evm.StateDB.AddAddressToAccessList(params.HistoryStorageAddress)
 
-	_, _, err := evm.Call(vm.AccountRef(msg.From()), *msg.To(), msg.Data(), msg.Gas(), common.Num0, false)
+	_, _, _, err := evm.Call(vm.AccountRef(msg.From()), *msg.To(), msg.Data(), msg.Gas(), common.Num0, false)
 	if err != nil {
 		panic(err)
 	}

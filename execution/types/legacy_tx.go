@@ -122,6 +122,10 @@ func (tx *LegacyTx) GetAccessList() AccessList {
 	return AccessList{}
 }
 
+func (tx *LegacyTx) GetAuthorizations() []Authorization {
+	return nil
+}
+
 func (tx *LegacyTx) Protected() bool {
 	return isProtectedV(&tx.V)
 }
@@ -398,7 +402,8 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		data:       tx.Data,
 		accessList: nil,
 		checkNonce: true,
-		Tx:         tx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           tx,
 	}
 
 	var err error

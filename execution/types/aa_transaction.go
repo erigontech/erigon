@@ -15,7 +15,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/arb"
 	"github.com/erigontech/erigon/execution/abi"
 )
 
@@ -31,8 +30,13 @@ const AA_GAS_PENALTY_PCT = 10
 var AA_ENTRY_POINT = common.HexToAddress("0x0000000000000000000000000000000000007560")
 var AA_SENDER_CREATOR = common.HexToAddress("0x00000000000000000000000000000000ffff7560")
 
+type NoTimeBoosted bool
+
+func (tx *NoTimeBoosted) IsTimeBoosted() *bool {return nil}
+func (tx *NoTimeBoosted) SetTimeboosted(_ *bool) {}
+
 type AccountAbstractionTransaction struct {
-	arb.NoTimeBoosted
+	NoTimeBoosted
 
 	TransactionMisc
 	Nonce      uint64
@@ -65,6 +69,10 @@ func (tx *AccountAbstractionTransaction) GetData() []byte {
 
 func (tx *AccountAbstractionTransaction) GetAccessList() AccessList {
 	return tx.AccessList
+}
+
+func (tx *AccountAbstractionTransaction) GetAuthorizations() []Authorization {
+	return tx.Authorizations
 }
 
 func (tx *AccountAbstractionTransaction) Protected() bool {
@@ -167,6 +175,8 @@ func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, r
 		to:         nil,
 		gasPrice:   *tx.FeeCap,
 		blobHashes: []common.Hash{},
+
+		TxRunContext: new(MessageRunContext),
 	}, nil
 }
 

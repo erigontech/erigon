@@ -99,6 +99,11 @@ func (tx *AccessListTx) copy() *AccessListTx {
 func (tx *AccessListTx) GetAccessList() AccessList {
 	return tx.AccessList
 }
+
+func (tx *AccessListTx) GetAuthorizations() []Authorization {
+	return nil
+}
+
 func (tx *AccessListTx) Protected() bool {
 	return true
 }
@@ -458,7 +463,8 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
-		Tx:         tx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           tx,
 	}
 
 	if !rules.IsBerlin {

@@ -109,6 +109,10 @@ func (tx *DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
 }
 
+func (tx *DynamicFeeTransaction) GetAuthorizations() []Authorization {
+	return nil
+}
+
 func (tx *DynamicFeeTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize(false)
 	// Add envelope size and type size
@@ -379,7 +383,8 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
-		Tx:         tx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           tx,
 	}
 	if !rules.IsLondon {
 		return nil, errors.New("eip-1559 transactions require London")

@@ -19,6 +19,7 @@ package evmtypes
 import (
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -85,6 +86,8 @@ type ExecutionResult struct {
 	ScheduledTxes types.Transactions
 	// Arbitrum: the contract deployed from the top-level transaction, or nil if not a contract creation tx
 	TopLevelDeployed *common.Address
+	// Arbitrum: total used multi-dimensional gas
+	UsedMultiGas multigas.MultiGas
 }
 
 // Unwrap returns the internal evm error which allows us for further

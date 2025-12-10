@@ -1,6 +1,8 @@
 module github.com/erigontech/erigon
 
-go 1.24
+go 1.24.0
+
+toolchain go1.24.7
 
 replace github.com/erigontech/erigon-lib => ./erigon-lib
 
@@ -116,7 +118,7 @@ require (
 	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476
 	golang.org/x/net v0.42.0
 	golang.org/x/sync v0.16.0
-	golang.org/x/sys v0.34.0
+	golang.org/x/sys v0.36.0
 	golang.org/x/time v0.12.0
 	golang.org/x/tools v0.34.0
 	google.golang.org/grpc v1.72.1
@@ -130,6 +132,8 @@ require (
 	pgregory.net/rapid v1.2.0
 	sigs.k8s.io/yaml v1.4.0
 )
+
+require github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab // indirect
 
 require (
 	github.com/FastFilter/xorfilter v0.2.1 // indirect
