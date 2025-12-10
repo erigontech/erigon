@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -534,7 +535,16 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	}
 }
 
+func isNil(v any) bool { return v == nil || reflect.ValueOf(v).IsNil() }
+
 func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+	if isNil(info) {
+		panic("BuildIndexWithSnapName: info is nil")
+	}
+	if isNil(info.Type) {
+		panic("BuildIndexWithSnapName: info.Type is nil, " + info.Name())
+	}
+
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
