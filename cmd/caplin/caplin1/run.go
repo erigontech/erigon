@@ -453,6 +453,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			option.builderClient,
 			stateSnapshots,
 			true,
+			peerDas,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
