@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -117,10 +116,10 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	// Waiting for a spec, we choose the latter because it's more general, but we check that the length is not greater than 64 hex-digits.
 	indexBytes, err := hexutil.FromHexWithValidation(index)
 	if err != nil {
-		return "", errors.New("unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error())
+		return "", &rpc.InvalidParamsError{Message: "unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error()}
 	}
 	if len(indexBytes) > 32 {
-		return "", hexutil.ErrTooBigHexString
+		return "", &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
