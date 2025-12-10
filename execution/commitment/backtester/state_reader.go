@@ -39,7 +39,8 @@ func newBacktestStateReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateA
 }
 
 func (b backtestStateReader) WithHistory() bool {
-	return true
+	// we lie it is without history so we can exercise SharedDomain's in-memory DomainPut(kv.CommitmmentDomain)
+	return false
 }
 
 func (b backtestStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
