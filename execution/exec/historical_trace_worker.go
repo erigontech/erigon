@@ -390,6 +390,9 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 	var resultProcessor historicalResultProcessor
 
 	for outputTxNum.Load() <= toTxNum {
+		if out.closed {
+			break
+		}
 		closed, err := out.AwaitDrain(ctx, 10*time.Millisecond)
 
 		if err != nil {
