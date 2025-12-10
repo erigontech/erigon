@@ -246,9 +246,10 @@ func (g *GossipManager) goCheckForkAndResubscribe() {
 		panic(err)
 	}
 	go func() {
+		slotLookahead := uint64(8)
 		for {
 			// compute upcoming ForkDigest immediately
-			epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + 4)
+			epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
 			upcomingForkDigest, err := g.ethClock.ComputeForkDigest(epoch)
 			if err != nil {
 				log.Warn("[GossipManager] failed to compute upcoming fork digest", "err", err)
@@ -259,7 +260,7 @@ func (g *GossipManager) goCheckForkAndResubscribe() {
 				oldForkDigest := fmt.Sprintf("%x", forkDigest)
 				go func(oldForkDigest string) {
 					// unsubscribe old topics after 2 slots
-					time.Sleep(6 * time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second)
+					time.Sleep(2 * time.Duration(slotLookahead) * time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second)
 					allTopics := g.subscriptions.AllTopics()
 					for _, topic := range allTopics {
 						if strings.Contains(topic, oldForkDigest) {
