@@ -51,6 +51,9 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
+	if s.p2p.Host().Network().Connectedness(info.ID) == network.Connected {
+		return nil
+	}
 	err = s.p2p.Host().Connect(ctxWithTimeout, info)
 	if err != nil {
 		return err
@@ -77,6 +80,18 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	return nil
 }
 
+func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
+	// connect to peers every 15 seconds
+	go func() {
+		for {
+			if err := s.connectWithAllPeers(peers); err != nil {
+				log.Debug("[Sentinel] Could not connect with static peers", "err", err)
+			}
+			time.Sleep(15 * time.Second)
+		}
+	}()
+}
+
 func (s *Sentinel) listenForPeers() {
 	enodes := []*enode.Node{}
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
@@ -92,9 +107,7 @@ func (s *Sentinel) listenForPeers() {
 		return
 	}
 	multiAddresses := convertToMultiAddr(enodes)
-	if err := s.connectWithAllPeers(multiAddresses); err != nil {
-		log.Warn("Could not connect to static peers", "reason", err)
-	}
+	s.stickToPeers(multiAddresses)
 
 	// limit the number of goroutines opening connection with peers
 	sem := semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections))
