@@ -89,7 +89,7 @@ func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
 			if err := s.connectWithAllPeers(peers); err != nil {
 				log.Debug("[Sentinel] Could not connect with static peers", "err", err)
 			}
-			time.Sleep(1 * time.Minute)
+			time.Sleep(3 * time.Minute)
 		}
 	}()
 }
