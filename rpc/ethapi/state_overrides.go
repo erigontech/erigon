@@ -85,7 +85,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
 }
 
 
-func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
+func (so *StateOverrides) Override(ibs *state.IntraBlockState, rules *chain.Rules, precompiles vm.PrecompiledContracts) error {
 	err := so.override(ibs)
 	if err != nil {
 		return err

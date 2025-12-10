@@ -452,7 +452,7 @@ func (s *simulator) simulateBlock(
 	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
 	if stateOverrides != nil {
-		if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
+		if err := stateOverrides.Override(intraBlockState, rules, activePrecompiles); err != nil {
 			return nil, nil, err
 		}
 	}
