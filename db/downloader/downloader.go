@@ -352,7 +352,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	var addWebSeedOpts []torrent.AddWebSeedsOpt //nolint:prealloc
 
-	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter() {
+	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter {
 		addWebSeedOpts = append(
 			addWebSeedOpts,
 			torrent.WebSeedResponseBodyRateLimiter(rate.NewLimiter(value, 0)),
