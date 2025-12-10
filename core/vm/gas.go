@@ -20,8 +20,8 @@
 package vm
 
 import (
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon/arb/multigas"
-	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/holiman/uint256"
 )
 

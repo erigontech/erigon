@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"math/big"
 	"strings"
 	"sync/atomic"

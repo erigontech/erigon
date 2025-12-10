@@ -23,6 +23,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"slices"
 
 	"github.com/erigontech/erigon/arb/multigas"
@@ -35,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -655,78 +656,78 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, *deployedContract, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
-		//usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
+		ret, *deployedContract, st.gasRemaining, multiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	} else {
-		ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		ret, st.gasRemaining, multiGas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		// TODO multiGas was not updated since last addition, why add again?
-		//usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
+		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	}
 
-		if refunds && !gasBailout {
-			//refund := st.calcGasRefund(rules)
-			//usedMultiGas = st.reimburseGas(rules, refund, floorGas7623, usedMultiGas)
+	if refunds && !gasBailout {
+		//refund := st.calcGasRefund(rules)
+		//usedMultiGas = st.reimburseGas(rules, refund, floorGas7623, usedMultiGas)
 
-			refundQuotient := params.RefundQuotient
-			if rules.IsLondon {
-				refundQuotient = params.RefundQuotientEIP3529
-			}
-
-			if st.evm.ProcessingHook.IsArbitrum() {
-				// Refund the gas that was held to limit the amount of computation done.
-				//st.gasRemaining += st.calcHeldGasRefund() // affects .gasUsed()
-				frg := st.evm.ProcessingHook.ForceRefundGas()
-				fmt.Printf("[%d] gas used %d force refund gas: %d, remains %d\n",
-					st.evm.Context.BlockNumber, st.gasUsed(), frg, st.gasRemaining)
-				st.gasRemaining += frg
-				//if st.gasRemaining > st.initialGas {
-				//	st.gasRemaining = st.initialGas
-				//}
-				nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
-				var refund uint64
-				if nonrefundable < st.gasUsed() {
-					// Apply refund counter, capped to a refund quotient
-					refund = (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
-					if refund > st.state.GetRefund() {
-						refund = st.state.GetRefund()
-					}
-					st.gasRemaining += refund
-				}
-
-				// Arbitrum: set the multigas refunds
-				usedMultiGas = usedMultiGas.WithRefund(refund)
-				if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
-					// After EIP-7623: Data-heavy transactions pay the floor gas.
-					if st.gasUsed() < floorGas7623 {
-						usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
-						prev := st.gasRemaining
-						st.gasRemaining = st.initialGas - floorGas7623
-						if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
-							t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
-						}
-					}
-				}
-
-			} else { // Other networks
-				gasUsed := st.gasUsed()
-				refund := min(gasUsed/refundQuotient, st.state.GetRefund())
-				gasUsed = gasUsed - refund
-
-				if rules.IsPrague {
-					gasUsed = max(floorGas7623, gasUsed)
-				}
-				st.gasRemaining = st.initialGas - gasUsed
-			}
-
-			st.refundGas()
-		} else if rules.IsPrague {
-			floorOrUsed := max(floorGas7623, st.gasUsed())
-			if st.initialGas < floorOrUsed {
-				panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (Prague floor): initialGas=%d, floorOrUsed=%d", st.initialGas, floorOrUsed))
-			}
-			st.gasRemaining = st.initialGas - floorOrUsed
+		refundQuotient := params.RefundQuotient
+		if rules.IsLondon {
+			refundQuotient = params.RefundQuotientEIP3529
 		}
+
+		if st.evm.ProcessingHook.IsArbitrum() {
+			// Refund the gas that was held to limit the amount of computation done.
+			//st.gasRemaining += st.calcHeldGasRefund() // affects .gasUsed()
+			frg := st.evm.ProcessingHook.ForceRefundGas()
+			fmt.Printf("[%d] gas used %d force refund gas: %d, remains %d\n",
+				st.evm.Context.BlockNumber, st.gasUsed(), frg, st.gasRemaining)
+			st.gasRemaining += frg
+			//if st.gasRemaining > st.initialGas {
+			//	st.gasRemaining = st.initialGas
+			//}
+			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
+			var refund uint64
+			if nonrefundable < st.gasUsed() {
+				// Apply refund counter, capped to a refund quotient
+				refund = (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
+				if refund > st.state.GetRefund() {
+					refund = st.state.GetRefund()
+				}
+				st.gasRemaining += refund
+			}
+
+			// Arbitrum: set the multigas refunds
+			usedMultiGas = usedMultiGas.WithRefund(refund)
+			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
+				// After EIP-7623: Data-heavy transactions pay the floor gas.
+				if st.gasUsed() < floorGas7623 {
+					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
+					prev := st.gasRemaining
+					st.gasRemaining = st.initialGas - floorGas7623
+					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
+						t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+					}
+				}
+			}
+
+		} else { // Other networks
+			gasUsed := st.gasUsed()
+			refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+			gasUsed = gasUsed - refund
+
+			if rules.IsPrague {
+				gasUsed = max(floorGas7623, gasUsed)
+			}
+			st.gasRemaining = st.initialGas - gasUsed
+		}
+
+		st.refundGas()
+	} else if rules.IsPrague {
+		floorOrUsed := max(floorGas7623, st.gasUsed())
+		if st.initialGas < floorOrUsed {
+			panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (Prague floor): initialGas=%d, floorOrUsed=%d", st.initialGas, floorOrUsed))
+		}
+		st.gasRemaining = st.initialGas - floorOrUsed
 	}
+	//}
 
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
