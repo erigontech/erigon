@@ -121,6 +121,9 @@ func generateTop10SlowestCharts(mv []MetricValues) top10SlowestCharts {
 		var accMaxSu uint64
 		accSus := make([]uint64, 0, len(mv[i].Accounts))
 		for k, v := range mv[i].Accounts {
+			// note currently filtering on LoadBranch==0 as well because all rows with it are for branch keys
+			// and not for accounts, and hence all their StorageUpdates are 0s messing up the real gini coefficients
+			// in future may want to move the branch related metrics to a separate csv and MetricValues.Branches
 			if len(k) == hex.EncodedLen(length.Addr) && v.LoadBranch == 0 {
 				accMaxSu = max(accMaxSu, v.StorageUpates)
 				accSus = append(accSus, v.StorageUpates)
