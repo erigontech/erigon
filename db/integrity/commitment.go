@@ -665,7 +665,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 			if err != nil {
-				return 0, err
+				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
 			maxTxNum, err := txNumReader.Max(tx, blockNum)
 			if err != nil {
