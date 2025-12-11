@@ -35,11 +35,12 @@ import (
 )
 
 const (
-	blobDownloaderInterval = 12 * time.Second
-	blobLogInterval        = 30 * time.Second
-	blocksBatchSize        = uint64(8)
-	maxIterations          = uint64(32)
-	minPeersForBlobDownload = 16
+	blobDownloaderInterval      = 12 * time.Second
+	blobLogInterval             = 30 * time.Second
+	blobBackfillWarningInterval = 4 * time.Minute
+	blocksBatchSize             = uint64(8)
+	maxIterations               = uint64(32)
+	minPeersForBlobDownload     = 16
 )
 
 // SyncedChecker is an interface to check if the forkchoice is synced
@@ -77,8 +78,9 @@ type BlobHistoryDownloader struct {
 	// immediateBlobsBackfilling indicates whether to backfill blobs immediately
 	immediateBlobsBackfilling bool
 
-	running atomic.Bool
-	logger  log.Logger
+	running           atomic.Bool
+	backfillCompleted atomic.Bool
+	logger            log.Logger
 
 	// notifyBlobBackfilled is called when blob backfilling is complete
 	notifyBlobBackfilled func()
@@ -166,18 +168,26 @@ func (b *BlobHistoryDownloader) run() {
 		b.logger.Error("[BlobHistoryDownloader] Error downloading blobs", "err", err)
 	}
 
-	timer := time.NewTimer(blobDownloaderInterval)
-	defer timer.Stop()
+	downloadTimer := time.NewTimer(blobDownloaderInterval)
+	defer downloadTimer.Stop()
+
+	warningTimer := time.NewTimer(blobBackfillWarningInterval)
+	defer warningTimer.Stop()
 
 	for {
 		select {
 		case <-b.ctx.Done():
 			return
-		case <-timer.C:
+		case <-downloadTimer.C:
 			if err := b.downloadOnce(false); err != nil {
 				b.logger.Error("[BlobHistoryDownloader] Error downloading blobs", "err", err)
 			}
-			timer.Reset(blobDownloaderInterval)
+			downloadTimer.Reset(blobDownloaderInterval)
+		case <-warningTimer.C:
+			if !b.backfillCompleted.Load() {
+				b.logger.Warn("[BlobHistoryDownloader] Blob backfilling is not finished, some blobs might be unavailable", "currentSlot", b.headSlot.Load(), "highestBackfilled", b.highestBackfilledSlot.Load())
+			}
+			warningTimer.Reset(blobBackfillWarningInterval)
 		}
 	}
 }
@@ -348,6 +358,8 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	if shouldLog {
 		b.logger.Info("[BlobHistoryDownloader] Blob history download finished successfully")
 	}
+
+	b.backfillCompleted.Store(true)
 
 	b.mu.RLock()
 	notify := b.notifyBlobBackfilled
