@@ -32,7 +32,7 @@ var (
 )
 
 type DataColumnSidecar struct {
-	Index                        uint64                         `json:"index"` // index of the column
+	Index                        uint64                         `json:"index,string"` // index of the column
 	Column                       *solid.ListSSZ[*Cell]          `json:"column"`
 	KzgCommitments               *solid.ListSSZ[*KZGCommitment] `json:"kzg_commitments"`
 	KzgProofs                    *solid.ListSSZ[*KZGProof]      `json:"kzg_proofs"`
