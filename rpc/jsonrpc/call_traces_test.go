@@ -28,12 +28,12 @@ import (
 	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func blockNumbersFromTraces(t *testing.T, b []byte) []int {
@@ -76,13 +76,12 @@ func TestCallTraceOneByOne(t *testing.T) {
 	s := jsoniter.ConfigDefault.BorrowStream(nil)
 	defer jsoniter.ConfigDefault.ReturnStream(s)
 	stream := jsonstream.Wrap(s)
-	var fromBlock, toBlock uint64
-	fromBlock = 1
-	toBlock = 10
+	fromBlock := rpc.BlockNumber(1)
+	toBlock := rpc.BlockNumber(10)
 	toAddress1 := common.Address{1}
 	traceReq1 := TraceFilterRequest{
-		FromBlock: (*hexutil.Uint64)(&fromBlock),
-		ToBlock:   (*hexutil.Uint64)(&toBlock),
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
 		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq1, new(bool), nil, stream); err != nil {
@@ -120,13 +119,12 @@ func TestCallTraceUnwind(t *testing.T) {
 	s := jsoniter.ConfigDefault.BorrowStream(nil)
 	defer jsoniter.ConfigDefault.ReturnStream(s)
 	stream := jsonstream.Wrap(s)
-	var fromBlock, toBlock uint64
-	fromBlock = 1
-	toBlock = 10
+	fromBlock := rpc.BlockNumber(1)
+	toBlock := rpc.BlockNumber(10)
 	toAddress1 := common.Address{1}
 	traceReq1 := TraceFilterRequest{
-		FromBlock: (*hexutil.Uint64)(&fromBlock),
-		ToBlock:   (*hexutil.Uint64)(&toBlock),
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
 		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq1, new(bool), nil, stream); err != nil {
@@ -140,8 +138,8 @@ func TestCallTraceUnwind(t *testing.T) {
 	stream.Reset(nil)
 	toBlock = 12
 	traceReq2 := TraceFilterRequest{
-		FromBlock: (*hexutil.Uint64)(&fromBlock),
-		ToBlock:   (*hexutil.Uint64)(&toBlock),
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
 		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq2, new(bool), nil, stream); err != nil {
@@ -156,8 +154,8 @@ func TestCallTraceUnwind(t *testing.T) {
 	fromBlock = 12
 	toBlock = 20
 	traceReq3 := TraceFilterRequest{
-		FromBlock: (*hexutil.Uint64)(&fromBlock),
-		ToBlock:   (*hexutil.Uint64)(&toBlock),
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
 		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq3, new(bool), nil, stream); err != nil {
@@ -184,12 +182,11 @@ func TestFilterNoAddresses(t *testing.T) {
 	s := jsoniter.ConfigDefault.BorrowStream(nil)
 	defer jsoniter.ConfigDefault.ReturnStream(s)
 	stream := jsonstream.Wrap(s)
-	var fromBlock, toBlock uint64
-	fromBlock = 1
-	toBlock = 10
+	fromBlock := rpc.BlockNumber(1)
+	toBlock := rpc.BlockNumber(10)
 	traceReq1 := TraceFilterRequest{
-		FromBlock: (*hexutil.Uint64)(&fromBlock),
-		ToBlock:   (*hexutil.Uint64)(&toBlock),
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
 	}
 	if err = api.Filter(context.Background(), traceReq1, new(bool), nil, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
@@ -228,15 +225,16 @@ func TestFilterAddressIntersection(t *testing.T) {
 	err = m.InsertChain(chain)
 	require.NoError(t, err, "inserting chain")
 
-	fromBlock, toBlock := uint64(1), uint64(15)
+	fromBlock := rpc.BlockNumber(1)
+	toBlock := rpc.BlockNumber(15)
 	t.Run("second", func(t *testing.T) {
 		s := jsoniter.ConfigDefault.BorrowStream(nil)
 		defer jsoniter.ConfigDefault.ReturnStream(s)
 		stream := jsonstream.Wrap(s)
 
 		traceReq1 := TraceFilterRequest{
-			FromBlock:   (*hexutil.Uint64)(&fromBlock),
-			ToBlock:     (*hexutil.Uint64)(&toBlock),
+			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
+			ToBlock:     &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
 			FromAddress: []*common.Address{&m.Address, &other},
 			ToAddress:   []*common.Address{&m.Address, &toAddress2},
 			Mode:        TraceFilterModeIntersection,
@@ -252,8 +250,8 @@ func TestFilterAddressIntersection(t *testing.T) {
 		stream := jsonstream.Wrap(s)
 
 		traceReq1 := TraceFilterRequest{
-			FromBlock:   (*hexutil.Uint64)(&fromBlock),
-			ToBlock:     (*hexutil.Uint64)(&toBlock),
+			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
+			ToBlock:     &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
 			FromAddress: []*common.Address{&m.Address, &other},
 			ToAddress:   []*common.Address{&toAddress1, &m.Address},
 			Mode:        TraceFilterModeIntersection,
@@ -269,8 +267,8 @@ func TestFilterAddressIntersection(t *testing.T) {
 		stream := jsonstream.Wrap(s)
 
 		traceReq1 := TraceFilterRequest{
-			FromBlock:   (*hexutil.Uint64)(&fromBlock),
-			ToBlock:     (*hexutil.Uint64)(&toBlock),
+			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
+			ToBlock:     &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
 			ToAddress:   []*common.Address{&other},
 			FromAddress: []*common.Address{&toAddress2, &toAddress1, &other},
 			Mode:        TraceFilterModeIntersection,

@@ -19,19 +19,19 @@ package gointerfaces
 import (
 	"fmt"
 
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 type Version struct {
 	Major, Minor, Patch uint32 // interface Version of the client - to perform compatibility check when opening
 }
 
-func VersionFromProto(r *types.VersionReply) Version {
+func VersionFromProto(r *typesproto.VersionReply) Version {
 	return Version{Major: r.Major, Minor: r.Minor, Patch: r.Patch}
 }
 
 // EnsureVersion - Default policy: allow only patch difference
-func EnsureVersion(local Version, remote *types.VersionReply) bool {
+func EnsureVersion(local Version, remote *typesproto.VersionReply) bool {
 	if remote.Major != local.Major {
 		return false
 	}

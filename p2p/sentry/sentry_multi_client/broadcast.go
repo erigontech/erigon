@@ -20,18 +20,18 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"strings"
 	"syscall"
 
 	"google.golang.org/grpc"
 
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
@@ -47,8 +47,8 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 		return
 	}
 
-	req66 := proto_sentry.OutboundMessageData{
-		Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+	req66 := sentryproto.OutboundMessageData{
+		Id:   sentryproto.MessageId_NEW_BLOCK_HASHES_66,
 		Data: data,
 	}
 
@@ -81,10 +81,10 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		return
 	}
 
-	req66 := proto_sentry.SendMessageToRandomPeersRequest{
+	req66 := sentryproto.SendMessageToRandomPeersRequest{
 		MaxPeers: uint64(cs.maxBlockBroadcastPeers(header)),
-		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_NEW_BLOCK_66,
+		Data: &sentryproto.OutboundMessageData{
+			Id:   sentryproto.MessageId_NEW_BLOCK_66,
 			Data: data,
 		},
 	}
@@ -96,7 +96,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 
 		_, err = sentry.SendMessageToRandomPeers(ctx, &req66, &grpc.EmptyCallOption{})
 		if err != nil {
-			if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+			if libsentry.IsPeerNotFoundErr(err) || networkTemporaryErr(err) {
 				log.Debug("broadcastNewBlock", "err", err)
 				continue
 			}
@@ -107,7 +107,4 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 
 func networkTemporaryErr(err error) bool {
 	return errors.Is(err, syscall.EPIPE) || errors.Is(err, p2p.ErrShuttingDown)
-}
-func isPeerNotFoundErr(err error) bool {
-	return strings.Contains(err.Error(), "peer not found")
 }

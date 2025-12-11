@@ -350,17 +350,17 @@ func (c *MockEthereumClockGetEpochAtSlotCall) DoAndReturn(f func(uint64) uint64)
 }
 
 // GetSlotByTime mocks base method.
-func (m *MockEthereumClock) GetSlotByTime(time time.Time) uint64 {
+func (m *MockEthereumClock) GetSlotByTime(arg0 time.Time) uint64 {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSlotByTime", time)
+	ret := m.ctrl.Call(m, "GetSlotByTime", arg0)
 	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
 // GetSlotByTime indicates an expected call of GetSlotByTime.
-func (mr *MockEthereumClockMockRecorder) GetSlotByTime(time any) *MockEthereumClockGetSlotByTimeCall {
+func (mr *MockEthereumClockMockRecorder) GetSlotByTime(arg0 any) *MockEthereumClockGetSlotByTimeCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSlotByTime", reflect.TypeOf((*MockEthereumClock)(nil).GetSlotByTime), time)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSlotByTime", reflect.TypeOf((*MockEthereumClock)(nil).GetSlotByTime), arg0)
 	return &MockEthereumClockGetSlotByTimeCall{Call: call}
 }
 

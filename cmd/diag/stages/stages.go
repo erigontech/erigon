@@ -25,9 +25,9 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon/cmd/diag/flags"
 	"github.com/erigontech/erigon/cmd/diag/util"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 var Command = cli.Command{
@@ -134,8 +134,8 @@ func printSyncStages(cliCtx *cli.Context, isCurrent bool) error {
 	return nil
 }
 
-func querySyncInfo(cliCtx *cli.Context) ([]diagnostics.SyncStage, error) {
-	var data []diagnostics.SyncStage
+func querySyncInfo(cliCtx *cli.Context) ([]diaglib.SyncStage, error) {
+	var data []diaglib.SyncStage
 	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/sync-stages"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
@@ -161,20 +161,20 @@ func printData(cliCtx *cli.Context, data []table.Row) {
 	}
 }
 
-func getStagesRows(stages []diagnostics.SyncStage) []table.Row {
+func getStagesRows(stages []diaglib.SyncStage) []table.Row {
 	return createSyncStageRows(stages, false)
 }
 
-func getCurrentStageRow(stages []diagnostics.SyncStage) []table.Row {
+func getCurrentStageRow(stages []diaglib.SyncStage) []table.Row {
 	return createSyncStageRows(stages, true)
 }
 
-func createSyncStageRows(stages []diagnostics.SyncStage, forCurrentStage bool) []table.Row {
+func createSyncStageRows(stages []diaglib.SyncStage, forCurrentStage bool) []table.Row {
 	rows := []table.Row{}
 	for _, stage := range stages {
 
 		if forCurrentStage {
-			if stage.State != diagnostics.Running {
+			if stage.State != diaglib.Running {
 				continue
 			}
 		}
@@ -200,7 +200,7 @@ func createSyncStageRows(stages []diagnostics.SyncStage, forCurrentStage bool) [
 	return rows
 }
 
-func createStageRowFromStage(stage diagnostics.SyncStage) table.Row {
+func createStageRowFromStage(stage diaglib.SyncStage) table.Row {
 	return table.Row{
 		stage.ID,
 		"",
@@ -210,10 +210,10 @@ func createStageRowFromStage(stage diagnostics.SyncStage) table.Row {
 	}
 }
 
-func createSubStageRowFromSubstageStage(substage diagnostics.SyncSubStage) table.Row {
+func createSubStageRowFromSubstageStage(substage diaglib.SyncSubStage) table.Row {
 	progress := substage.Stats.Progress
 
-	if substage.State == diagnostics.Completed {
+	if substage.State == diaglib.Completed {
 		progress = "100%"
 	} else {
 		if substage.ID == "E3 Indexing" {

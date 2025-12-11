@@ -26,13 +26,14 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/execution/rlp"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 /*
@@ -57,7 +58,7 @@ var databaseTablesCfg = kv.TableCfg{
 }
 
 type MdbxStore struct {
-	db *polygoncommon.Database
+	db *polygondb.Database
 }
 
 type txStore struct {
@@ -65,11 +66,11 @@ type txStore struct {
 }
 
 func NewMdbxStore(dataDir string, logger log.Logger, accede bool, roTxLimit int64) *MdbxStore {
-	return &MdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
+	return &MdbxStore{db: polygondb.NewDatabase(dataDir, dbcfg.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
 }
 
 func NewDbStore(db kv.RoDB) *MdbxStore {
-	return &MdbxStore{db: polygoncommon.AsDatabase(db)}
+	return &MdbxStore{db: polygondb.AsDatabase(db)}
 }
 
 func (s *MdbxStore) WithTx(tx kv.Tx) Store {
@@ -220,7 +221,7 @@ func lastEventIdWithinWindow(tx kv.Tx, fromId uint64, toTime time.Time) (uint64,
 			return 0, err
 		}
 
-		var event heimdall.EventRecordWithTime
+		var event EventRecordWithTime
 		if err := event.UnmarshallBytes(v); err != nil {
 			return 0, err
 		}
@@ -235,7 +236,7 @@ func lastEventIdWithinWindow(tx kv.Tx, fromId uint64, toTime time.Time) (uint64,
 	return eventId, nil
 }
 
-func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
+func (s *MdbxStore) PutEvents(ctx context.Context, events []*EventRecordWithTime) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -331,7 +332,7 @@ func (s *MdbxStore) EventsByBlock(ctx context.Context, hash common.Hash, blockHe
 	return txStore{tx}.EventsByBlock(ctx, hash, blockHeight)
 }
 
-func (s *MdbxStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+func (s *MdbxStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*EventRecordWithTime, bool, error) {
 	return nil, false, nil
 }
 
@@ -342,7 +343,17 @@ func (s *MdbxStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDele
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+	deleted, err = txStore{tx}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+	if err != nil {
+		return 0, err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
 }
 
 func NewTxStore(tx kv.Tx) txStore {
@@ -483,7 +494,7 @@ func (s txStore) LastEventIdWithinWindow(ctx context.Context, fromId uint64, toT
 	return lastEventIdWithinWindow(s.tx, fromId, toTime)
 }
 
-func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
+func (s txStore) PutEvents(ctx context.Context, events []*EventRecordWithTime) error {
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
@@ -670,7 +681,7 @@ func (s txStore) EventsByBlock(ctx context.Context, hash common.Hash, blockHeigh
 	return result, nil
 }
 
-func (s txStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+func (s txStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*EventRecordWithTime, bool, error) {
 	return nil, false, nil
 }
 
@@ -713,7 +724,7 @@ func (s txStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteL
 		if eventId >= eventIdTo {
 			break
 		}
-		var event heimdall.EventRecordWithTime
+		var event EventRecordWithTime
 		if err := event.UnmarshallBytes(v); err != nil {
 			return deleted, err
 		}
@@ -818,7 +829,7 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	var v []byte
 
 	for k, v, err = eventCursor.Seek(from); err == nil && k != nil; k, v, err = eventCursor.Next() {
-		var event heimdall.EventRecordWithTime
+		var event EventRecordWithTime
 		if err := event.UnmarshallBytes(v); err != nil {
 			return err
 		}

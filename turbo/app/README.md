@@ -64,7 +64,7 @@ The following configuration can be used to upload blocks from genesis where:
 | snapshot.version=2                                 | Indivates the version to be appended to snapshot file names when they are creatated                                                                                        |
 
 ```shell
-erigon/build/bin/erigon seg uploader --datadir=~/snapshots/bor-mainnet --chain=bor-mainnet \
+erigon/build/bin/erigon snapshots uploader --datadir=~/snapshots/bor-mainnet --chain=bor-mainnet \
   --bor.heimdall=https://heimdall-api.polygon.technology --sync.loop.prune.limit=500000 \
   --upload.location=r2:erigon-v2-snapshots-bor-mainnet --upload.from=earliest --snapshot.version=2 \
   --upload.snapshot.limit=1500000 

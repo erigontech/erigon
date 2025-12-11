@@ -24,17 +24,17 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/backup"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
@@ -42,6 +42,9 @@ import (
 
 func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
 	// don't reset senders here
+	if err := db.Update(ctx, ResetWitnesses); err != nil {
+		return err
+	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
@@ -67,7 +70,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 		return fmt.Errorf("saving Bodies progress failed: %w", err)
 	}
 	if err := stages.SaveStageProgress(tx, stages.Headers, 1); err != nil {
-		return fmt.Errorf("saving Bodies progress failed: %w", err)
+		return fmt.Errorf("saving Headers progress failed: %w", err)
 	}
 	if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
 		return fmt.Errorf("saving Snapshots progress failed: %w", err)
@@ -105,55 +108,6 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 	}
 
 	return nil
-}
-func ResetBorHeimdall(ctx context.Context, tx kv.RwTx, db kv.RwDB) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-	if err := tx.ClearTable(kv.BorEventNums); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BorEvents); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BorSpans); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		return tx.Commit()
-	}
-	return nil
-}
-
-func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
-	tables := []string{
-		kv.BorEventNums,
-		kv.BorEvents,
-		kv.BorSpans,
-		kv.BorEventTimes,
-		kv.BorEventProcessedBlocks,
-		kv.BorMilestones,
-		kv.BorCheckpoints,
-		kv.BorProducerSelections,
-	}
-
-	for _, table := range tables {
-		if err := tx.ClearTable(table); err != nil {
-			return err
-		}
-	}
-
-	if err := ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
-		return err
-	}
-
-	return stages.SaveStageProgress(tx, stages.PolygonSync, 0)
 }
 
 func ResetSenders(ctx context.Context, tx kv.RwTx) error {
@@ -196,13 +150,25 @@ func ResetTxLookup(tx kv.RwTx) error {
 	return nil
 }
 
+func ResetWitnesses(tx kv.RwTx) error {
+	if err := tx.ClearTable(kv.BorWitnesses); err != nil {
+		return err
+	}
+	if err := tx.ClearTable(kv.BorWitnessSizes); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.WitnessProcessing, 0); err != nil {
+		return err
+	}
+	return nil
+}
+
 var Tables = map[stages.SyncStage][]string{
 	stages.CustomTrace: {},
 	stages.Finish:      {},
 }
 var stateBuckets = []string{
-	kv.Epoch, kv.PendingEpoch, kv.Code,
-	kv.PlainContractCode, kv.IncarnationMap,
+	kv.Epoch, kv.PendingEpoch,
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
@@ -301,8 +267,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-						Stage: diagnostics.SnapshotFillDBStage{
+					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
+						Stage: diaglib.SnapshotFillDBStage{
 							StageName: string(stage),
 							Current:   header.Number.Uint64(),
 							Total:     blocksAvailable,
@@ -343,8 +309,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-						Stage: diagnostics.SnapshotFillDBStage{
+					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
+						Stage: diaglib.SnapshotFillDBStage{
 							StageName: string(stage),
 							Current:   blockNum,
 							Total:     blocksAvailable,
@@ -383,8 +349,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 		default:
-			diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-				Stage: diagnostics.SnapshotFillDBStage{
+			diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
+				Stage: diaglib.SnapshotFillDBStage{
 					StageName: string(stage),
 					Current:   blocksAvailable, // as we are done with other stages
 					Total:     blocksAvailable,

@@ -30,24 +30,27 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	changeset2 "github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -64,7 +67,6 @@ var (
 )
 
 const (
-	changesetSafeRange     = 32   // Safety net for long-sync, keep last 32 changesets
 	maxUnwindJumpAllowance = 1000 // Maximum number of blocks we are allowed to unwind
 )
 
@@ -263,7 +265,7 @@ func ExecV3(ctx context.Context,
 		doms, err = dbstate.NewSharedDomains(temporalTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
-		if errors.Is(err, dbstate.ErrBehindCommitment) {
+		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
 			return nil
 		}
 		if err != nil {
@@ -289,11 +291,6 @@ func ExecV3(ctx context.Context,
 
 	if maxBlockNum < blockNum {
 		return nil
-	}
-
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
-	if blockNum < cfg.blockReader.FrozenBlocks() {
-		shouldGenerateChangesets = false
 	}
 
 	if maxBlockNum > blockNum+16 {
@@ -369,24 +366,26 @@ func ExecV3(ctx context.Context,
 				accumulator:    accumulator,
 				isMining:       isMining,
 				inMemExec:      inMemExec,
+				initialCycle:   initialCycle,
 				applyTx:        applyTx,
 				applyWorker:    applyWorker,
+				inputBlockNum:  inputBlockNum,
+				maxBlockNum:    maxBlockNum,
 				outputTxNum:    &outputTxNum,
 				outputBlockNum: stages.SyncMetrics[stages.Execution],
 				logger:         logger,
 			},
-			shouldGenerateChangesets: shouldGenerateChangesets,
-			workerCount:              workerCount,
-			pruneEvery:               pruneEvery,
-			logEvery:                 logEvery,
-			progress:                 progress,
+			workerCount: workerCount,
+			pruneEvery:  pruneEvery,
+			logEvery:    logEvery,
+			progress:    progress,
 		}
 
 		executorCancel := pe.run(ctx, maxTxNum, logger)
 		defer executorCancel()
 
 		defer func() {
-			progress.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			progress.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangeSets(), inMemExec)
 		}()
 
 		executor = pe
@@ -403,8 +402,11 @@ func ExecV3(ctx context.Context,
 				u:              u,
 				isMining:       isMining,
 				inMemExec:      inMemExec,
+				initialCycle:   initialCycle,
 				applyTx:        applyTx,
 				applyWorker:    applyWorker,
+				inputBlockNum:  inputBlockNum,
+				maxBlockNum:    maxBlockNum,
 				outputTxNum:    &outputTxNum,
 				outputBlockNum: stages.SyncMetrics[stages.Execution],
 				logger:         logger,
@@ -412,7 +414,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs, inMemExec)
+			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, se.shouldGenerateChangeSets() || cfg.syncCfg.KeepExecutionProofs, inMemExec)
 		}()
 
 		executor = se
@@ -447,30 +449,16 @@ func ExecV3(ctx context.Context,
 	}
 
 	var b *types.Block
-
-	// Only needed by bor chains
-	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 	var errExhausted *ErrLoopExhausted
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
-		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
-		// where during initial sync we can expect bogus blocks to be imported.
-		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
-			start := time.Now()
-			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
-			// First compute and commit the progress done so far
-			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
-				return err
-			}
-			computeCommitmentDuration += time.Since(start)
-			shouldGenerateChangesets = true // now we can generate changesets for the safety net
-		}
-		changeset := &dbstate.StateChangeSet{}
+		shouldGenerateChangesets := shouldGenerateChangeSets(cfg, blockNum, maxBlockNum, initialCycle)
+		changeSet := &changeset2.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
-			executor.domains().SetChangesetAccumulator(changeset)
+			executor.domains().SetChangesetAccumulator(changeSet)
 		}
 		if !parallel {
 			select {
@@ -507,7 +495,6 @@ Loop:
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 
 		var arbosv uint64
 		signer := *types.LatestSignerForChainID(chainConfig.ChainID)
@@ -545,11 +532,7 @@ Loop:
 			accumulator.StartChange(header, txs, false)
 		}
 
-		var arbosVersion uint64
-		if cfg.chainConfig.IsArbitrum() {
-			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-		}
-		rules := chainConfig.Rules(blockNum, b.Time(), arbosVersion)
+		rules := blockContext.Rules(chainConfig)
 		blockReceipts := make(types.Receipts, len(txs))
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
@@ -570,7 +553,6 @@ Loop:
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
 				BlockHash:       b.Hash(),
-				SkipAnalysis:    skipAnalysis,
 				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
@@ -616,7 +598,7 @@ Loop:
 					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 						hooks.OnBlockEnd(err)
 					}
-					return err
+					return fmt.Errorf("%w: %w", consensus.ErrInvalidBlock, err) // new payload can contain invalid txs
 				}
 			}
 
@@ -694,9 +676,9 @@ Loop:
 		if ERIGON_COMMIT_EACH_BLOCK || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
 			if blockNum == 0 {
-				executor.domains().GetCommitmentContext().SetTrace(true)
+				executor.domains().GetCommitmentContext().Trie().SetTrace(true)
 			} else {
-				executor.domains().GetCommitmentContext().SetTrace(false)
+				executor.domains().GetCommitmentContext().Trie().SetTrace(false)
 			}
 			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 			if err != nil {
@@ -712,9 +694,9 @@ Loop:
 
 			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
-				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
 				if !inMemExec {
-					if err := dbstate.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
+					if err := changeset2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeSet); err != nil {
 						return err
 					}
 				}
@@ -860,6 +842,14 @@ Loop:
 		return errExhausted
 	}
 
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && b != nil {
+		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
+		// However, we should still at the very least report the last block number to it, so it can update its block progress.
+		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
+		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
+		cfg.notifications.Accumulator.StartChange(b.HeaderNoCopy(), nil, false /* unwind */)
+	}
+
 	return nil
 }
 
@@ -918,7 +908,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 
 func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if cfg.badBlockHalt {
-		return false, errors.New("wrong trie root")
+		return false, fmt.Errorf("%w: wrong trie root", consensus.ErrInvalidBlock)
 	}
 	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
@@ -928,7 +918,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 		return false, nil
 	}
 
-	unwindToLimit, err := applyTx.Debug().CanUnwindToBlockNum()
+	unwindToLimit, err := rawtemporaldb.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -939,7 +929,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := applyTx.Debug().CanUnwindBeforeBlockNum(unwindTo)
+	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1028,4 +1018,18 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 		return nil, nil
 	}
 	return b, err
+}
+
+func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
+	if cfg.syncCfg.AlwaysGenerateChangesets {
+		return true
+	}
+	if blockNum < cfg.blockReader.FrozenBlocks() {
+		return false
+	}
+	if initialCycle {
+		return false
+	}
+	// once past the initial cycle, make sure to generate changesets for the last blocks that fall in the reorg window
+	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
 }

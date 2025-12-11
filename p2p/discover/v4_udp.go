@@ -33,7 +33,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/discover/v4wire"
@@ -496,7 +496,7 @@ func (t *UDPv4) handleReply(from enode.ID, fromIP net.IP, port int, req v4wire.P
 // loop runs in its own goroutine. it keeps track of
 // the refresh timer and the pending reply queue.
 func (t *UDPv4) loop() {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	defer t.wg.Done()
 
 	var (
@@ -696,7 +696,7 @@ func (t *UDPv4) write(toaddr *net.UDPAddr, toid enode.ID, what string, packet []
 // readLoop runs in its own goroutine. it handles incoming UDP packets.
 func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 	defer t.wg.Done()
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 
 	if unhandled != nil {
 		defer close(unhandled)

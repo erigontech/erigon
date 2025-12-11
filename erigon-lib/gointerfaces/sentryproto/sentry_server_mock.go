@@ -314,45 +314,6 @@ func (c *MockSentryServerPeerEventsCall) DoAndReturn(f func(*PeerEventsRequest, 
 	return c
 }
 
-// PeerMinBlock mocks base method.
-func (m *MockSentryServer) PeerMinBlock(arg0 context.Context, arg1 *PeerMinBlockRequest) (*emptypb.Empty, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PeerMinBlock", arg0, arg1)
-	ret0, _ := ret[0].(*emptypb.Empty)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PeerMinBlock indicates an expected call of PeerMinBlock.
-func (mr *MockSentryServerMockRecorder) PeerMinBlock(arg0, arg1 any) *MockSentryServerPeerMinBlockCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeerMinBlock", reflect.TypeOf((*MockSentryServer)(nil).PeerMinBlock), arg0, arg1)
-	return &MockSentryServerPeerMinBlockCall{Call: call}
-}
-
-// MockSentryServerPeerMinBlockCall wrap *gomock.Call
-type MockSentryServerPeerMinBlockCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockSentryServerPeerMinBlockCall) Return(arg0 *emptypb.Empty, arg1 error) *MockSentryServerPeerMinBlockCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockSentryServerPeerMinBlockCall) Do(f func(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error)) *MockSentryServerPeerMinBlockCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryServerPeerMinBlockCall) DoAndReturn(f func(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error)) *MockSentryServerPeerMinBlockCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // Peers mocks base method.
 func (m *MockSentryServer) Peers(arg0 context.Context, arg1 *emptypb.Empty) (*PeersReply, error) {
 	m.ctrl.T.Helper()
@@ -622,6 +583,123 @@ func (c *MockSentryServerSendMessageToRandomPeersCall) Do(f func(context.Context
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSentryServerSendMessageToRandomPeersCall) DoAndReturn(f func(context.Context, *SendMessageToRandomPeersRequest) (*SentPeers, error)) *MockSentryServerSendMessageToRandomPeersCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPeerBlockRange mocks base method.
+func (m *MockSentryServer) SetPeerBlockRange(arg0 context.Context, arg1 *SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetPeerBlockRange", arg0, arg1)
+	ret0, _ := ret[0].(*emptypb.Empty)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetPeerBlockRange indicates an expected call of SetPeerBlockRange.
+func (mr *MockSentryServerMockRecorder) SetPeerBlockRange(arg0, arg1 any) *MockSentryServerSetPeerBlockRangeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPeerBlockRange", reflect.TypeOf((*MockSentryServer)(nil).SetPeerBlockRange), arg0, arg1)
+	return &MockSentryServerSetPeerBlockRangeCall{Call: call}
+}
+
+// MockSentryServerSetPeerBlockRangeCall wrap *gomock.Call
+type MockSentryServerSetPeerBlockRangeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryServerSetPeerBlockRangeCall) Return(arg0 *emptypb.Empty, arg1 error) *MockSentryServerSetPeerBlockRangeCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryServerSetPeerBlockRangeCall) Do(f func(context.Context, *SetPeerBlockRangeRequest) (*emptypb.Empty, error)) *MockSentryServerSetPeerBlockRangeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryServerSetPeerBlockRangeCall) DoAndReturn(f func(context.Context, *SetPeerBlockRangeRequest) (*emptypb.Empty, error)) *MockSentryServerSetPeerBlockRangeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPeerLatestBlock mocks base method.
+func (m *MockSentryServer) SetPeerLatestBlock(arg0 context.Context, arg1 *SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetPeerLatestBlock", arg0, arg1)
+	ret0, _ := ret[0].(*emptypb.Empty)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetPeerLatestBlock indicates an expected call of SetPeerLatestBlock.
+func (mr *MockSentryServerMockRecorder) SetPeerLatestBlock(arg0, arg1 any) *MockSentryServerSetPeerLatestBlockCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPeerLatestBlock", reflect.TypeOf((*MockSentryServer)(nil).SetPeerLatestBlock), arg0, arg1)
+	return &MockSentryServerSetPeerLatestBlockCall{Call: call}
+}
+
+// MockSentryServerSetPeerLatestBlockCall wrap *gomock.Call
+type MockSentryServerSetPeerLatestBlockCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryServerSetPeerLatestBlockCall) Return(arg0 *emptypb.Empty, arg1 error) *MockSentryServerSetPeerLatestBlockCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryServerSetPeerLatestBlockCall) Do(f func(context.Context, *SetPeerLatestBlockRequest) (*emptypb.Empty, error)) *MockSentryServerSetPeerLatestBlockCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryServerSetPeerLatestBlockCall) DoAndReturn(f func(context.Context, *SetPeerLatestBlockRequest) (*emptypb.Empty, error)) *MockSentryServerSetPeerLatestBlockCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPeerMinimumBlock mocks base method.
+func (m *MockSentryServer) SetPeerMinimumBlock(arg0 context.Context, arg1 *SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetPeerMinimumBlock", arg0, arg1)
+	ret0, _ := ret[0].(*emptypb.Empty)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetPeerMinimumBlock indicates an expected call of SetPeerMinimumBlock.
+func (mr *MockSentryServerMockRecorder) SetPeerMinimumBlock(arg0, arg1 any) *MockSentryServerSetPeerMinimumBlockCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPeerMinimumBlock", reflect.TypeOf((*MockSentryServer)(nil).SetPeerMinimumBlock), arg0, arg1)
+	return &MockSentryServerSetPeerMinimumBlockCall{Call: call}
+}
+
+// MockSentryServerSetPeerMinimumBlockCall wrap *gomock.Call
+type MockSentryServerSetPeerMinimumBlockCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryServerSetPeerMinimumBlockCall) Return(arg0 *emptypb.Empty, arg1 error) *MockSentryServerSetPeerMinimumBlockCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryServerSetPeerMinimumBlockCall) Do(f func(context.Context, *SetPeerMinimumBlockRequest) (*emptypb.Empty, error)) *MockSentryServerSetPeerMinimumBlockCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryServerSetPeerMinimumBlockCall) DoAndReturn(f func(context.Context, *SetPeerMinimumBlockRequest) (*emptypb.Empty, error)) *MockSentryServerSetPeerMinimumBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

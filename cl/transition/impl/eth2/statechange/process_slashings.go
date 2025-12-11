@@ -36,11 +36,8 @@ func ProcessSlashings(s abstract.BeaconState) error {
 	totalBalance := s.GetTotalActiveBalance()
 	// Calculate the total slashing amount
 	// by summing all slashings and multiplying by the provided multiplier
-	slashing := state.GetTotalSlashingAmount(s) * s.BeaconConfig().GetProportionalSlashingMultiplier(s.Version())
 	// Adjust the total slashing amount to be no greater than the total active balance
-	if totalBalance < slashing {
-		slashing = totalBalance
-	}
+	slashing := min(totalBalance, state.GetTotalSlashingAmount(s)*s.BeaconConfig().GetProportionalSlashingMultiplier(s.Version()))
 	beaconConfig := s.BeaconConfig()
 	// Apply penalties to validators who have been slashed and reached the withdrawable epoch
 	return threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {

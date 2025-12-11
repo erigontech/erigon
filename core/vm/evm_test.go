@@ -21,12 +21,20 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chain"
 )
+
+func TestEVMWithNoBaseFeeAndNoTxGasPrice(t *testing.T) {
+	t.Parallel()
+	vmConfig := Config{NoBaseFee: true}
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, vmConfig)
+	require.NotNil(t, evm)
+}
 
 func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
@@ -61,7 +69,6 @@ func TestInterpreterReadonly(t *testing.T) {
 			common.Address{},
 			new(uint256.Int),
 			0,
-			false,
 			c,
 		)
 
@@ -319,7 +326,6 @@ func TestReadonlyBasicCases(t *testing.T) {
 					common.Address{},
 					new(uint256.Int),
 					0,
-					false,
 					c,
 				)
 
@@ -412,7 +418,6 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 		common.Address{},
 		new(uint256.Int),
 		0,
-		false,
 		c,
 	)
 

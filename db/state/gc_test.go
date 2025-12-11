@@ -21,11 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 func TestGCReadAfterRemoveFile(t *testing.T) {
@@ -64,7 +64,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 
 			lastInView := hc.files[len(hc.files)-1]
 
-			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), hc.h.historyValuesOnCompressedPage, true)
+			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), hc.h.HistoryValuesOnCompressedPage, true)
 			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
 			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
 			if g.HasNext() {

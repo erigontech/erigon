@@ -239,7 +239,7 @@ total difficulty accumulated up to the block. sum of all prev blocks difficultie
 Account
 =======
 
-package: `github.com/erigontech/erigon-lib/types/accounts`
+package: `github.com/erigontech/erigon/execution/types/accounts`
 
 .. code-block:: go
 

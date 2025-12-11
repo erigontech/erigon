@@ -103,3 +103,13 @@ func (s *PeerDasState) SetLocalNodeID(localNode *enode.LocalNode) {
 	s.localNode.Store(localNode)
 	s.custodyColumnsCache.Store(nil) // clear the cache
 }
+
+func (s *PeerDasState) IsSupernode() bool {
+	// https://github.com/ethereum/consensus-specs/blob/master/specs/fulu/p2p-interface.md#supernodes
+	custodyColumns, err := s.GetMyCustodyColumns()
+	if err != nil {
+		log.Warn("failed to get my custody columns", "err", err)
+		return false
+	}
+	return len(custodyColumns) >= int(s.beaconConfig.NumberOfColumns)
+}

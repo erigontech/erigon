@@ -59,7 +59,7 @@ func EncryptedTxnSubmissionLess(a, b EncryptedTxnSubmission) bool {
 		return true
 	}
 
-	if a.EonIndex == b.EonIndex && a.TxnIndex <= b.TxnIndex {
+	if a.EonIndex == b.EonIndex && a.TxnIndex < b.TxnIndex {
 		return true
 	}
 
