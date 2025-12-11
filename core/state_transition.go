@@ -27,13 +27,14 @@ import (
 
 	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/arb/osver"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -386,7 +387,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	// EIP-7825: Transaction Gas Limit Cap
 	// TODO should skip for arbitrum?
 	if /*!st.evm.ChainRules().IsArbitrum &&*/
-		st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
 	}
 
@@ -571,7 +572,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	var usedMultiGas = multigas.ZeroGas()
 
 	// TODO only for arbos50?
-	if st.evm.ProcessingHook.IsArbitrum() && {
+	if st.evm.ProcessingHook.IsArbitrum() {
 		var multiGas multigas.MultiGas
 		multiGas, floorGas7623, overflow = multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
 		gas = multiGas.SingleGas()
@@ -700,7 +701,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 				if st.gasUsed() < floorGas7623 {
 					prev := st.gasRemaining
 					st.gasRemaining = st.initialGas - floorGas7623
-					spent := prev -st.gasRemaining
+					spent := prev - st.gasRemaining
 					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, spent) //floorGas7623-usedMultiGas.SingleGas())
 					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 						t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)

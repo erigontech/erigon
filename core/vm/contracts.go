@@ -272,14 +272,14 @@ func init() {
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []common.Address {
-	if rules.IsArbitrum{
+	if rules.IsArbitrum {
 		if rules.IsDia {
 			return PrecompiledAddressesStartingFromArbOS50
 		}
-		if  rules.IsStylus {
-			return PrecompiledAddressesArbOS30
+		if rules.IsStylus {
+			return PrecompiledAddressesStartingFromArbOS30
 		}
-		return PrecompiledAddressesArbitrum
+		return PrecompiledAddressesBeforeArbOS30
 	}
 
 	switch {
@@ -621,6 +621,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	gas := gasLo / finalDivisor
 	return max(gas, minGas)
 }
+
 //// RequiredGas returns the gas required to execute the pre-compiled contract.
 //func (c *bigModExp) RequiredGas(input []byte) uint64 {
 //	var (
