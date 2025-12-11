@@ -1199,6 +1199,7 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 		to = int64(uto)
 	}
 
+	to = int64(-1)
 	somethingPresent, somethingEmpty := false, false
 	for table := range stateSnapTypes.KeyValueGetters {
 		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), to, emptyOk)
