@@ -57,6 +57,15 @@ jobs:
                  /usr/share/miniconda \
                  /usr/share/swift
 
+      - name: Cleanup space
+        if: runner.os == 'Linux'
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'

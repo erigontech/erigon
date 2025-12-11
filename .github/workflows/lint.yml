@@ -38,6 +38,16 @@ jobs:
         with:
           go-version: '1.25'
 
+      - name: Cleanup space
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+
+      - run: df -h
+
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:

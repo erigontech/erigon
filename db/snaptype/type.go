@@ -540,6 +540,10 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 }
 
 func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+	if info.Type == nil {
+		panic("BuildIndexWithSnapName: info.Type is nil, " + info.Name())
+	}
+
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
