@@ -1262,7 +1262,7 @@ func (s *Ethereum) setUpSnapDownloader(
 	cc *chain.Config,
 ) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		s.logger.Warn("files changed...sending notification")
+		s.logger.Debug("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
@@ -1279,7 +1279,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			})
 		}
 		if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-			s.logger.Warn("[snapshots] downloader.Add", "err", err)
+			s.logger.Debug("[snapshots] downloader.Add", "err", err)
 		}
 	}, func(deletedFiles []string) {
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
@@ -1290,7 +1290,7 @@ func (s *Ethereum) setUpSnapDownloader(
 		}
 
 		if _, err := s.downloaderClient.Delete(ctx, &downloaderproto.DeleteRequest{Paths: deletedFiles}); err != nil {
-			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
+			s.logger.Debug("[snapshots] downloader.Delete", "err", err)
 		}
 	})
 
