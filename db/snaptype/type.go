@@ -549,7 +549,7 @@ func isNil[T any](t T) bool {
 }
 
 func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
-	if isNil(info.Type) {
+	if info.Type == nil {
 		panic("BuildIndexWithSnapName: info.Type is nil, " + info.Name())
 	}
 
