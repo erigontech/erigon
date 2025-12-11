@@ -151,7 +151,9 @@ func TestPoolCleanupShouldNotDeleteNewEncTxnsDueToConsecutiveEmptyDecrMsgs(t *te
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
 		// simulate decryption keys msg with 0 decrypted txns for 2 slots in a row to get close to the currently
-		// configured reorg awareness window of 3
+		// configured reorg awareness window of 3 (make sure that is the case otherwise the test won't be accurately
+		// capturing the situation)
+		require.Equal(t, uint64(3), handle.config.ReorgDepthAwareness)
 		// 1
 		handle.SimulateCurrentSlot()
 		handle.SimulateDecryptionKeys(ctx, t, ekg, 1)
