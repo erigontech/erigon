@@ -130,8 +130,7 @@ func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
 	if err := json.Unmarshal(respBody, &respMsg); err != nil {
 		return err
 	}
-	batch := []*jsonrpcMessage{&respMsg}
-	op.resp <- batch[:]
+	op.resp <- []*jsonrpcMessage{&respMsg}
 	return nil
 }
 

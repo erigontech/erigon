@@ -380,6 +380,9 @@ func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 	} else {
 		err = c.send(ctx, op, msgs)
 	}
+	if err != nil {
+		return err
+	}
 
 	batchResp, err := op.wait(ctx, c)
 	if err != nil {
