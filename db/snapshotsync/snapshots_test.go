@@ -41,6 +41,14 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
+func TestName(t *testing.T) {
+	f, _, ok := snaptype.ParseFileName("/", "v1.1-013050-013100-Eth1DataVotes.seg")
+	if !ok {
+		panic(1)
+	}
+	_ = f
+}
+
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
