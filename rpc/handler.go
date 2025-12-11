@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"reflect"
 	"slices"
@@ -68,6 +69,7 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
+	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 	forbiddenList ForbiddenList
@@ -118,7 +120,18 @@ func HandleError(err error, stream jsonstream.Stream) {
 	}
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *handler {
+func newHandler(
+	connCtx context.Context,
+	conn jsonWriter,
+	idgen func() ID,
+	reg *serviceRegistry,
+	batchLimit int,
+	allowList AllowList,
+	maxBatchConcurrency uint,
+	traceRequests bool,
+	logger log.Logger,
+	rpcSlowLogThreshold time.Duration,
+) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
 
@@ -131,6 +144,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		rootCtx:        rootCtx,
 		cancelRoot:     cancelRoot,
 		allowSubscribe: true,
+		batchLimit:     batchLimit,
 		serverSubs:     make(map[ID]*Subscription),
 		logger:         logger,
 		allowList:      allowList,
@@ -161,6 +175,13 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
 			h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}))
+		})
+		return
+	}
+	// Apply limit on total number of requests.
+	if h.batchLimit != 0 && len(msgs) > h.batchLimit {
+		h.startCallProc(func(cp *callProc) {
+			h.respondWithBatchTooLarge(cp, msgs)
 		})
 		return
 	}
@@ -224,6 +245,21 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 			n.activate()
 		}
 	})
+}
+
+func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage) {
+	reason := fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", h.batchLimit, len(batch))
+	resp := errorMessage(&invalidRequestError{reason})
+	// Find the first call and add its "id" field to the error.
+	// This is the best we can do, given that the protocol doesn't have a way
+	// of reporting an error for the entire batch.
+	for _, msg := range batch {
+		if msg.isCall() {
+			resp.ID = msg.ID
+			break
+		}
+	}
+	h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp})
 }
 
 // handleMsg handles a single message.
@@ -374,7 +410,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	delete(h.respWait, string(msg.ID))
 	// For normal responses, just forward the reply to Call/BatchCall.
 	if op.sub == nil {
-		op.resp <- msg
+		op.resp <- []*jsonrpcMessage{msg}
 		return
 	}
 	// For subscription responses, start the subscription if the server
