@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/klauspost/compress/gzip"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
@@ -1326,7 +1327,26 @@ func calculateTime(amountLeft, rate uint64) string {
 // the provided "debug" mux if non-nil. Only do this if you have a single instance of a Downloader.
 func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		d.torrentClient.WriteStatus(w)
+		// WriteStatus holds the client lock until it finishes. For large torrent counts, the output
+		// can be very large (90 MB).
+		var buf bytes.Buffer
+		gzW := gzip.NewWriter(&buf)
+		d.torrentClient.WriteStatus(gzW)
+		gzW.Close()
+		h := r.Header.Get("Accept-Encoding")
+		d.logger.Debug("compressed torrent client status", "size", buf.Len(), "Accept-Encoding", h)
+		if strings.Contains(h, "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Write(buf.Bytes())
+		} else {
+			gzR, err := gzip.NewReader(&buf)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			io.Copy(w, gzR)
+			gzR.Close()
+		}
 	})
 
 	// This is for gopprof.
