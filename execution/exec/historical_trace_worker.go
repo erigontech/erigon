@@ -361,7 +361,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	g.Go(func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+				err = fmt.Errorf("'map worker' paniced: %s, %s", rec, dbg.Stack())
+				logger.Error("map worker panic", "error", err)
 			}
 		}()
 		defer func() {
@@ -373,6 +374,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+				logger.Error("reduce worker panic", "error", err)
 			}
 		}()
 		return doHistoryReduce(ctx, consumer, cfg, toTxNum, outputTxNum, out, logger)
@@ -390,9 +392,6 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 	var resultProcessor historicalResultProcessor
 
 	for outputTxNum.Load() <= toTxNum {
-		if out.closed {
-			break
-		}
 		closed, err := out.AwaitDrain(ctx, 10*time.Millisecond)
 
 		if err != nil {
