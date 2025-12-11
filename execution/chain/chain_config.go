@@ -358,8 +358,11 @@ func (c *Config) IsPrague(time uint64, currentArbosVersion uint64) bool {
 }
 
 // IsOsaka returns whether time is either equal to the Osaka fork time or greater.
-func (c *Config) IsOsaka(time uint64) bool {
-	return isForked(c.OsakaTime, time)
+func (c *Config) IsOsaka(num, time, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= osver.ArbosVersion_50
+	}
+	return c.IsLondon(num) && isForked(c.OsakaTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) *common.Address {
@@ -450,7 +453,8 @@ func (c *Config) GetBlobGasPriceUpdateFraction(time uint64, currentArbosVer uint
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
-	if c.IsOsaka(time) {
+	// TODO arbitrum fields
+	if c.IsOsaka(0, time, 0) {
 		return params.MaxRlpBlockSize
 	}
 	return math.MaxInt
@@ -721,8 +725,40 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
-	IsArbitrum, IsStylus                              bool
+	IsArbitrum, IsStylus, IsDia                       bool
 	ArbOSVersion                                      uint64
+}
+
+// Rules ensures c's ChainID is not nil and returns a new Rules instance
+func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
+	chainID := c.ChainID
+	if chainID == nil {
+		chainID = new(big.Int)
+	}
+
+	return &Rules{
+		ChainID:            new(big.Int).Set(chainID),
+		IsHomestead:        c.IsHomestead(num),
+		IsTangerineWhistle: c.IsTangerineWhistle(num),
+		IsSpuriousDragon:   c.IsSpuriousDragon(num),
+		IsByzantium:        c.IsByzantium(num),
+		IsConstantinople:   c.IsConstantinople(num),
+		IsPetersburg:       c.IsPetersburg(num),
+		IsIstanbul:         c.IsIstanbul(num),
+		IsBerlin:           c.IsBerlin(num),
+		IsLondon:           c.IsLondon(num),
+		IsShanghai:         c.IsShanghai(time, currentArbosVersion) || c.IsAgra(num),
+		IsCancun:           c.IsCancun(time, currentArbosVersion),
+		IsNapoli:           c.IsNapoli(num),
+		IsBhilai:           c.IsBhilai(num),
+		IsPrague:           c.IsPrague(time, currentArbosVersion) || c.IsBhilai(num),
+		IsOsaka:            c.IsOsaka(num, time, currentArbosVersion),
+		IsAura:             c.Aura != nil,
+		ArbOSVersion:       currentArbosVersion,
+		IsArbitrum:         c.IsArbitrum(),
+		IsStylus:           c.IsArbitrum() && currentArbosVersion >= osver.ArbosVersion_Stylus,
+		IsDia:              c.IsArbitrum() && currentArbosVersion >= osver.ArbosVersion_50,
+	}
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.

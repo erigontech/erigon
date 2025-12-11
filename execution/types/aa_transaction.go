@@ -31,6 +31,10 @@ const AA_GAS_PENALTY_PCT = 10
 var AA_ENTRY_POINT = common.HexToAddress("0x0000000000000000000000000000000000007560")
 var AA_SENDER_CREATOR = common.HexToAddress("0x00000000000000000000000000000000ffff7560")
 
+//type NoTimeBoosted bool
+//func (tx *NoTimeBoosted) IsTimeBoosted() *bool {return nil}
+//func (tx *NoTimeBoosted) SetTimeboosted(_ *bool) {}
+
 type AccountAbstractionTransaction struct {
 	arb.NoTimeBoosted
 
@@ -171,6 +175,8 @@ func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, r
 		to:         nil,
 		gasPrice:   *tx.FeeCap,
 		blobHashes: []common.Hash{},
+
+		TxRunContext: new(MessageRunContext),
 	}, nil
 }
 

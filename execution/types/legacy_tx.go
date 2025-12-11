@@ -404,7 +404,8 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		checkNonce: true,
 		checkGas:   true,
 
-		Tx: tx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           tx,
 	}
 
 	var err error

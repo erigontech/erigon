@@ -148,7 +148,8 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce: true,
 		checkGas:   true,
 
-		Tx: tx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           tx,
 	}
 	if !rules.IsPrague {
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")

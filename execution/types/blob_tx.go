@@ -62,7 +62,8 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		checkNonce: true,
 		checkGas:   true,
 
-		Tx: stx,
+		TxRunContext: new(MessageRunContext),
+		Tx:           stx,
 	}
 	if !rules.IsCancun {
 		return nil, errors.New("BlobTx transactions require Cancun")

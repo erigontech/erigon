@@ -423,6 +423,7 @@ type Message struct {
 	SkipAccountChecks bool // same as checkNonce
 	SkipL1Charging    bool
 	TxRunMode         MessageRunMode // deprecated (shoudl be)
+	TxRunContext      *MessageRunContext
 	Tx                Transaction
 	EffectiveGas      uint64 // amount of gas effectively used by transaction (used in ArbitrumSubmitRetryableTx)
 }
@@ -431,20 +432,6 @@ type Message struct {
 func (m *Message) SetGasPrice(f *uint256.Int) { m.gasPrice.Set(f) }
 func (m *Message) SetFeeCap(f *uint256.Int)   { m.feeCap.Set(f) }
 func (m *Message) SetTip(f *uint256.Int)      { m.tipCap.Set(f) }
-
-type MessageRunMode uint8
-
-const (
-	MessageCommitMode MessageRunMode = iota
-	MessageGasEstimationMode
-	MessageEthcallMode
-	MessageReplayMode
-)
-
-// these message modes are executed onchain so cannot make any gas shortcuts
-func (m MessageRunMode) ExecutedOnChain() bool { // can use isFree for that??
-	return m == MessageCommitMode || m == MessageReplayMode
-}
 
 // eof arbitrum
 
@@ -463,6 +450,8 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		checkNonce: checkNonce,
 		checkGas:   checkGas,
 		isFree:     isFree,
+
+		TxRunContext: new(MessageRunContext),
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)

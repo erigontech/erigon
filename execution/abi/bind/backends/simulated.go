@@ -93,7 +93,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
-	m := mock.MockWithGenesisEngine(t, &genesis, engine, false)
+	m := mock.MockWithGenesisEngine(t, &genesis, engine, false, true)
 
 	backend := &SimulatedBackend{
 		m:            m,
@@ -620,7 +620,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	} else {
 		hi = b.pendingBlock.GasLimit()
 	}
-	if hi > params.MaxTxnGasLimit && b.m.ChainConfig.IsOsaka(b.pendingBlock.Time()) {
+	if hi > params.MaxTxnGasLimit && /*!b.m.ChainConfig.IsArbitrum() &&*/ b.m.ChainConfig.IsOsaka(b.pendingBlock.Time(), 0) {
 		// Cap the maximum gas allowance according to EIP-7825 if Osaka
 		hi = params.MaxTxnGasLimit
 	}

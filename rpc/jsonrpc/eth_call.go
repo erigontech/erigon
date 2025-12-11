@@ -64,7 +64,7 @@ var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 const estimateGasErrorRatio = 0.015
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -232,7 +232,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 		posterCost, _ := state.L1PricingState().PosterDataCost(msg, l1pricing.BatchPosterAddress, brotliCompressionLevel)
 		// Use estimate mode because this is used to raise the gas cap, so we don't want to underestimate.
-		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.MessageGasEstimationMode, posterCost)
+		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.NewMessageGasEstimationContext(), posterCost)
 		api.GasCap += postingGas
 	}
 
@@ -865,9 +865,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		args.From = &common.Address{}
 	}
 
+	//var arbosFormatVersion uint64
+	//if chainConfig.IsArbitrum() {
+	//	arbosFormatVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	//}
+
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
+	// TODO arbitrum
+	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))// blockNumber, header.Time, arbosFormatVersion))
 	excl := make(map[common.Address]struct{})
 	// Add 'from', 'to', precompiles to the exclusion list
 	excl[*args.From] = struct{}{}
