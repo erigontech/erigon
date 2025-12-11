@@ -8,6 +8,7 @@
 package bitutil
 
 import (
+	"crypto/subtle"
 	"runtime"
 	"unsafe"
 )
@@ -15,42 +16,15 @@ import (
 const wordSize = int(unsafe.Sizeof(uintptr(0)))
 const supportsUnaligned = runtime.GOARCH == "386" || runtime.GOARCH == "amd64" || runtime.GOARCH == "ppc64" || runtime.GOARCH == "ppc64le" || runtime.GOARCH == "s390x"
 
-// XORBytes xors the bytes in a and b. The destination is assumed to have enough
-// space. Returns the number of bytes xor'd.
+// XORBytes xors the bytes in a and b and writes the result into dst.
+// The number of bytes XORed is min(len(a), len(b)), and that value is returned.
+//
+// dst must have length >= min(len(a), len(b)) or the function will panic.
+// dst may exactly overlap with a or with b, but partial overlaps are not allowed.
+//
+// Deprecated: use crypto/subtle.XORBytes.
 func XORBytes(dst, a, b []byte) int {
-	if supportsUnaligned {
-		return fastXORBytes(dst, a, b)
-	}
-	return safeXORBytes(dst, a, b)
-}
-
-// fastXORBytes xors in bulk. It only works on architectures that support
-// unaligned read/writes.
-func fastXORBytes(dst, a, b []byte) int {
-	n := min(len(b), len(a))
-	w := n / wordSize
-	if w > 0 {
-		dw := *(*[]uintptr)(unsafe.Pointer(&dst))
-		aw := *(*[]uintptr)(unsafe.Pointer(&a))
-		bw := *(*[]uintptr)(unsafe.Pointer(&b))
-		for i := 0; i < w; i++ {
-			dw[i] = aw[i] ^ bw[i]
-		}
-	}
-	for i := n - n%wordSize; i < n; i++ {
-		dst[i] = a[i] ^ b[i]
-	}
-	return n
-}
-
-// safeXORBytes xors one by one. It works on all architectures, independent if
-// it supports unaligned read/writes or not.
-func safeXORBytes(dst, a, b []byte) int {
-	n := min(len(b), len(a))
-	for i := 0; i < n; i++ {
-		dst[i] = a[i] ^ b[i]
-	}
-	return n
+	return subtle.XORBytes(dst, a, b)
 }
 
 // ANDBytes ands the bytes in a and b. The destination is assumed to have enough

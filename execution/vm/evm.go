@@ -191,9 +191,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 	}
 
-	// BAL: record address access even if call fails due to gas/call depth and to precompiles
-	evm.intraBlockState.MarkAddressAccess(addr)
-
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if evm.Config().Tracer != nil {
 		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
@@ -221,6 +218,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 		}
 	}
+
+	// BAL: record address access even if call fails due to gas/call depth and to precompiles
+	evm.intraBlockState.MarkAddressAccess(addr)
 
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
