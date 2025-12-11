@@ -110,7 +110,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	}
 
 	if !exists {
-		segCfg := seg.DefaultCfg
+		segCfg := seg.DefaultCfg.WithValuesOnCompressedPage(a.cfg.ValuesOnCompressedPage)
 		segCfg.Workers = compressionWorkers
 		segCfg.ExpectMetadata = true
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.id), path, a.dirs.Tmp, segCfg, log.LvlTrace, a.logger)

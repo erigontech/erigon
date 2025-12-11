@@ -135,7 +135,7 @@ type Decompressor struct {
 	hasMetadata         bool
 	metadata            []byte
 	version             uint8
-	featureFlagBitmask  uint8
+	featureFlagBitmask  FeatureFlagBitmask
 	compPageValuesCount uint8
 
 	serializedDictSize uint64
@@ -236,15 +236,15 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 
 	d.version = d.data[0]
 
-	// 1st byte: version,
-	// 2nd byte: defines how exactly the file is compressed
-	// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
 	if d.version == FileCompressionFormatV1 {
-		d.featureFlagBitmask = d.data[1]
+		// 1st byte: version,
+		// 2nd byte: defines how exactly the file is compressed
+		// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
+		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
 		d.data = d.data[2:]
 	}
 
-	if d.featureFlagBitmask&PageLevelCompressionEnabled == PageLevelCompressionEnabled {
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
 		d.compPageValuesCount = d.data[0]
 		d.data = d.data[1:]
 	}
@@ -380,10 +380,11 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 	d.wordsStart = pos + dictSize
 
-	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
+	if d.Count() == 0 && dictSize == 0 && d.size > d.calcCompressedMinSize() {
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
 	}
+
 	validationPassed = true
 	return d, nil
 }
@@ -1097,4 +1098,16 @@ func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (
 		return 0, false
 	}
 	return foundOffset, true
+}
+
+func (d *Decompressor) calcCompressedMinSize() int64 {
+	if d.version == FileCompressionFormatV0 {
+		return compressedMinSize
+	}
+
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+		return compressedMinSize + 3 // 2 bytes always are used for bitmask and version + 1 optional for page level compression if enabled
+	}
+
+	return compressedMinSize + 2
 }

@@ -132,7 +132,7 @@ type Compressor struct {
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
 
 	version             uint8
-	featureFlagBitmask  uint8
+	featureFlagBitmask  FeatureFlagBitmask
 	compPageValuesCount uint8
 	metadata            []byte
 }
@@ -179,7 +179,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	}
 
 	if cfg.ValuesOnCompressedPage > 0 {
-		cc.featureFlagBitmask |= PageLevelCompressionEnabled
+		cc.featureFlagBitmask.Set(PageLevelCompressionEnabled)
 		cc.compPageValuesCount = uint8(cfg.ValuesOnCompressedPage)
 	}
 
@@ -298,11 +298,11 @@ func (c *Compressor) Compress() error {
 	defer cf.Close()
 
 	if c.version == FileCompressionFormatV1 {
-		if _, err := cf.Write([]byte{c.version, c.featureFlagBitmask}); err != nil {
+		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
 			return err
 		}
 
-		if c.featureFlagBitmask&PageLevelCompressionEnabled == PageLevelCompressionEnabled {
+		if c.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
 			if _, err := cf.Write([]byte{c.compPageValuesCount}); err != nil {
 				return err
 			}
