@@ -27,8 +27,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-type RpcEventType uint64
-
 type NewSnapshotSubscription func() error
 type HeaderSubscription func(headerRLP []byte) error
 type PendingLogsSubscription func(types.Logs) error
