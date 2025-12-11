@@ -43,7 +43,7 @@ func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockRea
 func (cr Reader) Config() *chain.Config { return cr.config }
 func (cr Reader) CurrentHeader() *types.Header {
 	hash := rawdb.ReadHeadHeaderHash(cr.tx)
-	h, err := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+	h, _ := cr.blockReader.HeaderByHash(ctx, cr.tx, hash)
 	if err != nil {
 		cr.logger.Warn("CurrentHeader lookup failed", "err", err)
 		return nil
