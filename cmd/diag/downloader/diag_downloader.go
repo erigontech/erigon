@@ -25,9 +25,9 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon/cmd/diag/flags"
 	"github.com/erigontech/erigon/cmd/diag/util"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 var (
@@ -220,7 +220,7 @@ func printFile(cliCtx *cli.Context) error {
 	return nil
 }
 
-func getDownloadedFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
+func getDownloadedFileRow(file diaglib.SegmentDownloadStatistics) table.Row {
 	averageDownloadRate := common.ByteCount(file.DownloadedStats.AverageRate) + "/s"
 	totalDownloadTimeString := time.Duration(file.DownloadedStats.TimeTook) * time.Second
 
@@ -234,7 +234,7 @@ func getDownloadedFileRow(file diagnostics.SegmentDownloadStatistics) table.Row 
 	return row
 }
 
-func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) table.Row {
+func getSnapshotStatusRow(snapDownload diaglib.SnapshotDownloadStatistics) table.Row {
 	status := "Downloading"
 	if snapDownload.DownloadFinished {
 		status = "Finished"
@@ -243,7 +243,7 @@ func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) t
 	downloadedPercent := getPercentDownloaded(snapDownload.Downloaded, snapDownload.Total)
 
 	remainingBytes := snapDownload.Total - snapDownload.Downloaded
-	downloadTimeLeft := diagnostics.CalculateTime(remainingBytes, snapDownload.DownloadRate)
+	downloadTimeLeft := diaglib.CalculateTime(remainingBytes, snapDownload.DownloadRate)
 
 	totalDownloadTimeString := time.Duration(snapDownload.TotalTime) * time.Second
 
@@ -266,13 +266,13 @@ func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) t
 	return rowObj
 }
 
-func getFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
+func getFileRow(file diaglib.SegmentDownloadStatistics) table.Row {
 	peersDownloadRate := getFileDownloadRate(file.Peers)
 	webseedsDownloadRate := getFileDownloadRate(file.Webseeds)
 	totalDownloadRate := peersDownloadRate + webseedsDownloadRate
 	downloadedPercent := getPercentDownloaded(file.DownloadedBytes, file.TotalBytes)
 	remainingBytes := file.TotalBytes - file.DownloadedBytes
-	downloadTimeLeft := diagnostics.CalculateTime(remainingBytes, totalDownloadRate)
+	downloadTimeLeft := diaglib.CalculateTime(remainingBytes, totalDownloadRate)
 	isActive := "false"
 	if totalDownloadRate > 0 {
 		isActive = "true"
@@ -294,7 +294,7 @@ func getFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
 	return row
 }
 
-func getPeersRows(peers []diagnostics.SegmentPeer) []table.Row {
+func getPeersRows(peers []diaglib.SegmentPeer) []table.Row {
 	rows := make([]table.Row, 0)
 
 	for _, peer := range peers {
@@ -309,7 +309,7 @@ func getPeersRows(peers []diagnostics.SegmentPeer) []table.Row {
 	return rows
 }
 
-func getFileDownloadRate(peers []diagnostics.SegmentPeer) uint64 {
+func getFileDownloadRate(peers []diaglib.SegmentPeer) uint64 {
 	var downloadRate uint64
 
 	for _, peer := range peers {
@@ -319,8 +319,8 @@ func getFileDownloadRate(peers []diagnostics.SegmentPeer) uint64 {
 	return downloadRate
 }
 
-func getData(cliCtx *cli.Context) (diagnostics.SyncStatistics, error) {
-	var data diagnostics.SyncStatistics
+func getData(cliCtx *cli.Context) (diaglib.SyncStatistics, error) {
+	var data diaglib.SyncStatistics
 	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/snapshot-sync"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)

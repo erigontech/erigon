@@ -23,14 +23,13 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -44,7 +43,6 @@ import (
 var (
 	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
-	computeSigningRoot           = fork.ComputeSigningRoot
 )
 
 type attestationService struct {
@@ -67,7 +65,7 @@ type attestationService struct {
 type AttestationForGossip struct {
 	Attestation       *solid.Attestation
 	SingleAttestation *solid.SingleAttestation // New container after Electra
-	Receiver          *sentinel.Peer
+	Receiver          *sentinelproto.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
 }

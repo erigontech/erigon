@@ -37,7 +37,7 @@ jobs:
           rm -drf $(pwd)/*
 
       - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## 4.1.7 release
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 1
@@ -49,6 +49,8 @@ jobs:
         ## Idea is:
         ##   latest image:    erigontech/erigon:${tag_name}${latest_suffix}
         ##   commit id image: erigontech/erigon:${tag_name}-${short_commit_id}
+        env:
+          CHECKOUT_REF: ${{ inputs.checkout_ref }}
         run: |
           branch_name="${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}"
           case "$branch_name" in
@@ -62,11 +64,11 @@ jobs:
               export tag_name='docker_pectra';
               export keep_images=5;
               export latest_suffix='';
-              export binaries="erigon caplin diag devnet downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
+              export binaries="erigon caplin diag downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
               ;;
             * )
               # use last string after last slash '/' by default if branch contains slash:
-              export tag_name=$(echo ${{ inputs.checkout_ref }} | sed -e  's/.*\///g' );
+              export tag_name=$(echo $CHECKOUT_REF | sed -e  's/.*\///g' );
               export keep_images=0;
               export latest_suffix=''
               export binaries="erigon"

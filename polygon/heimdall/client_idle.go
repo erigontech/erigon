@@ -21,26 +21,23 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
 )
 
 type IdleClient struct {
-	cfg params.MiningConfig
+	cfg buildercfg.MiningConfig
 }
 
-func NewIdleClient(cfg params.MiningConfig) Client {
+func NewIdleClient(cfg buildercfg.MiningConfig) Client {
 	return &IdleClient{cfg: cfg}
-}
-
-func (c *IdleClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
-	return nil, nil
 }
 
 func (c *IdleClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	return &Span{
-		ValidatorSet: valset.ValidatorSet{
-			Validators: []*valset.Validator{
+		StartBlock: 0,
+		EndBlock:   255,
+		ValidatorSet: ValidatorSet{
+			Validators: []*Validator{
 				{
 					ID:          0,
 					Address:     c.cfg.Etherbase,
@@ -48,7 +45,7 @@ func (c *IdleClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 				},
 			},
 		},
-		SelectedProducers: []valset.Validator{
+		SelectedProducers: []Validator{
 			{
 				ID:          0,
 				Address:     c.cfg.Etherbase,
@@ -60,9 +57,11 @@ func (c *IdleClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 
 func (c *IdleClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	return &Span{
-		Id: SpanId(spanID),
-		ValidatorSet: valset.ValidatorSet{
-			Validators: []*valset.Validator{
+		Id:         SpanId(spanID),
+		StartBlock: 0,
+		EndBlock:   255,
+		ValidatorSet: ValidatorSet{
+			Validators: []*Validator{
 				{
 					ID:          0,
 					Address:     c.cfg.Etherbase,
@@ -70,7 +69,7 @@ func (c *IdleClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 				},
 			},
 		},
-		SelectedProducers: []valset.Validator{
+		SelectedProducers: []Validator{
 			{
 				ID:          0,
 				Address:     c.cfg.Etherbase,
@@ -82,10 +81,6 @@ func (c *IdleClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 
 func (c *IdleClient) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error) {
 	return nil, nil
-}
-
-func (c *IdleClient) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
-	return &ChainManagerStatus{}, nil
 }
 
 func (c *IdleClient) FetchStatus(ctx context.Context) (*Status, error) {

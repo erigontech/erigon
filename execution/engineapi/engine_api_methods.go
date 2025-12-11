@@ -23,8 +23,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/params"
 )
 
 var ourCapabilities = []string{
@@ -165,7 +165,7 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 	if callerVersion != nil {
 		e.logger.Info("[GetClientVersionV1] Received request from" + callerVersion.String())
 	}
-	commitString := params.GitCommit
+	commitString := version.GitCommit
 	if len(commitString) >= 8 {
 		commitString = commitString[:8]
 	} else {
@@ -173,9 +173,9 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 	}
 	result := make([]engine_types.ClientVersionV1, 1)
 	result[0] = engine_types.ClientVersionV1{
-		Code:    params.ClientCode,
-		Name:    params.ClientName,
-		Version: params.VersionWithCommit(params.GitCommit),
+		Code:    version.ClientCode,
+		Name:    version.ClientName,
+		Version: version.VersionWithCommit(version.GitCommit),
 		Commit:  "0x" + commitString,
 	}
 	return result, nil
@@ -195,7 +195,7 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.CapellaVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
 	if err != nil {
 		return nil, err
 	}

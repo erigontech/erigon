@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
@@ -68,7 +68,7 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br services.FullB
 		}
 		body, _, _ := rawdb.ReadBody(tx, hash, i)
 		if body == nil {
-			err = fmt.Errorf("header not found: %d", i)
+			err = fmt.Errorf("body not found: %d", i)
 			if failFast {
 				return err
 			}

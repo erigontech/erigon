@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -46,7 +46,7 @@ type ValidatorSyncCommitteeSubscriptionsRequest struct {
 func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.ResponseWriter, r *http.Request) {
 	var req []ValidatorSyncCommitteeSubscriptionsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	if len(req) == 0 {
@@ -81,7 +81,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 				}
 				return nil
 			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
 			//cn()
@@ -89,11 +89,11 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 
 		// subscribe to subnets
 		for _, subnet := range syncnets {
-			if _, err := a.sentinel.SetSubscribeExpiry(r.Context(), &sentinel.RequestSubscribeExpiry{
+			if _, err := a.sentinel.SetSubscribeExpiry(r.Context(), &sentinelproto.RequestSubscribeExpiry{
 				Topic:          gossip.TopicNameSyncCommittee(int(subnet)),
 				ExpiryUnixSecs: uint64(expiry.Unix()),
 			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
 		}
@@ -105,17 +105,17 @@ func (a *ApiHandler) PostEthV1ValidatorBeaconCommitteeSubscription(w http.Respon
 	req := []*cltypes.BeaconCommitteeSubscription{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Error("failed to decode request", "err", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	if len(req) == 0 {
-		http.Error(w, "empty request", http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("empty request")).WriteTo(w)
 		return
 	}
 	for _, sub := range req {
 		if err := a.committeeSub.AddAttestationSubscription(context.Background(), sub); err != nil {
 			log.Error("failed to add attestation subscription", "err", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
 	}

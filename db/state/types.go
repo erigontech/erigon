@@ -1,6 +1,6 @@
 package state
 
-import "github.com/erigontech/erigon-lib/kv"
+import "github.com/erigontech/erigon/db/kv"
 
 /** custom types **/
 type Num = kv.Num

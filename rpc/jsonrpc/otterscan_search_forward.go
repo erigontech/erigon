@@ -20,8 +20,9 @@ import (
 	"bytes"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
+
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // Given a ChunkLocator, moves forward over the chunks and inside each chunk, moves

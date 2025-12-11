@@ -25,15 +25,14 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -312,14 +311,14 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = chain.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
-	tx, errBegin := db.BeginTemporalRw(context.Background())
+	tx, errBegin := db.BeginTemporalRo(context.Background())
 	if errBegin != nil {
 		return nil, errBegin
 	}
@@ -374,29 +373,20 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			if _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
-
-			var arbosVersion uint64
-			if config.IsArbitrum() {
-				arbosVersion = types.DeserializeHeaderExtraInformation(b.header).ArbOSFormatVersion
-			}
 			// Write state changes to db
-			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time, arbosVersion), stateWriter); err != nil {
+			blockContext := NewEVMBlockContext(b.header, GetHashFn(b.header, nil), b.engine, nil, config)
+			if err := ibs.CommitBlock(blockContext.Rules(config), stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
 			var err error
-			//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
-			//if err = domains.Flush(ctx, tx); err != nil {
-			//	return nil, nil, err
-			//}
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
 			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), uint64(txNum), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
-			if err = domains.Flush(ctx, tx); err != nil {
-				return nil, nil, err
-			}
+			//don't need `domains.Flush` because we are working on RoTx
+
 			b.header.Root = common.BytesToHash(stateRoot)
 
 			// Recreating block to make sure Root makes it into the header
@@ -417,7 +407,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		receipts[i] = receipt
 		parent = block
 	}
-	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
@@ -505,9 +494,3 @@ func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool       
 func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
 func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64                       { return 0 }
-func (cr *FakeChainReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	return nil
-}
-func (cr *FakeChainReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
-	return 0
-}

@@ -13,7 +13,6 @@ import (
 	reflect "reflect"
 
 	consensus "github.com/erigontech/erigon/execution/consensus"
-	valset "github.com/erigontech/erigon/polygon/bor/valset"
 	heimdall "github.com/erigontech/erigon/polygon/heimdall"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -80,45 +79,6 @@ func (c *MockSpannerCommitSpanCall) DoAndReturn(f func(heimdall.Span, consensus.
 	return c
 }
 
-// GetCurrentProducers mocks base method.
-func (m *MockSpanner) GetCurrentProducers(spanId uint64, chain ChainHeaderReader) ([]*valset.Validator, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentProducers", spanId, chain)
-	ret0, _ := ret[0].([]*valset.Validator)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetCurrentProducers indicates an expected call of GetCurrentProducers.
-func (mr *MockSpannerMockRecorder) GetCurrentProducers(spanId, chain any) *MockSpannerGetCurrentProducersCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentProducers", reflect.TypeOf((*MockSpanner)(nil).GetCurrentProducers), spanId, chain)
-	return &MockSpannerGetCurrentProducersCall{Call: call}
-}
-
-// MockSpannerGetCurrentProducersCall wrap *gomock.Call
-type MockSpannerGetCurrentProducersCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockSpannerGetCurrentProducersCall) Return(arg0 []*valset.Validator, arg1 error) *MockSpannerGetCurrentProducersCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockSpannerGetCurrentProducersCall) Do(f func(uint64, ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentProducersCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSpannerGetCurrentProducersCall) DoAndReturn(f func(uint64, ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentProducersCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // GetCurrentSpan mocks base method.
 func (m *MockSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error) {
 	m.ctrl.T.Helper()
@@ -154,45 +114,6 @@ func (c *MockSpannerGetCurrentSpanCall) Do(f func(consensus.SystemCall) (*heimda
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSpannerGetCurrentSpanCall) DoAndReturn(f func(consensus.SystemCall) (*heimdall.Span, error)) *MockSpannerGetCurrentSpanCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// GetCurrentValidators mocks base method.
-func (m *MockSpanner) GetCurrentValidators(spanId uint64, chain ChainHeaderReader) ([]*valset.Validator, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentValidators", spanId, chain)
-	ret0, _ := ret[0].([]*valset.Validator)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetCurrentValidators indicates an expected call of GetCurrentValidators.
-func (mr *MockSpannerMockRecorder) GetCurrentValidators(spanId, chain any) *MockSpannerGetCurrentValidatorsCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentValidators", reflect.TypeOf((*MockSpanner)(nil).GetCurrentValidators), spanId, chain)
-	return &MockSpannerGetCurrentValidatorsCall{Call: call}
-}
-
-// MockSpannerGetCurrentValidatorsCall wrap *gomock.Call
-type MockSpannerGetCurrentValidatorsCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockSpannerGetCurrentValidatorsCall) Return(arg0 []*valset.Validator, arg1 error) *MockSpannerGetCurrentValidatorsCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockSpannerGetCurrentValidatorsCall) Do(f func(uint64, ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentValidatorsCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSpannerGetCurrentValidatorsCall) DoAndReturn(f func(uint64, ChainHeaderReader) ([]*valset.Validator, error)) *MockSpannerGetCurrentValidatorsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

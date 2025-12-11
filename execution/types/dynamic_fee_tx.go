@@ -27,10 +27,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/rlp"
 )
 
 type DynamicFeeTransaction struct {
@@ -107,6 +107,10 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 
 func (tx *DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
+}
+
+func (tx *DynamicFeeTransaction) GetAuthorizations() []Authorization {
+	return nil
 }
 
 func (tx *DynamicFeeTransaction) EncodingSize() int {
@@ -379,7 +383,9 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
-		Tx:         tx,
+		checkGas:   true,
+
+		Tx: tx,
 	}
 	if !rules.IsLondon {
 		return nil, errors.New("eip-1559 transactions require London")
