@@ -291,7 +291,9 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
+	cfg.LogPrefix = "[snapshots] "
+
+	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}

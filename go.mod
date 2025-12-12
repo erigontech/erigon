@@ -19,7 +19,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.14.4
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/envpprof v1.4.0
+	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.1.1-0.20251125230353-15d98d46693b
 	github.com/anacrolix/go-libutp v1.3.3-0.20251121015447-f294e5ed5b4d
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
@@ -315,5 +315,3 @@ require (
 	modernc.org/sqlite v1.21.1 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
-
-replace github.com/ajwerner/btree => github.com/anacrolix/btree v0.0.0-20251103085645-fd1051eb0009
