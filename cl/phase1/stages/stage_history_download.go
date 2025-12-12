@@ -313,4 +313,3 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	return nil
 }
-
