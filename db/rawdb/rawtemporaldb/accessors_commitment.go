@@ -6,7 +6,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
@@ -16,7 +16,7 @@ func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
 	}
 	if minUnwindale == math.MaxUint64 { // no unwindable block found
 		log.Warn("no unwindable block found from changesets, falling back to latest with commitment")
-		return commitmentdb.LatestBlockNumWithCommitment(tx)
+		return commitment.LatestBlockNumWithCommitment(tx)
 	}
 	if minUnwindale > 0 {
 		minUnwindale-- // UnwindTo is exclusive, i.e. (unwindPoint,tip] get unwound

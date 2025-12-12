@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	execstate "github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -69,7 +68,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execstate.NewExecutionContext(context.Background(), tx, log.New())
+	domains := tx.Debug().NewMemBatch(nil)
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -98,10 +97,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf[:], txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, addr, buf[:], txNum, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
@@ -109,10 +108,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if (txNum+1)%stepSize == 0 {
 			trieState, err := hph.EncodeCurrentState(nil)
 			require.NoError(t, err)
-			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
+			cs := commitment.NewCommitmentState(txNum, 0, trieState)
 			encodedState, err := cs.Encode()
 			require.NoError(t, err)
-			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil, 0)
+			err = domains.DomainPut(kv.CommitmentDomain, commitment.KeyCommitmentState, encodedState, txNum, nil, 0)
 			require.NoError(t, err)
 		}
 	}
@@ -334,27 +333,28 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
-		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil, 0)
+		err = domains.PutAccount(context.Background(), accounts.BytesToAddress(addr), &acc, rwTx, txNum, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		var sv uint256.Int
+		sv.SetBytes([]byte{addr[0], loc[0]})
+		err = domains.PutStorage(context.Background(), accounts.BytesToAddress(addr), accounts.BytesToKey(loc), sv, rwTx, txNum, nil, 0)
 		require.NoError(t, err)
 
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			pv, step, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey2)
+			pv, step, _, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey2), rwTx)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv, step)
+			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey2), commitment.Branch(v[:]), rwTx, txNum, pv, step)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			pv, step, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey1)
+			pv, step, _, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey1), rwTx)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv, step)
+			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey1), commitment.Branch(v[:]), rwTx, txNum, pv, step)
 			require.NoError(t, err)
 			maxWrite = txNum
 		}
@@ -842,6 +842,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 
 	for j := uint64(0); j < keysCount; j++ {
 		key, existed := getKey()
+		addr := accounts.BytesToAddress(key)
 
 		r := rnd.IntN(101)
 		switch {
@@ -852,13 +853,12 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			buf := accounts.SerialiseV3(&acc)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			prev, step, _, err := domains.GetAccount(context.Background(), addr, tx)
 			require.NoError(t, err)
 
 			usedKeys[string(key)] = struct{}{}
 
-			err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev, step)
+			err = domains.PutAccount(context.Background(), addr, &acc, tx, txNum, prev, step)
 			require.NoError(t, err)
 
 		case r > 33 && r <= 66:
@@ -873,10 +873,10 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			prev, step, err := domains.GetLatest(kv.CodeDomain, tx, key)
+			prev, step, _, err := domains.GetCode(context.Background(), addr, tx)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.CodeDomain, tx, key, codeUpd, txNum, prev, step)
+			err = domains.PutCode(context.Background(), accounts.BytesToAddress(key), codeUpd, tx, txNum, prev, step)
 			require.NoError(t, err)
 		case r > 80:
 			if !existed {
@@ -892,8 +892,8 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 			if len(key) > length.Addr {
 				key = key[:length.Addr]
 			}
-
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			addr := accounts.BytesToAddress(key)
+			prev, step, _, err := domains.GetAccount(context.Background(), addr, tx)
 			require.NoError(t, err)
 			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
@@ -903,8 +903,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 					CodeHash:    accounts.EmptyCodeHash,
 					Incarnation: 0,
 				}
-				buf := accounts.SerialiseV3(&acc)
-				err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev, step)
+				err = domains.PutAccount(context.Background(), addr, &acc, tx, txNum, prev, step)
 				require.NoError(t, err)
 			}
 
@@ -916,10 +915,16 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}
 
-				prev, step, err := domains.GetLatest(kv.StorageDomain, tx, sk[:length.Addr])
+				prev, step, ok, err := domains.GetStorage(context.Background(),
+					accounts.BytesToAddress(sk[:length.Addr]), accounts.BytesToKey(sk[length.Addr:]), tx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, tx, sk, uint256.NewInt(txNum).Bytes(), txNum, prev, step)
+				var pprev *uint256.Int
+				if ok {
+					pprev = &prev
+				}
+				err = domains.PutStorage(context.Background(), accounts.BytesToAddress(sk[:length.Addr]),
+					accounts.BytesToKey(sk[length.Addr:]), *uint256.NewInt(txNum), tx, txNum, pprev, step)
 				require.NoError(t, err)
 			}
 

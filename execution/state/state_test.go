@@ -40,7 +40,7 @@ import (
 )
 
 func toAddr(a []byte) accounts.Address {
-	return accounts.InternAddress(common.BytesToAddress(a))
+	return accounts.BytesToAddress(a)
 }
 
 func TestNull(t *testing.T) {
@@ -51,8 +51,8 @@ func TestNull(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsGetter(tx))
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+	r := NewStateReader(domains, tx)
+	w := NewWriter(domains, tx, nil, txNum)
 	state := New(r)
 
 	address := accounts.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
@@ -84,8 +84,8 @@ func TestTouchDelete(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsGetter(tx))
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+	r := NewStateReader(domains, tx)
+	w := NewWriter(domains, tx, nil, txNum)
 	state := New(r)
 
 	state.GetOrNewStateObject(accounts.ZeroAddress)
@@ -118,7 +118,7 @@ func TestSnapshot(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsGetter(tx))
+	r := NewStateReader(domains, tx)
 	state := New(r)
 
 	stateobjaddr := toAddr([]byte("aa"))
@@ -162,7 +162,7 @@ func TestSnapshotEmpty(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsGetter(tx))
+	r := NewStateReader(domains, tx)
 	state := New(r)
 
 	snapshot := state.PushSnapshot()
@@ -181,9 +181,9 @@ func TestSnapshot2(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+	w := NewWriter(domains, tx, nil, txNum)
 
-	state := New(NewReaderV3(domains.AsGetter(tx)))
+	state := New(NewStateReader(domains, tx))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -322,7 +322,7 @@ func TestDump(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV3(domains.AsGetter(tx)))
+	st := New(NewStateReader(domains, tx))
 
 	// generate a few entries
 	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -336,7 +336,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)
 
-	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	w := NewWriter(domains, tx, nil, domains.TxNum())
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
@@ -345,7 +345,7 @@ func TestDump(t *testing.T) {
 	err = st.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	blockWriter := NewWriter(domains, tx, nil, domains.TxNum())
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
 	err = domains.Flush(context.Background(), tx)

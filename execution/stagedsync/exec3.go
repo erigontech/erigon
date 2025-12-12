@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -159,7 +158,7 @@ func ExecV3(ctx context.Context,
 		doms, err = state.NewExecutionContext(ctx, applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
-		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
+		if errors.Is(err, commitment.ErrBehindCommitment) {
 			return nil
 		}
 		if err != nil {
@@ -239,7 +238,7 @@ func ExecV3(ctx context.Context,
 	if !execStage.CurrentSyncCycle.IsInitialCycle {
 		var clean func()
 
-		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
+		readAhead, clean = exec.BlocksReadAhead(ctx, 2, doms, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
 	}
 

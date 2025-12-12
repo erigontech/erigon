@@ -99,14 +99,12 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBa
 	return sd
 }
 
-func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
-	sd.putLatest(domain, k, v, txNum)
-	return sd.putHistory(domain, toBytesZeroCopy(k), v, txNum, preval, prevStep)
+func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k []byte, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+	return sd.putHistory(domain, k, v, txNum, preval, prevStep)
 }
 
-func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte, prevStep kv.Step) error {
-	sd.putLatest(domain, k, nil, txNum)
-	return sd.putHistory(domain, toBytesZeroCopy(k), nil, txNum, preval, prevStep)
+func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+	return sd.putHistory(domain, k, nil, txNum, preval, prevStep)
 }
 
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
@@ -116,103 +114,32 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval, prevStep)
 }
 
-func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
-
-	var updateMetrics = func(domain kv.Domain, putKeySize int, putValueSize int) {
-		sd.metrics.Lock()
-		defer sd.metrics.Unlock()
-		sd.metrics.CachePutCount++
-		sd.metrics.CachePutSize += putKeySize + putValueSize
-		sd.metrics.CachePutKeySize += putKeySize
-		sd.metrics.CachePutValueSize += putValueSize
-		if dm, ok := sd.metrics.Domains[domain]; ok {
-			dm.CachePutCount++
-			dm.CachePutSize += putKeySize + putValueSize
-			dm.CachePutKeySize += putKeySize
-			dm.CachePutValueSize += putValueSize
-		} else {
-			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
-				CachePutCount:     1,
-				CachePutSize:      putKeySize + putValueSize,
-				CachePutKeySize:   putKeySize,
-				CachePutValueSize: putValueSize,
-			}
-		}
-	}
-
-	valWithStep := dataWithStep{data: val, step: kv.Step(txNum / sd.stepSize)}
-	putKeySize := 0
-	putValueSize := 0
-	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Set(key, valWithStep); ok {
-			putValueSize += len(val) - len(old.data)
-		} else {
-			putKeySize += len(key)
-			putValueSize += len(val)
-		}
-
-		updateMetrics(domain, putKeySize, putValueSize)
-		return
-	}
-
-	if old, ok := sd.domains[domain][key]; ok {
-		putValueSize += len(val) - len(old.data)
-	} else {
-		putKeySize += len(key)
-		putValueSize += len(val)
-	}
-	sd.domains[domain][key] = valWithStep
-
-	updateMetrics(domain, putKeySize, putValueSize)
-}
-
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
-	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
-		if sd.unwindChangeset != nil {
-			if values := sd.unwindChangeset[domain]; values != nil {
-				if value, ok := values[key]; ok {
-					prevStep := ^binary.BigEndian.Uint64(value.PrevStepBytes)
+	if sd.unwindChangeset != nil {
+		if values := sd.unwindChangeset[domain]; values != nil {
+			if value, ok := values[toStringZeroCopy(key)]; ok {
+				prevStep := ^binary.BigEndian.Uint64(value.PrevStepBytes)
 
-					if len(value.Value) == 0 {
-						keyStep := ^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:]))
+				if len(value.Value) == 0 {
+					keyStep := ^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:]))
 
-						if keyStep != prevStep {
-							if prevStep != 0 {
-								return nil, kv.Step(prevStep), false
-							}
+					if keyStep != prevStep {
+						if prevStep != 0 {
+							return nil, kv.Step(prevStep), false
 						}
-
-						return nil, kv.Step(prevStep), true
 					}
-					return value.Value, kv.Step(prevStep), true
+
+					return nil, kv.Step(prevStep), true
 				}
+				return value.Value, kv.Step(prevStep), true
 			}
 		}
-
-		return nil, 0, false
 	}
 
-	keyS := toStringZeroCopy(key)
-	var dataWithStep dataWithStep
-	if domain == kv.StorageDomain {
-		dataWithStep, ok = sd.storage.Get(keyS)
-		if !ok {
-			return unwoundLatest(domain, keyS)
-		}
-		return dataWithStep.data, dataWithStep.step, ok
-
-	}
-
-	dataWithStep, ok = sd.domains[domain][keyS]
-	if !ok {
-		return unwoundLatest(domain, keyS)
-	}
-	return dataWithStep.data, dataWithStep.step, ok
+	return nil, 0, false
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {

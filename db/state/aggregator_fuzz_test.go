@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
-	execstate "github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -46,8 +46,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execstate.NewExecutionContext(context.Background(), rwTx, log.New())
-	require.NoError(f, err)
+	domains := rwTx.Debug().NewMemBatch(nil)
 	defer domains.Close()
 
 	const txs = uint64(1000)
@@ -84,10 +83,10 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), buf, txNum, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil, 0)
 			require.NoError(t, err)
 
 			var v [8]byte
@@ -96,14 +95,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				pv, step, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv, step)
+				err = domains.DomainPut(kv.CommitmentDomain, commKey2, v[:], txNum, pv, step)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
 				pv, step, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv, step)
+				err = domains.DomainPut(kv.CommitmentDomain, commKey1, v[:], txNum, pv, step)
 				require.NoError(t, err)
 				maxWrite = txNum
 			}
@@ -162,8 +161,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execstate.NewExecutionContext(context.Background(), rwTx, log.New())
-	require.NoError(f, err)
+	domains := rwTx.Debug().NewMemBatch(nil)
 	defer domains.Close()
 
 	const txs = uint64(1000)
@@ -187,6 +185,8 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		for i := 0; i < 1000; i++ {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
+		comitCtx := commitment.NewCommitmentContext(commitment.ModeDirect, commitment.VariantHexPatriciaTrie, rwTx.Debug().Dirs().Tmp)
+
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			acc := accounts.Account{
 				Nonce:       1,
@@ -195,15 +195,18 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), buf, txNum, nil, 0)
 			require.NoError(t, err)
+			comitCtx.TouchAccount()
 
 			k := composite(addrs[txNum].Bytes(), locs[txNum].Bytes())
 			v := []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
-			err = domains.DomainPut(kv.StorageDomain, rwTx, k, v, txNum, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, k, v, txNum, nil, 0)
+			comitCtx.TouchStorage()
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
+				err = domains.Flush(context.Background(), rwTx)
 				_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, txNum, "", nil)
 				require.NoError(t, err)
 			}

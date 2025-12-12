@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -76,7 +76,7 @@ func isDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 	doms, err := state.NewExecutionContext(ctx, tx, logger)
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err)
-		return errors.Is(err, commitmentdb.ErrBehindCommitment)
+		return errors.Is(err, commitment.ErrBehindCommitment)
 	}
 	defer doms.Close()
 	return false

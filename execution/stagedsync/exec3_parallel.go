@@ -181,7 +181,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					}
 					blockUpdateCount += applyResult.stateUpdates.UpdateCount()
 					err := pe.rs.ApplyTxState(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
-						nil, applyResult.receipt, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+						applyResult.receipt, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 						pe.cfg.chainConfig, applyResult.rules, false)
 					blockApplyCount += applyResult.stateUpdates.UpdateCount()
 					pe.rs.SetTrace(false)
@@ -597,7 +597,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						pe.RLock()
 						defer pe.RUnlock()
 
-						reader := state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
+						reader := state.NewStateReader(pe.rs.Domains(), applyTx)
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
@@ -1440,7 +1440,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if stateReader == nil {
-					stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
+					stateReader = state.NewBufferedReader(pe.rs, state.NewStateReader(pe.rs.Domains(), applyTx))
 				}
 
 				stateWriter := state.NewBufferedWriter(pe.rs, nil)

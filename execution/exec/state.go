@@ -196,13 +196,13 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		rw.SetReader(state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(rw.chainTx))))
+		rw.SetReader(state.NewBufferedReader(rs, state.NewStateReader(rs.Domains(), rw.chainTx)))
 	}
 
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		rw.stateWriter = state.NewWriter(rs.Domains().AsPutDel(rw.chainTx), accumulator, 0)
+		rw.stateWriter = state.NewWriter(rs.Domains(), rw.chainTx, accumulator, 0)
 	}
 }
 
@@ -238,15 +238,15 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) {
 
 	if rw.chainTx != nil {
 		type resettable interface {
-			SetGetter(kv.TemporalGetter)
+			SetExecutionContext(ec *state.ExecutionContext, tx kv.TemporalTx)
 		}
 
 		if resettable, ok := rw.stateReader.(resettable); ok {
-			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+			resettable.SetExecutionContext(rw.rs.Domains(), rw.chainTx)
 		}
 
 		if resettable, ok := rw.stateWriter.(resettable); ok {
-			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+			resettable.SetExecutionContext(rw.rs.Domains(), rw.chainTx)
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
@@ -344,7 +344,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.IsHistoric() && rw.historyMode {
-		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx))))
+		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewStateReader(rw.rs.Domains(), rw.chainTx)))
 	}
 
 	if rw.background && rw.chainTx == nil {
@@ -366,7 +366,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.IsHistoric() && rw.historyMode {
-		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx))))
+		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewStateReader(rw.rs.Domains(), rw.chainTx)))
 	}
 
 	txIndex := txTask.Version().TxIndex
@@ -416,7 +416,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(nil)))
+				reader = state.NewBufferedReader(rs, state.NewStateReader(rs.Domains(), nil))
 			}
 
 			reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator)

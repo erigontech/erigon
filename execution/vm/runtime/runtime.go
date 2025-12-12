@@ -115,7 +115,7 @@ func setDefaults(cfg *Config) {
 // Execute sets up an in-memory, temporary, environment for the execution of
 // the given code. It makes sure that it's restored to its original state afterwards.
 
-var contractAsAddress = accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+var contractAsAddress = accounts.BytesToAddress([]byte("contract"))
 
 func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
@@ -140,7 +140,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+		cfg.State = state.New(state.NewStateReader(sd, tx))
 	}
 	var (
 		address = contractAsAddress
@@ -197,7 +197,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+		cfg.State = state.New(state.NewStateReader(sd, tx))
 	}
 	var (
 		vmenv  = NewEnv(cfg)

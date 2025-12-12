@@ -252,7 +252,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *state.ExecutionContext, tx k
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	ibs := state.New(state.NewStateReader(sd, tx))
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",

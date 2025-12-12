@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -17,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	execstate "github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
@@ -43,10 +45,8 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
 	acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
 	acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
-	storageK2 := append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...)
 
 	// --- check 1: non-existing storage ---
 	{
@@ -60,7 +60,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	// --- check 2: storage exists in DB - TemporalTx.HasPrefix should catch this ---
 	{
 		// write to storage
-		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), u256.Num1, rwTtx1, 1, nil, 0)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx1)
 		require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTtx2.Rollback()
-		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc2), accounts.InternKey(acc2slot2), u256.Num2, rwTtx2, 2, nil, 0)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx2)
 		require.NoError(t, err)
@@ -175,7 +175,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx4, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTtx4.Rollback()
-		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.Bytes(), 3)
+		err = sd.DelStorage(ctx, accounts.InternAddress(acc1), accounts.NilKey, rwTtx4, 3, nil, 0)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx4)
 		require.NoError(t, err)
@@ -198,7 +198,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx5, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTtx5.Rollback()
-		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), u256.U64(3), rwTtx5, 4, nil, 0)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx5)
 		require.NoError(t, err)
@@ -233,7 +233,6 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// empty range when nothing has been written yet
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
 	nextSubTree, ok := kv.NextSubtree(acc1.Bytes())
 	require.True(t, ok)
 
@@ -246,7 +245,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
+	err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), u256.U64(1), rwTtx1, 1, nil, 0)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx1)
 	require.NoError(t, err)
@@ -256,7 +255,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx2.Rollback()
-	err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK1, []byte{2}, 2, nil, 0)
+	err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), u256.U64(2), rwTtx2, 2, nil, 0)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx2)
 	require.NoError(t, err)
@@ -266,7 +265,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx3.Rollback()
-	err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx3, acc1.Bytes(), 3)
+	err = sd.DelStorage(ctx, accounts.InternAddress(acc1), accounts.NilKey, rwTtx3, 3, nil, 0)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx3)
 	require.NoError(t, err)
@@ -277,7 +276,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTtx4.Rollback()
 
-	err = sd.DomainPut(kv.StorageDomain, rwTtx4, storageK1, []byte{3}, 4, nil, 0)
+	err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), u256.U64(3), rwTtx4, 4, nil, 0)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx4)
 	require.NoError(t, err)

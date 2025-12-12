@@ -157,8 +157,8 @@ func runCmd(ctx *cli.Context) error {
 		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
 		chainConfig   *chain.Config
-		sender        = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
-		receiver      = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
+		sender        = accounts.BytesToAddress([]byte("sender"))
+		receiver      = accounts.BytesToAddress([]byte("receiver"))
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
@@ -191,7 +191,7 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewStateReader(sd, tx)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))

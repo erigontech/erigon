@@ -811,13 +811,13 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		txNum = base
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
+		require.NoError(rawdb.WriteReceiptCacheV2(tx, nil, txNum))
 		for i, r := range receipts {
 			txNum = base + 1 + uint64(i)
-			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, txNum))
+			require.NoError(rawdb.WriteReceiptCacheV2(tx, r, txNum))
 		}
 		txNum = base + uint64(len(receipts)) + 1
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
+		require.NoError(rawdb.WriteReceiptCacheV2(tx, nil, txNum))
 
 		// Compute and store the commitment
 		_, err = sd.ComputeCommitment(ctx, tx, true, blockNum, txNum, "flush-commitment", nil)

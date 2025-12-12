@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
@@ -498,7 +498,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 		if keyBuf != nil {
 			if vt != nil {
-				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
+				if !bytes.Equal(keyBuf, commitment.KeyCommitmentState) { // no replacement for state key
 					valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
@@ -519,7 +519,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 	if keyBuf != nil {
 		if vt != nil {
-			if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
+			if !bytes.Equal(keyBuf, commitment.KeyCommitmentState) { // no replacement for state key
 				valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)

@@ -131,7 +131,7 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 
 	if opCode == vm.EXTCODESIZE || opCode == vm.EXTCODECOPY || opCode == vm.EXTCODEHASH {
 		if len(scope.StackData()) > 0 {
-			addr := accounts.InternAddress(common.BytesToAddress(scope.StackData()[0].Bytes()))
+			addr := accounts.BytesToAddress(scope.StackData()[0].Bytes())
 			if t.isDelegatedAccount(scope.Code()) && addr != t.senderAddress {
 				t.err = fmt.Errorf("access to delegated account %s not allowed", addr)
 				return

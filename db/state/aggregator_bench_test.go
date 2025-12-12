@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	execstate "github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
@@ -66,9 +66,10 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	domains, err := execstate.NewExecutionContext(ctx, tx, log.New())
-	require.NoError(b, err)
+	domains := tx.Debug().NewMemBatch(nil)
 	defer domains.Close()
+
+	comitCtx := commitment.NewCommitmentContext(commitment.ModeDirect, commitment.VariantHexPatriciaTrie, tx.Debug().Dirs().Tmp)
 
 	b.ReportAllocs()
 
@@ -78,12 +79,16 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
-		err := domains.DomainPut(kv.StorageDomain, tx, key, val, txNum, prev, 0)
+		err := domains.DomainPut(kv.StorageDomain, key, val, txNum, prev, 0)
+		comitCtx.TouchStorage()
 		prev = val
 		require.NoError(b, err)
 
 		if i%100000 == 0 {
-			_, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
+			b.StopTimer()
+			domains.Flush(ctx, tx)
+			b.StartTimer()
+			_, err := comitCtx.ComputeCommitment(ctx, tx, tx, true, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 		}
 	}

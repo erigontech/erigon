@@ -101,7 +101,7 @@ func TestStateLogger(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, tx, _ := NewTestRwTx(t)
+			_, tx, ec := NewTestRwTx(t)
 
 			err := rawdbv3.TxNums.Append(tx, 1, 1)
 			require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestStateLogger(t *testing.T) {
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(tx))
+			state := New(NewStateReader(ec, tx))
 			state.SetHooks(mt.Hooks())
 
 			tt.run(state)

@@ -22,10 +22,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
 	"slices"
 	"strconv"
 	"strings"
+	"unique"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -125,6 +127,34 @@ type PatriciaContext interface {
 	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
 	Storage(plainKey []byte) (*Update, error)
+}
+
+func InternPath(p []byte) Path {
+	return Path(unique.Make(string(p)))
+}
+
+type Path unique.Handle[string]
+
+func (p Path) Value() []byte {
+	return toBytesZeroCopy(unique.Handle[string](p).Value())
+}
+
+func (p Path) Encode(w io.Writer) error {
+	return fmt.Errorf("TODO")
+}
+
+func (p Path) Decode(r io.Reader) error {
+	return fmt.Errorf("TODO")
+}
+
+type Branch []byte
+
+func (b Branch) Encode(w io.Writer) error {
+	return fmt.Errorf("TODO")
+}
+
+func (b Branch) Decode(r io.Reader) error {
+	return fmt.Errorf("TODO")
 }
 
 type TrieVariant string
@@ -1052,10 +1082,11 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		tmpdir: tmpdir,
 		mode:   m,
 	}
-	if t.mode == ModeDirect {
+	switch t.mode {
+	case ModeDirect:
 		t.keys = make(map[string]struct{})
 		t.initCollector()
-	} else if t.mode == ModeUpdate {
+	case ModeUpdate:
 		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	return t
@@ -1150,7 +1181,31 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
-func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
+func (t *Updates) TouchAccount(addr accounts.Address, account *accounts.Account) {
+	// TODO: re-arrange to avoid serialize/deserialize
+	t.TouchPlainKey(string(addr.Value().Bytes()), accounts.SerialiseV3(account), t.touchAccount)
+}
+
+func (t *Updates) TouchStorage(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
+	// TODO: re-arrange to avoid gc
+	addrValue := addr.Value()
+	keyValue := key.Value()
+	t.TouchPlainKey(string(append(addrValue[:], keyValue[:]...)), value.Bytes(), t.touchAccount)
+}
+
+func (t *Updates) DelStorage(addr accounts.Address, key accounts.StorageKey) {
+	// TODO: re-arrange to avoid gc
+	addrValue := addr.Value()
+	keyValue := key.Value()
+	t.TouchPlainKey(string(append(addrValue[:], keyValue[:]...)), nil, t.touchStorage)
+}
+
+func (t *Updates) TouchCode(addr accounts.Address, value []byte) {
+	addrValue := addr.Value()
+	t.TouchPlainKey(string(addrValue[:]), value, t.touchCode)
+}
+
+func (t *Updates) touchAccount(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 		return
@@ -1182,7 +1237,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	}
 }
 
-func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
+func (t *Updates) touchStorage(c *KeyUpdate, val []byte) {
 	c.update.StorageLen = int8(len(val))
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
@@ -1192,7 +1247,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	}
 }
 
-func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
+func (t *Updates) touchCode(c *KeyUpdate, code []byte) {
 	c.update.Flags |= CodeUpdate
 	if len(code) == 0 {
 		if c.update.Flags == 0 {

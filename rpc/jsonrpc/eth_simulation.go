@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
@@ -420,7 +420,7 @@ func (s *simulator) simulateBlock(
 
 	var stateReader state.StateReader
 	if latest {
-		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
+		stateReader = state.NewStateReader(sharedDomains, tx)
 	} else {
 		historyStateReader := state.NewHistoryReaderV3()
 		historyStateReader.SetTx(tx)
@@ -478,7 +478,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+	stateWriter := state.NewWriter(sharedDomains, tx, nil, sharedDomains.TxNum())
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
@@ -754,13 +754,13 @@ func clientLimitExceededError(message string) error {
 }
 
 type HistoryCommitmentOnlyReader struct {
-	latestReader  commitmentdb.StateReader
-	historyReader commitmentdb.StateReader
+	latestReader  commitment.StateReader
+	historyReader commitment.StateReader
 }
 
-func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	latestReader := commitmentdb.NewLatestStateReader(getter)
-	historyReader := commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum)
+func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) commitment.StateReader {
+	latestReader := commitment.NewLatestStateReader(getter)
+	historyReader := commitment.NewHistoryStateReader(roTx, limitReadAsOfTxNum)
 	return &HistoryCommitmentOnlyReader{latestReader, historyReader}
 }
 
@@ -772,15 +772,15 @@ func (r *HistoryCommitmentOnlyReader) CheckDataAvailable(kv.Domain, kv.Step) err
 	return nil
 }
 
-func (r *HistoryCommitmentOnlyReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+func (r *HistoryCommitmentOnlyReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
-		enc, step, err = r.historyReader.Read(d, plainKey, stepSize)
+		enc, step, err = r.historyReader.Read(d, plainKey)
 		if err != nil {
 			return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader historyReader %q: %w", d, err)
 		}
 		return enc, step, nil
 	}
-	enc, step, err = r.latestReader.Read(d, plainKey, stepSize)
+	enc, step, err = r.latestReader.Read(d, plainKey)
 	if err != nil {
 		return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader latestReader %q: %w", d, err)
 	}

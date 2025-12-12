@@ -405,7 +405,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
-				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
+				ibs := state.New(state.NewStateReader(se.rs.Domains(), se.applyTx))
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
@@ -443,7 +443,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				}
 
-				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil, txTask.TxNum)
+				stateWriter := state.NewWriter(se.doms, se.applyTx, nil, txTask.TxNum)
 
 				if err = ibs.MakeWriteSet(txTask.Rules(), stateWriter); err != nil {
 					panic(err)
@@ -572,7 +572,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
-			txTask.BalanceIncreaseSet, applyReceipt, result.Logs, result.TraceFroms, result.TraceTos,
+			applyReceipt, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
 			return false, err
 		}

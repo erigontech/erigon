@@ -1941,9 +1941,9 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 		defer toWitness.Close()
 		if len(plainKeyToWitness) == length.Addr { // touch account
-			toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toProcess.TouchAccount)
+			toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toProcess.touchAccount)
 		} else {
-			toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toProcess.TouchStorage)
+			toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toProcess.touchStorage)
 		}
 
 		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "")

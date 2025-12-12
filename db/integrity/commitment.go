@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	execstate "github.com/erigontech/erigon/execution/state"
 )
 
@@ -129,7 +128,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
 	maxTxNum := endTxNum - 1
-	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
+	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentState, maxTxNum)
 	if err != nil {
 		return info, err
 	}
@@ -403,7 +402,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			continue
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if bytes.Equal(branchKey, commitment.KeyCommitmentState) {
 			logger.Info("skipping state key", "valueLen", len(branchValue), "file", fileName)
 			continue
 		}
@@ -662,7 +661,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		if err != nil {
 			return 0, err
 		}
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if bytes.Equal(k, commitment.KeyCommitmentState) {
 			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 			if err != nil {
 				return 0, err

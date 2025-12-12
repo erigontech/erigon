@@ -18,6 +18,7 @@ package accounts
 
 import (
 	"fmt"
+	"io"
 	"unique"
 
 	"github.com/erigontech/erigon/common"
@@ -31,6 +32,10 @@ var NilAddress = Address{}
 
 func InternAddress(a common.Address) Address {
 	return Address(unique.Make(a))
+}
+
+func BytesToAddress(b []byte) Address {
+	return InternAddress(common.BytesToAddress(b))
 }
 
 func (a Address) IsNil() bool {
@@ -61,6 +66,15 @@ func (a Address) Format(s fmt.State, c rune) {
 		s.Write([]byte("<nil>"))
 	}
 	a.Value().Format(s, c)
+}
+
+func (a Address) Encode(w io.Writer) error {
+	return fmt.Errorf("TODO")
+
+}
+
+func (a Address) Decode(r io.Reader) error {
+	return fmt.Errorf("TODO")
 }
 
 // MarshalText returns the hex representation of a.
@@ -114,6 +128,10 @@ var NilKey = StorageKey{}
 
 func InternKey(k common.Hash) StorageKey {
 	return StorageKey(unique.Make(k))
+}
+
+func BytesToKey(b []byte) StorageKey {
+	return InternKey(common.BytesToHash(b))
 }
 
 func (k StorageKey) IsNil() bool {
@@ -192,6 +210,14 @@ func (h CodeHash) Format(s fmt.State, c rune) {
 		s.Write([]byte("<nil>"))
 	}
 	h.Value().Format(s, c)
+}
+
+func (h CodeHash) Encode(w io.Writer) error {
+	return fmt.Errorf("TODO")
+}
+
+func (h CodeHash) Decode(r io.Reader) error {
+	return fmt.Errorf("TODO")
 }
 
 func (h CodeHash) Cmp(o CodeHash) int {

@@ -14,11 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package test
+package state
 
 import (
 	"context"
-	"encoding/binary"
 	randOld "math/rand"
 	"math/rand/v2"
 	"sort"
@@ -34,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
-	execstate "github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -72,7 +71,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execstate.NewExecutionContext(context.Background(), rwTx, log.New())
+	domains, err := NewExecutionContext(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -88,10 +87,8 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	var txNum, blockNum uint64
 	for i := uint64(0); i < maxTx; i++ {
 		txNum = i
-		v := make([]byte, 8)
-		binary.BigEndian.PutUint64(v, i)
 		for j := 0; j < len(keys); j++ {
-			err := domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], v, txNum, nil, 0)
+			err := domains.PutAccount(ctx, accounts.BytesToAddress(keys[j]), &accounts.Account{Nonce: i}, rwTx, txNum, nil, 0)
 			require.NoError(t, err)
 		}
 
@@ -117,15 +114,17 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	latest := make([]byte, 8)
-	binary.BigEndian.PutUint64(latest, maxTx-1)
+	latest := maxTx - 1
 
 	t.Run("GetLatest", func(b *testing.B) {
 		t.ReportAllocs()
 		for ik := 0; ik < t.N; ik++ {
 			for i := 0; i < len(keys); i++ {
 				v, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[i])
-				require.Equalf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
+				var a accounts.Account
+				err = accounts.DeserialiseV3(&a, v)
+				require.NoError(t, err)
+				require.Equalf(t, latest, a.Nonce, "unexpected %d, wanted %d", a.Nonce, maxTx-1)
 				require.NoError(t, err)
 			}
 		}
@@ -136,10 +135,12 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			for i := 0; i < len(keys); i++ {
 				ts := uint64(rnd.IntN(int(maxTx)))
 				v, ok, err := rwTx.HistorySeek(kv.AccountsDomain, keys[i], ts)
-
 				require.True(t, ok)
 				require.NotNil(t, v)
-				//require.EqualValuesf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
+				var a accounts.Account
+				err = accounts.DeserialiseV3(&a, v)
+				require.NoError(t, err)
+				//require.Equalf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
 				require.NoError(t, err)
 			}
 		}
@@ -155,7 +156,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execstate.NewExecutionContext(context.Background(), rwTx, log.New())
+	domains, err := NewExecutionContext(context.Background(), rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -165,15 +166,24 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 
 	var txNum, blockNum uint64
 	for domName, d := range data {
-		fom := kv.AccountsDomain
-		if domName == "storage" {
-			fom = kv.StorageDomain
-		}
 		for key, upd := range d {
 			for _, u := range upd {
 				txNum = u.txNum
-				err := domains.DomainPut(fom, rwTx, []byte(key), u.value, txNum, nil, 0)
-				require.NoError(b, err)
+				switch domName {
+				case "storage":
+					var i uint256.Int
+					i.SetBytes(u.value)
+					err := domains.PutStorage(ctx,
+						accounts.BytesToAddress([]byte(key[:length.Addr])), accounts.BytesToKey([]byte(key[length.Addr:])),
+						i, rwTx, txNum, nil, 0)
+					require.NoError(b, err)
+				default:
+					var a accounts.Account
+					err := accounts.DeserialiseV3(&a, u.value)
+					require.NoError(b, err)
+					err = domains.PutAccount(ctx, accounts.BytesToAddress([]byte(key)), &a, rwTx, txNum, nil, 0)
+					require.NoError(b, err)
+				}
 			}
 		}
 	}

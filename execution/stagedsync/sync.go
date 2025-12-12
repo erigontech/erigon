@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -156,7 +156,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 			unwindPointWithCommitment, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindPoint, ttx)
 			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
 			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
-			if errors.Is(err, commitmentdb.ErrBehindCommitment) {
+			if errors.Is(err, commitment.ErrBehindCommitment) {
 				return nil
 			}
 			if err != nil {

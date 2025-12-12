@@ -12,7 +12,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader services.FullBlockReader) (chan uint64, context.CancelFunc) {
+func BlocksReadAhead(ctx context.Context, workers int, ec *state.ExecutionContext, db kv.TemporalRoDB, engine rules.Engine, blockReader services.FullBlockReader) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 100
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
@@ -20,7 +20,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 		g.Go(func() (err error) {
 			var bn uint64
 			var ok bool
-			var tx kv.Tx
+			var tx kv.TemporalTx
 			defer func() {
 				if tx != nil {
 					tx.Rollback()
@@ -41,13 +41,13 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 					if tx != nil {
 						tx.Rollback()
 					}
-					tx, err = db.BeginRo(ctx)
+					tx, err = db.BeginTemporalRo(ctx)
 					if err != nil {
 						return err
 					}
 				}
 
-				if err := blocksReadAheadFunc(gCtx, tx, bn+readAheadBlocks, engine, blockReader); err != nil {
+				if err := blocksReadAheadFunc(gCtx, ec, tx, bn+readAheadBlocks, engine, blockReader); err != nil {
 					return err
 				}
 			}
@@ -58,7 +58,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 		_ = g.Wait()
 	}
 }
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader services.FullBlockReader) error {
+func blocksReadAheadFunc(ctx context.Context, ec *state.ExecutionContext, tx kv.TemporalTx, blockNum uint64, engine rules.Engine, blockReader services.FullBlockReader) error {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
@@ -68,12 +68,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 	}
 	_, _ = engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache
 
-	ttx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return nil
-	}
-
-	stateReader := state.NewReaderV3(ttx)
+	stateReader := state.NewStateReader(ec, tx)
 	senders := block.Body().SendersFromTxs()
 
 	for _, sender := range senders {

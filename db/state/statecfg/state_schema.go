@@ -366,6 +366,19 @@ func EnableHistoricalCommitment() {
 	Schema.CommitmentDomain = cfg
 }
 
+func EnableValueCache(domain kv.Domain, cfg ValueCacheCfg) {
+	switch domain {
+	case kv.AccountsDomain:
+		Schema.AccountsDomain.ValueCache = cfg
+	case kv.StorageDomain:
+		Schema.StorageDomain.ValueCache = cfg
+	case kv.CodeDomain:
+		Schema.CodeDomain.ValueCache = cfg
+	case kv.CommitmentDomain:
+		Schema.CommitmentDomain.ValueCache = cfg
+	}
+}
+
 /*
   - v1.0 -> v2.0  is a breaking change. It causes a change in interpretation of "logFirstIdx" stored in receipt domain.
   - We wanted backwards compatibility however, so that was done with if checks, See `ReceiptStoresFirstLogIdx`

@@ -323,8 +323,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 	defer domains.Close()
 
-	stateReader := state.NewReaderV3(domains.AsGetter(tx))
-	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	stateReader := state.NewStateReader(domains, tx)
+	stateWriter := state.NewWriter(domains, tx, nil, domains.TxNum())
 
 	txNum := -1
 	txNumIncrement := func() {

@@ -27,13 +27,16 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/state/domains"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -45,8 +48,13 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
+type valueWithStep[V any] struct {
+	data V
+	step kv.Step
+}
+
 type ExecutionContext struct {
-	sdCtx *commitmentdb.SharedDomainsCommitmentContext
+	sdCtx *commitment.CommitmentContext
 
 	stepSize uint64
 
@@ -58,6 +66,11 @@ type ExecutionContext struct {
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
+
+	accountUpdates map[accounts.Address]valueWithStep[*accounts.Account]
+	storageUpdates map[accounts.Address]map[accounts.StorageKey]valueWithStep[uint256.Int]
+	codeUpdates    map[accounts.Address]valueWithStep[[]byte]
+	branchUpdates  map[commitment.Path]valueWithStep[commitment.Branch]
 }
 
 func NewExecutionContext(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*ExecutionContext, error) {
@@ -75,7 +88,7 @@ func NewExecutionContext(ctx context.Context, tx kv.TemporalTx, logger log.Logge
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+	sd.sdCtx = commitment.NewCommitmentContext(commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
 	if err := sd.SeekCommitment(ctx, tx); err != nil {
 		return nil, err
@@ -90,15 +103,75 @@ type temporalPutDel struct {
 }
 
 func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	return pd.sd.DomainPut(domain, pd.tx, k, v, txNum, prevVal, prevStep)
+	switch domain {
+	case kv.AccountsDomain:
+		var a accounts.Account
+		if err := accounts.DeserialiseV3(&a, v); err != nil {
+			return err
+		}
+		var pa *accounts.Account
+		if prevVal != nil {
+			var a accounts.Account
+			if err := accounts.DeserialiseV3(&a, prevVal); err != nil {
+				return err
+			}
+			pa = &a
+		}
+		return pd.sd.PutAccount(context.Background(), accounts.BytesToAddress(k), &a, pd.tx, txNum, pa, prevStep)
+	case kv.StorageDomain:
+		var i uint256.Int
+		i.SetBytes(v)
+		var pi *uint256.Int
+		if prevVal != nil {
+			var i uint256.Int
+			i.SetBytes(prevVal)
+			pi = &i
+		}
+		return pd.sd.PutStorage(context.Background(),
+			accounts.BytesToAddress(k[:length.Addr]), accounts.BytesToKey(k[length.Addr:]), i, pd.tx, txNum, pi, prevStep)
+	case kv.CodeDomain:
+		return pd.sd.PutCode(context.Background(), accounts.BytesToAddress(k), v, pd.tx, txNum, prevVal, prevStep)
+	case kv.CommitmentDomain:
+		return pd.sd.PutBranch(context.Background(), commitment.InternPath(k), commitment.Branch(v), pd.tx, txNum, commitment.Branch(prevVal), prevStep)
+	}
+	return pd.sd.mem.DomainPut(domain, k, v, txNum, prevVal, prevStep)
 }
 
 func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	return pd.sd.DomainDel(domain, pd.tx, k, txNum, prevVal, prevStep)
+	switch domain {
+	case kv.AccountsDomain:
+		var pa *accounts.Account
+		if prevVal != nil {
+			var a accounts.Account
+			if err := accounts.DeserialiseV3(&a, prevVal); err != nil {
+				return err
+			}
+			pa = &a
+		}
+		return pd.sd.DelAccount(context.Background(), accounts.BytesToAddress(k), pd.tx, txNum, pa, prevStep)
+	case kv.StorageDomain:
+		var pi *uint256.Int
+		if prevVal != nil {
+			var i uint256.Int
+			i.SetBytes(prevVal)
+			pi = &i
+		}
+		return pd.sd.DelStorage(context.Background(),
+			accounts.BytesToAddress(k[:length.Addr]), accounts.BytesToKey(k[length.Addr:]), pd.tx, txNum, pi, prevStep)
+	case kv.CodeDomain:
+		return pd.sd.DelCode(context.Background(), accounts.BytesToAddress(k), pd.tx, txNum, prevVal, prevStep)
+	case kv.CommitmentDomain:
+		return pd.sd.DelBranch(context.Background(), commitment.InternPath(k), pd.tx, txNum, commitment.Branch(prevVal), prevStep)
+	}
+	return pd.sd.mem.DomainDel(domain, k, txNum, prevVal, prevStep)
 }
 
 func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
-	return pd.sd.DomainDelPrefix(domain, pd.tx, prefix, txNum)
+	if domain == kv.StorageDomain {
+		return pd.sd.DelStorage(context.Background(), accounts.BytesToAddress(prefix), accounts.NilKey, pd.tx, txNum, nil, 0)
+	}
+
+	return fmt.Errorf("unsupported domain: %s, for del prefix")
 }
 
 func (sd *ExecutionContext) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
@@ -115,11 +188,45 @@ type temporalGetter struct {
 }
 
 func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.GetLatest(name, gt.tx, k)
+	switch name {
+	case kv.AccountsDomain:
+		addr := accounts.BytesToAddress(k)
+		a, s, ok, err := gt.sd.GetAccount(context.Background(), addr, gt.tx)
+		if ok {
+			return accounts.SerialiseV3(a), s, nil
+		}
+		return nil, 0, err
+	case kv.StorageDomain:
+		addr := accounts.BytesToAddress(k[:length.Addr])
+		key := accounts.BytesToKey(k[length.Addr:])
+		i, s, ok, err := gt.sd.GetStorage(context.Background(), addr, key, gt.tx)
+		if ok {
+			return i.Bytes(), s, nil
+		}
+		return nil, 0, err
+	case kv.CodeDomain:
+		addr := accounts.BytesToAddress(k)
+		c, s, _, err := gt.sd.GetCode(context.Background(), addr, gt.tx)
+		return c, s, err
+	case kv.CommitmentDomain:
+		b, s, ok, err := gt.sd.GetBranch(context.Background(), commitment.InternPath(k), gt.tx)
+		if ok {
+			return b, s, nil
+		}
+		return nil, 0, err
+	}
+	return gt.sd.getLatest(context.Background(), name, gt.tx, k, time.Time{})
 }
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
-	return gt.sd.HasPrefix(name, prefix, gt.tx)
+	var hasPrefix bool
+	err = gt.sd.mem.IteratePrefix(kv.StorageDomain, prefix, gt.tx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+		firstKey = common.Copy(k)
+		firstVal = common.Copy(v)
+		hasPrefix = true
+		return false, nil // do not continue, end on first occurrence
+	})
+	return firstKey, firstVal, hasPrefix, err
 }
 
 func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
@@ -168,7 +275,7 @@ func (sd *ExecutionContext) CommitmentCapture() bool {
 }
 
 func (sd *ExecutionContext) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
-func (sd *ExecutionContext) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
+func (sd *ExecutionContext) GetCommitmentCtx() *commitment.CommitmentContext {
 	return sd.sdCtx
 }
 func (sd *ExecutionContext) Logger() log.Logger { return sd.logger }
@@ -212,10 +319,11 @@ func (sd *ExecutionContext) SetTrace(b, capture bool) []string {
 	return sd.sdCtx.GetCapture(true)
 }
 
-func (sd *ExecutionContext) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
+func (sd *ExecutionContext) HasStorage(ctx context.Context, addr accounts.Address, roTx kv.Tx) ([]byte, []byte, bool, error) {
 	var firstKey, firstVal []byte
 	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+	addrVal := addr.Value()
+	err := sd.mem.IteratePrefix(kv.StorageDomain, addrVal[:], roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
 		firstKey = common.Copy(k)
 		firstVal = common.Copy(v)
 		hasPrefix = true
@@ -224,8 +332,13 @@ func (sd *ExecutionContext) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.T
 	return firstKey, firstVal, hasPrefix, err
 }
 
-func (sd *ExecutionContext) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
-	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
+func (sd *ExecutionContext) IterateStorage(ctx context.Context, addr accounts.Address, it func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
+	addrVal := addr.Value()
+	return sd.mem.IteratePrefix(kv.StorageDomain, addrVal[:], roTx, func(k []byte, v []byte, step kv.Step) (cont bool, err error) {
+		var i uint256.Int
+		i.SetBytes(v)
+		return it(accounts.BytesToKey(k), i, step)
+	})
 }
 
 func (sd *ExecutionContext) Close() {
@@ -250,12 +363,354 @@ func (sd *ExecutionContext) Flush(ctx context.Context, tx kv.RwTx) error {
 	return sd.mem.Flush(ctx, tx)
 }
 
-// TemporalDomain satisfaction
-func (sd *ExecutionContext) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+func (sd *ExecutionContext) GetAccount(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (v *accounts.Account, step kv.Step, ok bool, err error) {
 	if tx == nil {
-		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
+		return nil, 0, false, errors.New("sd.GetAccount: unexpected nil tx")
 	}
 	start := time.Now()
+	if val, ok := sd.accountUpdates[k]; ok {
+		sd.metrics.UpdateCacheReads(kv.AccountsDomain, start)
+		return val.data, val.step, false, nil
+	}
+
+	var buf bytes.Buffer
+	k.Encode(&buf)
+
+	vbytes, step, err := sd.getLatest(ctx, kv.AccountsDomain, tx, buf.Bytes(), start)
+	v = &accounts.Account{}
+	err = accounts.DeserialiseV3(v, vbytes)
+
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("account %s deserialize error: %w", k, err)
+	}
+
+	return v, step, true, nil
+}
+
+func (sd *ExecutionContext) PutAccount(ctx context.Context, k accounts.Address, v *accounts.Account, roTx kv.TemporalTx, txNum uint64, prevVal *accounts.Account, prevStep kv.Step) error {
+	if v == nil {
+		return fmt.Errorf("PutAccount: %s, trying to put nil value. not allowed", kv.AccountsDomain)
+	}
+
+	sd.sdCtx.TouchAccount(k, v)
+	var ok bool
+
+	if prevVal == nil {
+		var err error
+		prevVal, prevStep, ok, err = sd.GetAccount(ctx, k, roTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	if ok && v.Equals(prevVal) {
+		return nil
+	}
+
+	var kval = k.Value()
+	var pv []byte
+	if prevVal != nil {
+		pv = accounts.SerialiseV3(prevVal)
+	}
+
+	if err := sd.mem.DomainPut(kv.AccountsDomain, kval[:], accounts.SerialiseV3(v), txNum, pv, prevStep); err != nil {
+		return err
+	}
+
+	sd.accountUpdates[k] = valueWithStep[*accounts.Account]{v, kv.Step(txNum / sd.stepSize)}
+	return nil
+}
+
+func (sd *ExecutionContext) DelAccount(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prevVal *accounts.Account, prevStep kv.Step) error {
+	sd.sdCtx.TouchAccount(k, nil)
+
+	if prevVal == nil {
+		var err error
+		prevVal, prevStep, _, err = sd.GetAccount(ctx, k, roTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := sd.DelStorage(ctx, k, accounts.NilKey, roTx, txNum, nil, 0); err != nil {
+		return err
+	}
+
+	if err := sd.DelCode(ctx, k, roTx, txNum, nil, 0); err != nil {
+		return err
+	}
+
+	var prevBytes []byte
+	if prevVal != nil {
+		prevBytes = accounts.SerialiseV3(prevVal)
+	}
+	return sd.mem.DomainDel(kv.AccountsDomain, k.Value().Bytes(), txNum, prevBytes, prevStep)
+}
+
+func (sd *ExecutionContext) GetStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, tx kv.TemporalTx) (v uint256.Int, step kv.Step, ok bool, err error) {
+	if tx == nil {
+		return uint256.Int{}, 0, false, errors.New("sd.GetStorage: unexpected nil tx")
+	}
+
+	start := time.Now()
+	if storage, ok := sd.storageUpdates[addr][key]; ok {
+		sd.metrics.UpdateCacheReads(kv.StorageDomain, start)
+		return storage.data, storage.step, true, nil
+	}
+
+	var buf bytes.Buffer
+	domains.StorageLocation{Address: addr, Key: key}.Encode(&buf)
+
+	vbytes, step, err := sd.getLatest(ctx, kv.AccountsDomain, tx, buf.Bytes(), start)
+
+	if vbytes == nil {
+		return uint256.Int{}, 0, false, nil
+	}
+
+	v.SetBytes(vbytes)
+	return v, step, true, nil
+}
+
+func (sd *ExecutionContext) PutStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, v uint256.Int, roTx kv.TemporalTx, txNum uint64, prevVal *uint256.Int, prevStep kv.Step) error {
+	sd.sdCtx.TouchStorage(addr, key, v)
+
+	var ok bool
+	if prevVal == nil {
+		var err error
+		var prev uint256.Int
+		prev, prevStep, ok, err = sd.GetStorage(ctx, addr, key, roTx)
+		if err != nil {
+			return err
+		}
+		if ok {
+			prevVal = &prev
+		}
+	}
+
+	if ok && v == *prevVal {
+		return nil
+	}
+
+	var pv []byte
+	if prevVal != nil {
+		pv = prevVal.Bytes()
+	}
+
+	aval := addr.Value()
+	kval := key.Value()
+
+	if err := sd.mem.DomainPut(kv.StorageDomain, append(aval[:], kval[:]...), v.Bytes(), txNum, pv, prevStep); err != nil {
+		return err
+	}
+
+	putKeySize := 0
+	putValueSize := 0
+	valWithStep := valueWithStep[uint256.Int]{data: v, step: kv.Step(txNum / sd.stepSize)}
+
+	if slotUpdates := sd.storageUpdates[addr]; slotUpdates == nil {
+		sd.storageUpdates[addr] = map[accounts.StorageKey]valueWithStep[uint256.Int]{
+			key: valWithStep,
+		}
+		putKeySize += len(aval) + len(kval)
+		putValueSize += v.ByteLen()
+	} else {
+		prevByteLen := 0
+		if prevVal != nil {
+			prevByteLen = prevVal.ByteLen()
+		}
+		putValueSize = v.ByteLen() - prevByteLen
+		slotUpdates[key] = valWithStep
+	}
+	sd.metrics.UpdatePutCacheWrites(kv.StorageDomain, putKeySize, putValueSize)
+	return nil
+}
+
+func (sd *ExecutionContext) DelStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, roTx kv.TemporalTx, txNum uint64, prevVal *uint256.Int, prevStep kv.Step) error {
+	type tuple struct {
+		k, v []byte
+		step kv.Step
+	}
+	tombs := make([]tuple, 0, 8)
+
+	if addr.IsNil() || key.IsNil() {
+		var prefix []byte
+		if !addr.IsNil() {
+			value := addr.Value()
+			prefix = value[:]
+		}
+
+		if err := sd.mem.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte, step kv.Step) (bool, error) {
+			tombs = append(tombs, tuple{k, v, step})
+			return true, nil
+		}); err != nil {
+			return err
+		}
+		for _, tomb := range tombs {
+			var tv uint256.Int
+			tv.SetBytes(tomb.v)
+			if err := sd.DelStorage(ctx,
+				accounts.BytesToAddress(tomb.k[:length.Addr]), accounts.BytesToKey(tomb.k[length.Addr:]), roTx, txNum, &tv, tomb.step); err != nil {
+				return err
+			}
+		}
+
+		if assert.Enable {
+			forgotten := 0
+			if err := sd.mem.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte, step kv.Step) (bool, error) {
+				forgotten++
+				return true, nil
+			}); err != nil {
+				return err
+			}
+			if forgotten > 0 {
+				panic(fmt.Errorf("DomainDelPrefix: %d forgotten keys after '%x' prefix removal", forgotten, prefix))
+			}
+		}
+	}
+
+	if !key.IsNil() && addr.IsNil() {
+		return errors.New("address unexpectedly nil")
+	}
+
+	aval := addr.Value()
+	kval := key.Value()
+
+	var pv []byte
+	if prevVal != nil {
+		pv = prevVal.Bytes()
+	}
+	return sd.mem.DomainDel(kv.StorageDomain, append(aval[:], kval[:]...), txNum, pv, prevStep)
+}
+
+func (sd *ExecutionContext) GetCode(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (v []byte, step kv.Step, ok bool, err error) {
+	if tx == nil {
+		return nil, 0, false, errors.New("sd.GetCode: unexpected nil tx")
+	}
+	start := time.Now()
+	if val, ok := sd.codeUpdates[k]; ok {
+		sd.metrics.UpdateCacheReads(kv.CodeDomain, start)
+		return val.data, val.step, false, nil
+	}
+
+	kval := k.Value()
+	v, step, err = sd.getLatest(ctx, kv.CodeDomain, tx, kval[:], start)
+
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("account %s deserialize error: %w", k, err)
+	}
+
+	return v, step, true, nil
+}
+
+func (sd *ExecutionContext) PutCode(ctx context.Context, k accounts.Address, v []byte, roTx kv.TemporalTx, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	if v == nil {
+		return fmt.Errorf("PutAccount: %s, trying to put nil value. not allowed", kv.AccountsDomain)
+	}
+
+	sd.sdCtx.TouchCode(k, v)
+
+	if prevVal == nil {
+		var err error
+		prevVal, prevStep, _, err = sd.GetCode(ctx, k, roTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	if bytes.Equal(v, prevVal) {
+		return nil
+	}
+
+	kval := k.Value()
+	if err := sd.mem.DomainPut(kv.CodeDomain, kval[:], v, txNum, prevVal, prevStep); err != nil {
+		return err
+	}
+
+	sd.codeUpdates[k] = valueWithStep[[]byte]{v, kv.Step(txNum / sd.stepSize)}
+	return nil
+}
+
+func (sd *ExecutionContext) DelCode(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	sd.sdCtx.TouchCode(k, nil)
+
+	if prevVal == nil {
+		var err error
+		prevVal, prevStep, _, err = sd.GetCode(ctx, k, roTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	if prevVal == nil {
+		return nil
+	}
+
+	kval := k.Value()
+	return sd.mem.DomainDel(kv.AccountsDomain, kval[:], txNum, prevVal, prevStep)
+}
+
+func (sd *ExecutionContext) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, step kv.Step, ok bool, err error) {
+	if tx == nil {
+		return nil, 0, false, errors.New("sd.GetAccount: unexpected nil tx")
+	}
+	start := time.Now()
+	if val, ok := sd.branchUpdates[k]; ok {
+		sd.metrics.UpdateCacheReads(kv.CommitmentDomain, start)
+		return val.data, val.step, false, nil
+	}
+
+	var buf bytes.Buffer
+	k.Encode(&buf)
+
+	vbytes, step, err := sd.getLatest(ctx, kv.CommitmentDomain, tx, buf.Bytes(), start)
+
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("branch %s deserialize error: %w", k, err)
+	}
+
+	return commitment.Branch(vbytes), step, true, nil
+}
+
+func (sd *ExecutionContext) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prevVal commitment.Branch, prevStep kv.Step) error {
+	if v == nil {
+		return fmt.Errorf("PutBranch: %s, trying to put nil value. not allowed", kv.CommitmentDomain)
+	}
+
+	if prevVal == nil {
+		var err error
+		prevVal, prevStep, _, err = sd.GetBranch(ctx, k, roTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	bval := k.Value()
+	if err := sd.mem.DomainPut(kv.CommitmentDomain, bval, v, txNum, prevVal, prevStep); err != nil {
+		return err
+	}
+
+	sd.branchUpdates[k] = valueWithStep[commitment.Branch]{v, kv.Step(txNum / sd.stepSize)}
+	return nil
+}
+
+func (sd *ExecutionContext) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prevVal commitment.Branch, prevStep kv.Step) error {
+	if prevVal == nil {
+		var err error
+		prevVal, prevStep, _, err = sd.GetBranch(ctx, k, roTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	if prevVal == nil {
+		return nil
+	}
+
+	kval := k.Value()
+	return sd.mem.DomainDel(kv.AccountsDomain, kval[:], txNum, prevVal, prevStep)
+}
+
+func (sd *ExecutionContext) getLatest(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte, start time.Time) (v []byte, step kv.Step, err error) {
 	maxStep := kv.Step(math.MaxUint64)
 
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
@@ -276,8 +731,9 @@ func (sd *ExecutionContext) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []by
 	} else {
 		v, step, err = tx.GetLatest(domain, k)
 	}
+
 	if err != nil {
-		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+		return nil, 0, fmt.Errorf("account %s read error: %w", k, err)
 	}
 
 	return v, step, nil
@@ -342,113 +798,6 @@ func (sd *ExecutionContext) DomainLogMetrics() map[kv.Domain][]any {
 	return logMetrics
 }
 
-// DomainPut
-// Optimizations:
-//   - user can provide `prevVal != nil` - then it will not read prev value from storage
-//   - user can append k2 into k1, then underlying methods will not preform append
-//   - if `val == nil` it will call DomainDel
-func (sd *ExecutionContext) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	if v == nil {
-		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
-	}
-	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, v)
-
-	if prevVal == nil {
-		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k)
-		if err != nil {
-			return err
-		}
-	}
-	switch domain {
-	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain:
-		if bytes.Equal(prevVal, v) {
-			return nil
-		}
-	case kv.RCacheDomain, kv.CommitmentDomain:
-		//noop
-	default:
-		if bytes.Equal(prevVal, v) {
-			return nil
-		}
-	}
-	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
-}
-
-// DomainDel
-// Optimizations:
-//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
-//   - user can append k2 into k1, then underlying methods will not preform append
-//   - if `val == nil` it will call DomainDel
-func (sd *ExecutionContext) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, nil)
-	if prevVal == nil {
-		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, tx, k)
-		if err != nil {
-			return err
-		}
-	}
-
-	switch domain {
-	case kv.AccountsDomain:
-		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
-			return err
-		}
-		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil, 0); err != nil {
-			return err
-		}
-		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
-	case kv.CodeDomain:
-		if prevVal == nil {
-			return nil
-		}
-	default:
-		//noop
-	}
-	return sd.mem.DomainDel(domain, ks, txNum, prevVal, prevStep)
-}
-
-func (sd *ExecutionContext) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, prefix []byte, txNum uint64) error {
-	if domain != kv.StorageDomain {
-		return errors.New("DomainDelPrefix: not supported")
-	}
-
-	type tuple struct {
-		k, v []byte
-		step kv.Step
-	}
-	tombs := make([]tuple, 0, 8)
-
-	if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte, step kv.Step) (bool, error) {
-		tombs = append(tombs, tuple{k, v, step})
-		return true, nil
-	}); err != nil {
-		return err
-	}
-	for _, tomb := range tombs {
-		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, txNum, tomb.v, tomb.step); err != nil {
-			return err
-		}
-	}
-
-	if assert.Enable {
-		forgotten := 0
-		if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte, step kv.Step) (bool, error) {
-			forgotten++
-			return true, nil
-		}); err != nil {
-			return err
-		}
-		if forgotten > 0 {
-			panic(fmt.Errorf("DomainDelPrefix: %d forgotten keys after '%x' prefix removal", forgotten, prefix))
-		}
-	}
-	return nil
-}
-
 // DiscardWrites disables updates collection for further flushing into db.
 // Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
 func (sd *ExecutionContext) DiscardWrites(d kv.Domain) {
@@ -459,19 +808,21 @@ func (sd *ExecutionContext) DiscardWrites(d kv.Domain) {
 	sd.mem.DiscardWrites(d)
 }
 
-func (sd *ExecutionContext) GetCommitmentContext() *commitmentdb.SharedDomainsCommitmentContext {
+func (sd *ExecutionContext) GetCommitmentContext() *commitment.CommitmentContext {
 	return sd.sdCtx
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *ExecutionContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
-	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
+	blockNum, txNum, _, err := sd.sdCtx.SeekCommitment(ctx, sd.AsGetter(tx), tx)
 	if err != nil {
 		return err
 	}
+	sd.SetBlockNum(blockNum)
+	sd.SetTxNum(txNum)
 	return nil
 }
 
 func (sd *ExecutionContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
-	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
+	return sd.sdCtx.ComputeCommitment(ctx, sd.AsGetter(tx), sd.AsPutDel(tx), saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
 }

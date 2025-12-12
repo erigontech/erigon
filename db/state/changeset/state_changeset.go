@@ -415,6 +415,28 @@ type DomainMetrics struct {
 	Domains map[kv.Domain]*DomainIOMetrics
 }
 
+func (dm *DomainMetrics) UpdatePutCacheWrites(domain kv.Domain, putKeySize int, putValueSize int) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.CachePutCount++
+	dm.CachePutSize += putKeySize + putValueSize
+	dm.CachePutKeySize += putKeySize
+	dm.CachePutValueSize += putValueSize
+	if m, ok := dm.Domains[domain]; ok {
+		m.CachePutCount++
+		m.CachePutSize += putKeySize + putValueSize
+		m.CachePutKeySize += putKeySize
+		m.CachePutValueSize += putValueSize
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{
+			CachePutCount:     1,
+			CachePutSize:      putKeySize + putValueSize,
+			CachePutKeySize:   putKeySize,
+			CachePutValueSize: putValueSize,
+		}
+	}
+}
+
 func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()

@@ -167,7 +167,7 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, account
 		return accounts.NilAddress, err
 	}
 
-	signer := accounts.InternAddress(common.BytesToAddress(crypto.Keccak256(pubkey[1:])[12:]))
+	signer := accounts.BytesToAddress(crypto.Keccak256(pubkey[1:])[12:])
 	sigcache.Add(hash, signer)
 	return signer, nil
 }

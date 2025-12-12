@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 const minStepsForReferencing = 2
@@ -54,7 +53,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	aggTx := at
 
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
-	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitment.KeyCommitmentState) ||
 		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
 
 		return branch, nil // do not transform, return as is

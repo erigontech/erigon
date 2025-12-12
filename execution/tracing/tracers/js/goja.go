@@ -509,7 +509,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return false
 		}
-		addr := accounts.InternAddress(common.BytesToAddress(a))
+		addr := accounts.BytesToAddress(a)
 		return slices.Contains(t.activePrecompiles, addr)
 	})
 	vm.Set("slice", func(slice goja.Value, start, end int) goja.Value {
@@ -713,7 +713,7 @@ func (do *dbObj) GetBalance(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
+	addr := accounts.BytesToAddress(a)
 	value, err := do.ibs.GetBalance(addr)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -733,7 +733,7 @@ func (do *dbObj) GetNonce(addrSlice goja.Value) uint64 {
 		do.vm.Interrupt(err)
 		return 0
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
+	addr := accounts.BytesToAddress(a)
 	nonce, err := do.ibs.GetNonce(addr)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -748,7 +748,7 @@ func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
+	addr := accounts.BytesToAddress(a)
 	code, err := do.ibs.GetCode(addr)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -768,13 +768,13 @@ func (do *dbObj) GetState(addrSlice goja.Value, hashSlice goja.Value) goja.Value
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
+	addr := accounts.BytesToAddress(a)
 	h, err := do.fromBuf(do.vm, hashSlice, false)
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	hash := accounts.InternKey(common.BytesToHash(h))
+	hash := accounts.BytesToKey(h)
 	var outValue, _ = do.ibs.GetState(addr, hash)
 	res, err := do.toBuf(do.vm, outValue.PaddedBytes(32))
 	if err != nil {
@@ -790,7 +790,7 @@ func (do *dbObj) Exists(addrSlice goja.Value) bool {
 		do.vm.Interrupt(err)
 		return false
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
+	addr := accounts.BytesToAddress(a)
 	exists, err := do.ibs.Exist(addr)
 	if err != nil {
 		do.vm.Interrupt(err)

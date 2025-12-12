@@ -112,7 +112,7 @@ func TestAPI(t *testing.T) {
 	defer cancel()
 
 	c := kvcache.New(kvcache.DefaultCoherentConfig)
-	k1, k2 := [20]byte{1}, [20]byte{2}
+	k1, k2 := accounts.InternAddress(common.Address{1}), accounts.InternAddress(common.Address{2})
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 
 	acc := accounts.Account{
@@ -121,13 +121,16 @@ func TestAPI(t *testing.T) {
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 2,
 	}
-	account1Enc := accounts.SerialiseV3(&acc)
+	account1 := acc
+	account1Enc := accounts.SerialiseV3(&account1)
 	acc.Incarnation = 3
-	account2Enc := accounts.SerialiseV3(&acc)
+	account2 := acc
+	account2Enc := accounts.SerialiseV3(&account2)
 	acc.Incarnation = 5
-	account4Enc := accounts.SerialiseV3(&acc)
+	account4 := acc
+	account4Enc := accounts.SerialiseV3(&account4)
 
-	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
+	get := func(key accounts.Address, expectTxnID uint64) (res [1]chan []byte) {
 		wg := sync.WaitGroup{}
 		for i := 0; i < len(res); i++ {
 			wg.Add(1)
@@ -143,7 +146,8 @@ func TestAPI(t *testing.T) {
 						panic(fmt.Sprintf("View error: %v", err))
 					}
 					view := cacheView.(*kvcache.CoherentView)
-					v, err := c.Get(key[:], tx, kvcache.StateVersionID(view))
+					kv := key.Value()
+					v, err := c.Get(kv[:], tx, kvcache.StateVersionID(view))
 					if err != nil {
 						panic(fmt.Sprintf("Get error: %v", err))
 					}
@@ -164,7 +168,7 @@ func TestAPI(t *testing.T) {
 		return res
 	}
 
-	put := func(k, v []byte) uint64 {
+	put := func(k accounts.Address, v *accounts.Account) uint64 {
 		var txID uint64
 		err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			txID = tx.ViewID()
@@ -174,7 +178,7 @@ func TestAPI(t *testing.T) {
 			}
 			defer d.Close()
 			txNum := uint64(0)
-			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil, 0); err != nil {
+			if err := d.PutAccount(ctx, k, v, tx, txNum, nil, 0); err != nil {
 				return err
 			}
 			return d.Flush(ctx, tx)
@@ -183,7 +187,7 @@ func TestAPI(t *testing.T) {
 		return txID
 	}
 	// block 1 - represents existing state (no notifications about this data will come to client)
-	txID1 := put(k2[:], account1Enc)
+	txID1 := put(k2, &account1)
 
 	wg := sync.WaitGroup{}
 
@@ -215,10 +219,10 @@ func TestAPI(t *testing.T) {
 		fmt.Printf("done1: \n")
 	}()
 
-	txID2 := put(k1[:], account2Enc)
+	txID2 := put(k1, &account2)
 	fmt.Printf("-----1 %d, %d\n", txID1, txID2)
 	res3, res4 := get(k1, txID2), get(k2, txID2) // will see View of transaction 2
-	txID3 := put(k1[:], account2Enc)             // even if core already on block 3
+	txID3 := put(k1, &account2)                  // even if core already on block 3
 
 	c.OnNewBlock(&remoteproto.StateChangeBatch{
 		StateVersionId:      txID2,
@@ -230,7 +234,7 @@ func TestAPI(t *testing.T) {
 				BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
 				Changes: []*remoteproto.AccountChange{{
 					Action:  remoteproto.Action_UPSERT,
-					Address: gointerfaces.ConvertAddressToH160(k1),
+					Address: gointerfaces.ConvertAddressToH160(k1.Value()),
 					Data:    account2Enc,
 				}},
 			},
@@ -275,7 +279,7 @@ func TestAPI(t *testing.T) {
 				BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
 				Changes: []*remoteproto.AccountChange{{
 					Action:  remoteproto.Action_UPSERT,
-					Address: gointerfaces.ConvertAddressToH160(k1),
+					Address: gointerfaces.ConvertAddressToH160(k1.Value()),
 					Data:    account2Enc,
 				}},
 			},
@@ -310,7 +314,7 @@ func TestAPI(t *testing.T) {
 		fmt.Printf("done3: \n")
 	}()
 	fmt.Printf("-----3\n")
-	txID4 := put(k1[:], account2Enc)
+	txID4 := put(k1, &account2)
 
 	c.OnNewBlock(&remoteproto.StateChangeBatch{
 		StateVersionId:      txID4,
@@ -322,14 +326,14 @@ func TestAPI(t *testing.T) {
 				BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
 				Changes: []*remoteproto.AccountChange{{
 					Action:  remoteproto.Action_UPSERT,
-					Address: gointerfaces.ConvertAddressToH160(k1),
+					Address: gointerfaces.ConvertAddressToH160(k1.Value()),
 					Data:    account4Enc,
 				}},
 			},
 		},
 	})
 	fmt.Printf("-----4\n")
-	txID5 := put(k1[:], account4Enc) // reorg to new chain
+	txID5 := put(k1, &account4) // reorg to new chain
 	c.OnNewBlock(&remoteproto.StateChangeBatch{
 		StateVersionId:      txID5,
 		PendingBlockBaseFee: 1,
@@ -340,7 +344,7 @@ func TestAPI(t *testing.T) {
 				BlockHash:   gointerfaces.ConvertHashToH256([32]byte{2}),
 				Changes: []*remoteproto.AccountChange{{
 					Action:  remoteproto.Action_UPSERT,
-					Address: gointerfaces.ConvertAddressToH160(k1),
+					Address: gointerfaces.ConvertAddressToH160(k1.Value()),
 					Data:    account4Enc,
 				}},
 			},

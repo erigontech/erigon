@@ -29,7 +29,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -117,10 +116,10 @@ func TestEIP2200(t *testing.T) {
 
 			tx, sd := testTemporalTxSD(t)
 
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
+			r, w := state.NewStateReader(sd, tx), state.NewWriter(sd, tx, nil, sd.TxNum())
 			s := state.New(r)
 
-			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+			address := accounts.BytesToAddress([]byte("contract"))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
@@ -171,13 +170,13 @@ func TestCreateGas(t *testing.T) {
 	defer tx.Rollback()
 
 	for i, tt := range createGasTests {
-		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+		address := accounts.BytesToAddress([]byte("contract"))
 
 		domains, err := state.NewExecutionContext(context.Background(), tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 
-		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
+		stateReader := state.NewStateReader(domains, tx)
 		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)

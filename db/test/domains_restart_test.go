@@ -104,7 +104,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]accounts.StorageKey, 0)
 
-		writer = execstate.NewWriter(domains.AsPutDel(tx), nil, txNum)
+		writer = execstate.NewWriter(domains, tx, nil, txNum)
 	)
 
 	for i := uint64(1); i <= txs; i++ {
@@ -230,7 +230,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domains, err = execstate.NewExecutionContext(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer = execstate.NewWriter(domains.AsPutDel(tx), nil, txNum)
+	writer = execstate.NewWriter(domains, tx, nil, txNum)
 
 	txToStart := domains.TxNum()
 
@@ -308,7 +308,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
 		domains.SetTxNum(txNum)
-		writer := execstate.NewWriter(domains.AsPutDel(tx), nil, txNum)
+		writer := execstate.NewWriter(domains, tx, nil, txNum)
 
 		for i := testStartedFromTxNum; i <= txs; i++ {
 			txNum = i
@@ -397,7 +397,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer domains.Close()
 
-		writer := execstate.NewWriter(domains.AsPutDel(tx), nil, txNum)
+		writer := execstate.NewWriter(domains, tx, nil, txNum)
 
 		txToStart := domains.TxNum()
 		require.EqualValues(t, 0, txToStart)

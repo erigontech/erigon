@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	execstate "github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -141,11 +140,11 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			buf := accounts.SerialiseV3(&acc)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
+			addr := accounts.BytesToAddress(keys[j])
+			prev, step, _, err := domains.GetAccount(ctx, addr, rwTx)
 			require.NoError(tb, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev, step)
+			err = domains.PutAccount(ctx, addr, &acc, rwTx, txNum, prev, step)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
@@ -213,7 +212,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	for acit.HasNext() {
 		k, _, err := acit.Next()
 		require.NoError(t, err)
-		trieCtx.TouchKey(kv.AccountsDomain, string(k), nil)
+		trieCtx.TouchAccount(accounts.BytesToAddress(k), nil)
 	}
 
 	// check if the commitment is the same
@@ -243,7 +242,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
 		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
@@ -491,11 +490,11 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			buf := accounts.SerialiseV3(&acc)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
+			addr := accounts.BytesToAddress(keys[j])
+			prev, step, _, err := domains.GetAccount(ctx, addr, rwTx)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev, step)
+			err = domains.PutAccount(ctx, addr, &acc, rwTx, txNum, prev, step)
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}

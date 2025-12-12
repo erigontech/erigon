@@ -121,12 +121,12 @@ Loop:
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			v := accounts3.SerialiseV3(&acc)
 			k0[0] = byte(accs)
-			pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
+			addr0 := accounts.BytesToAddress(k0)
+			pv, step, _, err := domains.GetAccount(context.Background(), addr0, rwTx)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, k0, v, uint64(i), pv, step)
+			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, uint64(i), pv, step)
 			require.NoError(t, err)
 		}
 
@@ -208,22 +208,29 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			v := accounts3.SerialiseV3(&acc)
 			k0[0] = byte(accs)
-
-			pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
+			addr0 := accounts.BytesToAddress(k0)
+			pv, step, _, err := domains.GetAccount(context.Background(), addr0, rwTx)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, k0, v, txNum, pv, step)
+			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, txNum, pv, step)
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
 			for locs := 0; locs < 1000; locs++ {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
-				pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
+				p, step, ok, err := domains.GetStorage(context.Background(), addr0, accounts.BytesToKey(l0), rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, rwTx, composite(k0, l0), l0[24:], txNum, pv, step)
+				var v uint256.Int
+				var pv *uint256.Int
+
+				if ok {
+					pv = &p
+				}
+
+				v.SetBytes(l0[24:])
+				err = domains.PutStorage(context.Background(), addr0, accounts.BytesToKey(l0), v, rwTx, txNum, pv, step)
 				require.NoError(t, err)
 			}
 		}
@@ -270,37 +277,38 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 	txNum := domains.TxNum()
 	for accs := 0; accs < noaccounts; accs++ {
 		k0[0] = byte(accs)
-		pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
+		pv, step, _, err := domains.GetAccount(ctx, accounts.BytesToAddress(k0), rwTx)
 		require.NoError(t, err)
 
-		existed := make(map[string]struct{})
-		err = domains.IteratePrefix(kv.StorageDomain, k0, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-			existed[string(k)] = struct{}{}
-			return true, nil
-		})
+		existed := make(map[accounts.StorageKey]struct{})
+		err = domains.IterateStorage(ctx, accounts.BytesToAddress(k0),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (bool, error) {
+				existed[k] = struct{}{}
+				return true, nil
+			}, rwTx)
 		require.NoError(t, err)
 
 		missed := 0
-		err = domains.IteratePrefix(kv.StorageDomain, k0, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-			if _, been := existed[string(k)]; !been {
+		err = domains.IterateStorage(ctx, accounts.BytesToAddress(k0), func(k accounts.StorageKey, v uint256.Int, step kv.Step) (bool, error) {
+			if _, been := existed[k]; !been {
 				missed++
 			}
 			return true, nil
-		})
+		}, rwTx)
 		require.NoError(t, err)
 		require.Zero(t, missed)
 
-		err = domains.DomainDel(kv.AccountsDomain, rwTx, k0, txNum, pv, step)
+		err = domains.DelAccount(ctx, accounts.BytesToAddress(k0), rwTx, txNum, pv, step)
 		require.NoError(t, err)
 
 		notRemoved := 0
-		err = domains.IteratePrefix(kv.StorageDomain, k0, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+		err = domains.IterateStorage(ctx, accounts.BytesToAddress(k0), func(k accounts.StorageKey, v uint256.Int, step kv.Step) (bool, error) {
 			notRemoved++
-			if _, been := existed[string(k)]; !been {
+			if _, been := existed[k]; !been {
 				missed++
 			}
 			return true, nil
-		})
+		}, rwTx)
 		require.NoError(t, err)
 		require.Zero(t, missed)
 		require.Zero(t, notRemoved)
@@ -311,7 +319,7 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 	rwTx.Rollback()
 }
 
-func TestExecutionContext_IteratePrefix(t *testing.T) {
+func TestExecutionContext_IterateStorage(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -328,11 +336,11 @@ func TestExecutionContext_IteratePrefix(t *testing.T) {
 	defer rwTx.Rollback()
 
 	iterCount := func(domains *execstate.ExecutionContext) int {
-		var list [][]byte
-		require.NoError(domains.IteratePrefix(kv.StorageDomain, nil, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+		var list []accounts.StorageKey
+		require.NoError(domains.IterateStorage(ctx, accounts.NilAddress, func(k accounts.StorageKey, v uint256.Int, step kv.Step) (bool, error) {
 			list = append(list, k)
 			return true, nil
-		}))
+		}, rwTx))
 		return len(list)
 	}
 
@@ -357,13 +365,15 @@ func TestExecutionContext_IteratePrefix(t *testing.T) {
 		binary.BigEndian.PutUint64(buf[32-8:], i)
 		return buf
 	}
-	addr := acc(1)
+	addr := accounts.BytesToAddress(acc(1))
 	for i := uint64(0); i < stepSize; i++ {
 		txNum := i
-		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil, 0); err != nil {
+		if err = domains.PutAccount(ctx, addr, &accounts.Account{Nonce: i}, rwTx, txNum, nil, 0); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
+		var v uint256.Int
+		v.SetBytes(acc(i))
+		if err = domains.PutStorage(ctx, addr, accounts.BytesToKey(st(i)), v, rwTx, txNum, nil, 0); err != nil {
 			panic(err)
 		}
 	}
@@ -388,18 +398,20 @@ func TestExecutionContext_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 
 		txNum = stepSize
-		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(1)...), txNum, nil, 0); err != nil {
+		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(1)), rwTx, txNum, nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(2)...), txNum, nil, 0); err != nil {
+		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(2)), rwTx, txNum, nil, 0); err != nil {
 			panic(err)
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
 			txNum = i
-			if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil, 0); err != nil {
+			if err = domains.PutAccount(ctx, addr, &accounts.Account{Nonce: i}, rwTx, txNum, nil, 0); err != nil {
 				panic(err)
 			}
-			if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
+			var v uint256.Int
+			v.SetBytes(acc(i))
+			if err = domains.PutStorage(ctx, addr, accounts.BytesToKey(st(i)), v, rwTx, txNum, nil, 0); err != nil {
 				panic(err)
 			}
 		}
@@ -447,10 +459,12 @@ func TestExecutionContext_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 
 		txNum = stepSize*2 + 1
-		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(4)...), txNum, nil, 0); err != nil {
+		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(4)), rwTx, txNum, nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainPut(kv.StorageDomain, rwTx, append(addr, st(5)...), acc(5), txNum, nil, 0); err != nil {
+		var v uint256.Int
+		v.SetBytes(acc(5))
+		if err := domains.PutStorage(ctx, addr, accounts.BytesToKey(st(5)), v, rwTx, txNum, nil, 0); err != nil {
 			panic(err)
 		}
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -475,7 +489,7 @@ func TestExecutionContext_IteratePrefix(t *testing.T) {
 		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
-		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
+		err := domains.DelStorage(ctx, accounts.NilAddress, accounts.NilKey, rwTx, txNum+1, nil, 0)
 		require.NoError(err)
 		require.Equal(0, iterCount(domains))
 	}
@@ -506,7 +520,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
+		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -519,7 +533,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
+		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -560,14 +574,14 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 
 		// finally, verify ExecutionContexts.HasPrefix returns true
 		sd.SetTxNum(2) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx1)
+		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 
 		// check some other non-existing storages for non-existence after write operation
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc2.Bytes(), roTtx1)
+		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc2), roTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -585,7 +599,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx2)
+		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -636,7 +650,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify ExecutionContexts.HasPrefix returns true
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx2)
+		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -649,10 +663,10 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx4, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx4.Rollback)
-		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.Bytes(), 3)
+		err = sd.DelStorage(ctx, accounts.InternAddress(acc1), accounts.NilKey, rwTtx4, 3, nil, 0)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx4)
+		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx4)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -667,7 +681,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(roTtx3.Rollback)
 		sd.SetTxNum(4) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx3)
+		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx3)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -683,7 +697,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx5)
+		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx5)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -698,7 +712,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(roTtx4.Rollback)
 		sd.SetTxNum(5) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx4)
+		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx4)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)

@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 //Sqeeze: ForeignKeys-aware compression of file
@@ -177,27 +177,27 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	}
 
 	var (
-		temporalFiles  []string
-		processedFiles int
-		sizeDelta      = datasize.B
-		sqExt          = ".squeezed"
-		commitment     = at.d[kv.CommitmentDomain]
-		accounts       = at.d[kv.AccountsDomain]
-		storage        = at.d[kv.StorageDomain]
-		logEvery       = time.NewTicker(30 * time.Second)
+		temporalFiles    []string
+		processedFiles   int
+		sizeDelta        = datasize.B
+		sqExt            = ".squeezed"
+		commitmentDomain = at.d[kv.CommitmentDomain]
+		accountsDomain   = at.d[kv.AccountsDomain]
+		storageDomain    = at.d[kv.StorageDomain]
+		logEvery         = time.NewTicker(30 * time.Second)
 	)
 	defer logEvery.Stop()
 
 	for ri, r := range ranges {
-		af, err := accounts.rawLookupFileByRange(r.from, r.to)
+		af, err := accountsDomain.rawLookupFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
-		sf, err := storage.rawLookupFileByRange(r.from, r.to)
+		sf, err := storageDomain.rawLookupFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
-		cf, err := commitment.rawLookupFileByRange(r.from, r.to)
+		cf, err := commitmentDomain.rawLookupFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
@@ -208,29 +208,29 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 
 		err = func() error {
 			steps := cf.StepCount(stepSize)
-			compression := commitment.d.Compression
+			compression := commitmentDomain.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
 			}
 			logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
+				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitmentDomain.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
-				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
+				commitmentDomain.d.CompressCfg, log.LvlInfo, commitmentDomain.d.logger)
 			if err != nil {
 				return err
 			}
 			defer squeezedCompr.Close()
 
-			writer := commitment.d.dataWriter(squeezedCompr, false)
+			writer := commitmentDomain.d.dataWriter(squeezedCompr, false)
 			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
-			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+			vt, err := commitmentDomain.commitmentValTransformDomain(rng, accountsDomain, storageDomain, af, sf)
 			if err != nil {
 				return fmt.Errorf("failed to create commitment value transformer: %w", err)
 			}
@@ -247,7 +247,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					continue
 				}
 
-				if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+				if !bytes.Equal(k, commitment.KeyCommitmentState) {
 					v, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
@@ -317,7 +317,7 @@ type execContext interface {
 	BlockNum() uint64
 	TxNum() uint64
 	GetMemBatch() kv.TemporalMemBatch
-	GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext
+	GetCommitmentCtx() *commitment.CommitmentContext
 	Logger() log.Logger
 	DiscardWrites(d kv.Domain)
 }
@@ -558,7 +558,7 @@ func rebuildCommitmentShard(ctx context.Context, ec execContext, tx kv.TemporalT
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		ec.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+		ec.GetCommitmentCtx().TouchAccount(string(key), nil)
 		processed++
 		if !ok {
 			break
@@ -566,7 +566,7 @@ func rebuildCommitmentShard(ctx context.Context, ec execContext, tx kv.TemporalT
 	}
 
 	collectionSpent := time.Since(sf)
-	rh, err := ec.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+	rh, err := ec.GetCommitmentCtx().ComputeCommitment(ctx, ec.AsGetter(tx), ec.AsPutDel(tx), true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-package commitmentdb
+package commitment
 
 import (
 	"bytes"
@@ -20,10 +20,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -31,22 +31,10 @@ var (
 	mxCommitmentTook    = metrics.GetOrCreateSummary("domain_commitment_took")
 )
 
-type sd interface {
-	SetBlockNum(blockNum uint64)
-	SetTxNum(blockNum uint64)
-	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
-	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
-	StepSize() uint64
-	TxNum() uint64
-
-	Trace() bool
-	CommitmentCapture() bool
-}
-
 type StateReader interface {
 	WithHistory() bool
 	CheckDataAvailable(d kv.Domain, step kv.Step) error
-	Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error)
+	Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error)
 }
 
 type LatestStateReader struct {
@@ -69,7 +57,7 @@ func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error 
 	return nil
 }
 
-func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	enc, step, err = r.getter.GetLatest(d, plainKey)
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
@@ -99,12 +87,12 @@ func (r *HistoryStateReader) CheckDataAvailable(kv.Domain, kv.Step) error {
 	return nil
 }
 
-func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	enc, _, err = r.roTx.GetAsOf(d, plainKey, r.limitReadAsOfTxNum)
 	if err != nil {
 		return enc, 0, fmt.Errorf("HistoryStateReader(GetAsOf) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
 	}
-	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+	return enc, kv.Step(r.limitReadAsOfTxNum / r.roTx.Debug().StepSize()), nil
 }
 
 // LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) state at specified txNum, otherwise from *latest*.
@@ -114,13 +102,13 @@ type LimitedHistoryStateReader struct {
 	getter kv.TemporalGetter
 }
 
-func NewLimitedHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
+func NewLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
 	return &LimitedHistoryStateReader{
 		HistoryStateReader: HistoryStateReader{
 			roTx:               roTx,
 			limitReadAsOfTxNum: limitReadAsOfTxNum,
 		},
-		getter: getter,
+		getter: roTx,
 	}
 }
 
@@ -131,7 +119,7 @@ func (r *LimitedHistoryStateReader) WithHistory() bool {
 // Reason why we have `kv.TemporalDebugTx.GetLatestFromFiles' call here: `state.RebuildCommitmentFiles` can build commitment.kv from account.kv.
 // Example: we have account.0-16.kv and account.16-18.kv, let's generate commitment.0-16.kv => it means we need to make account.16-18.kv invisible
 // and then read "latest state" like there is no account.16-18.kv
-func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	var ok bool
 	var endTxNum uint64
 	// reading from domain files this way will dereference domain key correctly,
@@ -143,7 +131,7 @@ func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize 
 	if !ok {
 		enc = nil
 	} else {
-		step = kv.Step(endTxNum / stepSize)
+		step = kv.Step(endTxNum / r.roTx.Debug().StepSize())
 	}
 	if enc == nil {
 		enc, step, err = r.getter.GetLatest(d, plainKey)
@@ -154,50 +142,47 @@ func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize 
 	return enc, step, nil
 }
 
-type SharedDomainsCommitmentContext struct {
-	sharedDomains sd
-	updates       *commitment.Updates
-	patriciaTrie  commitment.Trie
-	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
-	trace         bool
-	stateReader   StateReader
+type CommitmentContext struct {
+	updates           *Updates
+	patriciaTrie      Trie
+	justRestored      atomic.Bool // set to true when commitment trie was just restored from snapshot
+	trace             bool
+	traceDomain       bool
+	commitmentCapture bool
+	stateReader       StateReader
 }
 
-// SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
-func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
+// SetStateReader can be used to set a custom state reader (otherwise the default one is set in CommitmentContext.trieContext).
+func (sdc *CommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
-func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
+func (sdc *CommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
 // SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
-func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
+func (sdc *CommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
+	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
+func (sdc *CommitmentContext) SetTrace(trace bool) {
 	sdc.trace = trace
 	sdc.patriciaTrie.SetTrace(trace)
 }
 
-func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
-	ctx := &SharedDomainsCommitmentContext{
-		sharedDomains: sd,
-	}
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
+func NewCommitmentContext(mode Mode, trieVariant TrieVariant, tmpDir string) *CommitmentContext {
+	ctx := &CommitmentContext{}
+	ctx.patriciaTrie, ctx.updates = InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	return ctx
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx) *TrieContext {
+func (sdc *CommitmentContext) trieContext(getter kv.TemporalGetter, putter kv.TemporalPutDel, txNum uint64) *TrieContext {
 	mainTtx := &TrieContext{
-		roTtx:    tx,
-		getter:   sdc.sharedDomains.AsGetter(tx),
-		putter:   sdc.sharedDomains.AsPutDel(tx),
-		stepSize: sdc.sharedDomains.StepSize(),
-		txNum:    sdc.sharedDomains.TxNum(),
+		getter: getter,
+		putter: putter,
+		txNum:  txNum,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader
@@ -208,55 +193,51 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx) *TrieCo
 	return mainTtx
 }
 
-func (sdc *SharedDomainsCommitmentContext) Close() {
+func (sdc *CommitmentContext) Close() {
 	sdc.updates.Close()
 }
 
-func (sdc *SharedDomainsCommitmentContext) Reset() {
+func (sdc *CommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
+func (sdc *CommitmentContext) GetCapture(truncate bool) []string {
 	return sdc.patriciaTrie.GetCapture(truncate)
 }
 
-func (sdc *SharedDomainsCommitmentContext) ClearRam() {
+func (sdc *CommitmentContext) ClearRam() {
 	sdc.updates.Reset()
 	sdc.Reset()
 }
 
-func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
+func (sdc *CommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
 
-func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
+func (sdc *CommitmentContext) Trie() Trie {
 	return sdc.patriciaTrie
 }
 
-// TouchKey marks plainKey as updated and applies different fn for different key types
-// (different behaviour for Code, Account and Storage key modifications).
-func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
-	if sdc.updates.Mode() == commitment.ModeDisabled {
-		return
-	}
-
-	switch d {
-	case kv.AccountsDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
-	case kv.CodeDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
-	case kv.StorageDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
-	//case kv.CommitmentDomain, kv.ReceiptDomain:
-	default:
-		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
-	}
+func (sdc *CommitmentContext) TouchAccount(addr accounts.Address, val *accounts.Account) {
+	sdc.updates.TouchAccount(addr, val)
 }
 
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+func (sdc *CommitmentContext) TouchStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	sdc.updates.TouchStorage(addr, key, val)
+}
+
+func (sdc *CommitmentContext) DelStorage(addr accounts.Address, key accounts.StorageKey) {
+	sdc.updates.DelStorage(addr, key)
+}
+
+func (sdc *CommitmentContext) TouchCode(addr accounts.Address, val []byte) {
+	sdc.updates.TouchCode(addr, val)
+}
+
+func (sdc *CommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*HexPatriciaHashed)
 	if ok {
 		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, logPrefix)
 	}
@@ -265,7 +246,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 }
 
 // Evaluates commitment for gathered updates.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+func (sdc *CommitmentContext) ComputeCommitment(ctx context.Context, getter kv.TemporalGetter, setter kv.TemporalPutDel, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -285,14 +266,14 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	// data accessing functions should be set when domain is opened/shared context updated
 
 	sdc.patriciaTrie.SetTrace(sdc.trace)
-	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
-	if sdc.sharedDomains.CommitmentCapture() {
+	sdc.patriciaTrie.SetTraceDomain(sdc.traceDomain)
+	if sdc.commitmentCapture {
 		if sdc.patriciaTrie.GetCapture(false) == nil {
 			sdc.patriciaTrie.SetCapture([]string{})
 		}
 	}
 
-	trieContext := sdc.trieContext(tx)
+	trieContext := sdc.trieContext(getter, setter, txNum)
 	sdc.Reset()
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress)
@@ -323,8 +304,8 @@ func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
-func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
-	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
+func (sdc *CommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
+	if sdc.patriciaTrie.Variant() != VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != VariantConcurrentHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	var step kv.Step
@@ -347,8 +328,8 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 }
 
 // enable concurrent commitment if we are using concurrent patricia trie and this trie diverges on very top (first branch is straight at nibble 0)
-func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible() error {
-	if pt, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
+func (sdc *CommitmentContext) enableConcurrentCommitmentIfPossible() error {
+	if pt, ok := sdc.patriciaTrie.(*ConcurrentPatriciaHashed); ok {
 		nextConcurrent, err := pt.CanDoConcurrentNext()
 		if err != nil {
 			return err
@@ -360,8 +341,8 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (blockNum, txNum uint64, ok bool, err error) {
-	trieContext := sdc.trieContext(tx)
+func (sdc *CommitmentContext) SeekCommitment(ctx context.Context, getter kv.TemporalGetter, tx kv.Tx) (blockNum, txNum uint64, ok bool, err error) {
+	trieContext := sdc.trieContext(getter, nil, 0)
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
@@ -381,8 +362,6 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 				return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
 			}
 		}
-		sdc.sharedDomains.SetBlockNum(blockNum)
-		sdc.sharedDomains.SetTxNum(txNum)
 		if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
 			return 0, 0, false, err
 		}
@@ -400,8 +379,6 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 			return 0, 0, false, err
 		}
 	}
-	sdc.sharedDomains.SetBlockNum(blockNum)
-	sdc.sharedDomains.SetTxNum(txNum)
 	if blockNum == 0 && txNum == 0 {
 		return 0, 0, true, nil
 	}
@@ -425,7 +402,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 }
 
 // encodes current trie state and saves it in SharedDomains
-func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieContext *TrieContext, blockNum, txNum uint64, rootHash []byte) error {
+func (sdc *CommitmentContext) encodeAndStoreCommitmentState(trieContext *TrieContext, blockNum, txNum uint64, rootHash []byte) error {
 	if trieContext == nil {
 		return errors.New("store commitment state: AggregatorContext is not initialized")
 	}
@@ -453,17 +430,17 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 }
 
 // Encodes current trie state and returns it
-func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {
+func (sdc *CommitmentContext) encodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {
 	var state []byte
 	var err error
 
 	switch trie := (sdc.patriciaTrie).(type) {
-	case *commitment.HexPatriciaHashed:
+	case *HexPatriciaHashed:
 		state, err = trie.EncodeCurrentState(nil)
 		if err != nil {
 			return nil, err
 		}
-	case *commitment.ConcurrentPatriciaHashed:
+	case *ConcurrentPatriciaHashed:
 		state, err = trie.RootTrie().EncodeCurrentState(nil)
 		if err != nil {
 			return nil, err
@@ -482,7 +459,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 
 // After commitment state is retored, method .Reset() should NOT be called until new updates.
 // Otherwise state should be restorePatriciaState()d again.
-func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (uint64, uint64, error) {
+func (sdc *CommitmentContext) restorePatriciaState(value []byte) (uint64, uint64, error) {
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {
 		if len(value) > 0 {
@@ -492,22 +469,22 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	}
 	tv := sdc.patriciaTrie.Variant()
 
-	var hext *commitment.HexPatriciaHashed
-	if tv == commitment.VariantHexPatriciaTrie {
+	var hext *HexPatriciaHashed
+	if tv == VariantHexPatriciaTrie {
 		var ok bool
-		hext, ok = sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
+		hext, ok = sdc.patriciaTrie.(*HexPatriciaHashed)
 		if !ok {
 			return 0, 0, errors.New("cannot typecast hex patricia trie")
 		}
 	}
-	if tv == commitment.VariantConcurrentHexPatricia {
-		phext, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed)
+	if tv == VariantConcurrentHexPatricia {
+		phext, ok := sdc.patriciaTrie.(*ConcurrentPatriciaHashed)
 		if !ok {
 			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
 		}
 		hext = phext.RootTrie()
 	}
-	if tv == commitment.VariantBinPatriciaTrie || hext == nil {
+	if tv == VariantBinPatriciaTrie || hext == nil {
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
 	}
 
@@ -527,7 +504,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 
 // Dummy way to rebuild commitment. Dummy because works for small state only.
 // To rebuild commitment correctly for any state size - use RebuildCommitmentFiles.
-func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) ([]byte, error) {
+func (sdc *CommitmentContext) rebuildCommitment(ctx context.Context, roTx kv.TemporalRwTx, blockNum, txNum uint64) ([]byte, error) {
 	it, err := roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
@@ -538,7 +515,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		sdc.TouchKey(kv.AccountsDomain, string(k), nil)
+		sdc.updates.TouchPlainKey(string(k), nil, sdc.updates.touchAccount)
 	}
 
 	it, err = roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
@@ -552,20 +529,18 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		sdc.TouchKey(kv.StorageDomain, string(k), nil)
+		sdc.updates.TouchPlainKey(string(k), nil, sdc.updates.touchAccount)
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, roTx, true, blockNum, txNum, "rebuild commit", nil)
+	return sdc.ComputeCommitment(ctx, roTx, roTx, true, blockNum, txNum, "rebuild commit", nil)
 }
 
 type TrieContext struct {
-	roTtx  kv.TemporalTx
 	getter kv.TemporalGetter
 	putter kv.TemporalPutDel
 	txNum  uint64
 
-	stepSize    uint64
 	trace       bool
 	stateReader StateReader
 }
@@ -597,18 +572,18 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
 	//}
-	return sdc.stateReader.Read(d, plainKey, sdc.stepSize)
+	return sdc.stateReader.Read(d, plainKey)
 }
 
-func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err error) {
+func (sdc *TrieContext) Account(plainKey []byte) (u *Update, err error) {
 	encAccount, _, err := sdc.readDomain(kv.AccountsDomain, plainKey)
 	if err != nil {
 		return nil, err
 	}
 
-	u = &commitment.Update{CodeHash: empty.CodeHash}
+	u = &Update{CodeHash: empty.CodeHash}
 	if len(encAccount) == 0 {
-		u.Flags = commitment.DeleteUpdate
+		u.Flags = DeleteUpdate
 		return u, nil
 	}
 
@@ -617,14 +592,14 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		return nil, err
 	}
 
-	u.Flags |= commitment.NonceUpdate
+	u.Flags |= NonceUpdate
 	u.Nonce = acc.Nonce
 
-	u.Flags |= commitment.BalanceUpdate
+	u.Flags |= BalanceUpdate
 	u.Balance = acc.Balance
 
 	if !acc.CodeHash.IsZero() {
-		u.Flags |= commitment.CodeUpdate
+		u.Flags |= CodeUpdate
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
@@ -635,7 +610,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		}
 		if len(code) > 0 {
 			copy(u.CodeHash[:], crypto.Keccak256(code))
-			u.Flags |= commitment.CodeUpdate
+			u.Flags |= CodeUpdate
 		}
 		if acc.CodeHash.Value() != u.CodeHash {
 			return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash, u.CodeHash[:])
@@ -644,18 +619,18 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 	return u, nil
 }
 
-func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
+func (sdc *TrieContext) Storage(plainKey []byte) (u *Update, err error) {
 	enc, _, err := sdc.readDomain(kv.StorageDomain, plainKey)
 	if err != nil {
 		return nil, err
 	}
-	u = &commitment.Update{
-		Flags:      commitment.DeleteUpdate,
+	u = &Update{
+		Flags:      DeleteUpdate,
 		StorageLen: int8(len(enc)),
 	}
 
 	if u.StorageLen > 0 {
-		u.Flags = commitment.StorageUpdate
+		u.Flags = StorageUpdate
 		copy(u.Storage[:u.StorageLen], enc)
 	}
 

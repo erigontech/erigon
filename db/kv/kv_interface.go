@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"reflect"
 	"sync"
 	"time"
 	"unsafe"
@@ -389,6 +391,17 @@ type (
 	ForkableId  uint16
 )
 
+type Encodable interface {
+	Encode(w io.Writer) error
+	Decode(r io.Reader) error
+}
+
+type ValueCache interface {
+	Name() Domain
+	KeyType() reflect.Type
+	ValueType() reflect.Type
+}
+
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step Step, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
@@ -466,8 +479,8 @@ type TemporalDebugDB interface {
 }
 
 type TemporalMemBatch interface {
-	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
-	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
+	DomainPut(domain Domain, k []byte, v []byte, txNum uint64, preval []byte, prevStep Step) error
+	DomainDel(domain Domain, k []byte, txNum uint64, preval []byte, prevStep Step) error
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error

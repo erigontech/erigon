@@ -1,5 +1,4 @@
-package commitmentdb
-
+package commitment
 import (
 	"math/rand"
 	"testing"

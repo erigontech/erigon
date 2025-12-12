@@ -340,7 +340,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	txNum := uint64(1) //2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
 
 	//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewStateReader(sd, tx), state.NewWriter(sd, tx, nil, txNum)
 
 	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
 	statedb.SetTrace(false)

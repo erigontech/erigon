@@ -930,8 +930,8 @@ func TestReproduceCrash(t *testing.T) {
 	_, tx, sd := state.NewTestRwTx(t)
 
 	txNum := uint64(1)
-	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	tsr := state.NewReaderV3(sd.AsGetter(tx))
+	tsw := state.NewWriter(sd, tx, nil, txNum)
+	tsr := state.NewStateReader(sd, tx)
 
 	intraBlockState := state.New(tsr)
 	// Start the 1st transaction
@@ -1351,7 +1351,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
-	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, tsw := state.NewStateReader(sd, tx), state.NewWriter(sd, tx, nil, txNum)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1397,7 +1397,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewStateReader(sd, tx), state.NewWriter(sd, tx, nil, txNum)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1434,7 +1434,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	blockNum := uint64(1)
 	txNum := uint64(3)
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewStateReader(sd, tx), state.NewWriter(sd, tx, nil, txNum)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
