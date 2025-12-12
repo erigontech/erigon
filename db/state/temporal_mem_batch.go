@@ -413,6 +413,9 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	}
 
 	for key, changeSet := range other.pastChangesAccumulator {
+		if sd.pastChangesAccumulator == nil {
+			sd.pastChangesAccumulator = map[string]*changeset.StateChangeSet{}
+		}
 		sd.pastChangesAccumulator[key] = changeSet
 	}
 
@@ -461,7 +464,6 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
-	sd.pastChangesAccumulator = make(map[string]*changeset.StateChangeSet)
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}

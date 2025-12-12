@@ -258,7 +258,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	if err != nil {
 		return
 	}
-	defer sd.Close()
+
+	closeSdOnReturn := true
+
+	defer func() {
+		if closeSdOnReturn {
+			sd.Close()
+		}
+	}()
 
 	if fcuHeader.Number.Sign() > 0 {
 		if canonicalHash == blockHash {
@@ -589,9 +596,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("head updated", logArgs...)
 		}
 	}
-	if *headNumber >= startPruneFrom {
-		e.runPostForkchoiceInBackground(ctx, sd, finishProgressBefore, isSynced, initialCycle)
-	}
+
+	closeSdOnReturn = false
+	e.runPostForkchoiceInBackground(ctx, sd, finishProgressBefore, isSynced, initialCycle)
 
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
@@ -622,18 +629,19 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(ctx context.Cont
 			tx.Rollback()
 		}()
 
-		commitStart := time.Now()
+		flushStart := time.Now()
 		if err := sd.Flush(ctx, tx); err != nil {
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 			return
 		}
+		timings = append(timings, "flush", time.Since(flushStart))
 		sd.ClearRam(true)
+		commitStart := time.Now()
 		if err := tx.Commit(); err != nil {
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 			return
 		}
-		commitTime := time.Since(commitStart)
-
+		timings = append(timings, "commit", time.Since(commitStart))
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
 				return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
@@ -650,10 +658,6 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(ctx context.Cont
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 			return
 		}
-
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		e.logger.Info("flushed", "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 		pruneStart := time.Now()
 		defer UpdateForkChoicePruneDuration(pruneStart)
@@ -674,6 +678,9 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(ctx context.Cont
 
 		if len(timings) > 0 {
 			timings = append(timings, "initialCycle", initialCycle)
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			e.logger.Info("Timings: Post-Forkchoice", timings...)
 		}
 	}()
