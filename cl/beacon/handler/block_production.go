@@ -62,7 +62,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 type BlockPublishingValidation string
@@ -1289,21 +1288,13 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		lenBlobs,
 	)
 	// Broadcast the block and its blobs
-	if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
-		Name: gossip.TopicNameBeaconBlock,
-		Data: blkSSZ,
-	}); err != nil {
+	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		a.logger.Error("Failed to publish block", "err", err)
 	}
 
 	if blk.Version() < clparams.FuluVersion {
 		for idx, blob := range blobsSidecarsBytes {
-			idx64 := uint64(idx)
-			if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
-				Name:     gossip.TopicNamePrefixBlobSidecar,
-				Data:     blob,
-				SubnetId: &idx64,
-			}); err != nil {
+			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(idx)), blob); err != nil {
 				a.logger.Error("Failed to publish blob sidecar", "err", err)
 			}
 		}
@@ -1317,11 +1308,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				continue
 			}
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
-			if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
-				Name:     gossip.TopicNamePrefixDataColumnSidecar,
-				Data:     columnSSZ,
-				SubnetId: &subnet,
-			}); err != nil {
+			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
 				a.logger.Error("Failed to publish data column sidecar", "err", err)
 			}
 		}
