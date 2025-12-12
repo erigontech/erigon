@@ -97,9 +97,9 @@ type Downloader struct {
 
 	torrentStorage storage.ClientImplCloser
 
-	ctx          context.Context
-	stopMainLoop context.CancelFunc
-	wg           sync.WaitGroup
+	ctx  context.Context
+	stop context.CancelFunc
+	wg   sync.WaitGroup
 
 	// TODO: Add an implicit prefix to messages from this.
 	logger    log.Logger
@@ -349,7 +349,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	requestHandler.downloader = d
 
-	d.ctx, d.stopMainLoop = context.WithCancel(context.Background())
+	d.ctx, d.stop = context.WithCancel(context.Background())
 
 	return d, nil
 }
@@ -1201,7 +1201,7 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 
 func (d *Downloader) Close() {
 	d.logger.Info("Stopping downloader", "files", len(d.torrentClient.Torrents()))
-	d.stopMainLoop()
+	d.stop()
 	d.logger.Debug("Closing torrents")
 	d.torrentClient.Close()
 	if err := d.torrentStorage.Close(); err != nil {
