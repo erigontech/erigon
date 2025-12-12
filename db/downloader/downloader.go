@@ -1065,8 +1065,11 @@ func (d *Downloader) addCompleteTorrentFromMetainfo(
 			return
 		}
 	}
-	// TODO: Handle manual verification and ignore piece completion flags.
-	panicif.False(t.Complete().Bool())
+	if !d.cfg.VerifyTorrentData && !d.cfg.ManualDataVerification && !t.Complete().Bool() {
+		d.logger.Warn("expected completed snapshot but torrent client disagrees",
+			"snapshot name", name,
+			"infohash", t.InfoHash())
+	}
 	return
 }
 
