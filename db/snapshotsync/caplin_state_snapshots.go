@@ -608,6 +608,9 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		logger.Warn("[snapshots] dumpCaplinState unexpected", "segName", segName, "snapDir", snapDir, "snapName", snapName)
 		panic(segName)
 	}
+	if f.Type == nil {
+		panic("BuildIndexWithSnapName: info.Type is nil, " + segName + " " + f.Name())
+	}
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = workers
@@ -649,6 +652,9 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	// Ugly hack to wait for fsync
 	time.Sleep(15 * time.Second)
 
+	if f.Type == nil {
+		panic("BuildIndexWithSnapName: info.Type is nil, " + f.Name())
+	}
 	return simpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
@@ -661,6 +667,10 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 		TmpDir:     tmpDir,
 		Salt:       &salt,
 		BaseDataID: sn.From,
+	}
+
+	if sn.Type == nil {
+		panic("BuildIndexWithSnapName: info.Type is nil, " + sn.Name())
 	}
 	if err := snaptype.BuildIndexWithSnapName(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
