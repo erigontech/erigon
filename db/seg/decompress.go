@@ -726,7 +726,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	if wordLen < 0 {
-		log.Error("invalid wordLen", "filename", g.fName, "pos", savePos, "buf len", len(buf))
+		log.Error("invalid wordLen", "fileName", g.fName, "pos", savePos, "bufLen", len(buf), "wordLen", wordLen)
 		return nil, 0
 	}
 	if wordLen == 0 {
@@ -748,7 +748,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	} else {
 		// Expand buffer
 		if len(buf)+int(wordLen) < 0 {
-			log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "buf len", len(buf))
+			log.Error("can't expand buffer", "fileName", g.fName, "pos", savePos, "bufLlen", len(buf), "wordLen", wordLen)
 			return nil, 0
 		}
 		buf = buf[:len(buf)+int(wordLen)]
