@@ -44,11 +44,13 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 	if !first {
 		return nil
 	}
-	me.metainfoTasks.Go(func() {
+	me.metainfoTasks.Add(1)
+	go func() {
+		defer me.metainfoTasks.Done()
 		me.doMetainfoTask(func() func() {
 			return me.d.addedFirstDownloader(me.d.ctx, t, miOpt, item.Name, item.InfoHash)
 		})
-	})
+	}()
 	return nil
 }
 

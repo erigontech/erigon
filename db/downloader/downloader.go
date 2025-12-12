@@ -731,7 +731,13 @@ func (d *Downloader) startSnapshotsDownload(
 	g.MakeChanWithLen(&batch.afterTasks, len(items))
 	var batchCtx context.Context
 	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
-	batch.all.Go(func() { d.logDownload(batchCtx, items, target) })
+
+	batch.all.Add(1)
+	go func() {
+		defer batch.all.Done()
+		d.logDownload(batchCtx, items, target)
+	}()
+
 	defer func() {
 		if err != nil {
 			batch.abandon()
