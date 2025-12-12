@@ -40,14 +40,14 @@ type (
 
 // DataColumnSidecarData includes block_root and slot for SSE events
 type DataColumnSidecarData struct {
-	BlockRoot                    common.Hash                          `json:"block_root"`
-	Index                        uint64                               `json:"index,string"`
-	Slot                         uint64                               `json:"slot,string"`
-	Column                       *solid.ListSSZ[*cltypes.Cell]        `json:"column"`
+	BlockRoot                    common.Hash                            `json:"block_root"`
+	Index                        uint64                                 `json:"index,string"`
+	Slot                         uint64                                 `json:"slot,string"`
+	Column                       *solid.ListSSZ[*cltypes.Cell]          `json:"column"`
 	KzgCommitments               *solid.ListSSZ[*cltypes.KZGCommitment] `json:"kzg_commitments"`
 	KzgProofs                    *solid.ListSSZ[*cltypes.KZGProof]      `json:"kzg_proofs"`
-	SignedBlockHeader            *cltypes.SignedBeaconBlockHeader     `json:"signed_block_header"`
-	KzgCommitmentsInclusionProof solid.HashVectorSSZ                  `json:"kzg_commitments_inclusion_proof"`
+	SignedBlockHeader            *cltypes.SignedBeaconBlockHeader       `json:"signed_block_header"`
+	KzgCommitmentsInclusionProof solid.HashVectorSSZ                    `json:"kzg_commitments_inclusion_proof"`
 }
 
 // NewDataColumnSidecarData creates a DataColumnSidecarData from a DataColumnSidecar
