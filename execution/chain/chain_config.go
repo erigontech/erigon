@@ -394,9 +394,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
-		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
-			0: nil,
-		}
+		c.parsedBlobSchedule = make(map[uint64]*params.BlobConfig)
 		if c.CancunTime != nil {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
 		}
@@ -699,7 +697,7 @@ func (c *CliqueConfig) String() string {
 // For blocks 0–4 an empty string will be returned.
 func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 	keys := common.SortedKeys(field)
-	if number < keys[0] {
+	if len(keys) == 0 || number < keys[0] {
 		return generics.Zero[T]()
 	}
 	for i := 0; i < len(keys)-1; i++ {
