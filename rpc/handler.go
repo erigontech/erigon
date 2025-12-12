@@ -188,14 +188,13 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 
 	// Handle non-call messages first:
 	calls := make([]*jsonrpcMessage, 0, len(msgs))
-	for _, msg := range msgs {
-		if handled := h.handleImmediate(msg); !handled {
-			calls = append(calls, msg)
-		}
-	}
+	h.handleResponses(msgs, func(msg *jsonrpcMessage) {
+		calls = append(calls, msg)
+	})
 	if len(calls) == 0 {
 		return
 	}
+
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
@@ -288,6 +287,63 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 			n.activate()
 		}
 	})
+}
+
+// handleResponses processes method call responses.
+func (h *handler) handleResponses(batch []*jsonrpcMessage, handleCall func(*jsonrpcMessage)) {
+	var resolvedOps []*requestOp
+	handleResp := func(msg *jsonrpcMessage) {
+		op := h.respWait[string(msg.ID)]
+		if op == nil {
+			h.logger.Debug("Unsolicited RPC response", "reqid", idForLog(msg.ID))
+			return
+		}
+		resolvedOps = append(resolvedOps, op)
+		delete(h.respWait, string(msg.ID))
+
+		// For subscription responses, start the subscription if the server
+		// indicates success. EthSubscribe gets unblocked in either case through
+		// the op.resp channel.
+		if op.sub != nil {
+			if msg.Error != nil {
+				op.err = msg.Error
+			} else {
+				op.err = json.Unmarshal(msg.Result, &op.sub.subid)
+				if op.err == nil {
+					go op.sub.start()
+					h.clientSubs[op.sub.subid] = op.sub
+				}
+			}
+		}
+
+		if !op.hadResponse {
+			op.hadResponse = true
+			op.resp <- batch
+		}
+	}
+
+	for _, msg := range batch {
+		start := time.Now()
+		switch {
+		case msg.isResponse():
+			handleResp(msg)
+			h.logger.Trace("Handled RPC response", "reqid", idForLog(msg.ID), "duration", time.Since(start))
+
+		case msg.isNotification():
+			if strings.HasSuffix(msg.Method, notificationMethodSuffix) {
+				h.handleSubscriptionResult(msg)
+				continue
+			}
+			handleCall(msg)
+
+		default:
+			handleCall(msg)
+		}
+	}
+
+	for _, op := range resolvedOps {
+		h.removeRequestOp(op)
+	}
 }
 
 // close cancels all requests except for inflightReq and waits for

@@ -133,10 +133,11 @@ type readOp struct {
 }
 
 type requestOp struct {
-	ids  []json.RawMessage
-	err  error
-	resp chan []*jsonrpcMessage // receives up to len(ids) responses
-	sub  *ClientSubscription    // only set for EthSubscribe requests
+	ids         []json.RawMessage
+	err         error
+	resp        chan []*jsonrpcMessage // receives up to len(ids) responses
+	sub         *ClientSubscription    // only set for EthSubscribe requests
+	hadResponse bool                   // true when the request was responded to
 }
 
 func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, error) {
