@@ -275,7 +275,8 @@ func CheckEip1559TxGasFeeCap(from common.Address, feeCap, tipCap, baseFee *uint2
 
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
-	if st.evm.ChainRules().IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
+	rules := st.evm.ChainRules()
+	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
 		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, st.msg.From().Hex(), len(st.msg.BlobHashes()))
 	}
 
@@ -321,7 +322,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 
 	// Make sure the transaction feeCap is greater than the block's baseFee.
-	if st.evm.ChainRules().IsLondon {
+	if rules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
@@ -330,7 +331,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
+	if st.msg.BlobGas() > 0 && rules.IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
 		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
@@ -340,8 +341,19 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	if st.msg.CheckGas() && rules.IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
+	}
+
+	if rules.Censoring != nil {
+		if slices.Contains(rules.Censoring.From, st.msg.From()) {
+			log.Warn("Ignoring Filtered Tx", "block", st.evm.IntraBlockState().Version().BlockNum, "from", st.msg.From())
+			return fmt.Errorf("%w: from %x", ErrCensored, st.msg.From())
+		}
+		if st.msg.To() != nil && slices.Contains(rules.Censoring.To, st.to()) {
+			log.Warn("Ignoring Filtered Tx", "block", st.evm.IntraBlockState().Version().BlockNum, "to", st.to())
+			return fmt.Errorf("%w: to %x", ErrCensored, st.to())
+		}
 	}
 
 	return st.buyGas(gasBailout)
@@ -652,6 +664,12 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 				continue
 			}
 			authority := *authorityPtr
+
+			censoring := st.evm.ChainRules().Censoring
+			if censoring != nil && censoring.Is7702Enabled && slices.Contains(censoring.From, authority) {
+				log.Warn("Ignoring Filtered Tx", "block", st.evm.IntraBlockState().Version().BlockNum, "authority", authority)
+				return nil, fmt.Errorf("%w: authority %x", ErrCensored, authority)
+			}
 
 			// 3. add authority account to accesses_addresses
 			verifiedAuthorities = append(verifiedAuthorities, authority)

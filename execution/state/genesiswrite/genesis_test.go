@@ -64,7 +64,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
+		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
 
 		expect, err := chainspec.ChainSpecByName(network)
@@ -117,13 +117,13 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	defer tx.Rollback()
 
 	spec := chainspec.Mainnet
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)

@@ -482,8 +482,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
-		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
+		if result.Err == nil {
+			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {
 			break
