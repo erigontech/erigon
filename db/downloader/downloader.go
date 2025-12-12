@@ -355,17 +355,24 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 // previous sync attempts. These probably should be cleaned up somewhere, we'll assume the node
 // knows to delete or ignore stuff that's not complete.
 func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
+	d.logger.Info("Adding torrents from disk")
 	var incompleteTorrents int
+	var newTorrents []*torrent.Torrent
 	defer func() {
 		if incompleteTorrents != 0 {
-			d.logger.Warn("add torrents from disk: skipped incomplete torrents",
+			d.logger.Warn("Skipped adding incomplete torrents",
 				"count", incompleteTorrents)
 		}
+		d.logger.Info("Finished adding torrents from disk", "new", len(newTorrents))
+		go func() {
+			for _, t := range newTorrents {
+				d.afterAdd(t)
+			}
+		}()
 	}()
-	var newTorrents []*torrent.Torrent
 	// The fs module should use forward slash style paths only. We need this guarantee for how we use
 	// the metainfo.Info.Name field for nested snapshot names.
-	err = fs.WalkDir(
+	return fs.WalkDir(
 		os.DirFS(d.snapDir()),
 		".",
 		func(path string, de fs.DirEntry, err error) error {
@@ -400,13 +407,6 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
 			return nil
 		},
 	)
-	if err != nil {
-		return
-	}
-	for _, t := range newTorrents {
-		d.afterAdd(t)
-	}
-	return nil
 }
 
 // I haven't removed logSeeding yet because I think Alex will want it back at some point.
@@ -1112,6 +1112,8 @@ func (d *Downloader) fetchMetainfoFromWebseed(name string, webseedUrlBase string
 func (d *Downloader) addTorrentIfComplete(
 	name string,
 ) (t *torrent.Torrent, complete, new bool, err error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	mi, err := d.loadMetainfoFromDisk(name)
 	if err != nil {
 		err = fmt.Errorf("loading metainfo from disk: %w", err)
