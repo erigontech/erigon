@@ -609,7 +609,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		panic(segName)
 	}
 	if f.Type == nil {
-		panic("BuildIndexWithSnapName: info.Type is nil, " + f.Name() + " " + snapDir)
+		panic(fmt.Sprintf("BuildIndexWithSnapName: info.Type is nil, "+f.Name()+" "+snapDir+": %t", f.Type != nil))
 	}
 
 	compressCfg := seg.DefaultCfg
