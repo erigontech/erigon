@@ -32,7 +32,9 @@ var (
 )
 
 type DataColumnSidecar struct {
+	BlockRoot                    common.Hash                    `json:"-"`
 	Index                        uint64                         `json:"index,string"` // index of the column
+	Slot                         uint64                         `json:"-"`
 	Column                       *solid.ListSSZ[*Cell]          `json:"column"`
 	KzgCommitments               *solid.ListSSZ[*KZGCommitment] `json:"kzg_commitments"`
 	KzgProofs                    *solid.ListSSZ[*KZGProof]      `json:"kzg_proofs"`
@@ -47,7 +49,10 @@ func NewDataColumnSidecar() *DataColumnSidecar {
 }
 
 func (d *DataColumnSidecar) Clone() clonable.Clonable {
-	newSidecar := &DataColumnSidecar{}
+	newSidecar := &DataColumnSidecar{
+		BlockRoot: d.BlockRoot,
+		Slot:      d.Slot,
+	}
 	newSidecar.tryInit()
 	return newSidecar
 }
