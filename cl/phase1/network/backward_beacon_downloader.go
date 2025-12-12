@@ -131,29 +131,38 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	}
 
 	var responses []*cltypes.SignedBeaconBlock
-	var received = make(chan []*cltypes.SignedBeaconBlock)
+	// Use buffered channel to prevent goroutine leaks - goroutines can send without blocking
+	// even if the receiver has already exited the loop
+	var received = make(chan []*cltypes.SignedBeaconBlock, 1)
+	var requestSent atomic.Bool
 
 Loop:
 	for {
 		select {
 		case <-b.reqInterval.C:
-			if len(received) == 0 {
+			// Only send one request at a time using atomic flag
+			if !requestSent.Swap(true) {
 				go func() {
 					blocks, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 					if err != nil {
 						b.rpc.BanPeer(peerId)
+						requestSent.Store(false)
 						return
 					}
 					if blocks == nil {
 						b.rpc.BanPeer(peerId)
+						requestSent.Store(false)
 						return
 					}
 					if len(blocks) == 0 {
 						b.rpc.BanPeer(peerId)
+						requestSent.Store(false)
 						return
 					}
-					if len(received) == 0 {
-						received <- blocks
+					select {
+					case received <- blocks:
+					default:
+						// Channel already has a response, discard this one
 					}
 				}()
 			}
