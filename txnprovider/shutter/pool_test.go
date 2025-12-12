@@ -150,6 +150,7 @@ func TestPoolCleanupShouldNotDeleteNewEncTxnsDueToConsecutiveEmptyDecrMsgs(t *te
 		// simulate the first block
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
+		synctest.Wait()
 		// simulate decryption keys msg with 0 decrypted txns for 2 slots in a row to get close to the currently
 		// configured reorg awareness window of 3 (make sure that is the case otherwise the test won't be accurately
 		// capturing the situation)
@@ -208,6 +209,7 @@ func TestPoolSkipsBlobTxns(t *testing.T) {
 		// simulate the first block
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
+		synctest.Wait()
 		// simulate some encrypted txn submissions and simulate a new block
 		encBlobTxn1 := MockEncryptedBlobTxn(t, handle.config.ChainId, ekg.Eon())
 		encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
@@ -253,6 +255,7 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		// simulate the first block
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
+		synctest.Wait()
 		// simulate some encrypted txn submissions and simulate a new block
 		encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
 		encTxn2 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
