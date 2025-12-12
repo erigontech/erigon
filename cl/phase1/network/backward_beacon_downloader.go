@@ -59,7 +59,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 		ctx:         ctx,
 		rpc:         rpc,
 		db:          db,
-		reqInterval: time.NewTicker(600 * time.Millisecond),
+		reqInterval: time.NewTicker(200 * time.Millisecond),
 		neverSkip:   true,
 		engine:      engine,
 		sn:          sn,
@@ -139,7 +139,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 
 // fetchBlockRange requests a range of blocks from peers and waits for a response.
 func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
-	const count = uint64(16)
+	const count = uint64(64)
 	start := b.slotToDownload.Load() - count + 1
 	if start > b.slotToDownload.Load() { // overflow check
 		start = 0
