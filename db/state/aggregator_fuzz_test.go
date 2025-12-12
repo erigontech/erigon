@@ -197,17 +197,19 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			buf := accounts.SerialiseV3(&acc)
 			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), buf, txNum, nil, 0)
 			require.NoError(t, err)
-			comitCtx.TouchAccount()
+			comitCtx.TouchAccount(accounts.InternAddress(addrs[txNum]), &acc)
 
 			k := composite(addrs[txNum].Bytes(), locs[txNum].Bytes())
 			v := []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
 			err = domains.DomainPut(kv.StorageDomain, k, v, txNum, nil, 0)
-			comitCtx.TouchStorage()
+			var sv uint256.Int
+			sv.SetBytes(v)
+			comitCtx.TouchStorage(accounts.InternAddress(addrs[txNum]), accounts.BytesToKey(locs[txNum].Bytes()), sv)
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
 				err = domains.Flush(context.Background(), rwTx)
-				_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, txNum, "", nil)
+				_, err := comitCtx.ComputeCommitment(context.Background(), rwTx, rwTx, true, txNum/10, txNum, "", nil)
 				require.NoError(t, err)
 			}
 

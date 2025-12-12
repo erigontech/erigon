@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
@@ -80,7 +82,9 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		val := <-vals
 		txNum := uint64(i)
 		err := domains.DomainPut(kv.StorageDomain, key, val, txNum, prev, 0)
-		comitCtx.TouchStorage()
+		var sv uint256.Int
+		sv.SetBytes(val)
+		comitCtx.TouchStorage(accounts.BytesToAddress(key[:length.Addr]), accounts.BytesToKey(key[length.Addr:]), sv)
 		prev = val
 		require.NoError(b, err)
 

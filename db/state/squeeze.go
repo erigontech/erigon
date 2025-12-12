@@ -29,6 +29,7 @@ import (
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 //Sqeeze: ForeignKeys-aware compression of file
@@ -320,6 +321,9 @@ type execContext interface {
 	GetCommitmentCtx() *commitment.CommitmentContext
 	Logger() log.Logger
 	DiscardWrites(d kv.Domain)
+
+	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
+	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 }
 
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
@@ -558,7 +562,7 @@ func rebuildCommitmentShard(ctx context.Context, ec execContext, tx kv.TemporalT
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		ec.GetCommitmentCtx().TouchAccount(string(key), nil)
+		ec.GetCommitmentCtx().TouchAccount(accounts.BytesToAddress(key), nil)
 		processed++
 		if !ok {
 			break

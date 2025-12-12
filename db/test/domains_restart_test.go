@@ -472,7 +472,6 @@ func TestCommit(t *testing.T) {
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	buf := accounts.SerialiseV3(&acc)
 
 	addr := common.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
 	loc := common.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
@@ -480,11 +479,12 @@ func TestCommit(t *testing.T) {
 	for i := 1; i < 3; i++ {
 		addr[0] = byte(i)
 
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+		err = domains.PutAccount(ctx, accounts.BytesToAddress(addr), &acc, tx, txNum, nil, 0)
 		require.NoError(t, err)
 		loc[0] = byte(i)
-
-		err = domains.DomainPut(kv.StorageDomain, tx, append(common.Copy(addr), loc...), []byte("0401"), txNum, nil, 0)
+		var i uint256.Int
+		i.SetBytes([]byte("0401"))
+		err = domains.PutStorage(ctx, accounts.BytesToAddress(addr), accounts.BytesToKey(loc), i, tx, txNum, nil, 0)
 		require.NoError(t, err)
 	}
 

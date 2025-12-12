@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	execstate "github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
@@ -831,7 +833,14 @@ func touchHistoricalKeys(sd *execstate.ExecutionContext, tx kv.TemporalTx, d kv.
 		if visitor != nil {
 			visitor(k)
 		}
-		sd.GetCommitmentCtx().TouchKey(d, string(k), nil)
+		switch d {
+		case kv.AccountsDomain:
+			sd.GetCommitmentCtx().TouchAccount(accounts.BytesToAddress(k), nil)
+		case kv.StorageDomain:
+			sd.GetCommitmentCtx().TouchStorage(accounts.BytesToAddress(k[:length.Addr]), accounts.BytesToKey(k[length.Addr:]), uint256.Int{})
+		case kv.CodeDomain:
+			sd.GetCommitmentCtx().TouchCode(accounts.BytesToAddress(k[:length.Addr]), nil)
+		}
 		touches++
 	}
 	return touches, nil

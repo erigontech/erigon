@@ -39,10 +39,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -926,7 +926,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			tx, err := coreDB.BeginTemporalRw(ctx)
 			defer tx.Rollback()
 			asrt.NoError(err)
-			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			sd, err := state.NewExecutionContext(ctx, tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
@@ -934,9 +934,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			asrt.NoError(err)
 
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
-			sndrBytes := accounts3.SerialiseV3(&sndr)
 			txNum := uint64(0)
-			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
+			err = sd.PutAccount(ctx, accounts.BytesToAddress([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), &sndr, tx, txNum, nil, 0)
 			asrt.NoError(err)
 
 			err = sd.Flush(ctx, tx)
@@ -1050,14 +1049,13 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginTemporalRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
-	sd, err := execctx.NewSharedDomains(ctx, tx.(kv.TemporalTx), logger)
+	sd, err := state.NewExecutionContext(ctx, tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
 
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
-	sndrBytes := accounts3.SerialiseV3(&sndr)
 	txNum := uint64(0)
-	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
+	err = sd.PutAccount(ctx, accounts.BytesToAddress([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), &sndr, tx, txNum, nil, 0)
 	require.NoError(t, err)
 
 	err = sd.Flush(ctx, tx)

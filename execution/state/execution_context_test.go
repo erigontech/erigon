@@ -513,10 +513,8 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
 	acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
 	acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
-	storageK2 := append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...)
 
 	// --- check 1: non-existing storage ---
 	{
@@ -530,7 +528,9 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 	// --- check 2: storage exists in DB - ExecutionContexts.HasPrefix should catch this ---
 	{
 		// write to storage
-		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
+		var i uint256.Int
+		i.SetBytes([]byte{1})
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), i, rwTtx1, 1, nil, 0)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx1)
@@ -596,7 +596,9 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx2, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx2.Rollback)
-		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
+		var i uint256.Int
+		i.SetBytes([]byte{2})
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc2slot2), i, rwTtx2, 2, nil, 0)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx2)
@@ -694,7 +696,9 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx5, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx5.Rollback)
-		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
+		var i uint256.Int
+		i.SetBytes([]byte{3})
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), i, rwTtx5, 4, nil, 0)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx5)

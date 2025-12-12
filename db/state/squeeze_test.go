@@ -389,14 +389,16 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
-		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+
+		a := accounts.BytesToAddress(addr)
+		err = domains.PutAccount(ctx, a, &acc, tx, txNum, nil, 0)
+		require.NoError(t, err)
+		var i uint256.Int
+		i.SetBytes([]byte{addr[0], loc[0]})
+		err = domains.PutStorage(ctx, a, accounts.BytesToKey(loc), i, tx, txNum, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
-		require.NoError(t, err)
-
-		err = domains.DomainPut(kv.CommitmentDomain, tx, someKey, aux[:], txNum, nil, 0)
+		err = domains.PutBranch(ctx, commitment.InternPath(someKey), aux[:], tx, txNum, nil, 0)
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
@@ -535,11 +537,17 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			buf := accounts.SerialiseV3(&acc)
-			prev, step, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
+			prevb, step, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(t, err)
-
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev, step)
+			var prev *accounts.Account
+			if prevb != nil {
+				var pa accounts.Account
+				err = accounts.DeserialiseV3(&pa, prevb)
+				require.NoError(t, err)
+				prev = &pa
+			}
+			require.NoError(t, err)
+			err = domains.PutAccount(ctx, accounts.BytesToAddress(keys[j]), &acc, rwTx, txNum, prev, step)
 			require.NoError(t, err)
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			//require.NoError(t, err)
@@ -582,11 +590,16 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			buf := accounts.SerialiseV3(&acc)
-			prev, step, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
+			prevb, step, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(t, err)
-
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev, step)
+			var prev *accounts.Account
+			if prevb != nil {
+				var pa accounts.Account
+				err = accounts.DeserialiseV3(&pa, prevb)
+				require.NoError(t, err)
+				prev = &pa
+			}
+			err = domains.PutAccount(ctx, accounts.BytesToAddress(keys[j]), &acc, rwTx, txNum, prev, step)
 			require.NoError(t, err)
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			//require.NoError(t, err)

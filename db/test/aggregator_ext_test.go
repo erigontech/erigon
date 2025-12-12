@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"math"
-	"math/rand"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -31,6 +30,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	randOld "math/rand"
+	"math/rand/v2"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -50,6 +52,21 @@ import (
 	execstate "github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+type rndGen struct {
+	*rand.Rand
+	oldGen *randOld.Rand
+}
+
+func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
+func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
+
+func newRnd(seed uint64) *rndGen {
+	return &rndGen{
+		Rand:   rand.New(rand.NewChaCha8([32]byte{byte(seed)})),
+		oldGen: randOld.New(randOld.NewSource(int64(seed))),
+	}
+}
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	if testing.Short() {
@@ -100,7 +117,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, addr, buf[:], txNum, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, append(common.Copy(addr), loc...), []byte{addr[0], loc[0]}, txNum, nil, 0)
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
@@ -203,7 +220,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execstate.NewExecutionContext(context.Background(), tx, log.New())
+	domains := tx.Debug().NewMemBatch(nil)
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -218,7 +235,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		tx, err = db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
 
-		domains, err = execstate.NewExecutionContext(context.Background(), tx, log.New())
+		domains = tx.Debug().NewMemBatch(nil)
 		require.NoError(t, err)
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
@@ -251,11 +268,11 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		}
 		buf := accounts.SerialiseV3(&acc)
 
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, prev1, 0)
+		err = domains.DomainPut(kv.AccountsDomain, addr, buf, txNum, prev1, 0)
 		require.NoError(t, err)
 		prev1 = buf
 
-		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev2, 0)
+		err = domains.DomainPut(kv.StorageDomain, append(common.Copy(addr), loc...), []byte{addr[0], loc[0]}, txNum, prev2, 0)
 		require.NoError(t, err)
 		prev2 = []byte{addr[0], loc[0]}
 
@@ -268,7 +285,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		prev, step, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
 		require.NoError(t, err)
-		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev, step)
+		err = domains.DomainPut(kv.StorageDomain, append(common.Copy(addr), loc...), []byte{addr[0], loc[0]}, txNum, prev, step)
 		require.NoError(t, err)
 	}
 
@@ -306,7 +323,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	defer domains.Close()
 
 	txs := uint64(1000)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 
 	var (
 		commKey1 = []byte("someCommKey")
@@ -603,7 +620,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	for key := range data {
 		removedKey = []byte(key)[:length.Addr]
 		txNum = maxTx + 1
-		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
+		err = domains.DelAccount(ctx, accounts.BytesToAddress(removedKey), rwTx, txNum, nil, 0)
 		require.NoError(t, err)
 		break
 	}
@@ -634,7 +651,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 
 	// 5. delete same key. commitment should be the same
 	txNum = maxTx + 1
-	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
+	err = domains.DelAccount(ctx, accounts.BytesToAddress(removedKey), rwTx, txNum, nil, 0)
 	require.NoError(t, err)
 
 	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, txNum/stepSize, txNum, "", nil)
@@ -662,7 +679,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	defer domains.Close()
 
 	txs := uint64(100)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 
 	state := make(map[string][]byte)
 
@@ -686,11 +703,11 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
-		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil, 0)
+		err = domains.PutAccount(context.Background(), accounts.BytesToAddress(addr), &acc, rwTx, txNum, nil, 0)
 		require.NoError(t, err)
-
-		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		var i uint256.Int
+		i.SetBytes([]byte{addr[0], loc[0]})
+		err = domains.PutStorage(context.Background(), accounts.BytesToAddress(addr), accounts.BytesToKey(loc), i, rwTx, txNum, nil, 0)
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
@@ -698,6 +715,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 			require.NoError(t, err)
 		}
 
+		buf := accounts.SerialiseV3(&acc)
 		state[string(addr)] = buf
 		state[string(addr)+string(loc)] = []byte{addr[0], loc[0]}
 	}
@@ -884,7 +902,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			err := domains.DomainDel(kv.AccountsDomain, tx, key, txNum, nil, 0)
+			err := domains.DelAccount(context.Background(), accounts.BytesToAddress(key), tx, txNum, nil, 0)
 			require.NoError(t, err)
 
 		case r > 66 && r <= 80:
@@ -931,4 +949,14 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 		}
 	}
 	return usedKeys
+}
+
+func generateRandomKey(r *rndGen, size uint64) string {
+	return string(generateRandomKeyBytes(r, size))
+}
+
+func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
+	key := make([]byte, size)
+	r.Read(key)
+	return key
 }
