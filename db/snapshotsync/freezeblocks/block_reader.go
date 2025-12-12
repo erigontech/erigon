@@ -1243,8 +1243,9 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	}
 	defer release()
 
+	var buf []byte
 	var b *types.BodyOnlyTxn
-	b, _, err = BodyForTxnFromSnapshot(blockNum, seg, nil)
+	b, buf, err = BodyForTxnFromSnapshot(blockNum, seg, buf[:0])
 	if err != nil {
 		return nil, err
 	}
@@ -1265,7 +1266,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	defer release()
 
 	// +1 because block has system-txn in the beginning of block
-	return r.txnByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
+	return r.txnByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, buf[:0])
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash
@@ -1328,6 +1329,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 	view := r.sn.View()
 	defer view.Close()
 
+	var buf []byte
 	var expectedFirstTxnID uint64
 	for _, snb := range view.Bodies() {
 		if snb.Src() == nil {
@@ -1335,7 +1337,9 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		}
 		firstBlockNum := snb.Src().Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
-		b, _, err := BodyForTxnFromSnapshot(firstBlockNum, snb, nil)
+		var b *types.BodyOnlyTxn
+		var err error
+		b, buf, err = BodyForTxnFromSnapshot(firstBlockNum, snb, buf[:0])
 		if err != nil {
 			return err
 		}
@@ -1544,7 +1548,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 
 	getMaxTxNum := func(seg *snapshotsync.VisibleSegment) GetMaxTxNum {
 		return func(i uint64) (uint64, error) {
-			b, buf, err = BodyForTxnFromSnapshot(i, seg, buf)
+			b, buf, err = BodyForTxnFromSnapshot(i, seg, buf[:0])
 			if err != nil {
 				return 0, err
 			}
