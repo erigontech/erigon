@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -93,56 +92,13 @@ type Domain struct {
 
 	checker *DependencyIntegrityChecker
 
-	valueCache kv.ValueCache
+	hooks Hooks
 }
 
-type Key interface {
-	kv.Encodable
-	comparable
-}
+type ReadHook func(key []byte, v []byte, foundStep kv.Step, isDb bool)
 
-type ValueCache[K Key, V kv.Encodable] interface {
-	kv.ValueCache
-	Get(key K) (V, kv.Step, bool, error)
-	Add(key K, value V, step kv.Step)
-	Sync(values map[K]V)
-}
-
-type noopCache[K Key, V kv.Encodable] struct {
-	name kv.Domain
-}
-
-func (n noopCache[K, V]) Name() kv.Domain {
-	return n.name
-}
-func (noopCache[K, V]) KeyType() reflect.Type {
-	return reflect.TypeFor[K]()
-}
-func (noopCache[K, V]) ValueType() reflect.Type {
-	return reflect.TypeFor[V]()
-}
-func (noopCache[K, V]) Get(key K) (V, kv.Step, bool, error) {
-	var v V
-	return v, 0, false, nil
-}
-func (noopCache[K, V]) Add(key K, value V, step kv.Step) {}
-func (noopCache[K, V]) Sync(values map[K]V)              {}
-
-func DomainValueCache[K Key, V kv.Encodable](d *Domain) (ValueCache[K, V], error) {
-	if d.valueCache == nil {
-		if init := d.ValueCache.InitCache; init != nil {
-			valueCache := init()
-
-			if _, ok := valueCache.(ValueCache[K, V]); !ok {
-				return nil, fmt.Errorf("unexpected cache initializaton type: got: %T, expected %T", valueCache, ValueCache[K, V](nil))
-			}
-
-			d.valueCache = valueCache
-		} else {
-			d.valueCache = noopCache[K, V]{d.Name}
-		}
-	}
-	return d.valueCache.(ValueCache[K, V]), nil
+type Hooks struct {
+	OnRead []ReadHook
 }
 
 type domainVisible struct {
@@ -185,6 +141,7 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 
 	return d, nil
 }
+
 func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
 }
@@ -1702,42 +1659,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	return nil, 0, false, err
 }
 
-func GetLatest[K Key, V kv.Encodable](ctx context.Context, domian kv.Domain, key K, roTx kv.TemporalTx) (V, kv.Step, bool, error) {
-	dtx := roTx.AggTx().(*AggregatorRoTx).d[domian]
-	cache, err := DomainValueCache[K, V](dtx.d)
-
-	if err == nil {
-		val, step, ok, err := cache.Get(key)
-
-		if ok {
-			return val, step, ok, err
-		}
-	}
-
-	buf := &bytes.Buffer{}
-	if err := key.Encode(buf); err != nil {
-		var v V
-		return v, 0, false, err
-	}
-
-	val, step, ok, err := dtx.getLatest(buf.Bytes(), roTx, math.MaxInt64, nil, time.Time{})
-
-	if ok {
-		var v V
-		buf := bytes.NewBuffer(val)
-		v.Decode(buf)
-
-		if cache != nil {
-			cache.Add(key, v, step)
-		}
-
-		return v, step, ok, err
-	}
-
-	var v V
-	return v, step, ok, err
-}
-
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
@@ -1769,16 +1690,23 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		if metrics != nil {
 			metrics.UpdateDbReads(dt.name, start)
 		}
+		for _, hook := range dt.d.hooks.OnRead {
+			hook(key, v, foundStep, true)
+		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
-	if metrics != nil {
-		metrics.UpdateFileReads(dt.name, start)
-	}
 
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)
+	}
+
+	if metrics != nil {
+		metrics.UpdateFileReads(dt.name, start)
+	}
+	for _, hook := range dt.d.hooks.OnRead {
+		hook(key, v, foundStep, false)
 	}
 	return v, kv.Step(endTxNum / dt.stepSize), foundInFile, nil
 }
