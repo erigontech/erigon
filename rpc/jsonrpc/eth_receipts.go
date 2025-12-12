@@ -166,6 +166,16 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
+	// Check if the requested blocks have been executed.
+	// This prevents returning empty results when blocks exist but haven't been executed yet.
+	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	if begin > latestExecuted || end > latestExecuted {
+		return nil, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing)", begin, end, latestExecuted)
+	}
+
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit)
 	if err != nil {
 		return nil, err
