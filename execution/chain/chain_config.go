@@ -90,7 +90,7 @@ type Config struct {
 	parsedBlobSchedule    map[uint64]*params.BlobConfig
 
 	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
-	BalancerTime            *uint64                          `json:"balancerTime,omitempty"`
+	BalancerTime            *big.Int                         `json:"balancerTime,omitempty"`
 	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
 	CensoringSchedule       map[uint64]*CensoringConfig      `json:"censoringSchedule,omitempty"`
 
@@ -246,7 +246,7 @@ func (c *Config) String() string {
 		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(c.Bpo5Time.Int64()))
 	}
 	if c.BalancerTime != nil {
-		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime((int64)(*c.BalancerTime)))
+		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime(c.BalancerTime.Int64()))
 	}
 	if c.GlamsterdamTime != nil {
 		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(c.GlamsterdamTime.Int64()))

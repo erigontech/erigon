@@ -249,7 +249,7 @@ type Config struct {
 	InternalCL bool
 
 	OverrideOsakaTime    *big.Int `toml:",omitempty"`
-	OverrideBalancerTime *uint64  `toml:",omitempty"`
+	OverrideBalancerTime *big.Int `toml:",omitempty"`
 
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
