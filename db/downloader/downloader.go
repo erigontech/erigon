@@ -101,9 +101,7 @@ type Downloader struct {
 	stop context.CancelFunc
 	wg   sync.WaitGroup
 
-	// TODO: Add an implicit prefix to messages from this.
-	logger    log.Logger
-	verbosity log.Lvl
+	logger log.Logger
 	// There's no way to include a prefix easily. We need the [style] for consistency.
 	logPrefix string
 
@@ -273,7 +271,7 @@ func configureHttp2(t *http.Transport) {
 	h2t.MaxReadFrameSize = 1 << 20 // Same as net/http.Transport.ReadBufferSize?
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downloader, error) {
 	requestHandler := &requestHandler{}
 	{
 		requestHandler.rt = makeTransport()
@@ -335,7 +333,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		torrentClient:      torrentClient,
 		addWebSeedOpts:     addWebSeedOpts,
 		logger:             logger,
-		verbosity:          verbosity,
 		torrentFS:          &AtomicTorrentFS{dir: cfg.Dirs.Snap},
 	}
 

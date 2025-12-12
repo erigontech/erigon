@@ -293,7 +293,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	cfg.LogPrefix = "[snapshots] "
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
+	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}

@@ -44,7 +44,7 @@ func TestConcurrentDownload(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
 	const conc = 2
@@ -79,7 +79,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
 	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
@@ -137,7 +137,7 @@ func TestVerifyData(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
 
@@ -156,7 +156,7 @@ func TestAddDel(t *testing.T) {
 
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
 

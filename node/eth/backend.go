@@ -1314,7 +1314,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return nil
 		}
 
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
 		if err != nil {
 			return err
 		}
