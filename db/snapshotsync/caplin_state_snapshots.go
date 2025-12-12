@@ -699,6 +699,7 @@ func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, to
 			}
 			// keep beaconblocks here but whatever....
 			to := i + blocksPerFile
+			log.Warn("[dbg] Dumping "+snapName, "from", i, "to", to)
 			logger.Log(lvl, "Dumping "+snapName, "from", i, "to", to)
 			if err := dumpCaplinState(ctx, snapName, kvGetter, i, to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[snapName]); err != nil {
 				return err
