@@ -95,7 +95,8 @@ func (ct *CommonTx) GetBlobHashes() []common.Hash {
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
-	GasPrice    *uint256.Int // wei per gas
+	GasPrice *uint256.Int // wei per gas
+
 	Timeboosted *bool
 }
 
@@ -127,7 +128,7 @@ func (tx *LegacyTx) GetAuthorizations() []Authorization {
 }
 
 func (tx *LegacyTx) Protected() bool {
-	return isProtectedV(&tx.V)
+	return IsProtectedV(&tx.V)
 }
 
 func (tx *LegacyTx) Unwrap() Transaction {
@@ -243,8 +244,8 @@ func (tx *LegacyTx) payloadSize(hashingOnly bool) (payloadSize, nonceLen, gasLen
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize(false)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, false); err != nil {
 		return err
 	}
@@ -253,8 +254,8 @@ func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 
 func (tx *LegacyTx) MarshalBinaryForHashing(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize(true)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, true); err != nil {
 		return err
 	}
@@ -325,8 +326,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize(false)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, false); err != nil {
 		return err
 	}
@@ -475,7 +476,7 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender common.Address, ok bool) {
+func (tx *LegacyTx) CachedSender() (sender common.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false

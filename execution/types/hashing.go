@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/execution/trie"
 )
 
-// encodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
-var encodeBufferPool = sync.Pool{
+// EncodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
+var EncodeBufferPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
 
@@ -182,9 +182,9 @@ func rlpHash(x interface{}) (h common.Hash) {
 	return h
 }
 
-// prefixedRlpHash writes the prefix into the hasher before rlp-encoding the
+// PrefixedRlpHash writes the prefix into the hasher before rlp-encoding the
 // given interface. It's used for typed transactions.
-func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
+func PrefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	//nolint:errcheck
 	sha.Write([]byte{prefix})

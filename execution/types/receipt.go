@@ -146,8 +146,8 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
+	buf := EncodeBufferPool.Get().(*bytes.Buffer)
+	defer EncodeBufferPool.Put(buf)
 	buf.Reset()
 	if err := r.encodeTyped(data, buf); err != nil {
 		return err
@@ -162,8 +162,8 @@ func (r Receipt) EncodeRLP69(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
+	buf := EncodeBufferPool.Get().(*bytes.Buffer)
+	defer EncodeBufferPool.Put(buf)
 	buf.Reset()
 	if err := r.encodeTyped69(data, buf); err != nil {
 		return err
@@ -594,7 +594,7 @@ func (rs Receipts) EncodeRLP69(w io.Writer) error {
 func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
-	sender, ok := txn.cachedSender()
+	sender, ok := txn.CachedSender()
 	if !ok {
 		return errors.New("tx must have cached sender")
 	}

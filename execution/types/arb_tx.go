@@ -27,13 +27,13 @@ var (
 // getPooledBuffer retrieves a buffer from the pool and creates a byte slice of the
 // requested size from it.
 //
-// The caller should return the *bytes.Buffer object back into encodeBufferPool after use!
+// The caller should return the *bytes.Buffer object back into EncodeBufferPool after use!
 // The returned byte slice must not be used after returning the buffer.
 func getPooledBuffer(size uint64) ([]byte, *bytes.Buffer, error) {
 	if size > math.MaxInt {
 		return nil, nil, fmt.Errorf("can't get buffer of size %d", size)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	buf := EncodeBufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	buf.Grow(int(size))
 	b := buf.Bytes()[:int(size)]
@@ -69,8 +69,8 @@ func NewArbTx(inner Transaction) *ArbTx {
 // 		return rlp.Encode(w, tx.inner)
 // 	}
 // 	// It's an EIP-2718 typed TX envelope.
-// 	buf := encodeBufferPool.Get().(*bytes.Buffer)
-// 	defer encodeBufferPool.Put(buf)
+// 	buf := EncodeBufferPool.Get().(*bytes.Buffer)
+// 	defer EncodeBufferPool.Put(buf)
 // 	buf.Reset()
 // 	if err := tx.encodeTyped(buf); err != nil {
 // 		return err
@@ -125,7 +125,7 @@ func (tx *ArbTx) DecodeRLP(s *rlp.Stream) error {
 		//if err != nil {
 		//	return err
 		//}
-		//defer encodeBufferPool.Put(buf)
+		//defer EncodeBufferPool.Put(buf)
 		//s.
 
 		// It's an EIP-2718 typed TX envelope.
@@ -221,7 +221,7 @@ func (tx *ArbTx) setDecoded(inner Transaction, size uint64) {
 func (tx *ArbTx) Protected() bool {
 	switch tx := tx.inner.(type) {
 	case *LegacyTx:
-		return !tx.V.IsZero() && isProtectedV(&tx.V)
+		return !tx.V.IsZero() && IsProtectedV(&tx.V)
 	default:
 		return true
 	}
@@ -491,7 +491,7 @@ func (tx *ArbTx) Hash() common.Hash {
 	} else if tx.Type() == ArbitrumLegacyTxType {
 		h = tx.inner.(*ArbitrumLegacyTxData).HashOverride
 	} else {
-		h = prefixedRlpHash(tx.Type(), tx.inner)
+		h = PrefixedRlpHash(tx.Type(), tx.inner)
 	}
 	tx.hash.Store(h)
 	return h
