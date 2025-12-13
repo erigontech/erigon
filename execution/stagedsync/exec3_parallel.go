@@ -234,7 +234,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						if !pe.isMining && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
-							pe.cfg.notifications.RecentLogs.Add(applyResult.Receipts)
+							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
 						}
 					}
 

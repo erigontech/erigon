@@ -433,7 +433,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				}
 
 				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
-					se.cfg.notifications.RecentLogs.Add(blockReceipts)
+					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
