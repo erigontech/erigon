@@ -523,6 +523,15 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 				"externalTx", useExternalTx,
 			)
 		}
+	} else {
+		timeBytes := make([]byte, 8)
+		now := uint64(time.Now().Unix())
+		binary.BigEndian.PutUint64(timeBytes, now)
+		err = tx.(kv.TemporalRwTx).Put(kv.ChaintipTiming, []byte("time"), timeBytes)
+		if err != nil {
+			return err
+		}
+		log.Info("on chaintip", "time", now)
 	}
 
 	pruneSmallBatchesStartTime := time.Now()
