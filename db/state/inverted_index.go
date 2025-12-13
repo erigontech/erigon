@@ -948,12 +948,21 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	defer idxDelCursor.Close()
 
 	var txKey [8]byte
+
+	_, valMin, err := keysCursor.Seek(txKey[:])
+	if err != nil {
+		return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
+	}
+
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
+	for txnb, val, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, val, err = keysCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 		}
 		txNum := binary.BigEndian.Uint64(txnb)
+		if bytes.Compare(valMin, val) < 0 {
+			valMin = val
+		}
 		if txNum >= txTo {
 			break
 		} else if limit == 0 {
