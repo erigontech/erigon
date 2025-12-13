@@ -81,6 +81,8 @@ type Cfg struct {
 	// Disable automatic data verification in the torrent client. We want to call VerifyData
 	// ourselves.
 	ManualDataVerification bool
+
+	LogPrefix string
 }
 
 // Before options/flags applied.
@@ -266,6 +268,7 @@ func New(
 		}
 	}
 
+	// TODO: This can go away.
 	log.Info("processed webseed configuration",
 		"webseedHttpProviders", webseedHttpProviders,
 		"webseedUrlsOrFiles", webseedUrlsOrFiles)
@@ -276,6 +279,7 @@ func New(
 		ClientConfig:      torrentConfig,
 		MdbxWriteMap:      mdbxWriteMap,
 		VerifyTorrentData: opts.Verify,
+		LogPrefix:         "[Downloader] ",
 	}
 	for _, s := range webseedHttpProviders {
 		// WebSeed URLs must have a trailing slash if the implementation should append the file

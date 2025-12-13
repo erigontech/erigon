@@ -566,30 +566,30 @@ func intsize(i uint64) (size int) {
 	return common.BitLenToByteLen(bits.Len64(i))
 }
 
-func IntLenExcludingHead(i uint64) int {
-	if i < 0x80 {
-		return 0
+func BigIntLen(i *big.Int) int {
+	bitLen := 0 // treat nil as 0
+	if i != nil {
+		bitLen = i.BitLen()
 	}
-	return intsize(i)
+	if bitLen < 8 {
+		return 1
+	}
+	// Strictly speaking, +1 is not correct when the number is longer than 55 bytes
+	// (see https://ethereum.org/developers/docs/data-structures-and-encoding/rlp/),
+	// but in practice all our numbers are smaller than that.
+	return 1 + common.BitLenToByteLen(bitLen)
 }
 
-func BigIntLenExcludingHead(i *big.Int) int {
+func Uint256Len(i uint256.Int) int {
 	bitLen := i.BitLen()
 	if bitLen < 8 {
-		return 0
+		return 1
 	}
-	return common.BitLenToByteLen(bitLen)
-}
-
-func Uint256LenExcludingHead(i uint256.Int) int {
-	bitLen := i.BitLen()
-	if bitLen < 8 {
-		return 0
-	}
-	return common.BitLenToByteLen(bitLen)
+	return 1 + common.BitLenToByteLen(bitLen)
 }
 
 // precondition: len(buffer) >= 9
+// TODO(yperbasis): replace with EncodeU64?
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
 	if 0 < i && i < 0x80 {
 		buffer[0] = byte(i)

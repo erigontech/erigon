@@ -111,15 +111,21 @@ func IsStateFileV2(name string) bool {
 	return StateFileRegex.MatchString(name)
 }
 
+func IsCaplin(dir string, fileName string) bool {
+	if strings.Contains(fileName, "caplin") || strings.Contains(dir, "caplin") {
+		return true
+	}
+	return false
+}
+
 func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
 	res.Path = filepath.Join(dir, fileName)
 	res.Ext = filepath.Ext(fileName)
 	res.name = fileName
-	dirPart, fileName := filepath.Split(fileName)
-	caplin := false
-	if dirPart == "caplin/" {
-		caplin = true
-	}
+	caplin := IsCaplin(dir, fileName)
+
+	fileName = filepath.Base(fileName)
+
 	if isSaltFile(fileName) {
 		typeString := "salt"
 		// format for salt files is different: salt-<type>.txt

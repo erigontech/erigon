@@ -104,9 +104,8 @@ jobs:
           run_suite engine cancun 0
           run_suite engine api 0
           run_suite engine auth 0
-          # 8 failures out of 194 tests, see https://github.com/ethereum/hive/pull/1355
-          # 12 failures out of 199 tests, see https://github.com/ethereum/execution-apis/pull/712 
-          run_suite rpc compat 12
+          # 8 failures out of 199 tests, see https://github.com/ethereum/hive/pull/1355
+          run_suite rpc compat 8
         continue-on-error: true
 
       - name: Upload output log

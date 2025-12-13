@@ -31,14 +31,6 @@ func (r EstimatedRamPerWorker) Workers() int {
 	return max(1, res) // must have at-least 1 worker
 }
 
-func (r EstimatedRamPerWorker) WorkersHalf() int {
-	return max(1, r.Workers()/2)
-}
-
-func (r EstimatedRamPerWorker) WorkersQuarter() int {
-	return max(1, r.Workers()/4)
-}
-
 // WorkersByRAMOnly - return max workers amount based on total Memory and estimated RAM per worker
 func (r EstimatedRamPerWorker) WorkersByRAMOnly() int {
 	// 50% of TotalMemory. Better don't count on 100% because OOM Killer may have aggressive defaults and other software may need RAM

@@ -138,7 +138,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 	// get the newly built block
-	newPayload, err := cl.engineApiClient.GetPayloadV4(ctx, *fcuRes.PayloadId)
+	newPayload, err := cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
 	if err != nil {
 		return nil, err
 	}

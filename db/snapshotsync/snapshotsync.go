@@ -395,8 +395,9 @@ func SyncSnapshots(
 
 		txNumsReader := blockReader.TxnumReader(ctx)
 
-		// This clause belongs in another function.
-		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
+		// This clause belongs in another function. We can take a long time here to determine what
+		// requests to send to the Downloader. Need to communicate that.
+		log.Info(fmt.Sprintf("[%s] Preparing snapshots request for %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()
 		//Corner cases:
