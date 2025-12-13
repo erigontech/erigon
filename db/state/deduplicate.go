@@ -163,7 +163,6 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return err
 	}
 
-	fmt.Println("Values to deduplicate:", dedupCount)
 
 	indexIn, err := ht.iit.deduplicateFiles(ctx, indexFiles, r.index.from, r.index.to, ps, dedupKeyEFs)
 	if err != nil {
