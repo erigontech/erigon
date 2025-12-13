@@ -21,7 +21,6 @@ package rpc
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"sync/atomic"
 	"time"
@@ -125,7 +124,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return nil
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
@@ -137,11 +136,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return nil
 	}
 	if batch {
-		if s.batchLimit > 0 && len(reqs) > s.batchLimit {
-			return errorMessage(fmt.Errorf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", s.batchLimit, len(reqs)))
-		} else {
-			h.handleBatch(reqs)
-		}
+		h.handleBatch(reqs)
 	} else {
 		h.handleMsg(reqs[0], stream)
 	}
