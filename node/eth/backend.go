@@ -1144,7 +1144,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
+		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
 			return err
 		}
 	}
