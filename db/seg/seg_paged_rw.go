@@ -227,8 +227,13 @@ func (g *PagedReader) Skip() (uint64, int) {
 	return offset, len(v)
 }
 
-func NewPagedWriter(parent CompressorI, pageSize int, compressionEnabled bool) *PagedWriter {
-	return &PagedWriter{parent: parent, pageSize: pageSize, compressionEnabled: compressionEnabled}
+func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
+
+	return &PagedWriter{
+		parent:             parent,
+		pageSize:           parent.GetValuesOnCompressedPage(),
+		compressionEnabled: compressionEnabled,
+	}
 }
 
 type CompressorI interface {
@@ -238,6 +243,7 @@ type CompressorI interface {
 	Count() int
 	FileName() string
 	SetMetadata(data []byte)
+	GetValuesOnCompressedPage() int
 }
 type PagedWriter struct {
 	parent             CompressorI
