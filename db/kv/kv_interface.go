@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
+	"iter"
 	"sync"
 	"time"
 	"unsafe"
@@ -398,8 +398,6 @@ type Encodable interface {
 
 type ValueCache interface {
 	Name() Domain
-	KeyType() reflect.Type
-	ValueType() reflect.Type
 }
 
 type TemporalGetter interface {
@@ -438,6 +436,7 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+	StepSize() uint64
 
 	AggForkablesTx(ForkableId) any // any forkableId, returns that group
 	Unmarked(ForkableId) UnmarkedTx
@@ -458,7 +457,6 @@ type TemporalDebugTx interface {
 
 	DomainProgress(domain Domain) (txNum uint64)
 	IIProgress(name InvertedIdx) (txNum uint64)
-	StepSize() uint64
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
 
@@ -478,21 +476,28 @@ type TemporalDebugDB interface {
 	MergeLoop(ctx context.Context) error
 }
 
+type DataWithStep struct {
+	Data []byte
+	Step Step
+}
+
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k []byte, v []byte, txNum uint64, preval []byte, prevStep Step) error
 	DomainDel(domain Domain, k []byte, txNum uint64, preval []byte, prevStep Step) error
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
-	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
-	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
-	SizeEstimate() uint64
+	IteratePrefix(domain Domain, prefix []byte, mem iter.Seq2[string, DataWithStep], roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
+	IsUnwound() bool
+	StepSize() Step
+	SetValueCache(cache ValueCache)
+	ValueCache(d Domain) ValueCache
 }
 
 type WithFreezeInfo interface {

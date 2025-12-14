@@ -19,8 +19,7 @@ type u128 struct{ hi, lo uint64 }      //nolint
 type u192 struct{ hi, lo, ext uint64 } //nolint
 
 type DomainGetFromFileCache struct {
-	sync.RWMutex
-	*freelru.LRU[uint64, domainGetFromFileCacheItem]
+	*freelru.ShardedLRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
 	limit          uint32
 }
@@ -38,23 +37,11 @@ var (
 )
 
 func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
-	c, err := freelru.New[uint64, domainGetFromFileCacheItem](limit, u64noHash)
+	c, err := freelru.NewSharded[uint64, domainGetFromFileCacheItem](limit, u64noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
-}
-
-func (c *DomainGetFromFileCache) Add(key uint64, value domainGetFromFileCacheItem) (evicted bool) {
-	c.Lock()
-	defer c.Unlock()
-	return c.LRU.Add(key, value)
-}
-
-func (c *DomainGetFromFileCache) Get(key uint64) (value domainGetFromFileCacheItem, ok bool) {
-	c.Lock() // get upates cache vars
-	defer c.Unlock()
-	return c.LRU.Get(key)
+	return &DomainGetFromFileCache{ShardedLRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
@@ -62,8 +49,6 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	if c == nil {
 		return
 	}
-	c.RLock()
-	defer c.RUnlock()
 	if !c.enabled || !c.trace {
 		return
 	}
@@ -108,7 +93,7 @@ var (
 )
 
 type IISeekInFilesCache struct {
-	*freelru.LRU[uint64, iiSeekInFilesCacheItem] // murmur3(key) -> {requestedTxNum, foundTxNum}
+	*freelru.ShardedLRU[uint64, iiSeekInFilesCacheItem] // murmur3(key) -> {requestedTxNum, foundTxNum}
 
 	hit, total int
 	trace      bool
@@ -121,11 +106,11 @@ func NewIISeekInFilesCache() *IISeekInFilesCache {
 	if !iiGetFromFileCacheEnabled {
 		return nil
 	}
-	c, err := freelru.New[uint64, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u64noHash)
+	c, err := freelru.NewSharded[uint64, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u64noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &IISeekInFilesCache{LRU: c, trace: iiGetFromFileCacheTrace}
+	return &IISeekInFilesCache{ShardedLRU: c, trace: iiGetFromFileCacheTrace}
 }
 func (c *IISeekInFilesCache) SetTrace(v bool) { c.trace = v }
 func (c *IISeekInFilesCache) LogStats(fileBaseName string) {

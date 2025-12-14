@@ -178,7 +178,7 @@ func TestAPI(t *testing.T) {
 			}
 			defer d.Close()
 			txNum := uint64(0)
-			if err := d.PutAccount(ctx, k, v, tx, txNum, nil, 0); err != nil {
+			if err := d.PutAccount(ctx, k, v, tx, txNum); err != nil {
 				return err
 			}
 			return d.Flush(ctx, tx)

@@ -77,7 +77,7 @@ func (api *InternalAPIImpl) GetStepsInDB(ctx context.Context) (float64, error) {
 	}
 	defer tx.Rollback()
 
-	steps := rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize())
+	steps := rawdbhelpers.IdxStepsCountV3(tx, tx.StepSize())
 	return steps, nil
 }
 

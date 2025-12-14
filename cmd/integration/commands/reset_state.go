@@ -194,7 +194,7 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
 
 	dbg := tx.Debug()
-	stepSize := dbg.StepSize()
+	stepSize := tx.StepSize()
 	for i := 0; i < int(kv.DomainLen); i++ {
 		d := kv.Domain(i)
 		txNum := dbg.DomainProgress(d)

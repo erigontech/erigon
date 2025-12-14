@@ -57,7 +57,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	var lastFrozenTxNum uint64
 	if lastFrozenStep > 0 {
-		lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(se.doms.StepSize())) - 1
+		lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(rwTx.StepSize())) - 1
 	}
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
@@ -289,7 +289,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		default:
 		}
 
-		lastExecutedStep := kv.Step(uint64(se.lastExecutedTxNum.Load()) / se.doms.StepSize())
+		lastExecutedStep := kv.Step(uint64(se.lastExecutedTxNum.Load()) / rwTx.StepSize())
 
 		// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost

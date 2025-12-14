@@ -222,7 +222,7 @@ func ExecV3(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
+	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.StepSize())
 	blockNum = doms.BlockNum()
 
 	if maxBlockNum < blockNum {
@@ -326,7 +326,7 @@ func ExecV3(ctx context.Context,
 					se.lastCommittedTxNum = se.domains().TxNum()
 
 					commitStart := time.Now()
-					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.StepSize())
 					applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
 					if err != nil {
 						return err
@@ -365,13 +365,13 @@ func ExecV3(ctx context.Context,
 		dumpPlainStateDebug(applyTx, doms)
 	}
 
-	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
+	lastCommitedStep := kv.Step((lastCommittedTxNum) / applyTx.StepSize())
 	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
 
 	if lastCommitedStep > 0 && lastCommitedStep <= lastFrozenStep && !dbg.DiscardCommitment() {
 		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
 			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommitedStep,
-			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
+			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(applyTx.StepSize()))-1)
 		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
 	}
@@ -583,7 +583,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 		var lastFrozenTxNum uint64
 		if lastFrozenStep > 0 {
-			lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(te.doms.StepSize())) - 1
+			lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(tx.StepSize())) - 1
 		}
 
 		for blockNum := startBlockNum; blockNum <= maxBlockNum; blockNum++ {
@@ -653,7 +653,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 				inputTxNum++
 			}
 
-			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
+			lastExecutedStep := kv.Step(inputTxNum / tx.StepSize())
 
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost

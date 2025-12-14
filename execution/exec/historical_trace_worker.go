@@ -701,7 +701,7 @@ func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader r
 		return 0, 0, err
 	}
 
-	stepSize := tx.Debug().StepSize()
+	stepSize := tx.StepSize()
 	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
 }
 

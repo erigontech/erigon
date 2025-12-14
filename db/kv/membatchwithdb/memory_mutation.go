@@ -109,6 +109,10 @@ func (m *MemoryMutation) DBSize() (uint64, error) {
 	panic("not implemented")
 }
 
+func (m *MemoryMutation) StepSize() uint64 {
+	return m.db.StepSize()
+}
+
 func initSequences(db kv.Tx, memTx kv.RwTx) error {
 	cursor, err := db.Cursor(kv.Sequence)
 	if err != nil {

@@ -88,7 +88,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	for i := uint64(0); i < maxTx; i++ {
 		txNum = i
 		for j := 0; j < len(keys); j++ {
-			err := domains.PutAccount(ctx, accounts.BytesToAddress(keys[j]), &accounts.Account{Nonce: i}, rwTx, txNum, nil, 0)
+			err := domains.PutAccount(ctx, accounts.BytesToAddress(keys[j]), &accounts.Account{Nonce: i}, rwTx, txNum)
 			require.NoError(t, err)
 		}
 
@@ -175,13 +175,13 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 					i.SetBytes(u.value)
 					err := domains.PutStorage(ctx,
 						accounts.BytesToAddress([]byte(key[:length.Addr])), accounts.BytesToKey([]byte(key[length.Addr:])),
-						i, rwTx, txNum, nil, 0)
+						i, rwTx, txNum)
 					require.NoError(b, err)
 				default:
 					var a accounts.Account
 					err := accounts.DeserialiseV3(&a, u.value)
 					require.NoError(b, err)
-					err = domains.PutAccount(ctx, accounts.BytesToAddress([]byte(key)), &a, rwTx, txNum, nil, 0)
+					err = domains.PutAccount(ctx, accounts.BytesToAddress([]byte(key)), &a, rwTx, txNum)
 					require.NoError(b, err)
 				}
 			}

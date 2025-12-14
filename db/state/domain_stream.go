@@ -22,9 +22,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"iter"
 	"math"
-
-	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -43,13 +42,18 @@ const (
 	RAM_CURSOR
 )
 
+type memIter struct {
+	next func() (string, kv.DataWithStep, bool)
+	stop func()
+}
+
 // CursorItem is the item in the priority queue used to do merge interation
 // over storage of a given account
 type CursorItem struct {
 	cDup    kv.CursorDupSort
 	cNonDup kv.Cursor
 
-	iter         btree2.MapIter[string, dataWithStep]
+	iter         memIter
 	idx          *seg.Reader
 	hist         *seg.PagedReader
 	btCursor     *Cursor
@@ -313,7 +317,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, dataWithStep], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
+func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, mem iter.Seq2[string, kv.DataWithStep], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
@@ -329,13 +333,9 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	var k, v []byte
 	var err error
 
-	if ramIter.Seek(string(prefix)) {
-		k := toBytesZeroCopy(ramIter.Key())
-		v = ramIter.Value().data
-
-		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: ramIter, endTxNum: math.MaxUint64, reverse: true})
-		}
+	if mem != nil {
+		next, stop := iter.Pull2[string, kv.DataWithStep](mem)
+		heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: memIter{next, stop}, endTxNum: math.MaxUint64, reverse: true})
 	}
 
 	valsCursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
@@ -383,11 +383,11 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 			ci1 := heap.Pop(cpPtr).(*CursorItem)
 			switch ci1.t {
 			case RAM_CURSOR:
-				if ci1.iter.Next() {
-					k = toBytesZeroCopy(ci1.iter.Key())
+				if mk, mv, ok := ci1.iter.next(); ok {
+					k = toBytesZeroCopy(mk)
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
-						ci1.val = common.Copy(ci1.iter.Value().data)
+						ci1.val = common.Copy(mv.Data)
 						heap.Push(cpPtr, ci1)
 					}
 				}

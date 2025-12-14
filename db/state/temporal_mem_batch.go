@@ -20,11 +20,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"iter"
+	"math"
 	"sort"
-	"sync"
 	"unsafe"
-
-	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -32,28 +31,10 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
-type iodir int
-
-const (
-	get iodir = iota
-	put
-)
-
-type dataWithStep struct {
-	data []byte
-	step kv.Step
-	dir  iodir
-}
-
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
-	stepSize uint64
-
+	aggTx        *AggregatorRoTx
 	getCacheSize int
-
-	latestStateLock sync.RWMutex
-	domains         [kv.DomainLen]map[string]dataWithStep
-	storage         *btree2.Map[string, dataWithStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
 	domainWriters   [kv.DomainLen]*DomainBufferedWriter
 	iiWriters       []*InvertedIndexBufferedWriter
@@ -68,26 +49,20 @@ type TemporalMemBatch struct {
 
 	unwindToTxNum   uint64
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
-
-	metrics *changeset.DomainMetrics
 }
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage: btree2.NewMap[string, dataWithStep](128),
-		metrics: ioMetrics.(*changeset.DomainMetrics),
+		aggTx: AggTx(tx),
 	}
-	aggTx := AggTx(tx)
-	sd.stepSize = aggTx.StepSize()
 
-	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
+	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(sd.aggTx.iis))
 
-	for id, ii := range aggTx.iis {
+	for id, ii := range sd.aggTx.iis {
 		sd.iiWriters[id] = ii.NewWriter()
 	}
 
-	for id, d := range aggTx.d {
-		sd.domains[id] = map[string]dataWithStep{}
+	for id, d := range sd.aggTx.d {
 		sd.domainWriters[id] = d.NewWriter()
 	}
 
@@ -97,6 +72,18 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBa
 	}
 
 	return sd
+}
+
+func (sd *TemporalMemBatch) StepSize() kv.Step {
+	return kv.Step(sd.aggTx.StepSize())
+}
+
+func (sd *TemporalMemBatch) SetValueCache(cache kv.ValueCache) {
+	sd.aggTx.d[cache.Name()].d.valueCache = cache
+}
+
+func (sd *TemporalMemBatch) ValueCache(d kv.Domain) kv.ValueCache {
+	return sd.aggTx.d[d].d.valueCache
 }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k []byte, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
@@ -115,9 +102,6 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
-
 	if sd.unwindChangeset != nil {
 		if values := sd.unwindChangeset[domain]; values != nil {
 			if value, ok := values[toStringZeroCopy(key)]; ok {
@@ -142,49 +126,8 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 	return nil, 0, false
 }
 
-func (sd *TemporalMemBatch) SizeEstimate() uint64 {
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
-
-	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
-	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.metrics.CachePutSize) * 4
-}
-
-func (sd *TemporalMemBatch) ClearRam() {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
-	for i := range sd.domains {
-		sd.domains[i] = map[string]dataWithStep{}
-	}
-
-	sd.storage = btree2.NewMap[string, dataWithStep](128)
-	sd.unwindToTxNum = 0
-	sd.unwindChangeset = nil
-
-	sd.metrics.Lock()
-	defer sd.metrics.Unlock()
-	sd.metrics.CachePutCount = 0
-	sd.metrics.CachePutSize = 0
-	sd.metrics.CachePutKeySize = 0
-	sd.metrics.CachePutValueSize = 0
-	for _, dm := range sd.metrics.Domains {
-		dm.CachePutCount = 0
-		dm.CachePutSize = 0
-		dm.CachePutKeySize = 0
-		dm.CachePutValueSize = 0
-	}
-}
-
-func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
-	var ramIter btree2.MapIter[string, dataWithStep]
-	if domain == kv.StorageDomain {
-		ramIter = sd.storage.Iter()
-	}
-
-	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
+func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, memIter iter.Seq2[string, kv.DataWithStep], roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, memIter, it, roTx)
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
@@ -243,6 +186,10 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 	sd.unwindChangeset = unwindChangeset
 }
 
+func (sd *TemporalMemBatch) IsUnwound() bool {
+	return sd.unwindToTxNum < math.MaxUint64
+}
+
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
@@ -285,7 +232,9 @@ func (sd *TemporalMemBatch) Close() {
 			f.Close()
 		}
 	}
-	sd.ClearRam()
+
+	sd.unwindToTxNum = 0
+	sd.unwindChangeset = nil
 }
 
 func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
@@ -293,18 +242,6 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	if !ok {
 		return fmt.Errorf("Can't merge %T into *TemporalMemBatch", o)
 	}
-
-	for domain, otherEntries := range other.domains {
-		entries := sd.domains[domain]
-		for key, value := range otherEntries {
-			entries[key] = value
-		}
-	}
-
-	other.storage.Scan(func(key string, value dataWithStep) bool {
-		sd.storage.Set(key, value)
-		return true
-	})
 
 	for domain, writer := range other.domainWriters {
 		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)
@@ -383,6 +320,8 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 			})
 		}
 		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, &changeSet)
+		sd.unwindChangeset = nil
+		sd.unwindToTxNum = math.MaxUint64
 	}
 
 	if err := sd.flushDiffSet(ctx, tx); err != nil {

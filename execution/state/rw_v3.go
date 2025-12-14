@@ -70,7 +70,7 @@ func (rs *StateV3) applyUpdates(ctx context.Context, roTx kv.TemporalTx, blockNu
 				if err = domains.DelCode(ctx, update.address, roTx, txNum, nil, 0); err != nil {
 					return false
 				}
-				if err = domains.DelStorage(ctx, update.address, accounts.NilKey, roTx, txNum, nil, 0); err != nil {
+				if err = domains.DelStorage(ctx, update.address, accounts.NilKey, roTx, txNum); err != nil {
 					return false
 				}
 			}
@@ -80,7 +80,7 @@ func (rs *StateV3) applyUpdates(ctx context.Context, roTx kv.TemporalTx, blockNu
 					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 						fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
 					}
-					if err = domains.PutAccount(ctx, update.address, update.data, roTx, txNum, nil, 0); err != nil {
+					if err = domains.PutAccount(ctx, update.address, update.data, roTx, txNum); err != nil {
 						return false
 					}
 				}
@@ -106,14 +106,14 @@ func (rs *StateV3) applyUpdates(ctx context.Context, roTx kv.TemporalTx, blockNu
 							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 								fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, i.key)
 							}
-							if err = domains.DelStorage(ctx, update.address, i.key, roTx, txNum, nil, 0); err != nil {
+							if err = domains.DelStorage(ctx, update.address, i.key, roTx, txNum); err != nil {
 								return false
 							}
 						} else {
 							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 								fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
 							}
-							if err = domains.PutStorage(ctx, update.address, i.key, i.value, roTx, txNum, nil, 0); err != nil {
+							if err = domains.PutStorage(ctx, update.address, i.key, i.value, roTx, txNum); err != nil {
 								return false
 							}
 						}
@@ -128,7 +128,7 @@ func (rs *StateV3) applyUpdates(ctx context.Context, roTx kv.TemporalTx, blockNu
 				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 					fmt.Printf("%d apply:del account: %x\n", blockNum, update.address)
 				}
-				if err = domains.DelAccount(ctx, update.address, roTx, txNum, nil, 0); err != nil {
+				if err = domains.DelAccount(ctx, update.address, roTx, txNum); err != nil {
 					return false
 				}
 			}
@@ -177,11 +177,11 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
-	if (txNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ && !dbg.DiscardCommitment() {
+	if (txNum+1)%roTx.StepSize() == 0 /*&& txTask.TxNum > 0 */ && !dbg.DiscardCommitment() {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum, fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
+		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum, fmt.Sprintf("applying step %d", txNum/roTx.StepSize()), nil)
 		if err != nil {
 			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
 		}
@@ -567,7 +567,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		if err := w.ec.DelCode(context.Background(), address, w.tx, w.txNum, nil, 0); err != nil {
 			return err
 		}
-		if err := w.ec.DelStorage(context.Background(), address, accounts.NilKey, w.tx, w.txNum, nil, 0); err != nil {
+		if err := w.ec.DelStorage(context.Background(), address, accounts.NilKey, w.tx, w.txNum); err != nil {
 			return err
 		}
 	}
@@ -576,7 +576,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
 	}
 
-	if err := w.ec.PutAccount(context.Background(), address, account, w.tx, w.txNum, nil, 0); err != nil {
+	if err := w.ec.PutAccount(context.Background(), address, account, w.tx, w.txNum); err != nil {
 		return err
 	}
 	return nil
@@ -600,14 +600,7 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	//TODO: move logic from SD
-	//if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-	//	return err
-	//}
-	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
-	//	return err
-	//}
-	if err := w.ec.DelAccount(context.Background(), address, w.tx, w.txNum, nil, 0); err != nil {
+	if err := w.ec.DelAccount(context.Background(), address, w.tx, w.txNum); err != nil {
 		return err
 	}
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
@@ -629,19 +622,19 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, &value)
 	}
-	var prev *uint256.Int
+	var prev []ValueWithStep[uint256.Int]
 	if original.ByteLen() < 0 {
-		prev = &original
+		prev = []ValueWithStep[uint256.Int]{{Value: original}}
 	}
 	if value.ByteLen() == 0 {
-		return w.ec.DelStorage(context.Background(), address, key, w.tx, w.txNum, prev, 0)
+		return w.ec.DelStorage(context.Background(), address, key, w.tx, w.txNum, prev...)
 	}
 	if w.accumulator != nil {
 		addressValue := address.Value()
 		keyValue := key.Value()
 		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, value.Bytes())
 	}
-	return w.ec.PutStorage(context.Background(), address, key, value, w.tx, w.txNum, prev, 0)
+	return w.ec.PutStorage(context.Background(), address, key, value, w.tx, w.txNum, prev...)
 }
 
 var fastCreate = dbg.EnvBool("FAST_CREATE", false)
@@ -653,7 +646,7 @@ func (w *Writer) CreateContract(address accounts.Address) error {
 	if fastCreate {
 		return nil
 	}
-	if err := w.ec.DelStorage(context.Background(), address, accounts.NilKey, w.tx, w.txNum, nil, 0); err != nil {
+	if err := w.ec.DelStorage(context.Background(), address, accounts.NilKey, w.tx, w.txNum); err != nil {
 		return err
 	}
 	return nil

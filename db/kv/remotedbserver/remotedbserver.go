@@ -794,7 +794,7 @@ func (s *KvServer) CurrentDomainVersion(_ context.Context, req *remoteproto.Curr
 func (s *KvServer) StepSize(_ context.Context, req *remoteproto.StepSizeReq) (reply *remoteproto.StepSizeReply, err error) {
 	reply = &remoteproto.StepSizeReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.Step = tx.Debug().StepSize()
+		reply.Step = tx.StepSize()
 		return nil
 	}); err != nil {
 		return nil, err

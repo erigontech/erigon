@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -92,13 +91,7 @@ type Domain struct {
 
 	checker *DependencyIntegrityChecker
 
-	hooks Hooks
-}
-
-type ReadHook func(key []byte, v []byte, foundStep kv.Step, isDb bool)
-
-type Hooks struct {
-	OnRead []ReadHook
+	valueCache kv.ValueCache
 }
 
 type domainVisible struct {
@@ -1665,7 +1658,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics domainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}
@@ -1690,9 +1683,6 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		if metrics != nil {
 			metrics.UpdateDbReads(dt.name, start)
 		}
-		for _, hook := range dt.d.hooks.OnRead {
-			hook(key, v, foundStep, true)
-		}
 		return v, foundStep, true, nil
 	}
 
@@ -1704,9 +1694,6 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 
 	if metrics != nil {
 		metrics.UpdateFileReads(dt.name, start)
-	}
-	for _, hook := range dt.d.hooks.OnRead {
-		hook(key, v, foundStep, false)
 	}
 	return v, kv.Step(endTxNum / dt.stepSize), foundInFile, nil
 }

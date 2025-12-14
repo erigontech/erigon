@@ -935,7 +935,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 			txNum := uint64(0)
-			err = sd.PutAccount(ctx, accounts.BytesToAddress([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), &sndr, tx, txNum, nil, 0)
+			err = sd.PutAccount(ctx, accounts.BytesToAddress([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), &sndr, tx, txNum)
 			asrt.NoError(err)
 
 			err = sd.Flush(ctx, tx)
@@ -1055,7 +1055,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 	txNum := uint64(0)
-	err = sd.PutAccount(ctx, accounts.BytesToAddress([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), &sndr, tx, txNum, nil, 0)
+	err = sd.PutAccount(ctx, accounts.BytesToAddress([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), &sndr, tx, txNum)
 	require.NoError(t, err)
 
 	err = sd.Flush(ctx, tx)

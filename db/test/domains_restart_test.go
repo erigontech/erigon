@@ -479,12 +479,12 @@ func TestCommit(t *testing.T) {
 	for i := 1; i < 3; i++ {
 		addr[0] = byte(i)
 
-		err = domains.PutAccount(ctx, accounts.BytesToAddress(addr), &acc, tx, txNum, nil, 0)
+		err = domains.PutAccount(ctx, accounts.BytesToAddress(addr), &acc, tx, txNum)
 		require.NoError(t, err)
 		loc[0] = byte(i)
 		var i uint256.Int
 		i.SetBytes([]byte("0401"))
-		err = domains.PutStorage(ctx, accounts.BytesToAddress(addr), accounts.BytesToKey(loc), i, tx, txNum, nil, 0)
+		err = domains.PutStorage(ctx, accounts.BytesToAddress(addr), accounts.BytesToKey(loc), i, tx, txNum)
 		require.NoError(t, err)
 	}
 

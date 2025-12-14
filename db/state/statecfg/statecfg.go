@@ -21,8 +21,6 @@ type DomainCfg struct {
 	ReplaceKeysInValues bool
 
 	FileVersion DomainVersionTypes
-
-	ValueCache ValueCacheCfg
 }
 
 func (d DomainCfg) Tables() []string {
@@ -119,10 +117,6 @@ type ForkableCfg struct {
 	Compression            seg.FileCompression
 	ValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 	Enabled                bool
-}
-
-type ValueCacheCfg struct {
-	InitCache func() kv.ValueCache
 }
 
 type DomainVersionTypes struct {

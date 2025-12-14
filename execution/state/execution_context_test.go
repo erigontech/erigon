@@ -126,7 +126,7 @@ Loop:
 			pv, step, _, err := domains.GetAccount(context.Background(), addr0, rwTx)
 			require.NoError(t, err)
 
-			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, uint64(i), pv, step)
+			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, uint64(i), execstate.ValueWithStep[*accounts.Account]{pv, step})
 			require.NoError(t, err)
 		}
 
@@ -213,7 +213,7 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 			pv, step, _, err := domains.GetAccount(context.Background(), addr0, rwTx)
 			require.NoError(t, err)
 
-			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, txNum, pv, step)
+			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, txNum, execstate.ValueWithStep[*accounts.Account]{pv, step})
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
@@ -223,14 +223,14 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 				require.NoError(t, err)
 
 				var v uint256.Int
-				var pv *uint256.Int
+				var pv []execstate.ValueWithStep[uint256.Int]
 
 				if ok {
-					pv = &p
+					pv = []execstate.ValueWithStep[uint256.Int]{{Value: p, Step: step}}
 				}
 
 				v.SetBytes(l0[24:])
-				err = domains.PutStorage(context.Background(), addr0, accounts.BytesToKey(l0), v, rwTx, txNum, pv, step)
+				err = domains.PutStorage(context.Background(), addr0, accounts.BytesToKey(l0), v, rwTx, txNum, pv...)
 				require.NoError(t, err)
 			}
 		}
@@ -298,7 +298,11 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, missed)
 
-		err = domains.DelAccount(ctx, accounts.BytesToAddress(k0), rwTx, txNum, pv, step)
+		var prev []execstate.ValueWithStep[*accounts.Account]
+		if pv != nil {
+			prev = []execstate.ValueWithStep[*accounts.Account]{{Value: pv, Step: step}}
+		}
+		err = domains.DelAccount(ctx, accounts.BytesToAddress(k0), rwTx, txNum, prev...)
 		require.NoError(t, err)
 
 		notRemoved := 0
@@ -368,12 +372,12 @@ func TestExecutionContext_IterateStorage(t *testing.T) {
 	addr := accounts.BytesToAddress(acc(1))
 	for i := uint64(0); i < stepSize; i++ {
 		txNum := i
-		if err = domains.PutAccount(ctx, addr, &accounts.Account{Nonce: i}, rwTx, txNum, nil, 0); err != nil {
+		if err = domains.PutAccount(ctx, addr, &accounts.Account{Nonce: i}, rwTx, txNum); err != nil {
 			panic(err)
 		}
 		var v uint256.Int
 		v.SetBytes(acc(i))
-		if err = domains.PutStorage(ctx, addr, accounts.BytesToKey(st(i)), v, rwTx, txNum, nil, 0); err != nil {
+		if err = domains.PutStorage(ctx, addr, accounts.BytesToKey(st(i)), v, rwTx, txNum); err != nil {
 			panic(err)
 		}
 	}
@@ -398,20 +402,20 @@ func TestExecutionContext_IterateStorage(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 
 		txNum = stepSize
-		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(1)), rwTx, txNum, nil, 0); err != nil {
+		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(1)), rwTx, txNum); err != nil {
 			panic(err)
 		}
-		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(2)), rwTx, txNum, nil, 0); err != nil {
+		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(2)), rwTx, txNum); err != nil {
 			panic(err)
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
 			txNum = i
-			if err = domains.PutAccount(ctx, addr, &accounts.Account{Nonce: i}, rwTx, txNum, nil, 0); err != nil {
+			if err = domains.PutAccount(ctx, addr, &accounts.Account{Nonce: i}, rwTx, txNum); err != nil {
 				panic(err)
 			}
 			var v uint256.Int
 			v.SetBytes(acc(i))
-			if err = domains.PutStorage(ctx, addr, accounts.BytesToKey(st(i)), v, rwTx, txNum, nil, 0); err != nil {
+			if err = domains.PutStorage(ctx, addr, accounts.BytesToKey(st(i)), v, rwTx, txNum); err != nil {
 				panic(err)
 			}
 		}
@@ -459,12 +463,12 @@ func TestExecutionContext_IterateStorage(t *testing.T) {
 		defer domains.Close()
 
 		txNum = stepSize*2 + 1
-		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(4)), rwTx, txNum, nil, 0); err != nil {
+		if err := domains.DelStorage(ctx, addr, accounts.BytesToKey(st(4)), rwTx, txNum); err != nil {
 			panic(err)
 		}
 		var v uint256.Int
 		v.SetBytes(acc(5))
-		if err := domains.PutStorage(ctx, addr, accounts.BytesToKey(st(5)), v, rwTx, txNum, nil, 0); err != nil {
+		if err := domains.PutStorage(ctx, addr, accounts.BytesToKey(st(5)), v, rwTx, txNum); err != nil {
 			panic(err)
 		}
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -489,7 +493,7 @@ func TestExecutionContext_IterateStorage(t *testing.T) {
 		domains, err = execstate.NewExecutionContext(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
-		err := domains.DelStorage(ctx, accounts.NilAddress, accounts.NilKey, rwTx, txNum+1, nil, 0)
+		err := domains.DelStorage(ctx, accounts.NilAddress, accounts.NilKey, rwTx, txNum+1)
 		require.NoError(err)
 		require.Equal(0, iterCount(domains))
 	}
@@ -530,7 +534,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		// write to storage
 		var i uint256.Int
 		i.SetBytes([]byte{1})
-		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), i, rwTtx1, 1, nil, 0)
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), i, rwTtx1, 1)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx1)
@@ -598,7 +602,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		t.Cleanup(rwTtx2.Rollback)
 		var i uint256.Int
 		i.SetBytes([]byte{2})
-		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc2slot2), i, rwTtx2, 2, nil, 0)
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc2slot2), i, rwTtx2, 2)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx2)
@@ -665,7 +669,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx4, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx4.Rollback)
-		err = sd.DelStorage(ctx, accounts.InternAddress(acc1), accounts.NilKey, rwTtx4, 3, nil, 0)
+		err = sd.DelStorage(ctx, accounts.InternAddress(acc1), accounts.NilKey, rwTtx4, 3)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx4)
@@ -698,7 +702,7 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		t.Cleanup(rwTtx5.Rollback)
 		var i uint256.Int
 		i.SetBytes([]byte{3})
-		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), i, rwTtx5, 4, nil, 0)
+		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), i, rwTtx5, 4)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx5)

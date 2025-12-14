@@ -350,12 +350,12 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
-		err = domains.PutAccount(context.Background(), accounts.BytesToAddress(addr), &acc, rwTx, txNum, nil, 0)
+		err = domains.PutAccount(context.Background(), accounts.BytesToAddress(addr), &acc, rwTx, txNum)
 		require.NoError(t, err)
 
 		var sv uint256.Int
 		sv.SetBytes([]byte{addr[0], loc[0]})
-		err = domains.PutStorage(context.Background(), accounts.BytesToAddress(addr), accounts.BytesToKey(loc), sv, rwTx, txNum, nil, 0)
+		err = domains.PutStorage(context.Background(), accounts.BytesToAddress(addr), accounts.BytesToKey(loc), sv, rwTx, txNum)
 		require.NoError(t, err)
 
 		var v [8]byte
@@ -620,7 +620,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	for key := range data {
 		removedKey = []byte(key)[:length.Addr]
 		txNum = maxTx + 1
-		err = domains.DelAccount(ctx, accounts.BytesToAddress(removedKey), rwTx, txNum, nil, 0)
+		err = domains.DelAccount(ctx, accounts.BytesToAddress(removedKey), rwTx, txNum)
 		require.NoError(t, err)
 		break
 	}
@@ -651,7 +651,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 
 	// 5. delete same key. commitment should be the same
 	txNum = maxTx + 1
-	err = domains.DelAccount(ctx, accounts.BytesToAddress(removedKey), rwTx, txNum, nil, 0)
+	err = domains.DelAccount(ctx, accounts.BytesToAddress(removedKey), rwTx, txNum)
 	require.NoError(t, err)
 
 	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, txNum/stepSize, txNum, "", nil)
@@ -703,11 +703,11 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
-		err = domains.PutAccount(context.Background(), accounts.BytesToAddress(addr), &acc, rwTx, txNum, nil, 0)
+		err = domains.PutAccount(context.Background(), accounts.BytesToAddress(addr), &acc, rwTx, txNum)
 		require.NoError(t, err)
 		var i uint256.Int
 		i.SetBytes([]byte{addr[0], loc[0]})
-		err = domains.PutStorage(context.Background(), accounts.BytesToAddress(addr), accounts.BytesToKey(loc), i, rwTx, txNum, nil, 0)
+		err = domains.PutStorage(context.Background(), accounts.BytesToAddress(addr), accounts.BytesToKey(loc), i, rwTx, txNum)
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
@@ -871,12 +871,16 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			prev, step, _, err := domains.GetAccount(context.Background(), addr, tx)
+			prevVal, step, _, err := domains.GetAccount(context.Background(), addr, tx)
 			require.NoError(t, err)
 
 			usedKeys[string(key)] = struct{}{}
 
-			err = domains.PutAccount(context.Background(), addr, &acc, tx, txNum, prev, step)
+			var prev []execstate.ValueWithStep[*accounts.Account]
+			if prevVal != nil {
+				prev = []execstate.ValueWithStep[*accounts.Account]{{Value: prevVal, Step: step}}
+			}
+			err = domains.PutAccount(context.Background(), addr, &acc, tx, txNum, prev...)
 			require.NoError(t, err)
 
 		case r > 33 && r <= 66:
@@ -902,7 +906,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			err := domains.DelAccount(context.Background(), accounts.BytesToAddress(key), tx, txNum, nil, 0)
+			err := domains.DelAccount(context.Background(), accounts.BytesToAddress(key), tx, txNum)
 			require.NoError(t, err)
 
 		case r > 66 && r <= 80:
@@ -911,9 +915,9 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 				key = key[:length.Addr]
 			}
 			addr := accounts.BytesToAddress(key)
-			prev, step, _, err := domains.GetAccount(context.Background(), addr, tx)
+			_, _, ok, err := domains.GetAccount(context.Background(), addr, tx)
 			require.NoError(t, err)
-			if prev == nil {
+			if !ok {
 				usedKeys[string(key)] = struct{}{}
 				acc := accounts.Account{
 					Nonce:       txNum,
@@ -921,7 +925,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 					CodeHash:    accounts.EmptyCodeHash,
 					Incarnation: 0,
 				}
-				err = domains.PutAccount(context.Background(), addr, &acc, tx, txNum, prev, step)
+				err = domains.PutAccount(context.Background(), addr, &acc, tx, txNum)
 				require.NoError(t, err)
 			}
 
@@ -937,12 +941,12 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 					accounts.BytesToAddress(sk[:length.Addr]), accounts.BytesToKey(sk[length.Addr:]), tx)
 				require.NoError(t, err)
 
-				var pprev *uint256.Int
+				var pprev []execstate.ValueWithStep[uint256.Int]
 				if ok {
-					pprev = &prev
+					pprev = []execstate.ValueWithStep[uint256.Int]{{Value: prev, Step: step}}
 				}
 				err = domains.PutStorage(context.Background(), accounts.BytesToAddress(sk[:length.Addr]),
-					accounts.BytesToKey(sk[length.Addr:]), *uint256.NewInt(txNum), tx, txNum, pprev, step)
+					accounts.BytesToKey(sk[length.Addr:]), *uint256.NewInt(txNum), tx, txNum, pprev...)
 				require.NoError(t, err)
 			}
 

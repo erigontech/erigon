@@ -92,7 +92,7 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, ste
 	if err != nil {
 		return enc, 0, fmt.Errorf("HistoryStateReader(GetAsOf) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
 	}
-	return enc, kv.Step(r.limitReadAsOfTxNum / r.roTx.Debug().StepSize()), nil
+	return enc, kv.Step(r.limitReadAsOfTxNum / r.roTx.StepSize()), nil
 }
 
 // LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) state at specified txNum, otherwise from *latest*.
@@ -131,7 +131,7 @@ func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []by
 	if !ok {
 		enc = nil
 	} else {
-		step = kv.Step(endTxNum / r.roTx.Debug().StepSize())
+		step = kv.Step(endTxNum / r.roTx.StepSize())
 	}
 	if enc == nil {
 		enc, step, err = r.getter.GetLatest(d, plainKey)
