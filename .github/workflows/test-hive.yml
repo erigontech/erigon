@@ -17,8 +17,8 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
-          # ref: master
+          repository: taratorio/hive
+          ref: fix-engine-cancun-bpo
           path: hive
 
       - name: Setup go env and cache
