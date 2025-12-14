@@ -24,6 +24,29 @@ const (
 	CompressVals FileCompression = 0b100
 )
 
+const (
+	FileCompressionFormatV0 = uint8(0)
+	FileCompressionFormatV1 = uint8(1)
+)
+
+type FeatureFlag uint8
+
+const (
+	PageLevelCompressionEnabled FeatureFlag = 1 << iota // 0b001
+	KeyCompressionEnabled                               // 0b010
+	ValCompressionEnabled                               // 0b100
+)
+
+type FeatureFlagBitmask uint8
+
+func (m FeatureFlagBitmask) Has(flag FeatureFlag) bool {
+	return m&FeatureFlagBitmask(flag) == FeatureFlagBitmask(flag)
+}
+
+func (m *FeatureFlagBitmask) Set(flag FeatureFlag) {
+	*m |= FeatureFlagBitmask(flag)
+}
+
 func ParseFileCompression(s string) (FileCompression, error) {
 	// Implementation would be here
 	return CompressNone, nil
