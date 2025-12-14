@@ -113,6 +113,14 @@ cd erigon
 make erigon
 ./build/bin/erigon
 ```
+Adds a short note in the "Getting Started" section explaining the repository migration from ledgerwatch
+to erigontech organization (completed in 2024).
+
+This helps new users avoid confusion when following outdated external guides or links.
+
+No functional changes.
+
+Similar to previous documentation improvements.
 
 Use `--datadir` to choose where to store data.
 
