@@ -909,7 +909,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.Balance = balance
 		}
-		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex > version.TxIndex && bversion.Incarnation > version.Incarnation) {
+		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex == version.TxIndex && bversion.Incarnation > version.Incarnation) {
 			version = bversion
 			if bsource != source {
 				source = bsource
@@ -929,7 +929,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.Nonce = nonce
 		}
-		if nversion.TxIndex > version.TxIndex || (nversion.TxIndex > version.TxIndex && nversion.Incarnation > version.Incarnation) {
+		if nversion.TxIndex > version.TxIndex || (nversion.TxIndex == version.TxIndex && nversion.Incarnation > version.Incarnation) {
 			version = nversion
 			if nsource != source {
 				source = nsource
@@ -950,7 +950,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.CodeHash = codeHash
 		}
-		if cversion.TxIndex > version.TxIndex || (cversion.TxIndex > version.TxIndex && cversion.Incarnation > version.Incarnation) {
+		if cversion.TxIndex > version.TxIndex || (cversion.TxIndex == version.TxIndex && cversion.Incarnation > version.Incarnation) {
 			version = cversion
 			if csource != source {
 				source = csource
