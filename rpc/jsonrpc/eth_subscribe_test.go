@@ -107,7 +107,7 @@ func TestEthSubscribe(t *testing.T) {
 func TestEthSubscribeReceipts(t *testing.T) {
 	m, require := mock.Mock(t), require.New(t)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
@@ -146,7 +146,17 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 
 	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
+			return err
+		}
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("Successfully created receipt subscription with ID: %v", id)
