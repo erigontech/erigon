@@ -66,7 +66,7 @@ func NewPersistentBlockCollector(
 			}
 		}).
 		GrowthStep(16 * datasize.MB).
-		MapSize(10 * datasize.TB).
+		MapSize(1 * datasize.TB).
 		Open(ctx)
 	if err != nil {
 		logger.Error("[PersistentBlockCollector] Failed to open database", "err", err, "path", persistDir)
