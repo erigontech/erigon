@@ -15,8 +15,8 @@ import (
 )
 
 // maxLocalCheckpointAge is the maximum age (in slots) of a local checkpoint to be considered valid
-// for reuse instead of fetching from remote. 7200 slots = ~24 hours at 12s/slot.
-const maxLocalCheckpointAge = 7200
+// for reuse instead of fetching from remote. 14400 slots = ~48 hours at 12s/slot.
+const maxLocalCheckpointAge = 14400
 
 // ReadOrFetchLatestBeaconState reads the latest beacon state from disk or fetches it from the network.
 // When remote sync is enabled, it first checks for a local checkpoint. If the local checkpoint exists
