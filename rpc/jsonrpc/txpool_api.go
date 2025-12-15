@@ -239,7 +239,7 @@ func (s *PublicTxPoolAPI) Inspect() map[string]map[string]map[string]string {
 	for account, txs := range pending {
 		dump := make(map[string]string)
 		for _, txn := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
+			dump[fmt.Sprintf("%d", txn.Nonce())] = format(txn)
 		}
 		content["pending"][account.Hex()] = dump
 	}
@@ -247,7 +247,7 @@ func (s *PublicTxPoolAPI) Inspect() map[string]map[string]map[string]string {
 	for account, txs := range queue {
 		dump := make(map[string]string)
 		for _, txn := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
+			dump[fmt.Sprintf("%d", txn.Nonce())] = format(txn)
 		}
 		content["queued"][account.Hex()] = dump
 	}
