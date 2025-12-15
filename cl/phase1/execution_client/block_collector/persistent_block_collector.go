@@ -172,7 +172,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		return nil
 	}
 
-	p.logger.Info("[PersistentBlockCollector] Flushing blocks", "count", len(blocks))
+	p.logger.Info("[BlockCollector] Flushing blocks", "count", len(blocks))
 
 	// Process blocks in batches (blocks are already sorted by key due to MDBX ordering)
 	blocksBatch := []*types.Block{}
@@ -181,7 +181,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	for _, b := range blocks {
 		block, err := p.decodeBlock(b.value)
 		if err != nil {
-			p.logger.Warn("[PersistentBlockCollector] Failed to decode block", "err", err)
+			p.logger.Warn("[BlockCollector] Failed to decode block", "err", err)
 			continue
 		}
 		if block == nil {
@@ -210,10 +210,10 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.db = nil
 
 	if err := dir.RemoveAll(p.persistDir); err != nil {
-		p.logger.Warn("[PersistentBlockCollector] Failed to remove database directory", "err", err)
+		p.logger.Warn("[BlockCollector] Failed to remove database directory", "err", err)
 	}
 
-	p.logger.Info("[PersistentBlockCollector] Flush complete", "blocksInserted", inserted)
+	p.logger.Info("[BlockCollector] Flush complete", "blocksInserted", inserted)
 
 	return nil
 }
@@ -264,29 +264,29 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 }
 
 func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64) error {
-	p.logger.Info("[PersistentBlockCollector] Inserting blocks",
+	p.logger.Info("[BlockCollector] Inserting blocks",
 		"from", blocksBatch[0].NumberU64(),
 		"to", blocksBatch[len(blocksBatch)-1].NumberU64())
 
 	if err := p.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {
-		p.logger.Warn("[PersistentBlockCollector] Failed to insert blocks", "err", err)
+		p.logger.Warn("[BlockCollector] Failed to insert blocks", "err", err)
 		return err
 	}
 
 	*inserted += uint64(len(blocksBatch))
-	p.logger.Info("[PersistentBlockCollector] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
+	p.logger.Info("[BlockCollector] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
 
 	lastBlockHash := blocksBatch[len(blocksBatch)-1].Hash()
 	currentHeader, err := p.engine.CurrentHeader(ctx)
 	if err != nil {
-		p.logger.Warn("[PersistentBlockCollector] Failed to get current header", "err", err)
+		p.logger.Warn("[BlockCollector] Failed to get current header", "err", err)
 	}
 
 	isForkchoiceNeeded := currentHeader == nil || blocksBatch[len(blocksBatch)-1].NumberU64() > currentHeader.Number.Uint64()
 	if *inserted >= p.syncBackLoop {
 		if isForkchoiceNeeded {
 			if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil); err != nil {
-				p.logger.Warn("[PersistentBlockCollector] Failed to update fork choice", "err", err)
+				p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
 			}
 		}
 		*inserted = 0
