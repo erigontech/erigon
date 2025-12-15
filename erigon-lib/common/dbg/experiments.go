@@ -18,12 +18,16 @@ package dbg
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/estimate"
@@ -77,15 +81,23 @@ var (
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
 	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
-	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
+	TraceDomainIO        = EnvBool("TRACE_DOMAIN_IO", false)
+	TraceNoopIO          = EnvBool("TRACE_NOOP_IO", false)
+	TraceLogs            = EnvBool("TRACE_LOGS", false)
 	TraceGas             = EnvBool("TRACE_GAS", false)
 	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
-	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)
+	TraceApply           = EnvBool("TRACE_APPLY", false)
+	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
+	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
+	TraceUnwinds         = EnvBool("TRACE_UNWINDS", false)
+	traceDomains         = EnvStrings("TRACE_DOMAINS", ",", nil)
 	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-	TraceDeletion        = EnvBool("TRACE_DELETION", false)
+
+	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
+	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -263,4 +275,119 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 			SaveHeapProfileNearOOM(opts...)
 		}
 	}
+}
+
+var tracedBlocks map[uint64]struct{}
+var traceAllBlocks bool
+var tracedTxIndexes map[int64]struct{}
+var tracedAccounts map[unique.Handle[common.Address]]struct{}
+var traceAllDomains bool
+var tracedDomains map[uint16]struct{}
+
+var traceInit sync.Once
+
+func initTraceMaps() {
+	tracedBlocks = map[uint64]struct{}{}
+	if len(TraceBlocks) == 1 && TraceBlocks[0] == math.MaxUint64 {
+		traceAllBlocks = true
+	}
+	for _, blockNum := range TraceBlocks {
+		tracedBlocks[blockNum] = struct{}{}
+	}
+	tracedTxIndexes = map[int64]struct{}{}
+	for _, index := range TraceTxIndexes {
+		tracedTxIndexes[index] = struct{}{}
+	}
+	tracedAccounts = map[unique.Handle[common.Address]]struct{}{}
+	for _, account := range TraceAccounts {
+		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
+		tracedAccounts[unique.Make(common.HexToAddress(account))] = struct{}{}
+	}
+	if len(traceDomains) == 1 &&
+		(strings.EqualFold(traceDomains[0], "all") || strings.EqualFold(traceDomains[0], "any") ||
+			strings.EqualFold(traceDomains[0], "true")) {
+		traceAllDomains = true
+	} else {
+		tracedDomains = map[uint16]struct{}{}
+		for _, domain := range traceDomains {
+			if d, err := string2Domain(domain); err == nil {
+				tracedDomains[d] = struct{}{}
+			}
+		}
+	}
+}
+
+func string2Domain(in string) (uint16, error) {
+	const (
+		accountsDomain   uint16 = 0 // Eth Accounts
+		storageDomain    uint16 = 1 // Eth Account's Storage
+		codeDomain       uint16 = 2 // Eth Smart-Contract Code
+		commitmentDomain uint16 = 3 // Merkle Trie
+		receiptDomain    uint16 = 4 // Tiny Receipts - without logs. Required for node-operations.
+		rCacheDomain     uint16 = 5 // Fat Receipts - with logs. Optional.
+		domainLen        uint16 = 6 // Technical marker of Enum. Not real Domain.
+	)
+
+	switch strings.ToLower(in) {
+	case "accounts":
+		return accountsDomain, nil
+	case "storage":
+		return storageDomain, nil
+	case "code":
+		return codeDomain, nil
+	case "commitment":
+		return commitmentDomain, nil
+	case "receipt":
+		return receiptDomain, nil
+	case "rcache":
+		return rCacheDomain, nil
+	default:
+		return math.MaxUint16, fmt.Errorf("unknown name: %s", in)
+	}
+}
+
+func TraceBlock(blockNum uint64) bool {
+	traceInit.Do(initTraceMaps)
+	if traceAllBlocks {
+		return true
+	}
+	_, ok := tracedBlocks[blockNum]
+	return ok
+}
+
+func TraceTx(blockNum uint64, txIndex int) bool {
+	traceInit.Do(initTraceMaps)
+	if !TraceBlock(blockNum) {
+		return false
+	}
+
+	if len(tracedTxIndexes) != 0 {
+		if _, ok := tracedTxIndexes[int64(txIndex)]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
+func TraceAccount(addr unique.Handle[common.Address]) bool {
+	traceInit.Do(initTraceMaps)
+	if len(tracedAccounts) != 0 {
+		_, ok := tracedAccounts[addr]
+		return ok
+	}
+	return false
+}
+
+func TracingAccounts() bool {
+	return len(tracedAccounts) > 0
+}
+
+func TraceDomain(domain uint16) bool {
+	traceInit.Do(initTraceMaps)
+	if traceAllDomains {
+		return true
+	}
+	_, ok := tracedDomains[domain]
+	return ok
 }

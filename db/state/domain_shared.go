@@ -193,6 +193,10 @@ func (sd *SharedDomains) SetTrace(b bool) {
 	sd.trace = b
 }
 
+func (sd *SharedDomains) Trace() bool {
+	return sd.trace
+}
+
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
 	var firstKey, firstVal []byte
 	var hasPrefix bool

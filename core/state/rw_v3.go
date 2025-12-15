@@ -529,10 +529,11 @@ func (w *Writer) CreateContract(address common.Address) error {
 }
 
 type ReaderV3 struct {
-	txNum     uint64
-	trace     bool
-	tx        kv.TemporalGetter
-	composite []byte
+	txNum       uint64
+	trace       bool
+	tracePrefix string
+	tx          kv.TemporalGetter
+	composite   []byte
 }
 
 func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
@@ -542,11 +543,17 @@ func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()                    {}
-func (r *ReaderV3) SetTxNum(txNum uint64)               { r.txNum = txNum }
+func (r *ReaderV3) DiscardReadList()      {}
+func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
+func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
+	r.trace = trace
+	if tplen := len(tracePrefix); tplen > 0 && tracePrefix[tplen-1] != ' ' {
+		tracePrefix += " "
+	}
+	r.tracePrefix = tracePrefix
+}
 func (r *ReaderV3) SetTx(tx kv.TemporalTx)              {}
 func (r *ReaderV3) ReadSet() map[string]*dbstate.KvList { return nil }
-func (r *ReaderV3) SetTrace(trace bool)                 { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                       {}
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
@@ -650,12 +657,12 @@ func NewReaderParallelV3(sd *dbstate.SharedDomains) *ReaderParallelV3 {
 	}
 }
 
-func (r *ReaderParallelV3) DiscardReadList()                    { r.discardReadList = true }
-func (r *ReaderParallelV3) SetTxNum(txNum uint64)               { r.txNum = txNum }
-func (r *ReaderParallelV3) SetTx(tx kv.TemporalTx)              { r.tx = tx }
-func (r *ReaderParallelV3) ReadSet() map[string]*dbstate.KvList { return r.readLists }
-func (r *ReaderParallelV3) SetTrace(trace bool)                 { r.trace = trace }
-func (r *ReaderParallelV3) ResetReadSet()                       { r.readLists = newReadList() }
+func (r *ReaderParallelV3) DiscardReadList()                        { r.discardReadList = true }
+func (r *ReaderParallelV3) SetTxNum(txNum uint64)                   { r.txNum = txNum }
+func (r *ReaderParallelV3) SetTx(tx kv.TemporalTx)                  { r.tx = tx }
+func (r *ReaderParallelV3) ReadSet() map[string]*dbstate.KvList     { return r.readLists }
+func (r *ReaderParallelV3) SetTrace(trace bool, tracePrefix string) { r.trace = trace }
+func (r *ReaderParallelV3) ResetReadSet()                           { r.readLists = newReadList() }
 
 func (r *ReaderParallelV3) HasStorage(address common.Address) (bool, error) {
 	firstK, firstV, hasStorage, err := r.sd.HasPrefix(kv.StorageDomain, address[:], r.tx)

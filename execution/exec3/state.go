@@ -215,7 +215,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 	rw.ibs.Reset()
 	ibs, hooks, cc := rw.ibs, rw.hooks, rw.chainConfig
-	//ibs.SetTrace(true)
+	ibs.SetTrace(txTask.Trace)
 	ibs.SetHooks(hooks)
 
 	var err error

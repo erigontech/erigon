@@ -46,10 +46,10 @@ func NewHistoryReaderV3() *HistoryReaderV3 {
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
-func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
-func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
-func (hr *HistoryReaderV3) SetTrace(trace bool)    { hr.trace = trace }
+func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx)                  { hr.ttx = tx }
+func (hr *HistoryReaderV3) SetTxNum(txNum uint64)                   { hr.txNum = txNum }
+func (hr *HistoryReaderV3) GetTxNum() uint64                        { return hr.txNum }
+func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) { hr.trace = trace }
 
 // Gets the txNum where Account, Storage and Code history begins.
 // If the node is an archive node all history will be available therefore

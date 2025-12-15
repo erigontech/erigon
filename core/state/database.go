@@ -43,6 +43,8 @@ type StateReader interface {
 	ReadAccountCode(address common.Address) ([]byte, error)
 	ReadAccountCodeSize(address common.Address) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
+
+	SetTrace(trace bool, tracePrefix string)
 }
 
 type HistoricalStateReader interface {

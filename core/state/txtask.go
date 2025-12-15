@@ -78,6 +78,7 @@ type TxTask struct {
 	Logs               []*types.Log
 	TraceFroms         map[common.Address]struct{}
 	TraceTos           map[common.Address]struct{}
+	Trace              bool
 
 	GasUsed uint64
 

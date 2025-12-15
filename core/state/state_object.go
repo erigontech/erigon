@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon/core/tracing"
@@ -191,10 +192,14 @@ func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) erro
 		return nil
 	}
 	// Load from DB in case it is missing.
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && so.db.trace) {
+		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
+	}
 	readStart := time.Now()
 	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, key)
 	so.db.storageReadDuration += time.Since(readStart)
 	so.db.storageReadCount++
+	so.db.stateReader.SetTrace(false, "")
 
 	if err != nil {
 		out.Clear()
@@ -340,10 +345,14 @@ func (so *stateObject) Code() ([]byte, error) {
 		return nil, nil
 	}
 
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && so.db.trace) {
+		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
+	}
 	readStart := time.Now()
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
 	so.db.storageReadDuration += time.Since(readStart)
 	so.db.storageReadCount++
+	so.db.stateReader.SetTrace(false, "")
 
 	if err != nil {
 		return nil, fmt.Errorf("can't code for %x: %w", so.Address(), err)

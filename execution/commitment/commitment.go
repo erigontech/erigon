@@ -90,6 +90,7 @@ type Trie interface {
 
 	// Makes trie more verbose
 	SetTrace(bool)
+	SetTraceDomain(bool)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant

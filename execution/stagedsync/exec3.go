@@ -576,6 +576,7 @@ Loop:
 				Config: chainConfig,
 
 				ValidationResults: validationResults,
+				Trace:             dbg.TraceTx(blockNum, txIndex),
 			}
 			if txTask.HistoryExecution && gasUsed == 0 {
 				gasUsed, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
@@ -686,15 +687,18 @@ Loop:
 
 		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
-			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
+			if dbg.TraceBlock(blockNum) {
+				executor.domains().SetTrace(true)
+			}
+			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
 
-			//if !bytes.Equal(rh, header.Root.Bytes()) {
-			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-			//	return errors.New("wrong trie root")
-			//}
+			if !bytes.Equal(rh, header.Root.Bytes()) {
+				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+				return errors.New("wrong trie root")
+			}
 
 			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {

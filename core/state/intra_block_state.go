@@ -429,12 +429,16 @@ func (sdb *IntraBlockState) GetCode(addr common.Address) ([]byte, error) {
 		if stateObject != nil && !stateObject.deleted {
 			code, err := stateObject.Code()
 			if sdb.trace {
-				fmt.Printf("GetCode %x, returned %d\n", addr, len(code))
+				if err != nil {
+					fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, err)
+				} else {
+					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
+				}
 			}
 			return code, err
 		}
 		if sdb.trace {
-			fmt.Printf("GetCode %x, returned nil\n", addr)
+			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, 0)
 		}
 		return nil, nil
 	}
@@ -451,7 +455,11 @@ func (sdb *IntraBlockState) GetCode(addr common.Address) ([]byte, error) {
 		})
 
 	if sdb.trace || traceAccount(addr) {
-		fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
+		if err != nil {
+			fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, err)
+		} else {
+			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
+		}
 	}
 
 	return code, err
@@ -488,10 +496,14 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 			if s.data.CodeHash == empty.CodeHash {
 				return 0, nil
 			}
+			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && sdb.trace) {
+				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+			}
 			readStart := time.Now()
 			l, err := sdb.stateReader.ReadAccountCodeSize(addr)
 			sdb.storageReadDuration += time.Since(readStart)
 			sdb.storageReadCount++
+			sdb.stateReader.SetTrace(false, "")
 			if err != nil {
 				return l, err
 			}
@@ -673,11 +685,14 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 				// TODO: discuss if we should ignore error
 				prev := new(uint256.Int)
 
+				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && sdb.trace) {
+					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+				}
 				readStart := time.Now()
 				account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
 				sdb.storageReadDuration += time.Since(readStart)
 				sdb.storageReadCount++
-
+				sdb.stateReader.SetTrace(false, "")
 				if account != nil {
 					prev.Add(&account.Balance, &bi.increase)
 				} else {
@@ -1012,10 +1027,14 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 		return nil, nil
 	}
 
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && sdb.trace) {
+		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+	}
 	readStart := time.Now()
 	readAccount, err := sdb.stateReader.ReadAccountData(addr)
 	sdb.storageReadDuration += time.Since(readStart)
 	sdb.storageReadCount++
+	sdb.stateReader.SetTrace(false, "")
 
 	if err != nil {
 		return nil, err
@@ -1672,6 +1691,7 @@ func (sdb *IntraBlockState) SetVersion(inc int) {
 
 func (sdb *IntraBlockState) Version() Version {
 	return Version{
+		BlockNum:    sdb.blockNum,
 		TxIndex:     sdb.txIndex,
 		Incarnation: sdb.version,
 	}
@@ -1757,4 +1777,8 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 		}
 	}
 	return nil
+}
+
+func (sdb *IntraBlockState) BlockNumber() any {
+	return sdb.blockNum
 }

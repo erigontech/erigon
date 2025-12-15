@@ -79,6 +79,7 @@ type HexPatriciaHashed struct {
 	rootTouched   bool
 	rootPresent   bool
 	trace         bool
+	traceDomain   bool
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
@@ -2215,8 +2216,25 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		default:
 		}
-		if hph.trace {
-			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		if hph.trace || hph.traceDomain {
+			update := stateUpdate
+
+			if update == nil {
+				if len(plainKey) == hph.accountKeyLen {
+					update, err = hph.ctx.Account(plainKey)
+					if err != nil {
+						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+					}
+				} else {
+					update, err = hph.ctx.Storage(plainKey)
+					if err != nil {
+						return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+					}
+				}
+			}
+
+			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			fmt.Println(trace)
 		}
 		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
 			return fmt.Errorf("followAndUpdate: %w", err)
@@ -2281,7 +2299,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool) { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 

@@ -48,6 +48,10 @@ type Stateless struct {
 	trace          bool
 }
 
+func (s *Stateless) SetTrace(trace bool, _ string) {
+	s.trace = trace
+}
+
 // NewStateless creates a new instance of Stateless
 // It deserialises the block witness and creates the state trie out of it, checking that the root of the constructed
 // state trie matches the value of `stateRoot` parameter
