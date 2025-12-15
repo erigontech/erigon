@@ -48,5 +48,6 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsOsaka:            c.IsOsaka(bc.Time),
 		IsAmsterdam:        c.IsAmsterdam(bc.Time),
 		IsAura:             c.Aura != nil,
+		Censoring:          chain.ConfigValueLookup(c.CensoringSchedule, bc.Time),
 	}
 }

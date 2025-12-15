@@ -195,8 +195,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			ret, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
 			return ret, err
 		}
-		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
-		result.Err = ibs.FinalizeTx(rules, noop)
+		result.Err = rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
+		if result.Err == nil {
+			result.Err = ibs.FinalizeTx(rules, noop)
+		}
 	case txTask.IsBlockEnd():
 		// this is handled by the reducer in process results
 	default:
