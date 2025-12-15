@@ -1320,7 +1320,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		maxSize = blobTxnMaxSize
 	}
 	if len(serializedTxn) > maxSize {
-		return ErrRlpTooBig
+		return fmt.Errorf("%w: type=%d", ErrRlpTooBig, txnType)
 	}
 	return nil
 }
