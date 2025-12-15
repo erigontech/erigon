@@ -87,7 +87,6 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
-	startTime := time.Now()
 	blockRoot := cfg.startingRoot
 	currentSlot := cfg.startingSlot
 
