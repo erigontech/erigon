@@ -1559,7 +1559,7 @@ func (d *Downloader) afterAddForDownloadMissingMetainfo(t *torrent.Torrent, name
 	// it from the peers or using the sources mechanism in the torrent client.
 	t.AddSources(slices.Collect(d.webseedMetainfoUrls(name)))
 	d.afterAddForDownload(t)
-	go d.spawn(func() {
+	d.spawn(func() {
 		d.delayedGotInfoHandler(t)
 	})
 }
