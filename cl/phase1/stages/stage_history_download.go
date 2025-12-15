@@ -217,6 +217,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				if speed > 1000.0 {
 					initialProgress = currProgress
 					startTimeLoop = time.Now()
+					continue
 				}
 
 				if speed == 0 || initialBeaconBlock == nil {
