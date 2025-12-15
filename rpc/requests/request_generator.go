@@ -263,8 +263,19 @@ func (req *requestGenerator) PingErigonRpc() PingResult {
 		RequestID: req.reqID,
 	}
 
+	targetURL := req.target
+	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+		targetURL = "http://" + targetURL
+	}
+	res.Target = targetURL
+
+	client := req.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	
 	// return early if the http module has issue fetching the url
-	resp, err := http.Get("http://" + req.target) //nolint
+	resp, err := client.Get(targetURL)
 	if err != nil {
 		res.Took = time.Since(start)
 		res.Err = err
