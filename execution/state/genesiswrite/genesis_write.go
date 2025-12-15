@@ -83,16 +83,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, false, dirs, logger)
+	return CommitGenesisBlockWithOverride(db, genesis, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime, overrideBalancerTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, keepStoredChainConfig, dirs, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, overrideBalancerTime, keepStoredChainConfig, dirs, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -114,7 +114,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 	return spec.Config
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime, overrideBalancerTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -132,6 +132,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 	applyOverrides := func(config *chain.Config) {
 		if overrideOsakaTime != nil {
 			config.OsakaTime = overrideOsakaTime
+		}
+		if overrideBalancerTime != nil {
+			config.BalancerTime = overrideBalancerTime
+			if config.CensoringSchedule != nil {
+				var noCensoring chain.CensoringConfig
+				config.CensoringSchedule[overrideBalancerTime.Uint64()] = &noCensoring
+			}
 		}
 	}
 
