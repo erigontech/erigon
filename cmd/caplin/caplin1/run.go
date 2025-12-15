@@ -200,11 +200,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 	}
 
-	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config, genesisDb)
+	// Create ethClock early from genesis state for checkpoint sync to use
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
+
+	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config, genesisDb, ethClock)
 	if err != nil {
 		return err
 	}
-	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
 	pruneBlobDistance := uint64(128600)
 	if config.ArchiveBlobs || config.BlobPruningDisabled {
