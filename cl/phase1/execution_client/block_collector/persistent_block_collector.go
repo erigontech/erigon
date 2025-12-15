@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -58,7 +59,7 @@ func NewPersistentBlockCollector(
 	persistDir string,
 ) *PersistentBlockCollector {
 	ctx := context.Background()
-	db, err := mdbx.New(kv.Label("caplin-history"), logger).
+	db, err := mdbx.New(kv.Label(dbcfg.CaplinDB), logger).
 		Path(persistDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{
