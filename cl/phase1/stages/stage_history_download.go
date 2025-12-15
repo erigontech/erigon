@@ -195,6 +195,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	isBackfilling := atomic.Bool{}
 
 	go func() {
+		startTimeLoop := time.Now()
 		initialProgress := cfg.downloader.Progress()
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
@@ -212,11 +213,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
-				speed := float64(currProgress-initialProgress) / time.Since(startTime).Seconds()
-				fmt.Println("Speed:", speed)
+				speed := float64(currProgress-initialProgress) / time.Since(startTimeLoop).Seconds()
+				fmt.Println("Speed:", speed, initialProgress, currProgress, time.Since(startTimeLoop).Seconds())
 				if speed > 1000.0 {
 					initialProgress = currProgress
-					startTime = time.Now()
+					startTimeLoop = time.Now()
 					continue
 				}
 
