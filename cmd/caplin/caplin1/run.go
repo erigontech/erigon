@@ -126,6 +126,17 @@ func OpenCaplinDatabase(ctx context.Context,
 	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), blobPruneDistance, beaconConfig, ethClock), nil
 }
 
+func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
+	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
+
+	os.MkdirAll(dataDirIndexer, 0700)
+
+	return mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
+			return kv.ChaindataTablesCfg
+		}).Open()
+}
+
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader downloaderproto.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
