@@ -124,6 +124,7 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 }
 
 type valueCache[K comparable, V any] interface {
+	Name() kv.Domain
 	Add(key K, value V, step kv.Step) (evicted bool)
 	Remove(key K) (evicted bool)
 	Get(key K) (value ValueWithStep[V], ok bool)
@@ -177,7 +178,6 @@ type updates[K comparable, V any] interface {
 
 type domain[K comparable, V any] struct {
 	sync.RWMutex
-	name       kv.Domain
 	mem        kv.TemporalMemBatch
 	metrics    *DomainMetrics
 	commitCtx  *commitment.CommitmentContext
@@ -192,7 +192,7 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 
 	start := time.Now()
 	if val, ok := d.updates.Get(k); ok {
-		d.metrics.UpdateCacheReads(d.name, start)
+		d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
 		return val.Value, val.Step, false, nil
 	}
 
@@ -200,7 +200,7 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 
 	if d.mem.IsUnwound() {
 		av := serializer(k)
-		if val, step, ok := d.mem.GetLatest(d.name, av[:]); ok {
+		if val, step, ok := d.mem.GetLatest(d.valueCache.Name(), av[:]); ok {
 			if v, err = deserializer(val); err != nil {
 				return v, step, false, err
 			}
@@ -221,7 +221,7 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 	}
 
 	av := serializer(k)
-	val, step, err := d.getLatest(ctx, d.name, av[:], tx, maxStep, start)
+	val, step, err := d.getLatest(ctx, d.valueCache.Name(), av[:], tx, maxStep, start)
 	if v, err = deserializer(val); err != nil {
 		return v, step, false, err
 	}
@@ -262,7 +262,7 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 	if ok {
 		pvbuf = valueSerializer(prevVal)
 	}
-	if err := d.mem.DomainPut(d.name, kbuf, vbuf, txNum, pvbuf, prevStep); err != nil {
+	if err := d.mem.DomainPut(d.valueCache.Name(), kbuf, vbuf, txNum, pvbuf, prevStep); err != nil {
 		return err
 	}
 
@@ -276,7 +276,7 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 		putValueSize = len(vbuf) - len(pvbuf)
 	}
 
-	d.metrics.UpdatePutCacheWrites(d.name, putKeySize, putValueSize)
+	d.metrics.UpdatePutCacheWrites(d.valueCache.Name(), putKeySize, putValueSize)
 	return nil
 }
 
@@ -318,7 +318,7 @@ func (d *domain[K, V]) del(ctx context.Context, k K,
 		putValueSize = -len(pvbuf)
 	}
 
-	d.metrics.UpdatePutCacheWrites(d.name, putKeySize, putValueSize)
+	d.metrics.UpdatePutCacheWrites(d.valueCache.Name(), putKeySize, putValueSize)
 	return nil
 }
 
@@ -400,7 +400,7 @@ func (u accountUpdates) Clear() updates[accounts.Address, *accounts.Account] {
 	return accountUpdates{}
 }
 
-func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *CodeDomain, commitCtx *commitment.CommitmentContext) (*AccountsDomain, error) {
+func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *CodeDomain, commitCtx *commitment.CommitmentContext, metrics *DomainMetrics) (*AccountsDomain, error) {
 	cache := mem.ValueCache(kv.AccountsDomain)
 
 	if cache != nil {
@@ -418,7 +418,7 @@ func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *Co
 
 	return &AccountsDomain{
 		domain: domain[accounts.Address, *accounts.Account]{
-			name:       kv.AccountsDomain,
+			metrics:    metrics,
 			mem:        mem,
 			commitCtx:  commitCtx,
 			valueCache: cache.(valueCache[accounts.Address, *accounts.Account]),
@@ -510,6 +510,46 @@ type storageLocation struct {
 	key     accounts.StorageKey
 }
 
+type stroageCache struct {
+	lru   *freelru.ShardedLRU[storageLocation, ValueWithStep[uint256.Int]]
+	limit uint32
+}
+
+func newStroageCache(limit uint32) (*stroageCache, error) {
+	type handle[U comparable] struct{ value *U }
+
+	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
+		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
+	}
+
+	c, err := freelru.NewSharded[storageLocation, ValueWithStep[uint256.Int]](limit, func(k storageLocation) uint32 {
+		return uint32(uintptr(unsafe.Pointer((*handle[common.Address])(unsafe.Pointer(&k.address)).value))) ^
+			uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k.address)).value)))
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &stroageCache{lru: c, limit: limit}, nil
+}
+
+func (c *stroageCache) Name() kv.Domain {
+	return kv.CodeDomain
+}
+
+func (c *stroageCache) Add(key storageLocation, value uint256.Int, step kv.Step) (evicted bool) {
+	return c.lru.Add(key, ValueWithStep[uint256.Int]{value, step})
+}
+
+func (c stroageCache) Remove(key storageLocation) (evicted bool) {
+	return c.lru.Remove(key)
+}
+
+func (c *stroageCache) Get(key storageLocation) (value ValueWithStep[uint256.Int], ok bool) {
+	return c.lru.GetAndRefresh(key, 5*time.Minute)
+}
+
 type storageUpdates map[accounts.Address]map[accounts.StorageKey]ValueWithStep[uint256.Int]
 
 func (u storageUpdates) Get(k storageLocation) (ValueWithStep[uint256.Int], bool) {
@@ -568,6 +608,33 @@ func (u storageUpdates) Clear() updates[storageLocation, uint256.Int] {
 
 type StorageDomain struct {
 	domain[storageLocation, uint256.Int]
+}
+
+func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentContext, metrics *DomainMetrics) (*StorageDomain, error) {
+	cache := mem.ValueCache(kv.StorageDomain)
+
+	if cache != nil {
+		if _, ok := cache.(*lruValueCache[accounts.Address, common.Address, *accounts.Account]); !ok {
+			return nil, fmt.Errorf("unexpected cache initializaton type: got: %T, expected %T", cache, &lruValueCache[accounts.Address, common.Address, *accounts.Account]{})
+		}
+	} else {
+		var err error
+		cache, err = newStroageCache(250_000)
+		if err != nil {
+			return nil, err
+		}
+		mem.SetValueCache(cache)
+	}
+
+	return &StorageDomain{
+		domain: domain[storageLocation, uint256.Int]{
+			metrics:    metrics,
+			mem:        mem,
+			commitCtx:  commitCtx,
+			valueCache: cache.(*stroageCache),
+			updates:    storageUpdates{},
+		},
+	}, nil
 }
 
 func (sd *StorageDomain) Get(ctx context.Context, addr accounts.Address, key accounts.StorageKey, tx kv.TemporalTx) (v uint256.Int, step kv.Step, ok bool, err error) {
@@ -779,6 +846,10 @@ func (u codeUpdates) Iter() iter.Seq2[accounts.Address, ValueWithStep[codeWithHa
 	}
 }
 
+func (u codeUpdates) Clear() updates[accounts.Address, codeWithHash] {
+	return codeUpdates{}
+}
+
 type codeCache struct {
 	hashes *freelru.ShardedLRU[accounts.Address, accounts.CodeHash]
 	code   *freelru.ShardedLRU[accounts.CodeHash, ValueWithStep[codeWithHash]]
@@ -859,6 +930,33 @@ func (c *codeCache) Remove(k accounts.Address) (evicted bool) {
 
 type CodeDomain struct {
 	domain[accounts.Address, codeWithHash]
+}
+
+func NewCodeDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentContext, metrics *DomainMetrics) (*CodeDomain, error) {
+	cache := mem.ValueCache(kv.CodeDomain)
+
+	if cache != nil {
+		if _, ok := cache.(*codeCache); !ok {
+			return nil, fmt.Errorf("unexpected cache initializaton type: got: %T, expected %T", cache, &codeCache{})
+		}
+	} else {
+		var err error
+		cache, err = newCodeCache(10_000)
+		if err != nil {
+			return nil, err
+		}
+		mem.SetValueCache(cache)
+	}
+
+	return &CodeDomain{
+		domain: domain[accounts.Address, codeWithHash]{
+			metrics:    metrics,
+			mem:        mem,
+			commitCtx:  commitCtx,
+			valueCache: cache.(valueCache[accounts.Address, codeWithHash]),
+			updates:    codeUpdates{},
+		},
+	}, nil
 }
 
 func (cd *CodeDomain) Get(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (h accounts.CodeHash, c []byte, step kv.Step, ok bool, err error) {
@@ -947,12 +1045,26 @@ type branchCache struct {
 	state       ValueWithStep[commitment.Branch]
 	root        ValueWithStep[commitment.Branch]
 	trunk       map[uint16]ValueWithStep[commitment.Branch]
-	branches    lruValueCache[commitment.Path, string, commitment.Branch]
+	branches    *lruValueCache[commitment.Path, string, commitment.Branch]
 	branchLimit uint32
 }
 
+func newBranchCache(branchLimit uint32) (*branchCache, error) {
+	c, err := newLRUValueCache[commitment.Path, string, commitment.Branch](kv.CommitmentDomain, branchLimit)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &branchCache{
+		trunk:       map[uint16]ValueWithStep[commitment.Branch]{},
+		branches:    c,
+		branchLimit: branchLimit,
+	}, nil
+}
+
 func (c *branchCache) Name() kv.Domain {
-	return kv.CodeDomain
+	return kv.CommitmentDomain
 }
 
 var statePath = commitment.InternPath([]byte("state"))
@@ -1041,6 +1153,33 @@ func (u branchUpdates) Iter() iter.Seq2[commitment.Path, ValueWithStep[commitmen
 
 func (u branchUpdates) Clear() updates[commitment.Path, commitment.Branch] {
 	return branchUpdates{}
+}
+
+func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentContext, metrics *DomainMetrics) (*CommitmentDomain, error) {
+	cache := mem.ValueCache(kv.CommitmentDomain)
+
+	if cache != nil {
+		if _, ok := cache.(*branchCache); !ok {
+			return nil, fmt.Errorf("unexpected cache initializaton type: got: %T, expected %T", cache, &branchCache{})
+		}
+	} else {
+		var err error
+		cache, err = newBranchCache(500_000)
+		if err != nil {
+			return nil, err
+		}
+		mem.SetValueCache(cache)
+	}
+
+	return &CommitmentDomain{
+		domain: domain[commitment.Path, commitment.Branch]{
+			metrics:    metrics,
+			mem:        mem,
+			commitCtx:  commitCtx,
+			valueCache: cache.(valueCache[commitment.Path, commitment.Branch]),
+			updates:    branchUpdates{},
+		},
+	}, nil
 }
 
 func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, step kv.Step, ok bool, err error) {

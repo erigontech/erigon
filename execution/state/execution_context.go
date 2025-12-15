@@ -64,7 +64,7 @@ type ExecutionContext struct {
 	commitmentDomain  *CommitmentDomain
 }
 
-func NewExecutionContext(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*ExecutionContext, error) {
+func NewExecutionContext(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (ec *ExecutionContext, err error) {
 	sd := &ExecutionContext{
 		logger: logger,
 		//trace:   true,
@@ -79,6 +79,22 @@ func NewExecutionContext(ctx context.Context, tx kv.TemporalTx, logger log.Logge
 	}
 
 	sd.sdCtx = commitment.NewCommitmentContext(commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+
+	if sd.commitmentDomain, err = NewCommitmentDomain(sd.mem, sd.sdCtx, &sd.metrics); err != nil {
+		return nil, err
+	}
+
+	if sd.storageDomain, err = NewStorageDomain(sd.mem, sd.sdCtx, &sd.metrics); err != nil {
+		return nil, err
+	}
+
+	if sd.codeDomain, err = NewCodeDomain(sd.mem, sd.sdCtx, &sd.metrics); err != nil {
+		return nil, err
+	}
+
+	if sd.accountsDomain, err = NewAccountsDomain(sd.mem, sd.storageDomain, sd.codeDomain, sd.sdCtx, &sd.metrics); err != nil {
+		return nil, err
+	}
 
 	if err := sd.SeekCommitment(ctx, tx); err != nil {
 		return nil, err
@@ -185,7 +201,14 @@ func (sd *ExecutionContext) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 }
 
 func (sd *ExecutionContext) Merge(other *ExecutionContext) error {
-	return sd.mem.Merge(other.mem)
+	if err := sd.mem.Merge(other.mem); err != nil {
+		return err
+	}
+	sd.accountsDomain.Merge(&other.accountsDomain.domain)
+	sd.storageDomain.Merge(&other.storageDomain.domain)
+	sd.codeDomain.Merge(&other.codeDomain.domain)
+	sd.commitmentDomain.Merge(&other.commitmentDomain.domain)
+	return nil
 }
 
 type temporalGetter struct {
