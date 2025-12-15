@@ -18,6 +18,7 @@ package block_collector
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -113,8 +114,15 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 		return fmt.Errorf("failed to create payload key: %w", err)
 	}
 
-	// Store in database
+	// Store in database (skip if already exists)
 	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
+		existing, err := tx.GetOne(kv.Headers, key)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			return nil // already have this block
+		}
 		return tx.Put(kv.Headers, key, encodedBlock)
 	})
 }
@@ -285,6 +293,37 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 	}
 
 	return nil
+}
+
+// HasBlock checks if a block with the given number is already in the collector
+func (p *PersistentBlockCollector) HasBlock(blockNumber uint64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.db == nil {
+		return false
+	}
+
+	var hasBlock bool
+	_ = p.db.View(context.Background(), func(tx kv.Tx) error {
+		cursor, err := tx.Cursor(kv.Headers)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		// Keys are prefixed with block number (8 bytes big-endian)
+		prefix := make([]byte, 8)
+		binary.BigEndian.PutUint64(prefix, blockNumber)
+		k, _, err := cursor.Seek(prefix)
+		if err != nil {
+			return err
+		}
+		// Check if the key starts with our block number
+		hasBlock = k != nil && len(k) >= 8 && binary.BigEndian.Uint64(k[:8]) == blockNumber
+		return nil
+	})
+
+	return hasBlock
 }
 
 // HasPendingBlocks returns true if there are persisted blocks waiting to be loaded

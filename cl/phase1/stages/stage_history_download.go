@@ -102,6 +102,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
+	cfg.downloader.SetBlockChecker(cfg.executionBlocksCollector)
 
 	var initialBeaconBlock *cltypes.SignedBeaconBlock
 

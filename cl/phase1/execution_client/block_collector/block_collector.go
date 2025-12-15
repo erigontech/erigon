@@ -41,6 +41,7 @@ var (
 type BlockCollector interface {
 	AddBlock(block *cltypes.BeaconBlock) error
 	Flush(ctx context.Context) error
+	HasBlock(blockNumber uint64) bool
 }
 
 type blockCollector struct {
@@ -171,6 +172,11 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 	b.collector = etl.NewCollector(etlPrefix, b.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), b.logger)
 	return nil
 
+}
+
+// HasBlock returns false for the non-persistent collector (blocks are not tracked)
+func (b *blockCollector) HasBlock(blockNumber uint64) bool {
+	return false
 }
 
 // serializes block value
