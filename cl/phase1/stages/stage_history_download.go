@@ -213,6 +213,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
 				speed := float64(currProgress-initialProgress) / time.Since(startTime).Seconds()
+				fmt.Println("Speed:", speed)
 				if speed > 1000.0 {
 					initialProgress = currProgress
 					continue
