@@ -192,7 +192,7 @@ var ExperimentalConcurrentCommitment = false // set true to use concurrent commi
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
+		CompressCfg: DomainCompressCfg.WithValuesOnCompressedPage(16), Compression: seg.CompressNone,
 
 		Accessors: AccessorBTree | AccessorExistence,
 
