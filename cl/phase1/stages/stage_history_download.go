@@ -216,6 +216,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				fmt.Println("Speed:", speed)
 				if speed > 1000.0 {
 					initialProgress = currProgress
+					startTime = time.Now()
 					continue
 				}
 
