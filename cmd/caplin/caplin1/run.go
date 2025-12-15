@@ -462,6 +462,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	stageCfg := stages.ClStagesCfg(
+		ctx,
 		beaconRpc,
 		antiq,
 		ethClock,
