@@ -134,7 +134,7 @@ func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
 	return mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
 			return kv.ChaindataTablesCfg
-		}).Open()
+		}).Open(ctx)
 }
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
