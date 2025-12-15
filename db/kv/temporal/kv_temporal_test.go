@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -50,11 +51,19 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, firstVal, ok, err := rwTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		ok, err := rwTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx1)
+		require.True(t, firstKey.IsNil())
+		require.Equal(t, firstVal.ByteLen(), 0)
 	}
 
 	// --- check 2: storage exists in DB - TemporalTx.HasPrefix should catch this ---
@@ -96,18 +105,34 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify TemporalTx.HasPrefix returns true
-		firstKey, firstVal, ok, err := roTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		ok, err := roTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{1}, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx1)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.Num1, firstVal)
 
 		// check some other non-existing storages for non-existence after write operation
-		firstKey, firstVal, ok, err = roTtx1.HasPrefix(kv.StorageDomain, acc2.Bytes())
+		ok, err = roTtx1.HasPrefix(kv.StorageDomain, acc2.Bytes())
 		require.NoError(t, err)
 		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
+		firstKey = accounts.NilKey
+		firstVal = uint256.Int{}
+		sd.IterateStorage(ctx, accounts.InternAddress(acc2),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx1)
+		require.True(t, firstKey.IsNil())
+		require.Equal(t, firstVal.ByteLen(), 0)
 	}
 
 	// --- check 3: storage exists in files only - TemporalTx.HasPrefix should catch this
@@ -163,11 +188,19 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify TemporalTx.HasPrefix returns true
-		firstKey, firstVal, ok, err := roTtx2.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		ok, err := roTtx2.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{1}, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, roTtx2)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.Num1, firstVal)
 	}
 
 	// --- check 4: delete storage - TemporalTx.HasPrefix should catch this and say it does not exist
@@ -186,11 +219,19 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		defer roTtx3.Rollback()
 
-		firstKey, firstVal, ok, err := roTtx3.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		ok, err := roTtx3.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc2),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, roTtx3)
+		require.True(t, firstKey.IsNil())
+		require.Equal(t, firstVal.ByteLen(), 0)
 	}
 
 	// --- check 5: write to it again after deletion - TemporalTx.HasPrefix should catch
@@ -209,11 +250,19 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		defer roTtx4.Rollback()
 
-		firstKey, firstVal, ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{3}, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, roTtx4)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.U64(3), firstVal)
 	}
 }
 

@@ -561,7 +561,7 @@ func (s *KvServer) HasPrefix(_ context.Context, req *remoteproto.HasPrefixReq) (
 
 	reply := &remoteproto.HasPrefixReply{}
 	err = s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = tx.HasPrefix(domain, req.Prefix)
+		reply.HasPrefix, err = tx.HasPrefix(domain, req.Prefix)
 		return err
 	})
 	if err != nil {

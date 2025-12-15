@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"math/bits"
 	"slices"
 	"strconv"
@@ -139,23 +138,7 @@ func (p Path) Value() []byte {
 	return toBytesZeroCopy(unique.Handle[string](p).Value())
 }
 
-func (p Path) Encode(w io.Writer) error {
-	return fmt.Errorf("TODO")
-}
-
-func (p Path) Decode(r io.Reader) error {
-	return fmt.Errorf("TODO")
-}
-
 type Branch []byte
-
-func (b Branch) Encode(w io.Writer) error {
-	return fmt.Errorf("TODO")
-}
-
-func (b Branch) Decode(r io.Reader) error {
-	return fmt.Errorf("TODO")
-}
 
 type TrieVariant string
 

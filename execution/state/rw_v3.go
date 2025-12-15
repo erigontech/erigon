@@ -67,7 +67,7 @@ func (rs *StateV3) applyUpdates(ctx context.Context, roTx kv.TemporalTx, blockNu
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, update.address)
 				}
 				//del, before create: to clanup code/storage
-				if err = domains.DelCode(ctx, update.address, roTx, txNum, nil, 0); err != nil {
+				if err = domains.DelCode(ctx, update.address, roTx, txNum); err != nil {
 					return false
 				}
 				if err = domains.DelStorage(ctx, update.address, accounts.NilKey, roTx, txNum); err != nil {
@@ -94,7 +94,7 @@ func (rs *StateV3) applyUpdates(ctx context.Context, roTx kv.TemporalTx, blockNu
 						fmt.Printf("%d apply:put code: %x %x\n", blockNum, update.address, code)
 					}
 
-					if err = domains.PutCode(ctx, update.address, update.code, roTx, txNum, nil, 0); err != nil {
+					if err = domains.PutCode(ctx, update.address, accounts.NilCodeHash, update.code, roTx, txNum); err != nil {
 						return false
 					}
 				}
@@ -564,7 +564,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.ec.DelCode(context.Background(), address, w.tx, w.txNum, nil, 0); err != nil {
+		if err := w.ec.DelCode(context.Background(), address, w.tx, w.txNum); err != nil {
 			return err
 		}
 		if err := w.ec.DelStorage(context.Background(), address, accounts.NilKey, w.tx, w.txNum); err != nil {
@@ -587,7 +587,7 @@ func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64,
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
 	addressValue := address.Value()
-	if err := w.ec.PutCode(context.Background(), address, code, w.tx, w.txNum, nil, 0); err != nil {
+	if err := w.ec.PutCode(context.Background(), address, codeHash, code, w.tx, w.txNum); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
@@ -681,11 +681,11 @@ func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	if r.ec != nil {
-		_, _, hasStorage, err := r.ec.HasStorage(context.Background(), address, r.tx)
+		hasStorage, err := r.ec.HasStorage(context.Background(), address, r.tx)
 		return hasStorage, err
 	}
 	av := address.Value()
-	_, _, hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, av[:])
+	hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, av[:])
 	return hasStorage, err
 }
 
@@ -787,7 +787,7 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var code []byte
 	var err error
 	if r.ec != nil {
-		code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
+		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
 		if err != nil {
 			return nil, err
 		}
@@ -810,7 +810,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var code []byte
 	var err error
 	if r.ec != nil {
-		code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
+		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
 	} else {
 		var addressValue common.Address
 		if !address.IsNil() {

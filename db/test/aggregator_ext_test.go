@@ -361,17 +361,23 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			pv, step, _, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey2), rwTx)
+			pv, step, ok, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey2), rwTx)
 			require.NoError(t, err)
-
-			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey2), commitment.Branch(v[:]), rwTx, txNum, pv, step)
+			var prev []execstate.ValueWithStep[commitment.Branch]
+			if ok {
+				prev = []execstate.ValueWithStep[commitment.Branch]{{Value: pv, Step: step}}
+			}
+			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey2), commitment.Branch(v[:]), rwTx, txNum, prev...)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			pv, step, _, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey1), rwTx)
+			pv, step, ok, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey1), rwTx)
 			require.NoError(t, err)
-
-			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey1), commitment.Branch(v[:]), rwTx, txNum, pv, step)
+			var prev []execstate.ValueWithStep[commitment.Branch]
+			if ok {
+				prev = []execstate.ValueWithStep[commitment.Branch]{{Value: pv, Step: step}}
+			}
+			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey1), commitment.Branch(v[:]), rwTx, txNum, prev...)
 			require.NoError(t, err)
 			maxWrite = txNum
 		}
@@ -895,10 +901,13 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			prev, step, _, err := domains.GetCode(context.Background(), addr, tx)
+			h, c, step, ok, err := domains.GetCode(context.Background(), addr, tx)
 			require.NoError(t, err)
-
-			err = domains.PutCode(context.Background(), accounts.BytesToAddress(key), codeUpd, tx, txNum, prev, step)
+			var prev []execstate.CodeWithStep
+			if ok {
+				prev = []execstate.CodeWithStep{{Code: c, Hash: h, Step: step}}
+			}
+			err = domains.PutCode(context.Background(), accounts.BytesToAddress(key), accounts.NilCodeHash, codeUpd, tx, txNum, prev...)
 			require.NoError(t, err)
 		case r > 80:
 			if !existed {

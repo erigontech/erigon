@@ -401,7 +401,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		err = domains.PutStorage(ctx, a, accounts.BytesToKey(loc), i, tx, txNum)
 		require.NoError(t, err)
 
-		err = domains.PutBranch(ctx, commitment.InternPath(someKey), aux[:], tx, txNum, nil, 0)
+		err = domains.PutBranch(ctx, commitment.InternPath(someKey), aux[:], tx, txNum)
 		require.NoError(t, err)
 		maxWrite = txNum
 	}

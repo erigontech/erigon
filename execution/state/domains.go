@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"iter"
@@ -538,6 +539,11 @@ func (u storageUpdates) Iter() iter.Seq2[storageLocation, ValueWithStep[uint256.
 	}
 }
 
+func (u storageUpdates) UpdatedSlots(addr accounts.Address) (map[accounts.StorageKey]ValueWithStep[uint256.Int], bool) {
+	vm, ok := u[addr]
+	return vm, ok
+}
+
 func (u storageUpdates) SortedIter(addr accounts.Address) iter.Seq2[storageLocation, ValueWithStep[uint256.Int]] {
 	if addr.IsNil() {
 		return func(yield func(storageLocation, ValueWithStep[uint256.Int]) bool) {
@@ -635,6 +641,16 @@ func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key acc
 		roTx, txNum, pv)
 }
 
+func (sd *StorageDomain) slotIterator(addr accounts.Address) func(yield func(string, kv.DataWithStep) bool) {
+	return func(yield func(string, kv.DataWithStep) bool) {
+		for k, v := range sd.updates.(storageUpdates).SortedIter(addr) {
+			aval := k.address.Value()
+			kval := k.key.Value()
+			yield(string(append(aval[:], kval[:]...)), kv.DataWithStep{Data: v.Value.Bytes(), Step: v.Step})
+		}
+	}
+}
+
 func (sd *StorageDomain) DelAll(ctx context.Context, addr accounts.Address, roTx kv.TemporalTx, txNum uint64) error {
 	type tuple struct {
 		k, v []byte
@@ -648,15 +664,7 @@ func (sd *StorageDomain) DelAll(ctx context.Context, addr accounts.Address, roTx
 		prefix = value[:]
 	}
 
-	it := func(yield func(string, kv.DataWithStep) bool) {
-		for k, v := range sd.updates.(storageUpdates).SortedIter(addr) {
-			aval := k.address.Value()
-			kval := k.key.Value()
-			yield(string(append(aval[:], kval[:]...)), kv.DataWithStep{Data: v.Value.Bytes(), Step: v.Step})
-		}
-	}
-
-	if err := sd.mem.IteratePrefix(kv.StorageDomain, prefix, it, roTx, func(k, v []byte, step kv.Step) (bool, error) {
+	if err := sd.mem.IteratePrefix(kv.StorageDomain, prefix, sd.slotIterator(addr), roTx, func(k, v []byte, step kv.Step) (bool, error) {
 		tombs = append(tombs, tuple{k, v, step})
 		return true, nil
 	}); err != nil {
@@ -674,7 +682,7 @@ func (sd *StorageDomain) DelAll(ctx context.Context, addr accounts.Address, roTx
 
 	if assert.Enable {
 		forgotten := 0
-		if err := sd.mem.IteratePrefix(kv.StorageDomain, prefix, it, roTx, func(k, v []byte, step kv.Step) (bool, error) {
+		if err := sd.mem.IteratePrefix(kv.StorageDomain, prefix, sd.slotIterator(addr), roTx, func(k, v []byte, step kv.Step) (bool, error) {
 			forgotten++
 			return true, nil
 		}); err != nil {
@@ -687,9 +695,36 @@ func (sd *StorageDomain) DelAll(ctx context.Context, addr accounts.Address, roTx
 	return nil
 }
 
+func (sd *StorageDomain) HasStorage(ctx context.Context, addr accounts.Address, roTx kv.Tx) (bool, error) {
+	if slots, ok := sd.updates.(*storageUpdates).UpdatedSlots(addr); ok {
+		for _, slot := range slots {
+			if slot.Value.ByteLen() > 0 {
+				return true, nil
+			}
+		}
+	}
+
+	var hasPrefix bool
+	addrVal := addr.Value()
+	err := sd.mem.IteratePrefix(kv.StorageDomain, addrVal[:], nil, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+		hasPrefix = true
+		return false, nil // do not continue, end on first occurrence
+	})
+	return hasPrefix, err
+}
+
+func (sd *StorageDomain) IterateStorage(ctx context.Context, addr accounts.Address, it func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
+	addrVal := addr.Value()
+	return sd.mem.IteratePrefix(kv.StorageDomain, addrVal[:], sd.slotIterator(addr), roTx, func(k []byte, v []byte, step kv.Step) (cont bool, err error) {
+		var i uint256.Int
+		i.SetBytes(v)
+		return it(accounts.BytesToKey(k), i, step)
+	})
+}
+
 type codeWithHash struct {
 	hash accounts.CodeHash
-	code []byte
+	code weak.Pointer[[]byte]
 }
 
 type CodeWithStep struct {
@@ -746,7 +781,7 @@ func (u codeUpdates) Iter() iter.Seq2[accounts.Address, ValueWithStep[codeWithHa
 
 type codeCache struct {
 	hashes *freelru.ShardedLRU[accounts.Address, accounts.CodeHash]
-	code   *freelru.ShardedLRU[accounts.CodeHash, weak.Pointer[ValueWithStep[codeWithHash]]]
+	code   *freelru.ShardedLRU[accounts.CodeHash, ValueWithStep[codeWithHash]]
 	limit  uint32
 }
 
@@ -765,7 +800,7 @@ func newCodeCache(limit uint32) (*codeCache, error) {
 		return nil, err
 	}
 
-	code, err := freelru.NewSharded[accounts.CodeHash, weak.Pointer[ValueWithStep[codeWithHash]]](limit, func(k accounts.CodeHash) uint32 {
+	code, err := freelru.NewSharded[accounts.CodeHash, ValueWithStep[codeWithHash]](limit, func(k accounts.CodeHash) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k)).value)))
 	})
 
@@ -793,11 +828,11 @@ func (c *codeCache) Get(key accounts.Address) (value ValueWithStep[codeWithHash]
 
 	pc, ok := c.code.Get(h)
 
-	if !ok || pc.Value() == nil {
+	if !ok || pc.Value.code.Value() == nil {
 		return ValueWithStep[codeWithHash]{}, false
 	}
 
-	return *pc.Value(), true
+	return pc, true
 }
 
 func (c *codeCache) Add(k accounts.Address, v codeWithHash, s kv.Step) (evicted bool) {
@@ -808,8 +843,8 @@ func (c *codeCache) Add(k accounts.Address, v codeWithHash, s kv.Step) (evicted 
 	}
 
 	if !v.hash.IsEmpty() {
-		if pv, ok := c.code.Get(h); !ok || pv.Value() == nil {
-			return c.code.Add(v.hash, weak.Make(&ValueWithStep[codeWithHash]{Value: v, Step: s}))
+		if pv, ok := c.code.Get(h); !ok || pv.Value.code.Value() == nil {
+			return c.code.Add(v.hash, ValueWithStep[codeWithHash]{Value: v, Step: s})
 		}
 	}
 
@@ -833,13 +868,13 @@ func (cd *CodeDomain) Get(ctx context.Context, k accounts.Address, tx kv.Tempora
 			return av[:]
 		},
 		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
+			return codeWithHash{code: weak.Make(&b), hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
 		})
 
-	return v.hash, v.code, step, ok, err
+	return v.hash, *v.code.Value(), step, ok, err
 }
 
-func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, c []byte, h accounts.CodeHash, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithStep) error {
+func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.CodeHash, c []byte, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithStep) error {
 	if c == nil {
 		return fmt.Errorf("domain: %s, trying to put nil value. not allowed", kv.CodeDomain)
 	}
@@ -849,12 +884,12 @@ func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, c []byte, h a
 	var pv *ValueWithStep[codeWithHash]
 	if len(prev) != 0 {
 		pv = &ValueWithStep[codeWithHash]{
-			Value: codeWithHash{code: prev[0].Code, hash: prev[0].Hash},
+			Value: codeWithHash{code: weak.Make(&prev[0].Code), hash: prev[0].Hash},
 			Step:  prev[0].Step,
 		}
 	}
 
-	if bytes.Equal(c, pv.Value.code) {
+	if bytes.Equal(c, *pv.Value.code.Value()) {
 		return nil
 	}
 
@@ -862,19 +897,19 @@ func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, c []byte, h a
 		h = accounts.InternCodeHash(crypto.Keccak256Hash(c))
 	}
 
-	return cd.domain.put(ctx, k, codeWithHash{code:c, hash: h},
+	return cd.domain.put(ctx, k, codeWithHash{code: weak.Make(&c), hash: h},
 		func(k accounts.Address) []byte {
 			kv := k.Value()
 			return kv[:]
 		},
 		func(v0 codeWithHash, v1 codeWithHash) bool {
-			return bytes.Equal(v0.code, v1.code)
+			return bytes.Equal(*v0.code.Value(), *v1.code.Value())
 		},
 		func(v codeWithHash) []byte {
-			return v.code
+			return *v.code.Value()
 		},
 		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
+			return codeWithHash{code: weak.Make(&b), hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
 		},
 		roTx, txNum, pv)
 }
@@ -885,7 +920,7 @@ func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.Tempo
 	var pv *ValueWithStep[codeWithHash]
 	if len(prev) != 0 {
 		pv = &ValueWithStep[codeWithHash]{
-			Value: codeWithHash{code: prev[0].Code, hash: prev[0].Hash},
+			Value: codeWithHash{code: weak.Make(&prev[0].Code), hash: prev[0].Hash},
 			Step:  prev[0].Step,
 		}
 	}
@@ -896,19 +931,169 @@ func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.Tempo
 			return kv[:]
 		},
 		func(v codeWithHash) []byte {
-			return v.code
+			return *v.code.Value()
 		},
 		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
+			return codeWithHash{code: weak.Make(&b), hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
 		},
 		roTx, txNum, pv)
 }
 
-type branhCache struct {
-	root     map[uint16]commitment.Branch
-	branches lruValueCache[commitment.Path, string, commitment.Branch]
-	limit    uint32
+type CommitmentDomain struct {
+	domain[commitment.Path, commitment.Branch]
 }
 
-type CommitmentDomain struct {
+type branchCache struct {
+	state       ValueWithStep[commitment.Branch]
+	root        ValueWithStep[commitment.Branch]
+	trunk       map[uint16]ValueWithStep[commitment.Branch]
+	branches    lruValueCache[commitment.Path, string, commitment.Branch]
+	branchLimit uint32
+}
+
+func (c *branchCache) Name() kv.Domain {
+	return kv.CodeDomain
+}
+
+var statePath = commitment.InternPath([]byte("state"))
+
+func (c *branchCache) Get(key commitment.Path) (ValueWithStep[commitment.Branch], bool) {
+	switch {
+	case key == statePath:
+	case len(key.Value()) < 3:
+		keyValue := key.Value()
+		if len(keyValue) == 0 {
+			if len(c.root.Value) > 0 {
+				return c.root, true
+			}
+			return ValueWithStep[commitment.Branch]{}, false
+		}
+		value, ok := c.trunk[binary.BigEndian.Uint16(keyValue)]
+		return value, ok
+	}
+
+	return c.branches.Get(key)
+}
+
+func (c *branchCache) Add(k commitment.Path, v commitment.Branch, s kv.Step) (evicted bool) {
+	switch {
+	case k == statePath:
+		c.state = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+		return false
+	case len(k.Value()) < 3:
+		keyValue := k.Value()
+		if len(keyValue) == 0 {
+			c.root = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+			return false
+		}
+		c.trunk[binary.BigEndian.Uint16(keyValue)] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+		return false
+	}
+
+	return c.branches.Add(k, v, s)
+}
+
+func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
+	switch {
+	case k == statePath:
+		evicted = len(c.state.Value) > 0
+		c.state = ValueWithStep[commitment.Branch]{}
+		return evicted
+	case len(k.Value()) < 3:
+		keyValue := k.Value()
+		if len(keyValue) == 0 {
+			evicted = len(c.root.Value) > 0
+			c.root = ValueWithStep[commitment.Branch]{}
+			return evicted
+		}
+		kv := binary.BigEndian.Uint16(keyValue)
+		if _, ok := c.trunk[kv]; ok {
+			delete(c.trunk, kv)
+			return true
+		}
+		return false
+	}
+	// note we're making the hash inaccessable, the code will get evicted
+	// if its not accessed or its gc'd
+	return c.branches.Remove(k)
+}
+
+type branchUpdates map[commitment.Path]ValueWithStep[commitment.Branch]
+
+func (u branchUpdates) Get(k commitment.Path) (ValueWithStep[commitment.Branch], bool) {
+	v, ok := u[k]
+	return v, ok
+}
+
+func (u branchUpdates) Put(k commitment.Path, v ValueWithStep[commitment.Branch]) bool {
+	_, exists := u[k]
+	u[k] = v
+	return !exists
+}
+
+func (u branchUpdates) Iter() iter.Seq2[commitment.Path, ValueWithStep[commitment.Branch]] {
+	return func(yield func(commitment.Path, ValueWithStep[commitment.Branch]) bool) {
+		for k, v := range u {
+			yield(k, v)
+		}
+	}
+}
+
+func (u branchUpdates) Clear() updates[commitment.Path, commitment.Branch] {
+	return branchUpdates{}
+}
+
+func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, step kv.Step, ok bool, err error) {
+	return cd.domain.get(ctx, k, tx,
+		func(k commitment.Path) []byte {
+			return k.Value()
+		},
+		func(b []byte) (v commitment.Branch, err error) {
+			return commitment.Branch(b), nil
+		})
+}
+
+func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[commitment.Branch]) error {
+	if v == nil {
+		return fmt.Errorf("PutBranch: %s, trying to put nil value. not allowed", kv.CommitmentDomain)
+	}
+
+	var pv *ValueWithStep[commitment.Branch]
+	if len(prev) != 0 {
+		pv = &prev[0]
+	}
+
+	return cd.domain.put(ctx, k, v,
+		func(k commitment.Path) []byte {
+			return k.Value()
+		},
+		func(v0 commitment.Branch, v1 commitment.Branch) bool {
+			return bytes.Equal(v0, v1)
+		},
+		func(v commitment.Branch) []byte {
+			return v
+		},
+		func(b []byte) (v commitment.Branch, err error) {
+			return commitment.Branch(b), nil
+		},
+		roTx, txNum, pv)
+}
+
+func (cd *CommitmentDomain) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[commitment.Branch]) error {
+	var pv *ValueWithStep[commitment.Branch]
+	if len(prev) != 0 {
+		pv = &prev[0]
+	}
+
+	return cd.domain.del(ctx, k,
+		func(k commitment.Path) []byte {
+			return k.Value()
+		},
+		func(v commitment.Branch) []byte {
+			return v
+		},
+		func(b []byte) (v commitment.Branch, err error) {
+			return commitment.Branch(b), nil
+		},
+		roTx, txNum, pv)
 }

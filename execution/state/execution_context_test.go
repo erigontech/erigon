@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -522,11 +523,19 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx1)
+		ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx1)
+		require.True(t, firstKey.IsNil())
+		require.Equal(t, firstVal.ByteLen(), 0)
 	}
 
 	// --- check 2: storage exists in DB - ExecutionContexts.HasPrefix should catch this ---
@@ -537,11 +546,20 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), i, rwTtx1, 1)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx1)
+		ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{1}, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx1)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.Num1, firstVal)
+
 		// check after flush
 		err = sd.Flush(ctx, rwTtx1)
 		require.NoError(t, err)
@@ -578,18 +596,32 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 
 		// finally, verify ExecutionContexts.HasPrefix returns true
 		sd.SetTxNum(2) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx1)
+		ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{1}, firstVal)
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx1)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.Num1, firstVal)
 
 		// check some other non-existing storages for non-existence after write operation
-		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc2), roTtx1)
+		ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc2), roTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
+		firstKey = accounts.NilKey
+		firstVal = uint256.Int{}
+		sd.IterateStorage(ctx, accounts.InternAddress(acc2),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx1)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.Num1, firstVal)
 
 		roTtx1.Rollback()
 	}
@@ -605,11 +637,19 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc2slot2), i, rwTtx2, 2)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx2)
+		ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{1}, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx2)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.Num1, firstVal)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx2)
 		require.NoError(t, err)
@@ -656,11 +696,19 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify ExecutionContexts.HasPrefix returns true
-		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx2)
+		ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{1}, firstVal)
+		firstKey = accounts.NilKey
+		firstVal = uint256.Int{}
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx2)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.Num1, firstVal)
 		roTtx2.Rollback()
 	}
 
@@ -672,11 +720,19 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DelStorage(ctx, accounts.InternAddress(acc1), accounts.NilKey, rwTtx4, 3)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx4)
+		ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx4)
 		require.NoError(t, err)
 		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx4)
+		require.True(t, firstKey.IsNil())
+		require.Equal(t, firstVal.ByteLen(), 0)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx4)
 		require.NoError(t, err)
@@ -687,11 +743,17 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(roTtx3.Rollback)
 		sd.SetTxNum(4) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx3)
+		ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx3)
 		require.NoError(t, err)
 		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, roTtx3)
+		require.True(t, firstKey.IsNil())
+		require.Equal(t, firstVal.ByteLen(), 0)
 		roTtx3.Rollback()
 	}
 
@@ -705,11 +767,19 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.PutStorage(ctx, accounts.InternAddress(acc1), accounts.InternKey(acc1slot1), i, rwTtx5, 4)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx5)
+		ok, err := sd.HasStorage(ctx, accounts.InternAddress(acc1), rwTtx5)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{3}, firstVal)
+		var firstKey accounts.StorageKey
+		var firstVal uint256.Int
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, rwTtx5)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.U64(3), firstVal)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx5)
 		require.NoError(t, err)
@@ -720,11 +790,19 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(roTtx4.Rollback)
 		sd.SetTxNum(5) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx4)
+		ok, err = sd.HasStorage(ctx, accounts.InternAddress(acc1), roTtx4)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
-		require.Equal(t, []byte{3}, firstVal)
+		firstKey = accounts.NilKey
+		firstVal = uint256.Int{}
+		sd.IterateStorage(ctx, accounts.InternAddress(acc1),
+			func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error) {
+				firstKey = k
+				firstVal = v
+				return false, nil
+			}, roTtx4)
+		require.Equal(t, acc1slot1, firstKey.Value())
+		require.Equal(t, u256.U64(3), firstVal)
 		roTtx4.Rollback()
 	}
 }

@@ -726,13 +726,13 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err e
 	return reply.V, 0, nil
 }
 
-func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) (bool, error) {
 	req := &remoteproto.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
 	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)
 	if err != nil {
-		return nil, nil, false, err
+		return false, err
 	}
-	return reply.FirstKey, reply.FirstVal, reply.HasPrefix, nil
+	return reply.HasPrefix, nil
 }
 
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {

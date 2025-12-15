@@ -94,7 +94,7 @@ func TestToECDSAErrors(t *testing.T) {
 }
 
 func BenchmarkSha3(b *testing.B) {
-	a := []byte("hello world")
+	a := []byte("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
 	for b.Loop() {
 		Keccak256(a)
 	}

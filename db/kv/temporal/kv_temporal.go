@@ -491,15 +491,15 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv
 	return v, step, err
 }
 
-func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) (bool, error) {
 	return tx.hasPrefix(name, tx.Tx, prefix)
 }
 
-func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) (bool, error) {
 	return tx.hasPrefix(name, tx.RwTx, prefix)
 }
 
-func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []byte, bool, error) {
+func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) (bool, error) {
 	to, ok := kv.NextSubtree(prefix)
 	if !ok {
 		to = nil
@@ -507,20 +507,20 @@ func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []by
 
 	it, err := tx.rangeLatest(name, dbTx, prefix, to, 1)
 	if err != nil {
-		return nil, nil, false, err
+		return false, err
 	}
 
 	defer it.Close()
 	if !it.HasNext() {
-		return nil, nil, false, nil
+		return false, nil
 	}
 
-	k, v, err := it.Next()
+	_, _, err = it.Next()
 	if err != nil {
-		return nil, nil, false, err
+		return false, err
 	}
 
-	return k, v, true, nil
+	return true, nil
 }
 
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
