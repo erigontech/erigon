@@ -1309,7 +1309,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		txnMaxSize = 4 * txnSlotSize // 128KB
 
 		// Should be enough for a transaction with 6 blobs
-		blobTxnMaxSize = 900_000
+		blobTxnMaxSize = 1024 * 1024
 	)
 	txnType, err := PeekTransactionType(serializedTxn)
 	if err != nil {
