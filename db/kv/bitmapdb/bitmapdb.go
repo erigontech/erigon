@@ -212,19 +212,6 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 	return roaring.FastOr(chunks...), nil
 }
 
-// SeekInBitmap - returns value in bitmap which is >= n
-//
-//nolint:deadcode
-func SeekInBitmap(m *roaring.Bitmap, n uint32) (found uint32, ok bool) {
-	i := m.Iterator()
-	i.AdvanceIfNeeded(n)
-	ok = i.HasNext()
-	if ok {
-		found = i.Next()
-	}
-	return found, ok
-}
-
 // CutLeft - cut from bitmap `targetSize` bytes from left
 // removing lft part from `bm`
 // returns nil on zero cardinality
