@@ -116,10 +116,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	elHasBlobs := false
-	if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+	if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 {
 		blobsWithProof, proofs := f.engine.GetBlobs(ctx, versionedHashes)
 		elHasBlobs = len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
 		log.Debug("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+		// If we're in archived mode and got blobs from EL, store them in blob storage
+		if elHasBlobs && f.peerDas.IsArchivedMode() && f.blobStorage != nil {
+			if err := f.storeELBlobsToStorage(block, blockRoot, blobsWithProof, proofs); err != nil {
+				log.Warn("OnBlock: failed to store EL blobs to storage", "blockRoot", common.Hash(blockRoot), "err", err)
+			}
+		}
 	}
 
 	// Check if blob data is available (skip if blobs are in txpool)
@@ -309,6 +315,54 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
 		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
 	}
+	return nil
+}
+
+// storeELBlobsToStorage converts blobs from EL to BlobSidecars and stores them in blob storage
+func (f *ForkChoiceStore) storeELBlobsToStorage(block *cltypes.SignedBeaconBlock, blockRoot common.Hash, blobs [][]byte, proofs [][][]byte) error {
+	header := block.SignedBeaconBlockHeader()
+	blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobs))
+
+	for i := 0; i < len(blobs); i++ {
+		commitment := block.Block.Body.BlobKzgCommitments.Get(i)
+		if commitment == nil {
+			return fmt.Errorf("missing commitment %d", i)
+		}
+
+		// Build inclusion proof
+		inclusionProofRaw, err := block.Block.Body.KzgCommitmentMerkleProof(i)
+		if err != nil {
+			return fmt.Errorf("failed to compute inclusion proof for blob %d: %w", i, err)
+		}
+		inclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+		for j, h := range inclusionProofRaw {
+			inclusionProof.Set(j, h)
+		}
+
+		// Get blob and proof
+		var blob cltypes.Blob
+		copy(blob[:], blobs[i])
+
+		var kzgProof common.Bytes48
+		if len(proofs[i]) > 0 {
+			copy(kzgProof[:], proofs[i][0])
+		}
+
+		blobSidecar := cltypes.NewBlobSidecar(
+			uint64(i),
+			&blob,
+			common.Bytes48(*commitment),
+			kzgProof,
+			header,
+			inclusionProof,
+		)
+		blobSidecars = append(blobSidecars, blobSidecar)
+	}
+
+	if err := f.blobStorage.WriteBlobSidecars(context.Background(), blockRoot, blobSidecars); err != nil {
+		return fmt.Errorf("failed to write blob sidecars: %w", err)
+	}
+	log.Debug("OnBlock: stored EL blobs to storage", "blockRoot", common.Hash(blockRoot), "count", len(blobSidecars))
 	return nil
 }
 
