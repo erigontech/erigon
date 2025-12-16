@@ -41,6 +41,7 @@ var backtestCommitmentCommand = cli.Command{
 		&utils.DataDirFlag,
 		&cli.Uint64Flag{Name: "from", Value: 1, Usage: "block number to start historical backtesting from. Defaults to first block."},
 		&cli.Uint64Flag{Name: "to", Value: math.MaxUint64, Usage: "block number to end historical backtesting at. Defaults to latest block with historical data in files."},
+		&cli.Int64Flag{Name: "tMinusN", Value: -1, Usage: "number of blocks to backtest starting from latest block minus N. Alternative to [from,to). Defaults to -1, i.e. by default use [from,to)"},
 		&cli.StringFlag{Name: "output-dir", Required: true, Usage: "directory to store all backtesting result artefacts such as graphs, metrics, profiling, etc."},
 	}),
 	Action: func(cliCtx *cli.Context) error {
@@ -49,11 +50,17 @@ var backtestCommitmentCommand = cli.Command{
 		if err != nil {
 			panic(fmt.Errorf("rollback snapshots to block: could not setup logger: %w", err))
 		}
-		dataDir := cliCtx.String(utils.DataDirFlag.Name)
-		from := cliCtx.Uint64("from")
-		to := cliCtx.Uint64("to")
-		outputDir := cliCtx.String("output-dir")
-		err = doBacktestCommitment(ctx, from, to, dataDir, outputDir, logger)
+		if cliCtx.IsSet("tMinusN") && (cliCtx.IsSet("from") || cliCtx.IsSet("to")) {
+			return fmt.Errorf("cannot specify both [from,to) and tMinusN")
+		}
+		args := backtestCommitmentArgs{
+			from:      cliCtx.Uint64("from"),
+			to:        cliCtx.Uint64("to"),
+			tMinusN:   cliCtx.Int64("tMinusN"),
+			dataDir:   cliCtx.String(utils.DataDirFlag.Name),
+			outputDir: cliCtx.String("output-dir"),
+		}
+		err = doBacktestCommitment(ctx, args, logger)
 		if err != nil {
 			logger.Error("encountered an issue while backtesting", "err", err)
 			return err
@@ -62,8 +69,16 @@ var backtestCommitmentCommand = cli.Command{
 	},
 }
 
-func doBacktestCommitment(ctx context.Context, from uint64, to uint64, dataDir string, outputDir string, logger log.Logger) error {
-	dirs, l, err := datadir.New(dataDir).MustFlock()
+type backtestCommitmentArgs struct {
+	from      uint64
+	to        uint64
+	tMinusN   int64
+	dataDir   string
+	outputDir string
+}
+
+func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logger log.Logger) error {
+	dirs, l, err := datadir.New(args.dataDir).MustFlock()
 	if err != nil {
 		return err
 	}
@@ -88,6 +103,9 @@ func doBacktestCommitment(ctx context.Context, from uint64, to uint64, dataDir s
 		return err
 	}
 	defer db.Close()
-	bt := backtester.New(logger, db, blockReader, outputDir)
-	return bt.Run(ctx, from, to)
+	bt := backtester.New(logger, db, blockReader, args.outputDir)
+	if args.tMinusN >= 0 {
+		return bt.RunTMinusN(ctx, uint64(args.tMinusN))
+	}
+	return bt.Run(ctx, args.from, args.to)
 }

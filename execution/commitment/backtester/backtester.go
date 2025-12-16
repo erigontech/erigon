@@ -19,6 +19,7 @@ package backtester
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"time"
@@ -49,19 +50,50 @@ func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, out
 	}
 }
 
-func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) error {
-	start := time.Now()
-	bt.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)
-	if fromBlock > toBlock || fromBlock == 0 {
-		return fmt.Errorf("invalid block range for backtest: fromBlock=%d, toBlock=%d", fromBlock, toBlock)
-	}
+func (bt Backtester) RunTMinusN(ctx context.Context, n uint64) error {
 	tx, err := bt.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	tnr := bt.blockReader.TxnumReader(ctx)
-	err = checkDataAvailable(tx, fromBlock, toBlock, tnr)
+	toBlockNum, _, err := tnr.Last(tx)
+	if err != nil {
+		return err
+	}
+	var fromBlockNum uint64
+	if toBlockNum <= n {
+		fromBlockNum = 1
+	} else {
+		fromBlockNum = toBlockNum - n
+	}
+	return bt.run(ctx, tx, fromBlockNum, toBlockNum)
+}
+
+func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) error {
+	tx, err := bt.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return bt.run(ctx, tx, fromBlock, toBlock)
+}
+
+func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64, toBlock uint64) error {
+	start := time.Now()
+	bt.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)
+	if fromBlock > toBlock || fromBlock == 0 {
+		return fmt.Errorf("invalid block range for backtest: fromBlock=%d, toBlock=%d", fromBlock, toBlock)
+	}
+	tnr := bt.blockReader.TxnumReader(ctx)
+	if toBlock == math.MaxUint64 {
+		var err error
+		toBlock, _, err = tnr.Last(tx)
+		if err != nil {
+			return err
+		}
+	}
+	err := checkDataAvailable(tx, fromBlock, toBlock, tnr)
 	if err != nil {
 		return err
 	}
