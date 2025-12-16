@@ -23,7 +23,7 @@ const LegacyStepSize = 1_562_500
 const LegacyStepsInFrozenFile = 64
 
 // Default number of transactions (txNums) in one "step". One static file can have [1, DefaultStepsInFrozenFile] steps.
-const DefaultStepSize = 1_562_500
+const DefaultStepSize = 1_562_50
 
 // DefaultStepsInFrozenFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -346,7 +347,16 @@ func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnap
 
 var ErrNothingToPrune = errors.New("nothing to prune")
 
-var mxPruneTookBor = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
+var pruneBuild = "new_prune"
+
+func withBuild(metric string) string {
+	if strings.Contains(metric, "{") {
+		return strings.Replace(metric, "{", fmt.Sprintf("{build=%q,", pruneBuild), 1)
+	}
+	return fmt.Sprintf(`%s{build=%q}`, metric, pruneBuild)
+}
+
+var mxPruneTookBor = metrics.GetOrCreateSummary(withBuild(`prune_seconds{type="bor"}`))
 
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error) {
 	if br.blockReader.FreezingCfg().KeepBlocks {

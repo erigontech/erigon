@@ -17,9 +17,22 @@
 package state
 
 import (
+	"fmt"
+	"os"
+	"strings"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
+
+var pruneBuild = "new_prune"
+
+func withBuild(metric string) string {
+	if strings.Contains(metric, "{") {
+		return strings.Replace(metric, "{", fmt.Sprintf("{build=%q,", pruneBuild), 1)
+	}
+	return fmt.Sprintf(`%s{build=%q}`, metric, pruneBuild)
+}
 
 var (
 	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
@@ -28,34 +41,57 @@ var (
 	//LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
 	//LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
 	//LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
-	mxPruneTookAgg         = metrics.GetOrCreateSummary(`prune_seconds{type="state"}`)
-	mxPrunableDAcc         = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="account"}`)
-	mxPrunableDSto         = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
-	mxPrunableDCode        = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)
-	mxPrunableDComm        = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment"}`)
-	mxPrunableHAcc         = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="account"}`)
-	mxPrunableHSto         = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
-	mxPrunableHCode        = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
-	mxPrunableHComm        = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
-	mxUnwindTook           = metrics.GetOrCreateHistogram(`domain_unwind_took{type="domain"}`)
-	mxRunningUnwind        = metrics.GetOrCreateGauge("domain_running_unwind")
-	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
-	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
-	mxCollateTook          = metrics.GetOrCreateHistogram(`domain_collate_took{type="domain"}`)
-	mxCollateTookHistory   = metrics.GetOrCreateHistogram(`domain_collate_took{type="history"}`)
-	mxCollateTookIndex     = metrics.GetOrCreateHistogram(`domain_collate_took{type="index"}`)
-	mxPruneTookDomain      = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
-	mxPruneTookHistory     = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
-	mxPruneTookIndex       = metrics.GetOrCreateHistogram(`domain_prune_took{type="index"}`)
-	mxPruneInProgress      = metrics.GetOrCreateGauge("domain_pruning_progress")
-	mxCollationSize        = metrics.GetOrCreateGauge("domain_collation_size")
-	mxCollationSizeHist    = metrics.GetOrCreateGauge("domain_collation_hist_size")
-	mxPruneSizeDomain      = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
-	mxPruneSizeHistory     = metrics.GetOrCreateCounter(`domain_prune_size{type="history"}`)
-	mxPruneSizeIndex       = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
-	mxDupsPruneSizeIndex   = metrics.GetOrCreateCounter(`domain_dups_prune_size{type="index"}`)
-	mxBuildTook            = metrics.GetOrCreateSummary("domain_build_files_took")
-	mxStepTook             = metrics.GetOrCreateSummary("domain_step_took")
+	build          = os.Getenv("ERIGON_PRUNE_BUILD")
+	mxPruneTookAgg = metrics.GetOrCreateSummary(
+		withBuild(`prune_seconds{type="state"}`),
+	)
+
+	mxPrunableDAcc  = metrics.GetOrCreateGauge(withBuild(`domain_prunable{type="domain",table="account"}`))
+	mxPrunableDSto  = metrics.GetOrCreateGauge(withBuild(`domain_prunable{type="domain",table="storage"}`))
+	mxPrunableDCode = metrics.GetOrCreateGauge(withBuild(`domain_prunable{type="domain",table="code"}`))
+	mxPrunableDComm = metrics.GetOrCreateGauge(withBuild(`domain_prunable{type="domain",table="commitment"}`))
+
+	mxPrunableHAcc  = metrics.GetOrCreateGauge(withBuild(`domain_prunable{type="history",table="account"}`))
+	mxPrunableHSto  = metrics.GetOrCreateGauge(withBuild(`domain_prunable{type="history",table="storage"}`))
+	mxPrunableHCode = metrics.GetOrCreateGauge(withBuild(`domain_prunable{type="history",table="code"}`))
+	mxPrunableHComm = metrics.GetOrCreateGauge(withBuild(`domain_prunable{type="history",table="commitment"}`))
+
+	mxUnwindTook = metrics.GetOrCreateHistogram(
+		withBuild(`domain_unwind_took{type="domain"}`),
+	)
+
+	mxRunningUnwind        = metrics.GetOrCreateGauge(withBuild("domain_running_unwind"))
+	mxRunningMerges        = metrics.GetOrCreateGauge(withBuild("domain_running_merges"))
+	mxRunningFilesBuilding = metrics.GetOrCreateGauge(withBuild("domain_running_files_building"))
+
+	mxCollateTook        = metrics.GetOrCreateHistogram(withBuild(`domain_collate_took{type="domain"}`))
+	mxCollateTookHistory = metrics.GetOrCreateHistogram(withBuild(`domain_collate_took{type="history"}`))
+	mxCollateTookIndex   = metrics.GetOrCreateHistogram(withBuild(`domain_collate_took{type="index"}`))
+
+	mxPruneTookDomain  = metrics.GetOrCreateHistogram(withBuild(`domain_prune_took{type="domain"}`))
+	mxPruneTookHistory = metrics.GetOrCreateHistogram(withBuild(`domain_prune_took{type="history"}`))
+	mxPruneTookIndex   = metrics.GetOrCreateHistogram(withBuild(`domain_prune_took{type="index"}`))
+
+	mxPruneInProgress = metrics.GetOrCreateGauge(withBuild("domain_pruning_progress"))
+
+	mxCollationSize     = metrics.GetOrCreateGauge(withBuild("domain_collation_size"))
+	mxCollationSizeHist = metrics.GetOrCreateGauge(withBuild("domain_collation_hist_size"))
+
+	mxPruneSizeDomain  = metrics.GetOrCreateCounter(withBuild(`domain_prune_size{type="domain"}`))
+	mxPruneSizeHistory = metrics.GetOrCreateCounter(withBuild(`domain_prune_size{type="history"}`))
+	mxPruneSizeIndex   = metrics.GetOrCreateCounter(withBuild(`domain_prune_size{type="index"}`))
+
+	mxDupsPruneSizeIndex = metrics.GetOrCreateCounter(
+		withBuild(`domain_dups_prune_size{type="index"}`),
+	)
+
+	mxBuildTook = metrics.GetOrCreateSummary(
+		withBuild("domain_build_files_took"),
+	)
+
+	mxStepTook = metrics.GetOrCreateSummary(
+		withBuild("domain_step_took"),
+	)
 )
 
 var (

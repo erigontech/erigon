@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -110,8 +112,17 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	return nil
 }
 
+var pruneBuild = "new_prune"
+
+func withBuild(metric string) string {
+	if strings.Contains(metric, "{") {
+		return strings.Replace(metric, "{", fmt.Sprintf("{build=%q,", pruneBuild), 1)
+	}
+	return fmt.Sprintf(`%s{build=%q}`, metric, pruneBuild)
+}
+
 var (
-	mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
+	mxPruneTookBlocks = metrics.GetOrCreateSummary(withBuild(`prune_seconds{type="blocks"}`))
 )
 
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.
