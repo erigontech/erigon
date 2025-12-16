@@ -116,13 +116,6 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 
 	// Store in database (skip if already exists)
 	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
-		existing, err := tx.GetOne(kv.Headers, key)
-		if err != nil {
-			return err
-		}
-		if existing != nil {
-			return nil // already have this block
-		}
 		return tx.Put(kv.Headers, key, encodedBlock)
 	})
 }
@@ -205,13 +198,29 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		}
 	}
 
-	// Close the database and remove the directory
+	// Close, remove, and reopen the database to clear it
 	p.db.Close()
-	p.db = nil
 
 	if err := dir.RemoveAll(p.persistDir); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to remove database directory", "err", err)
 	}
+
+	db, err := mdbx.New(kv.Label(dbcfg.CaplinDB), p.logger).
+		Path(p.persistDir).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{
+				kv.Headers: kv.TableCfgItem{},
+			}
+		}).
+		GrowthStep(16 * datasize.MB).
+		MapSize(1 * datasize.TB).
+		Open(ctx)
+	if err != nil {
+		p.logger.Error("[BlockCollector] Failed to reopen database", "err", err)
+		p.db = nil
+		return fmt.Errorf("failed to reopen database: %w", err)
+	}
+	p.db = db
 
 	p.logger.Info("[BlockCollector] Flush complete", "blocksInserted", inserted)
 
@@ -305,7 +314,7 @@ func (p *PersistentBlockCollector) HasBlock(blockNumber uint64) bool {
 	}
 
 	var hasBlock bool
-	_ = p.db.View(context.Background(), func(tx kv.Tx) error {
+	if err := p.db.View(context.Background(), func(tx kv.Tx) error {
 		cursor, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
@@ -319,38 +328,13 @@ func (p *PersistentBlockCollector) HasBlock(blockNumber uint64) bool {
 			return err
 		}
 		// Check if the key starts with our block number
-		hasBlock = k != nil && len(k) >= 8 && binary.BigEndian.Uint64(k[:8]) == blockNumber
+		hasBlock = len(k) >= 8 && binary.BigEndian.Uint64(k[:8]) == blockNumber
 		return nil
-	})
-
-	return hasBlock
-}
-
-// HasPendingBlocks returns true if there are persisted blocks waiting to be loaded
-func (p *PersistentBlockCollector) HasPendingBlocks() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.db == nil {
-		return false
+	}); err != nil {
+		p.logger.Warn("[BlockCollector] Failed to check for block", "err", err)
 	}
 
-	var hasBlocks bool
-	_ = p.db.View(context.Background(), func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(kv.Headers)
-		if err != nil {
-			return err
-		}
-		defer cursor.Close()
-		k, _, err := cursor.First()
-		if err != nil {
-			return err
-		}
-		hasBlocks = k != nil
-		return nil
-	})
-
-	return hasBlocks
+	return hasBlock
 }
 
 // Close closes the database

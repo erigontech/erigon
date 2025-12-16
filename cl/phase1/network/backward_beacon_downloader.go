@@ -324,6 +324,9 @@ func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, el
 	}
 
 	blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, b.expectedRoot)
+	if err != nil {
+		log.Warn("Failed to read execution block number", "err", err)
+	}
 	if err != nil || blockNumber == nil {
 		return false
 	}
