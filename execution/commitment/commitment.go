@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -1316,6 +1317,7 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, prefetchFn func(hash
 
 		t.initCollector()
 
+		start := time.Now()
 		// Extract hashed keys for prefetch
 		if prefetchFn != nil && len(pairs) > 0 {
 			hashedKeys := make([][]byte, len(pairs))
