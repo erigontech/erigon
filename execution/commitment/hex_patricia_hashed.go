@@ -1530,11 +1530,17 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 }
 
 var AccumulateTime = time.Duration(0)
+var BranchCallCount = 0
+var MaxBranchDepth = 0
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
+	BranchCallCount++
+	if int(hph.currentKeyLen) > MaxBranchDepth {
+		MaxBranchDepth = int(hph.currentKeyLen)
+	}
 	start := time.Now()
 	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
@@ -2478,6 +2484,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 
 	// Prefetch callback - collects prefixes and warms them up in parallel
 	prefetchFn := func(hashedKeys [][]byte) error {
+		warmupStart := time.Now()
 		prefixes := collectBranchPrefixesFromKeys(hashedKeys, maxDepth)
 		if len(prefixes) == 0 || numWorkers <= 0 {
 			return nil
@@ -2510,7 +2517,9 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 				return nil
 			})
 		}
-		return g.Wait()
+		err := g.Wait()
+		fmt.Printf("Warmup: %d keys, %d prefixes, %d workers, took %v\n", len(hashedKeys), len(prefixes), numWorkers, time.Since(warmupStart))
+		return err
 	}
 
 	// Use HashSortWithPrefetch - loads all keys, warms up, then processes

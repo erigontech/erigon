@@ -874,13 +874,13 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	// Use warmup to pre-fetch branch data in parallel before computing commitment
-	// maxDepth=4 collects prefixes up to 4 nibbles deep (covers most branch reads)
+	// maxDepth=128 covers full path for both account keys (64 nibbles) and storage keys (128 nibbles)
 	// numWorkers=NumCPU/2 balances parallelism with MDBX transaction overhead
 	numWorkers := runtime.NumCPU() / 2
 	if numWorkers < 2 {
 		numWorkers = 2
 	}
-	computedRootHash, err := doms.ComputeCommitmentWithWarmup(ctx, applyTx, cfg.db, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil, 4, numWorkers)
+	computedRootHash, err := doms.ComputeCommitmentWithWarmup(ctx, applyTx, cfg.db, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil, 128, numWorkers)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
