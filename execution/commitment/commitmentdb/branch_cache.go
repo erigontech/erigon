@@ -2,104 +2,21 @@ package commitmentdb
 
 import (
 	"context"
-	"sync"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-// BranchCache holds pre-warmed branch data for parallel reads.
-// Thread-safe for concurrent reads and writes.
-type BranchCache struct {
-	mu    sync.RWMutex
-	cache map[string]branchCacheEntry
-}
-
-type branchCacheEntry struct {
-	data []byte
-	step kv.Step
-	err  error
-}
-
-func NewBranchCache() *BranchCache {
-	return &BranchCache{
-		cache: make(map[string]branchCacheEntry),
-	}
-}
-
-func (c *BranchCache) Get(prefix []byte) (data []byte, step kv.Step, err error, found bool) {
-	c.mu.RLock()
-	entry, ok := c.cache[string(prefix)]
-	c.mu.RUnlock()
-	if !ok {
-		return nil, 0, nil, false
-	}
-	return entry.data, entry.step, entry.err, true
-}
-
-func (c *BranchCache) Put(prefix []byte, data []byte, step kv.Step, err error) {
-	c.mu.Lock()
-	// Make a copy of data since the underlying buffer may be reused
-	dataCopy := make([]byte, len(data))
-	copy(dataCopy, data)
-	c.cache[string(prefix)] = branchCacheEntry{data: dataCopy, step: step, err: err}
-	c.mu.Unlock()
-}
-
-func (c *BranchCache) Size() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.cache)
-}
-
-func (c *BranchCache) Clear() {
-	c.mu.Lock()
-	c.cache = make(map[string]branchCacheEntry)
-	c.mu.Unlock()
-}
-
-// CachedTrieContext wraps a TrieContext and uses cache for Branch reads.
-// It implements commitment.PatriciaContext.
-type CachedTrieContext struct {
-	ctx   commitment.PatriciaContext
-	cache *BranchCache
-}
-
-func NewCachedTrieContext(ctx commitment.PatriciaContext, cache *BranchCache) *CachedTrieContext {
-	return &CachedTrieContext{ctx: ctx, cache: cache}
-}
-
-func (c *CachedTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
-	if c.cache != nil {
-		if data, step, err, found := c.cache.Get(prefix); found {
-			return data, step, err
-		}
-	}
-	return c.ctx.Branch(prefix)
-}
-
-func (c *CachedTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
-	return c.ctx.PutBranch(prefix, data, prevData, prevStep)
-}
-
-func (c *CachedTrieContext) Account(plainKey []byte) (*commitment.Update, error) {
-	return c.ctx.Account(plainKey)
-}
-
-func (c *CachedTrieContext) Storage(plainKey []byte) (*commitment.Update, error) {
-	return c.ctx.Storage(plainKey)
-}
-
 // TrieContextFactory creates new TrieContext instances for parallel warmup.
 // Each TrieContext uses its own MDBX transaction for thread safety.
+// Returns the context and a cleanup function to close the transaction.
 type TrieContextFactory func() (commitment.PatriciaContext, func())
 
-// WarmupBranches pre-fetches branch data in parallel using multiple TrieContexts.
-// The ctxFactory creates a new TrieContext (with its own MDBX transaction) for each worker.
-// The cleanup function returned by ctxFactory is called when the worker finishes.
-func WarmupBranches(ctx context.Context, prefixes [][]byte, cache *BranchCache, numWorkers int, ctxFactory TrieContextFactory) error {
+// WarmupBranches pre-fetches branch data in parallel to warm up MDBX page cache.
+// Each worker gets its own TrieContext (with its own MDBX transaction).
+// The reads warm up the cache - results are not stored since Process will re-read them.
+func WarmupBranches(ctx context.Context, prefixes [][]byte, numWorkers int, ctxFactory TrieContextFactory) error {
 	if len(prefixes) == 0 || numWorkers <= 0 {
 		return nil
 	}
@@ -126,8 +43,8 @@ func WarmupBranches(ctx context.Context, prefixes [][]byte, cache *BranchCache, 
 				default:
 				}
 
-				data, step, err := trieCtx.Branch(prefix)
-				cache.Put(prefix, data, step, err)
+				// Just read to warm cache - we don't need the result
+				_, _, _ = trieCtx.Branch(prefix)
 			}
 			return nil
 		})

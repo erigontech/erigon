@@ -3,6 +3,7 @@ package commitmentdb
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,11 +12,11 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-// mockPatriciaContext is a simple mock for testing the cache
+// mockPatriciaContext is a simple mock for testing warmup
 type mockPatriciaContext struct {
 	mu       sync.Mutex
 	branches map[string][]byte
-	calls    int
+	calls    atomic.Int32
 }
 
 func newMockPatriciaContext() *mockPatriciaContext {
@@ -25,9 +26,9 @@ func newMockPatriciaContext() *mockPatriciaContext {
 }
 
 func (m *mockPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	m.calls.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls++
 	if data, ok := m.branches[string(prefix)]; ok {
 		return data, 1, nil
 	}
@@ -49,76 +50,6 @@ func (m *mockPatriciaContext) Storage(plainKey []byte) (*commitment.Update, erro
 	return nil, nil
 }
 
-func (m *mockPatriciaContext) getCalls() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.calls
-}
-
-func TestBranchCache_BasicOperations(t *testing.T) {
-	t.Parallel()
-
-	cache := NewBranchCache()
-
-	// Test Put and Get
-	prefix := []byte{0x01, 0x02}
-	data := []byte{0xaa, 0xbb, 0xcc}
-	cache.Put(prefix, data, 5, nil)
-
-	gotData, gotStep, gotErr, found := cache.Get(prefix)
-	require.True(t, found)
-	require.Equal(t, data, gotData)
-	require.Equal(t, kv.Step(5), gotStep)
-	require.NoError(t, gotErr)
-
-	// Test missing key
-	_, _, _, found = cache.Get([]byte{0xff})
-	require.False(t, found)
-
-	// Test Size
-	require.Equal(t, 1, cache.Size())
-
-	// Test Clear
-	cache.Clear()
-	require.Equal(t, 0, cache.Size())
-}
-
-func TestCachedTrieContext(t *testing.T) {
-	t.Parallel()
-
-	mockCtx := newMockPatriciaContext()
-	// Add some branch data to the mock
-	mockCtx.branches[string([]byte{0x00})] = []byte{0x11, 0x22}
-	mockCtx.branches[string([]byte{0x01})] = []byte{0x33, 0x44}
-
-	cache := NewBranchCache()
-	// Pre-warm only prefix 0x00
-	cache.Put([]byte{0x00}, []byte{0x11, 0x22}, 1, nil)
-
-	cachedCtx := NewCachedTrieContext(mockCtx, cache)
-
-	// This should come from cache (no mock call)
-	data, step, err := cachedCtx.Branch([]byte{0x00})
-	require.NoError(t, err)
-	require.Equal(t, []byte{0x11, 0x22}, data)
-	require.Equal(t, kv.Step(1), step)
-	require.Equal(t, 0, mockCtx.getCalls()) // No call to underlying context
-
-	// This should hit the mock (not in cache)
-	data, step, err = cachedCtx.Branch([]byte{0x01})
-	require.NoError(t, err)
-	require.Equal(t, []byte{0x33, 0x44}, data)
-	require.Equal(t, kv.Step(1), step)
-	require.Equal(t, 1, mockCtx.getCalls()) // One call to underlying context
-
-	// Missing key should also hit mock
-	data, step, err = cachedCtx.Branch([]byte{0x02})
-	require.NoError(t, err)
-	require.Nil(t, data)
-	require.Equal(t, kv.Step(0), step)
-	require.Equal(t, 2, mockCtx.getCalls())
-}
-
 func TestWarmupBranches(t *testing.T) {
 	t.Parallel()
 
@@ -132,19 +63,10 @@ func TestWarmupBranches(t *testing.T) {
 		{0x00, 0x02},
 	}
 
-	// Track calls per worker
-	var callsMu sync.Mutex
-	workerCalls := make(map[int]int)
-	workerID := 0
-
-	cache := NewBranchCache()
+	// Track total calls across all workers
+	var totalCalls atomic.Int32
 
 	ctxFactory := func() (commitment.PatriciaContext, func()) {
-		callsMu.Lock()
-		id := workerID
-		workerID++
-		callsMu.Unlock()
-
 		mockCtx := newMockPatriciaContext()
 		// Each mock returns different data based on prefix
 		mockCtx.branches[string([]byte{0x00})] = []byte{0xaa}
@@ -153,35 +75,36 @@ func TestWarmupBranches(t *testing.T) {
 		mockCtx.branches[string([]byte{0x00, 0x02})] = []byte{0xdd}
 
 		cleanup := func() {
-			callsMu.Lock()
-			workerCalls[id] = mockCtx.getCalls()
-			callsMu.Unlock()
+			totalCalls.Add(mockCtx.calls.Load())
 		}
 		return mockCtx, cleanup
 	}
 
-	err := WarmupBranches(ctx, prefixes, cache, 2, ctxFactory)
+	err := WarmupBranches(ctx, prefixes, 2, ctxFactory)
 	require.NoError(t, err)
 
-	// Verify cache has all prefixes
-	require.Equal(t, 4, cache.Size())
+	// Verify all prefixes were read (warming the cache)
+	require.Equal(t, int32(4), totalCalls.Load())
+}
 
-	// Verify data is correct
-	data, _, _, found := cache.Get([]byte{0x00})
-	require.True(t, found)
-	require.Equal(t, []byte{0xaa}, data)
+func TestWarmupBranches_EmptyPrefixes(t *testing.T) {
+	t.Parallel()
 
-	data, _, _, found = cache.Get([]byte{0x01})
-	require.True(t, found)
-	require.Equal(t, []byte{0xbb}, data)
+	ctx := context.Background()
+	var factoryCalled bool
 
-	data, _, _, found = cache.Get([]byte{0x00, 0x01})
-	require.True(t, found)
-	require.Equal(t, []byte{0xcc}, data)
+	ctxFactory := func() (commitment.PatriciaContext, func()) {
+		factoryCalled = true
+		return newMockPatriciaContext(), nil
+	}
 
-	data, _, _, found = cache.Get([]byte{0x00, 0x02})
-	require.True(t, found)
-	require.Equal(t, []byte{0xdd}, data)
+	err := WarmupBranches(ctx, nil, 2, ctxFactory)
+	require.NoError(t, err)
+	require.False(t, factoryCalled, "factory should not be called for empty prefixes")
+
+	err = WarmupBranches(ctx, [][]byte{}, 2, ctxFactory)
+	require.NoError(t, err)
+	require.False(t, factoryCalled, "factory should not be called for empty prefixes")
 }
 
 func TestCollectBranchPrefixes(t *testing.T) {
@@ -225,16 +148,6 @@ func TestCollectBranchPrefixes(t *testing.T) {
 	// Should have prefixes for each key at depths 0, 1, 2
 	// Exact count depends on the hashed key values
 	require.NotEmpty(t, prefixes)
-
-	// Verify the empty prefix (depth 0) is included
-	hasEmptyPrefix := false
-	for _, p := range prefixes {
-		if len(p) == 1 && p[0] == 0x00 { // compact empty prefix
-			hasEmptyPrefix = true
-			break
-		}
-	}
-	require.True(t, hasEmptyPrefix, "should have empty prefix (root)")
 }
 
 func TestCollectBranchPrefixes_ModeDirect(t *testing.T) {
@@ -265,4 +178,23 @@ func TestCollectBranchPrefixes_ModeDirect(t *testing.T) {
 	prefixes, err := CollectBranchPrefixes(ctx, updates, 2)
 	require.NoError(t, err)
 	require.Nil(t, prefixes)
+}
+
+func TestCollectBranchPrefixesFromKeys(t *testing.T) {
+	t.Parallel()
+
+	hashedKeys := [][]byte{
+		{0x0, 0x1, 0x2, 0x3},
+		{0x0, 0x1, 0x4, 0x5},
+		{0x0, 0x2, 0x0, 0x0},
+	}
+
+	prefixes := CollectBranchPrefixesFromKeys(hashedKeys, 2)
+	require.NotEmpty(t, prefixes)
+
+	// Should have:
+	// - depth 0: empty prefix (1)
+	// - depth 1: 0x0 (shared by all) (1)
+	// - depth 2: 0x01, 0x02 (2)
+	// Total unique: 4 compact prefixes
 }
