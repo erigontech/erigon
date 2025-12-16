@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"runtime/pprof"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -158,12 +159,28 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return err
 	}
 	bt.logger.Info("computing commitment", "block", block)
+	cpuProfilePath := path.Join(blockOutputDir, "cpu.prof")
+	cpuProfile, err := os.Create(cpuProfilePath)
+	if err != nil {
+		return fmt.Errorf("failed to create cpu profile: %w", err)
+	}
+	defer func() {
+		err := cpuProfile.Close()
+		if err != nil {
+			bt.logger.Error("failed to close cpu profile", "f", cpuProfilePath, "err", err)
+		}
+	}()
+	err = pprof.StartCPUProfile(cpuProfile)
+	if err != nil {
+		return fmt.Errorf("failed to start cpu profile: %s: %w", cpuProfilePath, err)
+	}
 	commitmentStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /*saveState*/, block, maxTxNum, "commitment-backtester", nil /*progress*/)
 	if err != nil {
 		return err
 	}
 	bt.logger.Info("computed commitment", "block", block, "in", time.Since(commitmentStart))
+	pprof.StopCPUProfile()
 	canonicalHeader, err := bt.blockReader.HeaderByNumber(ctx, tx, block)
 	if err != nil {
 		return err
