@@ -1540,7 +1540,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if err != nil {
 		return err
 	}
-	accumulatedTime += time.Since(start)
+	AccumulateTime += time.Since(start)
 	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 
