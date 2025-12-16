@@ -65,6 +65,9 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	}
 	var integrityErr error
 	for i, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
 		recompute := !onlyRecomputeLastFile || i == len(files)-1
 		err = checkCommitmentRootInFile(ctx, db, br, file, recompute, logger)
 		if err != nil {
@@ -665,7 +668,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 			if err != nil {
-				return 0, err
+				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
 			maxTxNum, err := txNumReader.Max(tx, blockNum)
 			if err != nil {

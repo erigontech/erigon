@@ -244,7 +244,7 @@ func (a *ApiHandler) init() {
 
 			if a.routerCfg.Debug {
 				r.Get("/debug/fork_choice", a.GetEthV1DebugBeaconForkChoice)
-				r.Get("/debug/data_column_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1DebugBeaconDataColumnSidecars))
+				r.Get("/debug/beacon/data_column_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1DebugBeaconDataColumnSidecars))
 			}
 			if a.routerCfg.Config {
 				r.Route("/config", func(r chi.Router) {

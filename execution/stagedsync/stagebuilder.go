@@ -33,6 +33,8 @@ type ChainEventNotifier interface {
 	OnNewPendingLogs(types.Logs)
 	OnLogs([]*remoteproto.SubscribeLogsReply)
 	HasLogSubscriptions() bool
+	OnReceipts([]*remoteproto.SubscribeReceiptsReply)
+	HasReceiptSubscriptions() bool
 }
 
 func MiningStages(

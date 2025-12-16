@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1114,7 +1115,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	}
 
 	if blobCount != len(txn.BlobBundles) {
-		p.logger.Debug(fmt.Sprintf("blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
+		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	blobs := txn.Blobs()
@@ -1122,7 +1123,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	proofs := txn.Proofs()
 
 	if len(blobs) != len(commitments) {
-		log.Error(fmt.Sprintf("len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
+		log.Debug(fmt.Sprintf("TX POOL: len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	if p.isOsaka() {
@@ -1131,7 +1132,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	} else {
 		if len(commitments) != len(proofs) {
-			log.Error(fmt.Sprintf("NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
+			log.Debug(fmt.Sprintf("TX POOL: NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
 			return txpoolcfg.UnequalBlobTxExt
 		}
 	}
@@ -1309,7 +1310,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		txnMaxSize = 4 * txnSlotSize // 128KB
 
 		// Should be enough for a transaction with 6 blobs
-		blobTxnMaxSize = 800_000
+		blobTxnMaxSize = 1024 * 1024
 	)
 	txnType, err := PeekTransactionType(serializedTxn)
 	if err != nil {
@@ -1320,7 +1321,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		maxSize = blobTxnMaxSize
 	}
 	if len(serializedTxn) > maxSize {
-		return ErrRlpTooBig
+		return fmt.Errorf("%w: type=%d", ErrRlpTooBig, txnType)
 	}
 	return nil
 }
@@ -1719,6 +1720,13 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
+	now := time.Now().Unix()
+	censoring := chain.ConfigValueLookup(p.chainConfig.CensoringSchedule, uint64(now))
+	if censoring != nil && slices.Contains(censoring.From, senderAddr) {
+		p.logger.Info("discarding transaction from a bad sender", "sender", senderAddr)
+		return txpoolcfg.InvalidSender
+	}
+
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
@@ -1730,6 +1738,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
 				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "at nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.ErrAuthorityReserved
+			}
+			if censoring != nil && censoring.Is7702Enabled && slices.Contains(censoring.From, a.authority) {
+				p.logger.Info("discarding transaction from a bad sender", "authority", a.authority)
+				return txpoolcfg.InvalidSender
 			}
 		}
 		for _, a := range mt.TxnSlot.AuthAndNonces {
