@@ -2589,6 +2589,9 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
 
+	log.Debug("commitment with warmup finished",
+		"keys", common.PrettyCounter(ki), "spent", time.Since(start))
+
 	return rootHash, nil
 }
 
