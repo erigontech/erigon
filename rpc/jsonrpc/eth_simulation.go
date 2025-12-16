@@ -452,7 +452,7 @@ func (s *simulator) simulateBlock(
 	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
 	if stateOverrides != nil {
-		if err := stateOverrides.OverrideWithPrecompiles(intraBlockState, activePrecompiles); err != nil {
+		if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -473,7 +473,10 @@ func (s *simulator) simulateBlock(
 		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
 	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
-	engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
+	err = engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
+	if err != nil {
+		return nil, nil, err
+	}
 	err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
 	if err != nil {
 		return nil, nil, err

@@ -1109,25 +1109,26 @@ func (c *cell) IsEmpty() bool {
 }
 
 func (c *cell) String() string {
-	s := "("
+	var s strings.Builder
+	s.WriteString("(")
 	if c.hashLen > 0 {
-		s += fmt.Sprintf("hash(len=%d)=%x, ", c.hashLen, c.hash)
+		s.WriteString(fmt.Sprintf("hash(len=%d)=%x, ", c.hashLen, c.hash))
 	}
 	if c.hashedExtLen > 0 {
-		s += fmt.Sprintf("hashedExtension(len=%d)=%x, ", c.hashedExtLen, c.hashedExtension[:c.hashedExtLen])
+		s.WriteString(fmt.Sprintf("hashedExtension(len=%d)=%x, ", c.hashedExtLen, c.hashedExtension[:c.hashedExtLen]))
 	}
 	if c.extLen > 0 {
-		s += fmt.Sprintf("extension(len=%d)=%x, ", c.extLen, c.extension[:c.extLen])
+		s.WriteString(fmt.Sprintf("extension(len=%d)=%x, ", c.extLen, c.extension[:c.extLen]))
 	}
 	if c.accountAddrLen > 0 {
-		s += fmt.Sprintf("accountAddr=%x, ", c.accountAddr)
+		s.WriteString(fmt.Sprintf("accountAddr=%x, ", c.accountAddr))
 	}
 	if c.storageAddrLen > 0 {
-		s += fmt.Sprintf("storageAddr=%x, ", c.storageAddr)
+		s.WriteString(fmt.Sprintf("storageAddr=%x, ", c.storageAddr))
 	}
 
-	s += ")"
-	return s
+	s.WriteString(")")
+	return s.String()
 }
 
 func (hph *HexPatriciaHashed) PrintGrid() {

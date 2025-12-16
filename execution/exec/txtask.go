@@ -484,8 +484,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
-		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
+		if result.Err == nil {
+			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {
 			break
@@ -559,10 +561,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		for addr, bal := range txTask.BalanceIncreaseSet {
-			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		}
-
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
 		}

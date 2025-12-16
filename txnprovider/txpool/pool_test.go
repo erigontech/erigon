@@ -1264,6 +1264,72 @@ func makeBlobTxn() TxnSlot {
 	return blobTxn
 }
 
+func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blobCount int) []byte {
+	t.Helper()
+
+	require := require.New(t)
+	tipCap := uint256.NewInt(2 * common.GWei)
+	feeCap := uint256.NewInt(30 * common.GWei)
+	maxFeePerBlobGas := uint256.NewInt(500_000)
+
+	wrapper := &types.BlobTxWrapper{
+		Tx: types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    0,
+					To:       &common.Address{1},
+					GasLimit: 1_000_000,
+					Value:    uint256.NewInt(0),
+					Data:     []byte{0x01},
+				},
+				ChainID: chainID,
+				TipCap:  tipCap,
+				FeeCap:  feeCap,
+			},
+			MaxFeePerBlobGas: maxFeePerBlobGas,
+		},
+		WrapperVersion: 1,
+		Commitments:    make(types.BlobKzgs, blobCount),
+		Blobs:          make(types.Blobs, blobCount),
+		Proofs:         make(types.KZGProofs, 0, blobCount*int(params.CellsPerExtBlob)),
+	}
+
+	kzgCtx := kzg.Ctx()
+	for i := 0; i < blobCount; i++ {
+		for j := range wrapper.Blobs[i] {
+			wrapper.Blobs[i][j] = byte(i + 1)
+		}
+		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&wrapper.Blobs[i]), 0)
+		require.NoError(err)
+		_, cellProofs, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrapper.Blobs[i]), 4)
+		require.NoError(err)
+
+		copy(wrapper.Commitments[i][:], commitment[:])
+		for _, proof := range cellProofs {
+			var proofBytes types.KZGProof
+			copy(proofBytes[:], proof[:])
+			wrapper.Proofs = append(wrapper.Proofs, proofBytes)
+		}
+
+		wrapper.Tx.BlobVersionedHashes = append(wrapper.Tx.BlobVersionedHashes, common.Hash(kzg.KZGToVersionedHash(commitment)))
+	}
+
+	key, err := crypto.GenerateKey()
+	require.NoError(err)
+	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID.ToBig()), key)
+	require.NoError(err)
+	dt := &wrapper.Tx.DynamicFeeTransaction
+	v, r, s := signedTx.RawSignatureValues()
+	dt.V.Set(v)
+	dt.R.Set(r)
+	dt.S.Set(s)
+
+	buf := bytes.NewBuffer(nil)
+	require.NoError(wrapper.MarshalBinaryWrapped(buf))
+
+	return buf.Bytes()
+}
+
 func TestDropRemoteAtNoGossip(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
@@ -1458,6 +1524,31 @@ func TestBlobSlots(t *testing.T) {
 	for _, reason := range reasons {
 		assert.Equal(txpoolcfg.BlobPoolOverflow, reason, reason.String())
 	}
+}
+
+func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
+	require := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 1)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	cfg := txpoolcfg.DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Osaka"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(err)
+
+	chainID := uint256.MustFromBig(testforks.Forks["Osaka"].ChainID)
+	rawTxn := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, params.MaxBlobsPerTxn)
+
+	parseCtx := NewTxnParseContext(*chainID)
+	parseCtx.WithSender(false)
+	parseCtx.ValidateRLP(pool.ValidateSerializedTxn)
+
+	var slot TxnSlot
+	_, err = parseCtx.ParseTransaction(rawTxn, 0, &slot, nil, false, true, nil)
+	require.NoError(err)
 }
 
 func TestGetBlobsV1(t *testing.T) {

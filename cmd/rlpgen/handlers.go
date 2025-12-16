@@ -187,7 +187,7 @@ func bigIntHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName stri
 		_ = addToImports(named)
 	}
 	// size
-	fmt.Fprintf(b1, "    size += rlp.BigIntLenExcludingHead(&obj.%s) + 1\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.BigIntLen(&obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeBigInt(&obj.%s, w, b[:]); err != nil {\n", fieldName)
@@ -214,10 +214,7 @@ func bigIntPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName s
 	}
 
 	// size
-	fmt.Fprintf(b1, "    size += 1\n")
-	fmt.Fprintf(b1, "    if obj.%s != nil {\n", fieldName)
-	fmt.Fprintf(b1, "        size += rlp.BigIntLenExcludingHead(obj.%s)\n", fieldName)
-	fmt.Fprintf(b1, "    }\n")
+	fmt.Fprintf(b1, "    size += rlp.BigIntLen(obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeBigInt(obj.%s, w, b[:]); err != nil {\n", fieldName)

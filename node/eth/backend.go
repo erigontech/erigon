@@ -379,7 +379,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.OverrideBalancerTime, config.KeepStoredChainConfig, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -1144,7 +1144,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
+		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
 			return err
 		}
 	}
@@ -1314,7 +1314,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return nil
 		}
 
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
 		if err != nil {
 			return err
 		}

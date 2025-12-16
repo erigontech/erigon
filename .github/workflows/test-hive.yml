@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
-          # ref: master
+          ref: 73fb4440b1fe4b362bf66e6278ec7d46b254f362
           path: hive
 
       - name: Setup go env and cache
@@ -104,13 +104,12 @@ jobs:
           run_suite engine cancun 0
           run_suite engine api 0
           run_suite engine auth 0
-          # 8 failures out of 194 tests, see https://github.com/ethereum/hive/pull/1355
-          # 10 failures out of 199 tests, see https://github.com/ethereum/execution-apis/pull/712 
-          run_suite rpc compat 10
+          # 8 failures out of 199 tests, see https://github.com/ethereum/hive/pull/1355
+          run_suite rpc compat 8
         continue-on-error: true
 
       - name: Upload output log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hive-workspace-log
           path: hive/workspace/logs

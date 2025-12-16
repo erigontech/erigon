@@ -566,12 +566,18 @@ func intsize(i uint64) (size int) {
 	return common.BitLenToByteLen(bits.Len64(i))
 }
 
-func BigIntLenExcludingHead(i *big.Int) int {
-	bitLen := i.BitLen()
-	if bitLen < 8 {
-		return 0
+func BigIntLen(i *big.Int) int {
+	bitLen := 0 // treat nil as 0
+	if i != nil {
+		bitLen = i.BitLen()
 	}
-	return common.BitLenToByteLen(bitLen)
+	if bitLen < 8 {
+		return 1
+	}
+	// Strictly speaking, +1 is not correct when the number is longer than 55 bytes
+	// (see https://ethereum.org/developers/docs/data-structures-and-encoding/rlp/),
+	// but in practice all our numbers are smaller than that.
+	return 1 + common.BitLenToByteLen(bitLen)
 }
 
 func Uint256Len(i uint256.Int) int {

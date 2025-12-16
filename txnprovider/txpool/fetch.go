@@ -332,12 +332,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 		}
 	case sentryproto.MessageId_POOLED_TRANSACTIONS_66, sentryproto.MessageId_TRANSACTIONS_66:
 		txns := TxnSlots{}
-		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-			return nil
-		}); err != nil {
-			return err
-		}
-
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {

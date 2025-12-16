@@ -81,7 +81,7 @@ func (a *Account) EncodingLengthForStorage() uint {
 }
 
 func (a *Account) EncodingLengthForHashing() uint {
-	structLength := rlp.U256Len(&a.Balance) + rlp.U64Len(a.Nonce)
+	structLength := rlp.Uint256Len(a.Balance) + rlp.U64Len(a.Nonce)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 	return uint(rlp.ListPrefixLen(structLength) + structLength)
 }
