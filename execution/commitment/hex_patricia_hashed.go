@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -2443,6 +2444,174 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	return rootHash, nil
+}
+
+// TrieContextFactory creates new PatriciaContext instances for parallel warmup.
+type TrieContextFactory func() (PatriciaContext, func())
+
+// ProcessWithWarmup is like Process but pre-warms MDBX page cache by reading Branch data
+// in parallel before processing. Works with both ModeDirect and ModeUpdate.
+func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, maxDepth int, numWorkers int, ctxFactory TrieContextFactory) (rootHash []byte, err error) {
+	var (
+		m  runtime.MemStats
+		ki uint64
+
+		updatesCount = updates.Size()
+		start        = time.Now()
+		logEvery     = time.NewTicker(20 * time.Second)
+	)
+
+	if collectCommitmentMetrics {
+		hph.metrics.Reset()
+		hph.metrics.updates.Store(updatesCount)
+		defer func() {
+			hph.metrics.TotalProcessingTimeInc(start)
+			hph.metrics.WriteToCSV()
+		}()
+	}
+
+	defer func() { logEvery.Stop() }()
+
+	// Prefetch callback - collects prefixes and warms them up in parallel
+	prefetchFn := func(hashedKeys [][]byte) error {
+		prefixes := collectBranchPrefixesFromKeys(hashedKeys, maxDepth)
+		if len(prefixes) == 0 || numWorkers <= 0 {
+			return nil
+		}
+
+		// Warmup in parallel
+		work := make(chan []byte, len(prefixes))
+		for _, p := range prefixes {
+			work <- p
+		}
+		close(work)
+
+		g, gctx := errgroup.WithContext(ctx)
+		for i := 0; i < numWorkers; i++ {
+			g.Go(func() error {
+				trieCtx, cleanup := ctxFactory()
+				if cleanup != nil {
+					defer cleanup()
+				}
+
+				for prefix := range work {
+					select {
+					case <-gctx.Done():
+						return gctx.Err()
+					default:
+					}
+					// Just read to warm cache
+					_, _, _ = trieCtx.Branch(prefix)
+				}
+				return nil
+			})
+		}
+		return g.Wait()
+	}
+
+	// Use HashSortWithPrefetch - loads all keys, warms up, then processes
+	err = updates.HashSortWithPrefetch(ctx, prefetchFn, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		select {
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
+				append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
+					hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
+			if progress != nil {
+				progress <- &CommitProgress{
+					KeyIndex:    ki,
+					UpdateCount: updatesCount,
+					Metrics:     hph.metrics.AsValues(),
+				}
+			}
+		default:
+		}
+
+		if hph.trace || hph.traceDomain || hph.capture != nil {
+			update := stateUpdate
+
+			if update == nil {
+				if int16(len(plainKey)) == hph.accountKeyLen {
+					update, err = hph.ctx.Account(plainKey)
+					if err != nil {
+						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+					}
+				} else {
+					update, err = hph.ctx.Storage(plainKey)
+					if err != nil {
+						return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+					}
+				}
+			}
+
+			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
+
+			if hph.trace || hph.traceDomain {
+				fmt.Println(trace)
+			}
+
+			if hph.capture != nil {
+				hph.capture = append(hph.capture, trace)
+			}
+		}
+
+		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
+			return fmt.Errorf("followAndUpdate: %w", err)
+		}
+		ki++
+		if progress != nil && ki == updatesCount {
+			progress <- &CommitProgress{
+				KeyIndex:    ki,
+				UpdateCount: updatesCount,
+				Metrics:     hph.metrics.AsValues(),
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("hash sort with prefetch failed: %w", err)
+	}
+
+	// Folding everything up to the root
+	for hph.activeRows > 0 {
+		foldDone := hph.metrics.StartFolding(nil)
+		if err = hph.fold(); err != nil {
+			return nil, fmt.Errorf("final fold: %w", err)
+		}
+		foldDone()
+	}
+
+	rootHash, err = hph.RootHash()
+	if err != nil {
+		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	if hph.trace {
+		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
+	}
+
+	return rootHash, nil
+}
+
+// collectBranchPrefixesFromKeys extracts all unique prefixes from hashed keys up to maxDepth.
+func collectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
+	seen := make(map[string]struct{})
+	var prefixes [][]byte
+
+	for _, hashedKey := range hashedKeys {
+		for depth := 0; depth <= maxDepth && depth <= len(hashedKey); depth++ {
+			prefix := hashedKey[:depth]
+			compactPrefix := hexNibblesToCompactBytes(prefix)
+			key := string(compactPrefix)
+			if _, exists := seen[key]; !exists {
+				seen[key] = struct{}{}
+				prefixCopy := make([]byte, len(compactPrefix))
+				copy(prefixCopy, compactPrefix)
+				prefixes = append(prefixes, prefixCopy)
+			}
+		}
+	}
+
+	return prefixes
 }
 
 func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }

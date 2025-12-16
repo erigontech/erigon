@@ -310,58 +310,85 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
-// WarmupBranches pre-warms MDBX page cache by reading Branch data in parallel.
-// This should be called before ComputeCommitment to speed up trie processing.
-// Each worker goroutine gets its own transaction from the database.
+// ComputeCommitmentWithWarmup is like ComputeCommitment but pre-warms MDBX page cache
+// by reading Branch data in parallel before processing.
+// Works with both ModeDirect and ModeUpdate.
 // maxDepth determines how deep to collect prefixes (e.g., 4 means prefixes up to 4 nibbles).
-// numWorkers is the number of parallel goroutines to use.
-func (sdc *SharedDomainsCommitmentContext) WarmupBranches(ctx context.Context, db kv.TemporalRoDB, maxDepth int, numWorkers int) error {
-	if sdc.updates.Mode() != commitment.ModeUpdate {
-		// Only ModeUpdate supports non-destructive iteration
-		return nil
+// numWorkers is the number of parallel goroutines to use for warmup.
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithWarmup(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress, maxDepth int, numWorkers int) (rootHash []byte, err error) {
+	mxCommitmentRunning.Inc()
+	defer mxCommitmentRunning.Dec()
+	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
+
+	updateCount := sdc.updates.Size()
+	if sdc.trace {
+		start := time.Now()
+		defer func() {
+			log.Trace("ComputeCommitment", "block", blockNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
+		}()
+	}
+	if updateCount == 0 {
+		rootHash, err = sdc.patriciaTrie.RootHash()
+		return rootHash, err
 	}
 
-	// Collect prefixes from updates
-	prefixes, err := CollectBranchPrefixes(ctx, sdc.updates, maxDepth)
-	if err != nil {
-		return fmt.Errorf("collecting branch prefixes: %w", err)
+	sdc.patriciaTrie.SetTrace(sdc.trace)
+	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
+	if sdc.sharedDomains.CommitmentCapture() {
+		if sdc.patriciaTrie.GetCapture(false) == nil {
+			sdc.patriciaTrie.SetCapture([]string{})
+		}
 	}
 
-	if len(prefixes) == 0 {
-		return nil
-	}
+	trieContext := sdc.trieContext(tx)
+	sdc.Reset()
 
-	// Create factory for TrieContexts with their own transactions
+	// Create factory for warmup TrieContexts with their own transactions
 	ctxFactory := func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx)
 		if err != nil {
-			// Return a context that will return errors
 			return &errorTrieContext{err: err}, nil
 		}
 
-		trieCtx := &TrieContext{
+		warmupCtx := &TrieContext{
 			roTtx:    roTx,
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			stepSize: sdc.sharedDomains.StepSize(),
 			txNum:    sdc.sharedDomains.TxNum(),
 		}
 		if sdc.stateReader != nil {
-			trieCtx.stateReader = sdc.stateReader
+			warmupCtx.stateReader = sdc.stateReader
 		} else {
-			trieCtx.stateReader = &LatestStateReader{trieCtx.getter}
+			warmupCtx.stateReader = &LatestStateReader{warmupCtx.getter}
 		}
 
 		cleanup := func() {
 			roTx.Rollback()
 		}
-		return trieCtx, cleanup
+		return warmupCtx, cleanup
 	}
 
-	if err := WarmupBranches(ctx, prefixes, numWorkers, ctxFactory); err != nil {
-		return fmt.Errorf("warming up branches: %w", err)
+	// Use HashSortWithPrefetch which works for both ModeDirect and ModeUpdate
+	hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		// Fall back to regular process for other trie types
+		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress)
+	} else {
+		rootHash, err = hph.ProcessWithWarmup(ctx, sdc.updates, logPrefix, commitProgress, maxDepth, numWorkers, ctxFactory)
 	}
 
-	return nil
+	if err != nil {
+		return nil, err
+	}
+	sdc.justRestored.Store(false)
+
+	if saveState {
+		if err = sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum, rootHash); err != nil {
+			return nil, err
+		}
+	}
+
+	return rootHash, err
 }
 
 // errorTrieContext is a PatriciaContext that always returns an error.
