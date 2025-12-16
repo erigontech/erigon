@@ -69,34 +69,47 @@ func generateChartsPage(mv []MetricValues) *components.Page {
 	page.SetPageTitle("commitment backtest charts")
 	page.SetLayout(components.PageFlexLayout)
 	top10Slowest := generateTop10SlowestCharts(mv)
-	// place 3 in 1 row
-	top10Slowest.times.SetGlobalOptions(widthOpts("30vw"))
-	top10Slowest.updates.SetGlobalOptions(widthOpts("30vw"))
-	top10Slowest.suGinis.SetGlobalOptions(widthOpts("30vw"))
-	page.AddCharts(
-		top10Slowest.times,
-		top10Slowest.updates,
-		top10Slowest.suGinis,
-	)
+	// place 1 per row
+	top10Slowest.times.SetGlobalOptions(widthOpts("100vw"))
+	page.AddCharts(top10Slowest.times)
+	// place 2 per row
+	top10Slowest.unfoldTimeGinis.SetGlobalOptions(widthOpts("45vw"))
+	top10Slowest.foldTimeGinis.SetGlobalOptions(widthOpts("45vw"))
+	page.AddCharts(top10Slowest.unfoldTimeGinis, top10Slowest.foldTimeGinis)
+	// place 2 per row
+	top10Slowest.updates.SetGlobalOptions(widthOpts("45vw"))
+	top10Slowest.suGinis.SetGlobalOptions(widthOpts("45vw"))
+	page.AddCharts(top10Slowest.updates, top10Slowest.suGinis)
 	// place 1 per row
 	processingTimes := generateProcessingTimesChart(mv)
 	processingTimes.SetGlobalOptions(widthOpts("100vw"))
+	unfoldTimeGinis := generateUnfoldTimeGinisChart(mv)
+	unfoldTimeGinis.SetGlobalOptions(widthOpts("100vw"))
+	foldTimeGinis := generateFoldTimeGinisChart(mv)
+	foldTimeGinis.SetGlobalOptions(widthOpts("100vw"))
 	trieUpdates := generateTrieUpdatesChart(mv)
 	trieUpdates.SetGlobalOptions(widthOpts("100vw"))
+	storageUpdateGinis := generateStorageUpdateGinisChart(mv)
+	storageUpdateGinis.SetGlobalOptions(widthOpts("100vw"))
 	dbRw := generateDbRwChart(mv)
 	dbRw.SetGlobalOptions(widthOpts("100vw"))
 	page.AddCharts(
 		processingTimes,
+		unfoldTimeGinis,
+		foldTimeGinis,
 		trieUpdates,
+		storageUpdateGinis,
 		dbRw,
 	)
 	return page
 }
 
 type top10SlowestCharts struct {
-	times   *charts.Line
-	updates *charts.Bar
-	suGinis *charts.Line
+	times           *charts.Bar
+	unfoldTimeGinis *charts.Line
+	foldTimeGinis   *charts.Line
+	updates         *charts.Bar
+	suGinis         *charts.Line
 }
 
 func generateTop10SlowestCharts(mv []MetricValues) top10SlowestCharts {
@@ -108,6 +121,12 @@ func generateTop10SlowestCharts(mv []MetricValues) top10SlowestCharts {
 	}
 	nums := make([]int, len(mv))
 	times := make([]opts.LineData, len(mv))
+	unfoldTimes := make([]opts.BarData, len(mv))
+	maxUnfoldTimesPerAcc := make([]opts.BarData, len(mv))
+	unfoldTimeGinis := make([]opts.LineData, len(mv))
+	foldTimes := make([]opts.BarData, len(mv))
+	maxFoldTimesPerAcc := make([]opts.BarData, len(mv))
+	foldTimeGinis := make([]opts.LineData, len(mv))
 	accs := make([]opts.BarData, len(mv))
 	storage := make([]opts.BarData, len(mv))
 	maxSuPerAcc := make([]opts.BarData, len(mv))
@@ -116,33 +135,64 @@ func generateTop10SlowestCharts(mv []MetricValues) top10SlowestCharts {
 		name := strconv.FormatUint(mv[i].BatchId, 10)
 		nums[i] = i + 1
 		times[i] = opts.LineData{Name: name, Value: mv[i].SpentProcessing.Milliseconds()}
+		unfoldTimes[i] = opts.BarData{Name: name, Value: mv[i].SpentUnfolding.Milliseconds()}
+		foldTimes[i] = opts.BarData{Name: name, Value: mv[i].SpentFolding.Milliseconds()}
 		accs[i] = opts.BarData{Name: name, Value: mv[i].AddressKeys}
 		storage[i] = opts.BarData{Name: name, Value: mv[i].StorageKeys}
-		var accMaxSu uint64
+		var accMaxSu, accMaxUnfoldTime, accMaxFoldTime uint64
 		accSus := make([]uint64, 0, len(mv[i].Accounts))
-		for k, v := range mv[i].Accounts {
-			// note currently filtering on LoadBranch==0 as well because all rows with it are for branch keys
-			// and not for accounts, and hence all their StorageUpdates are 0s messing up the real gini coefficients
-			// in future may want to move the branch related metrics to a separate csv and MetricValues.Branches
-			if len(k) == hex.EncodedLen(length.Addr) && v.LoadBranch == 0 {
-				accMaxSu = max(accMaxSu, v.StorageUpates)
-				accSus = append(accSus, v.StorageUpates)
-			}
-		}
+		accUnfoldTimes := make([]uint64, 0, len(mv[i].Accounts))
+		accFoldTimes := make([]uint64, 0, len(mv[i].Accounts))
+		forEachAccStat(mv[i].Accounts, func(stat *commitment.AccountStats) {
+			accMaxSu = max(accMaxSu, stat.StorageUpates)
+			accSus = append(accSus, stat.StorageUpates)
+			accMaxUnfoldTime = max(accMaxUnfoldTime, uint64(stat.SpentUnfolding.Milliseconds()))
+			accUnfoldTimes = append(accUnfoldTimes, uint64(stat.SpentUnfolding.Milliseconds()))
+			accMaxFoldTime = max(accMaxFoldTime, uint64(stat.SpentFolding.Milliseconds()))
+			accFoldTimes = append(accFoldTimes, uint64(stat.SpentFolding.Milliseconds()))
+		})
 		maxSuPerAcc[i] = opts.BarData{Name: name, Value: accMaxSu}
 		suGinis[i] = opts.LineData{Name: name, Value: giniCoefficient(accSus)}
+		maxUnfoldTimesPerAcc[i] = opts.BarData{Name: name, Value: accMaxUnfoldTime}
+		unfoldTimeGinis[i] = opts.LineData{Name: name, Value: giniCoefficient(accUnfoldTimes)}
+		maxFoldTimesPerAcc[i] = opts.BarData{Name: name, Value: accMaxFoldTime}
+		foldTimeGinis[i] = opts.LineData{Name: name, Value: giniCoefficient(accFoldTimes)}
 	}
-	timesChart := charts.NewLine()
+	timesChart := charts.NewBar()
 	timesChart.SetGlobalOptions(
-		subTitleOpts("top 10 slowest", "processing times"),
-		noLegendOpts(),
+		subTitleOpts("top 10 slowest", "processing times (miliseconds)"),
+		legendOpts(),
+		gridOpts(),
 	)
 	timesChart.SetXAxis(nums).
-		AddSeries("times", times)
+		AddSeries("unfold", unfoldTimes, charts.WithLineChartOpts(opts.LineChart{Stack: "total"})).
+		AddSeries("fold", foldTimes, charts.WithLineChartOpts(opts.LineChart{Stack: "total"})).
+		AddSeries("maxUnfoldTimePerAcc", maxUnfoldTimesPerAcc, charts.WithLineChartOpts(opts.LineChart{Stack: "perAcc"})).
+		AddSeries("maxFoldTimePerAcc", maxFoldTimesPerAcc, charts.WithLineChartOpts(opts.LineChart{Stack: "perAcc"}))
+	timesLineChart := charts.NewLine()
+	timesLineChart.SetXAxis("total").AddSeries("total", times)
+	timesChart.Overlap(timesLineChart)
+	unfoldTimeGinisChart := charts.NewLine()
+	unfoldTimeGinisChart.SetGlobalOptions(
+		subTitleOpts("top 10 slowest", "unfolding times gini coefficient"),
+		legendOpts(),
+		gridOpts(),
+	)
+	unfoldTimeGinisChart.SetXAxis(nums).
+		AddSeries("gini", unfoldTimeGinis)
+	foldTimeGinisChart := charts.NewLine()
+	foldTimeGinisChart.SetGlobalOptions(
+		subTitleOpts("top 10 slowest", "folding times gini coefficient"),
+		legendOpts(),
+		gridOpts(),
+	)
+	foldTimeGinisChart.SetXAxis(nums).
+		AddSeries("gini", foldTimeGinis)
 	updatesChart := charts.NewBar()
 	updatesChart.SetGlobalOptions(
 		subTitleOpts("top 10 slowest", "trie updates"),
 		legendOpts(),
+		gridOpts(),
 	)
 	updatesChart.SetXAxis(nums).
 		AddSeries("accs", accs).
@@ -151,11 +201,18 @@ func generateTop10SlowestCharts(mv []MetricValues) top10SlowestCharts {
 	suGinisChart := charts.NewLine()
 	suGinisChart.SetGlobalOptions(
 		subTitleOpts("top 10 slowest", "storage updates gini coefficient"),
-		noLegendOpts(),
+		legendOpts(),
+		gridOpts(),
 	)
 	suGinisChart.SetXAxis(nums).
 		AddSeries("gini", suGinis)
-	return top10SlowestCharts{times: timesChart, updates: updatesChart, suGinis: suGinisChart}
+	return top10SlowestCharts{
+		times:           timesChart,
+		unfoldTimeGinis: unfoldTimeGinisChart,
+		foldTimeGinis:   foldTimeGinisChart,
+		updates:         updatesChart,
+		suGinis:         suGinisChart,
+	}
 }
 
 func generateProcessingTimesChart(mv []MetricValues) *charts.Line {
@@ -186,6 +243,50 @@ func generateProcessingTimesChart(mv []MetricValues) *charts.Line {
 	return chart
 }
 
+func generateUnfoldTimeGinisChart(mv []MetricValues) *charts.Line {
+	batchIds := make([]uint64, len(mv))
+	unfoldTimeGinis := make([]opts.LineData, len(mv))
+	for i := range mv {
+		batchIds[i] = mv[i].BatchId
+		unfoldTimes := make([]uint64, 0, len(mv[i].Accounts))
+		forEachAccStat(mv[i].Accounts, func(stat *commitment.AccountStats) {
+			unfoldTimes = append(unfoldTimes, uint64(stat.SpentUnfolding.Milliseconds()))
+		})
+		unfoldTimeGinis[i] = opts.LineData{Value: giniCoefficient(unfoldTimes)}
+	}
+	chart := charts.NewLine()
+	chart.SetGlobalOptions(
+		titleOpts("unfolding times gini coefficient"),
+		legendOpts(),
+		gridOpts(),
+	)
+	chart.SetXAxis(batchIds).
+		AddSeries("gini", unfoldTimeGinis)
+	return chart
+}
+
+func generateFoldTimeGinisChart(mv []MetricValues) *charts.Line {
+	batchIds := make([]uint64, len(mv))
+	foldTimeGinis := make([]opts.LineData, len(mv))
+	for i := range mv {
+		batchIds[i] = mv[i].BatchId
+		foldTimes := make([]uint64, 0, len(mv[i].Accounts))
+		forEachAccStat(mv[i].Accounts, func(stat *commitment.AccountStats) {
+			foldTimes = append(foldTimes, uint64(stat.SpentFolding.Milliseconds()))
+		})
+		foldTimeGinis[i] = opts.LineData{Value: giniCoefficient(foldTimes)}
+	}
+	chart := charts.NewLine()
+	chart.SetGlobalOptions(
+		titleOpts("folding times gini coefficient"),
+		legendOpts(),
+		gridOpts(),
+	)
+	chart.SetXAxis(batchIds).
+		AddSeries("gini", foldTimeGinis)
+	return chart
+}
+
 func generateTrieUpdatesChart(mv []MetricValues) *charts.Line {
 	batchIds := make([]uint64, len(mv))
 	accountUpdates := make([]opts.LineData, len(mv))
@@ -208,6 +309,28 @@ func generateTrieUpdatesChart(mv []MetricValues) *charts.Line {
 			charts.WithLineChartOpts(opts.LineChart{Stack: "total"}),
 			charts.WithAreaStyleOpts(opts.AreaStyle{Opacity: opts.Float(0.2)}),
 		)
+	return chart
+}
+
+func generateStorageUpdateGinisChart(mv []MetricValues) *charts.Line {
+	batchIds := make([]uint64, len(mv))
+	suGinis := make([]opts.LineData, len(mv))
+	for i := range mv {
+		batchIds[i] = mv[i].BatchId
+		sus := make([]uint64, 0, len(mv[i].Accounts))
+		forEachAccStat(mv[i].Accounts, func(stat *commitment.AccountStats) {
+			sus = append(sus, stat.StorageUpates)
+		})
+		suGinis[i] = opts.LineData{Value: giniCoefficient(sus)}
+	}
+	chart := charts.NewLine()
+	chart.SetGlobalOptions(
+		titleOpts("storage updates gini coefficient"),
+		legendOpts(),
+		gridOpts(),
+	)
+	chart.SetXAxis(batchIds).
+		AddSeries("gini", suGinis)
 	return chart
 }
 
@@ -258,10 +381,6 @@ func legendOpts() charts.GlobalOpts {
 	return charts.WithLegendOpts(opts.Legend{Bottom: "5%", Left: "center"})
 }
 
-func noLegendOpts() charts.GlobalOpts {
-	return charts.WithLegendOpts(opts.Legend{Show: opts.Bool(false)})
-}
-
 func gridOpts() charts.GlobalOpts {
 	return charts.WithGridOpts(opts.Grid{Bottom: "15%"})
 }
@@ -283,4 +402,15 @@ func giniCoefficient(values []uint64) float64 {
 		return 0
 	}
 	return (2*weightedSum)/(float64(n)*sum) - (float64(n)+1)/float64(n)
+}
+
+func forEachAccStat(as map[string]*commitment.AccountStats, f func(stat *commitment.AccountStats)) {
+	for addr, stat := range as {
+		// note currently filtering on LoadBranch==0 as well because all rows with it are for branch keys
+		// and not for accounts, and hence all their StorageUpdates are 0s messing up the real gini coefficients
+		// in future may want to move the branch related metrics to a separate csv and MetricValues.Branches
+		if len(addr) == hex.EncodedLen(length.Addr) && stat.LoadBranch == 0 {
+			f(stat)
+		}
+	}
 }
