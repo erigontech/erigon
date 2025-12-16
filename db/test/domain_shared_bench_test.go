@@ -72,7 +72,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -155,7 +155,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -237,7 +237,7 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		acc := accounts3.Account{
 			Nonce:       i,
 			Balance:     *uint256.NewInt(i*10e4 + uint64(jitter)),
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts3.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		value := accounts3.SerialiseV3(&acc)

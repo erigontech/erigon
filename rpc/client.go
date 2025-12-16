@@ -593,6 +593,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			// A read error is fatal for the connection, and all pending requests must be cancelled, including any
 			// that might still be considered in-flight.
 			conn.close(err, nil)
+			lastOp = nil
 			reading = false
 
 		// Reconnect:
@@ -610,9 +611,10 @@ func (c *Client) dispatch(codec ServerCodec) {
 			go c.read(newcodec)
 			reading = true
 			conn = c.newClientConn(newcodec)
-			// Re-register the in-flight request on the new handler
-			// because that's where it will be sent.
-			conn.handler.addRequestOp(lastOp)
+			// Re-register the in-flight request on the new handler because that's where it will be sent.
+			if lastOp != nil {
+				conn.handler.addRequestOp(lastOp)
+			}
 
 		// Send path:
 		case op := <-reqInitLock:
@@ -622,7 +624,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			conn.handler.addRequestOp(op)
 
 		case err := <-c.reqSent:
-			if err != nil {
+			if lastOp != nil && err != nil {
 				// Remove response handlers for the last send. When the read loop
 				// goes down, it will signal all other current operations.
 				conn.handler.removeRequestOp(lastOp)

@@ -22,10 +22,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -46,7 +46,7 @@ type Resetable interface {
 
 type TraceWorker struct {
 	stateReader  *state.HistoryReaderV3
-	engine       consensus.EngineReader
+	engine       rules.EngineReader
 	headerReader services.HeaderReader
 	tx           kv.Getter
 	chainConfig  *chain.Config
@@ -64,7 +64,7 @@ type TraceWorker struct {
 	vmConfig  *vm.Config
 }
 
-func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineReader, br services.HeaderReader, tracer GenericTracer) *TraceWorker {
+func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReader, br services.HeaderReader, tracer GenericTracer) *TraceWorker {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
 
@@ -115,13 +115,13 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	}
 	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
 
-	txContext := core.NewEVMTxContext(msg)
+	txContext := protocol.NewEVMTxContext(msg)
 	if e.vmConfig.TraceJumpDest {
 		txContext.TxHash = txn.Hash()
 	}
 	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 
-	gp := new(core.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
+	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
@@ -136,7 +136,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 			return err
 		}
 	} else {
-		result, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
+		result, err := protocol.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
 		if err != nil {
 			if result == nil {
 				return fmt.Errorf("%w: blockNum=%d, txNum=%d", err, e.blockNum, txNum)

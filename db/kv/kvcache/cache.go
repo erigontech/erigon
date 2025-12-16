@@ -218,8 +218,8 @@ func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 
 	r = &CoherentRoot{
 		ready:     make(chan struct{}),
-		cache:     btree2.NewBTreeG[*Element](Less),
-		codeCache: btree2.NewBTreeG[*Element](Less),
+		cache:     btree2.NewBTreeG(Less),
+		codeCache: btree2.NewBTreeG(Less),
 	}
 	c.roots[versionID] = r
 	return r
@@ -248,8 +248,8 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 		c.codeEvict.Init()
 		if r.cache == nil {
 			//log.Info("advance: new", "to", viewID)
-			r.cache = btree2.NewBTreeG[*Element](Less)
-			r.codeCache = btree2.NewBTreeG[*Element](Less)
+			r.cache = btree2.NewBTreeG(Less)
+			r.codeCache = btree2.NewBTreeG(Less)
 		} else {
 			r.cache.Walk(func(items []*Element) bool {
 				for _, i := range items {

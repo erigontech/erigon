@@ -7,6 +7,9 @@ on:
         - main
   workflow_dispatch:
 
+env:
+  EEST_VERSION: 'v5.3.0'
+
 concurrency:
   # Dynamic group to fill all available runners
   group: hive-eest-tests-${{ github.run_id }}
@@ -33,7 +36,7 @@ jobs:
           echo "Pruning docker system..."
           docker system prune -af --volumes
       - name: Checkout Hive
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           ref: master
@@ -82,7 +85,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eels/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eels/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -112,7 +115,7 @@ jobs:
               exit 1
             fi
           }
-          run_suite eest/consume-engine
+          run_suite eels/consume-engine
         continue-on-error: true
       - name: Upload output log
         uses: actions/upload-artifact@v5

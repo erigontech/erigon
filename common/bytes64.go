@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	bytes64T = reflect.TypeOf(Bytes64{})
+	bytes64T = reflect.TypeFor[Bytes64]()
 )
 
 type Bytes64 [length.Bytes64]byte

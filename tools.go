@@ -33,6 +33,8 @@ package tools
 // build tag 'trick_go_mod_tidy' - is used to hide warnings of IDEA (because we can't import `main` packages in go)
 
 import (
+	_ "github.com/99designs/gqlgen"
+	_ "github.com/99designs/gqlgen/graphql/introspection"
 	_ "github.com/erigontech/mdbx-go"
 	_ "github.com/erigontech/mdbx-go/libmdbx"
 	_ "github.com/fjl/gencodec"
@@ -40,4 +42,5 @@ import (
 	_ "go.uber.org/mock/mockgen/model"
 	_ "golang.org/x/tools/cmd/stringer"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
+	_ "google.golang.org/protobuf/cmd/protoc-gen-go"
 )

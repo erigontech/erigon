@@ -151,7 +151,7 @@ func SnapshotDownloadInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return common.CopyBytes(bytes), nil
+	return common.Copy(bytes), nil
 }
 
 func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
@@ -160,7 +160,7 @@ func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return common.CopyBytes(bytes), nil
+	return common.Copy(bytes), nil
 }
 
 func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
@@ -169,7 +169,7 @@ func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return common.CopyBytes(bytes), nil
+	return common.Copy(bytes), nil
 }
 
 func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {

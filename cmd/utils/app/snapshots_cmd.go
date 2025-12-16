@@ -60,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -276,7 +277,6 @@ var snapshotCommand = cli.Command{
 			// parent commands.
 			Flags: []cli.Flag{
 				&utils.DataDirFlag,
-				&utils.ChainFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
 			},
@@ -293,6 +293,34 @@ var snapshotCommand = cli.Command{
 				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
+		},
+		{
+			Name: "rollback-snapshots-to-block",
+			Description: "Rollback the node back to a given block by deleting chaindata and all corresponding " +
+				"snapshots that contain data related to the given block and blocks after it. It deletes block " +
+				"related seg files and also state files that contain data of its first tx num and later." +
+				"It is useful for shadowforks, recovering broken nodes or chains, and/or for doing experiments that " +
+				"involve replaying certain blocks.",
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("rollback snapshots to block: could not setup logger: %w", err))
+				}
+				block := cliCtx.Uint64("block")
+				prompt := cliCtx.Bool("prompt")
+				dataDir := cliCtx.String(utils.DataDirFlag.Name)
+				err = doRollbackSnapshotsToBlock(cliCtx.Context, block, prompt, dataDir, logger)
+				if err != nil {
+					logger.Error(err.Error())
+					return err
+				}
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Required: true},
+				&cli.BoolFlag{Name: "prompt", Value: true},
+			}),
 		},
 		{
 			Name:   "diff",
@@ -357,6 +385,49 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "check-commitment-hist-at-blk",
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("check commitment history at block: could not setup logger: %w", err))
+				}
+				err = doCheckCommitmentHistAtBlk(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-commitment-hist-at-blk] failure", "err", err)
+					return err
+				}
+				log.Info("[check-commitment-hist-at-blk] success")
+				return nil
+			},
+			Description: "check if our historical commitment data matches the state root at a given block",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to verify", Required: true},
+			}),
+		},
+		{
+			Name: "check-commitment-hist-at-blk-range",
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("check commitment history at block range: could not setup logger: %w", err))
+				}
+				err = doCheckCommitmentHistAtBlkRange(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-commitment-hist-at-blk-range] failure", "err", err)
+					return err
+				}
+				log.Info("[check-commitment-hist-at-blk-range] success")
+				return nil
+			},
+			Description: "check if our historical commitment data matches the state roots of headers for a given [from,to) block range",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
+				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+			}),
+		},
+		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
 				if err := doPublishable(cliCtx); err != nil {
@@ -407,6 +478,21 @@ var snapshotCommand = cli.Command{
 				&cli.PathFlag{Name: "file", Required: true},
 				&cli.StringFlag{Name: "compress", Required: true, Usage: "Values compression type: all,none,keys,values"},
 			}),
+		},
+		{
+			Name:        "domain",
+			Description: "Domain related subcommands",
+			Subcommands: []*cli.Command{
+				{
+					Name:   "stat",
+					Action: domainStat,
+					Usage:  "Calculate statistics for a domain",
+					Flags: joinFlags([]cli.Flag{
+						&utils.DataDirFlag,
+						&cli.UintFlag{Name: "domain", Required: true},
+					}),
+				},
+			},
 		},
 	},
 }
@@ -550,13 +636,13 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 	}
 
 	// Step 2: Process each candidate file (already parsed)
-	doesRmCommitment := len(domainNames) != 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
+	doesRmCommitment := len(domainNames) == 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
-		if doesRmCommitment && strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+		if doesRmCommitment && strings.Contains(filepath.Base(res.Path), "commitment") && strings.HasSuffix(res.Path, ".kv") {
 			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err
@@ -720,6 +806,88 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
 }
 
+func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt bool, dataDir string, logger log.Logger) error {
+	dirs, l, err := datadir.New(dataDir).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err := l.Unlock()
+		if err != nil {
+			logger.Error("failed to unlock datadir", "err", err)
+		}
+	}()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	_, _, _, br, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	reader, _ := br.IO()
+	txNumReader := reader.TxnumReader(ctx)
+	toTxNum, err := txNumReader.Min(tx, blockNum)
+	if err != nil {
+		return err
+	}
+	toStep := toTxNum / agg.StepSize()
+	var toDelete []string
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
+		filePaths, err := dir2.ListFiles(dirPath)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		for _, filePath := range filePaths {
+			parsed, isState, ok := snaptype.ParseFileName("", filePath)
+			if !ok {
+				continue
+			}
+			if (isState && parsed.To > toStep) || (!isState && parsed.To > blockNum) {
+				logger.Info("adding for deletion", "file", parsed.Path)
+				toDelete = append(toDelete, parsed.Path)
+			}
+		}
+	}
+	logger.Info("about to delete chaindata and mentioned snapshot files", "toBlock", blockNum, "toTxNum", toTxNum, "toStep", toStep)
+	if prompt {
+		scanner := bufio.NewScanner(os.Stdin)
+		fmt.Print("confirm above? (y/n): ")
+		scanner.Scan()
+		response := strings.ToLower(strings.TrimSpace(scanner.Text()))
+		if response != "y" {
+			logger.Info("rollback aborted")
+			return nil
+		}
+	}
+	err = dir2.RemoveAll(dirs.Chaindata)
+	if err != nil {
+		return err
+	}
+	for _, filePath := range toDelete {
+		err = dir2.RemoveFile(filePath)
+		if err != nil {
+			return err
+		}
+	}
+	logger.Info("rollback completed - deleted chaindata and files", "deletedFiles", toDelete)
+	return nil
+}
+
 func doBtSearch(cliCtx *cli.Context) error {
 	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
@@ -832,7 +1000,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	checkStr := cliCtx.String("check")
 	var requestedChecks []integrity.Check
 	if len(checkStr) > 0 {
-		for _, split := range strings.Split(checkStr, ",") {
+		for split := range strings.SplitSeq(checkStr, ",") {
 			requestedChecks = append(requestedChecks, integrity.Check(split))
 		}
 
@@ -929,8 +1097,28 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
+		case integrity.StateProgress:
+			if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
 		case integrity.Publishable:
 			if err := doPublishable(cliCtx); err != nil {
+				return err
+			}
+		case integrity.CommitmentRoot:
+			if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
+				return err
+			}
+		case integrity.CommitmentKvi:
+			if err := integrity.CheckCommitmentKvi(ctx, db, failFast, logger); err != nil {
+				return err
+			}
+		case integrity.CommitmentKvDeref:
+			if err := integrity.CheckCommitmentKvDeref(ctx, db, failFast, logger); err != nil {
+				return err
+			}
+		case integrity.CommitmentHistVal:
+			if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
 				return err
 			}
 		default:
@@ -941,8 +1129,94 @@ func doIntegrity(cliCtx *cli.Context) error {
 	return nil
 }
 
+func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	_, _, _, blockRetire, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+	return integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger)
+}
+
+func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	_, _, _, blockRetire, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	from := cliCtx.Uint64("from")
+	to := cliCtx.Uint64("to")
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, logger)
+}
+
 func CheckBorChain(chainName string) bool {
 	return slices.Contains([]string{networkname.BorMainnet, networkname.Amoy, networkname.BorE2ETestChain2Val, networkname.BorDevnet}, chainName)
+}
+
+func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
+	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
+	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
+
+	to := int64(-1)
+	for _, snapt := range snaptype.CaplinSnapshotTypes {
+		uto, empty, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), to, emptyOk)
+		if err != nil {
+			return err
+		}
+		if empty {
+			continue
+		}
+
+		to = int64(uto)
+	}
+
+	somethingPresent, somethingEmpty := false, false
+	for table := range stateSnapTypes.KeyValueGetters {
+		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), to, emptyOk)
+		if err != nil {
+			return err
+		}
+		somethingPresent = somethingPresent || !empty
+		somethingEmpty = somethingEmpty || empty
+
+		to = int64(uto)
+	}
+
+	if somethingEmpty && somethingPresent {
+		return fmt.Errorf("some state snapshot files are empty while others are present")
+	}
+
+	return nil
+
 }
 
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
@@ -1335,6 +1609,9 @@ func doPublishable(cliCtx *cli.Context) error {
 	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
 		return err
 	}
+	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {
+		return err
+	}
 	// check if salt-state.txt and salt-blocks.txt exist
 	exists, err := dir2.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
 	if err != nil {
@@ -1468,7 +1745,10 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max)
+		stepSize := agg.StepSize()
+		minStep := min / stepSize
+		maxStep := max / stepSize
+		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
 	} else {
 		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
 		if err != nil {
@@ -1543,8 +1823,8 @@ func doMeta(cliCtx *cli.Context) error {
 			}
 		}
 		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HR(), "keys_size", keysSize.HR(), "vals_size", valsSize.HR(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HR(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
-	} else if strings.HasSuffix(fname, ".bt") {
-		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
+	} else if before, ok := strings.CutSuffix(fname, ".bt"); ok {
+		kvFPath := before + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
 			panic(err)

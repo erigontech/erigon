@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -89,8 +89,13 @@ func (s *StageState) SyncMode() stages.Mode {
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
-	return stages.SaveStageProgress(db, s.ID, newBlockNum)
+	if err := stages.SaveStageProgress(db, s.ID, newBlockNum); err != nil {
+		return err
+	}
+	s.BlockNumber = newBlockNum
+	return nil
 }
+
 func (s *StageState) UpdatePrune(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
 }
@@ -130,9 +135,9 @@ var ExecUnwind = UnwindReason{}
 var ForkChoice = UnwindReason{}
 
 func BadBlock(badBlock common.Hash, err error) UnwindReason {
-	if !errors.Is(err, consensus.ErrInvalidBlock) {
+	if !errors.Is(err, rules.ErrInvalidBlock) {
 		// make sure to always have ErrInvalidBlock in the error chain for bad block unwinding
-		err = fmt.Errorf("%w: %w", consensus.ErrInvalidBlock, err)
+		err = fmt.Errorf("%w: %w", rules.ErrInvalidBlock, err)
 	}
 	return UnwindReason{Block: &badBlock, ErrBadBlock: err}
 }

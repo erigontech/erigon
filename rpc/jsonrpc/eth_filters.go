@@ -99,9 +99,15 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	stub := make([]any, 0)
 	// remove 0x
 	cutIndex := strings.TrimPrefix(index, "0x")
-	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+	// Validate the id exists for any subscription type first to distinguish "never created" from "no changes yet".
+	exists := api.filters.HasHeadsSubscription(rpchelper.HeadsSubID(cutIndex)) ||
+		api.filters.HasPendingTxsSubscription(rpchelper.PendingTxsSubID(cutIndex)) ||
+		api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex))
+	if !exists {
 		return nil, rpc.ErrFilterNotFound
 	}
+
+	// Identify the subscription type by probing each store; if none have data yet, return empty slice
 	if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
 		for _, v := range blocks {
 			stub = append(stub, v.Hash())

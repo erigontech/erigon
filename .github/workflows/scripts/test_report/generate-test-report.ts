@@ -18,7 +18,6 @@ const acceptedWorkflows = [
     '.github/workflows/qa-sync-from-scratch.yml',
     '.github/workflows/qa-sync-with-externalcl.yml',
     '.github/workflows/qa-tip-tracking-gnosis.yml',
-    '.github/workflows/qa-tip-tracking-polygon.yml',
     '.github/workflows/qa-tip-tracking.yml',
     '.github/workflows/qa-tip-tracking-with-load.yml',
     '.github/workflows/qa-txpool-performance-test.yml',

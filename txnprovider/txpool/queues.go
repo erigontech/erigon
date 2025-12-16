@@ -52,7 +52,7 @@ func (s *bestSlice) UnsafeAdd(i *metaTxn) {
 
 type BestQueue struct {
 	ms             []*metaTxn
-	pendingBastFee uint64
+	pendingBaseFee uint64
 }
 
 func (p *BestQueue) Len() int {
@@ -60,7 +60,7 @@ func (p *BestQueue) Len() int {
 }
 
 func (p *BestQueue) Less(i, j int) bool {
-	return p.ms[i].better(p.ms[j], *uint256.NewInt(p.pendingBastFee))
+	return p.ms[i].better(p.ms[j], *uint256.NewInt(p.pendingBaseFee))
 }
 
 func (p *BestQueue) Swap(i, j int) {

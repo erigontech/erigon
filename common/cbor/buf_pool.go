@@ -35,17 +35,20 @@ func Decoder(r io.Reader) *codec.Decoder {
 	case d = <-decoderPool:
 		d.Reset(r)
 	default:
-		{
-			var handle codec.CborHandle
-			handle.ReaderBufferSize = 64 * 1024
-			handle.ZeroCopy = true // if you need access to object outside of db transaction - please copy bytes before deserialization
-			d = codec.NewDecoder(r, &handle)
-		}
+	}
+	if d == nil {
+		var handle codec.CborHandle
+		handle.ReaderBufferSize = 64 * 1024
+		handle.ZeroCopy = true // if you need access to object outside of db transaction - please copy bytes before deserialization
+		d = codec.NewDecoder(r, &handle)
 	}
 	return d
 }
 
 func returnDecoderToPool(d *codec.Decoder) {
+	if d == nil {
+		return
+	}
 	select {
 	case decoderPool <- d:
 	default:
@@ -62,20 +65,23 @@ func Encoder(w io.Writer) *codec.Encoder {
 	case e = <-encoderPool:
 		e.Reset(w)
 	default:
-		{
-			var handle codec.CborHandle
-			handle.WriterBufferSize = 64 * 1024
-			handle.StructToArray = true
-			handle.OptimumSize = true
-			handle.StringToRaw = true
+	}
+	if e == nil {
+		var handle codec.CborHandle
+		handle.WriterBufferSize = 64 * 1024
+		handle.StructToArray = true
+		handle.OptimumSize = true
+		handle.StringToRaw = true
 
-			e = codec.NewEncoder(w, &handle)
-		}
+		e = codec.NewEncoder(w, &handle)
 	}
 	return e
 }
 
 func returnEncoderToPool(e *codec.Encoder) {
+	if e == nil {
+		return
+	}
 	select {
 	case encoderPool <- e:
 	default:

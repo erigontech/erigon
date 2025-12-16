@@ -234,7 +234,7 @@ func initSeparatedLogging(
 		return
 	}
 
-	err := os.MkdirAll(dirPath, 0764)
+	err := os.MkdirAll(dirPath, 0755)
 	if err != nil {
 		logger.Warn("failed to create log dir, console logging only")
 		return

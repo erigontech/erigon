@@ -157,7 +157,7 @@ func BenchmarkName(b *testing.B) {
 	k := []byte{15}
 
 	b.Run("1", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			GetFromPage(k, bts, nil, false)
 		}
 	})
