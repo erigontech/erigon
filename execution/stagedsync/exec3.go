@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -872,7 +873,14 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
+	// Use warmup to pre-fetch branch data in parallel before computing commitment
+	// maxDepth=4 collects prefixes up to 4 nibbles deep (covers most branch reads)
+	// numWorkers=NumCPU/2 balances parallelism with MDBX transaction overhead
+	numWorkers := runtime.NumCPU() / 2
+	if numWorkers < 2 {
+		numWorkers = 2
+	}
+	computedRootHash, err := doms.ComputeCommitmentWithWarmup(ctx, applyTx, cfg.db, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil, 4, numWorkers)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
