@@ -338,7 +338,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 
 							// Use warmup to pre-fetch branch data in parallel (maxDepth=128 covers full key paths)
-							numWorkers := runtime.NumCPU() / 2
+							numWorkers := runtime.NumCPU()
 							if numWorkers < 2 {
 								numWorkers = 2
 							}
