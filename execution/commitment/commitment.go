@@ -1328,6 +1328,7 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, prefetchFn func(hash
 				return err
 			}
 		}
+		log.Debug("Prefetch hashed keys completed", "count", len(pairs), "duration", time.Since(start))
 
 		// Second pass: process all keys
 		for _, p := range pairs {
