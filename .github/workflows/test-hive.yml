@@ -18,7 +18,9 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ethereum/hive
-          # ref: master
+          # Temporary pin to fix CI issues with ethereum/hive (see https://github.com/ethereum/hive/issues/XXXX)
+          # TODO: Revert to 'main' once upstream issues are resolved
+          ref: 73fb4440b1fe4b362bf66e6278ec7d46b254f362
           path: hive
 
       - name: Setup go env and cache
