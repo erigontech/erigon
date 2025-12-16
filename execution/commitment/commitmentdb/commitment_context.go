@@ -266,6 +266,12 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 
 // Evaluates commitment for gathered updates.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+	return sdc.ComputeCommitmentWithCache(ctx, tx, saveState, blockNum, txNum, logPrefix, commitProgress, nil)
+}
+
+// ComputeCommitmentWithCache is like ComputeCommitment but uses a pre-warmed branch cache.
+// If cache is nil, it behaves exactly like ComputeCommitment.
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithCache(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress, cache *BranchCache) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -295,6 +301,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	trieContext := sdc.trieContext(tx)
 	sdc.Reset()
 
+	// Wrap trieContext with cache if provided
+	var patriciaCtx commitment.PatriciaContext = trieContext
+	if cache != nil {
+		patriciaCtx = NewCachedTrieContext(trieContext, cache)
+		sdc.patriciaTrie.ResetContext(patriciaCtx)
+	}
+
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress)
 	if err != nil {
 		return nil, err
@@ -308,6 +321,84 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	return rootHash, err
+}
+
+// WarmupBranchCache pre-warms a branch cache by reading Branch data in parallel.
+// This should be called before ComputeCommitmentWithCache to speed up trie processing.
+// Each worker goroutine gets its own transaction from the database.
+// maxDepth determines how deep to collect prefixes (e.g., 4 means prefixes up to 4 nibbles).
+// numWorkers is the number of parallel goroutines to use.
+func (sdc *SharedDomainsCommitmentContext) WarmupBranchCache(ctx context.Context, db kv.TemporalRoDB, maxDepth int, numWorkers int) (*BranchCache, error) {
+	if sdc.updates.Mode() != commitment.ModeUpdate {
+		// Only ModeUpdate supports non-destructive iteration
+		return nil, nil
+	}
+
+	// Collect prefixes from updates
+	prefixes, err := CollectBranchPrefixes(ctx, sdc.updates, maxDepth)
+	if err != nil {
+		return nil, fmt.Errorf("collecting branch prefixes: %w", err)
+	}
+
+	if len(prefixes) == 0 {
+		return nil, nil
+	}
+
+	cache := NewBranchCache()
+
+	// Create factory for TrieContexts with their own transactions
+	ctxFactory := func() (commitment.PatriciaContext, func()) {
+		roTx, err := db.BeginTemporalRo(ctx)
+		if err != nil {
+			// Return a context that will return errors
+			return &errorTrieContext{err: err}, nil
+		}
+
+		trieCtx := &TrieContext{
+			roTtx:    roTx,
+			getter:   sdc.sharedDomains.AsGetter(roTx),
+			stepSize: sdc.sharedDomains.StepSize(),
+			txNum:    sdc.sharedDomains.TxNum(),
+		}
+		if sdc.stateReader != nil {
+			trieCtx.stateReader = sdc.stateReader
+		} else {
+			trieCtx.stateReader = &LatestStateReader{trieCtx.getter}
+		}
+
+		cleanup := func() {
+			roTx.Rollback()
+		}
+		return trieCtx, cleanup
+	}
+
+	if err := WarmupBranches(ctx, prefixes, cache, numWorkers, ctxFactory); err != nil {
+		return nil, fmt.Errorf("warming up branches: %w", err)
+	}
+
+	return cache, nil
+}
+
+// errorTrieContext is a PatriciaContext that always returns an error.
+// Used when transaction creation fails in warmup factory.
+type errorTrieContext struct {
+	err error
+}
+
+func (e *errorTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	return nil, 0, e.err
+}
+
+func (e *errorTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+	return e.err
+}
+
+func (e *errorTrieContext) Account(plainKey []byte) (*commitment.Update, error) {
+	return nil, e.err
+}
+
+func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) {
+	return nil, e.err
 }
 
 // by that key stored latest root hash and tree state

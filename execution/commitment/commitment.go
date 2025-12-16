@@ -1258,6 +1258,133 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 	return nil
 }
 
+// ForEachHashedKey iterates over hashed keys without consuming the updates.
+// This is useful for collecting prefixes for branch warmup.
+// Only supported for ModeUpdate mode.
+func (t *Updates) ForEachHashedKey(ctx context.Context, fn func(hashedKey []byte) error) error {
+	if t.mode != ModeUpdate {
+		return nil // Not supported for ModeDirect
+	}
+
+	var iterErr error
+	t.tree.Ascend(func(item *KeyUpdate) bool {
+		select {
+		case <-ctx.Done():
+			iterErr = ctx.Err()
+			return false
+		default:
+		}
+
+		if err := fn(item.hashedKey); err != nil {
+			iterErr = err
+			return false
+		}
+		return true
+	})
+	return iterErr
+}
+
+// keyPair holds a hashed key and plain key pair for prefetch processing
+type keyPair struct {
+	hashedKey []byte
+	plainKey  []byte
+	update    *Update
+}
+
+// HashSortWithPrefetch loads all keys first, calls prefetchFn with hashed keys for warming up,
+// then processes each key with the main callback. This works with both ModeDirect and ModeUpdate.
+// The prefetchFn receives all hashed keys and can be used to warm up branch caches in parallel.
+func (t *Updates) HashSortWithPrefetch(ctx context.Context, prefetchFn func(hashedKeys [][]byte) error, fn func(hk, pk []byte, update *Update) error) error {
+	switch t.mode {
+	case ModeDirect:
+		clear(t.keys)
+
+		// First pass: collect all keys into memory
+		var pairs []keyPair
+		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			// Make copies since ETL may reuse buffers
+			hk := make([]byte, len(k))
+			copy(hk, k)
+			pk := make([]byte, len(v))
+			copy(pk, v)
+			pairs = append(pairs, keyPair{hashedKey: hk, plainKey: pk})
+			return nil
+		}, etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			return err
+		}
+
+		t.initCollector()
+
+		// Extract hashed keys for prefetch
+		if prefetchFn != nil && len(pairs) > 0 {
+			hashedKeys := make([][]byte, len(pairs))
+			for i, p := range pairs {
+				hashedKeys[i] = p.hashedKey
+			}
+			if err := prefetchFn(hashedKeys); err != nil {
+				return err
+			}
+		}
+
+		// Second pass: process all keys
+		for _, p := range pairs {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(p.hashedKey, p.plainKey, nil); err != nil {
+				return err
+			}
+		}
+
+	case ModeUpdate:
+		// First pass: collect all keys
+		var pairs []keyPair
+		t.tree.Ascend(func(item *KeyUpdate) bool {
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+			}
+			// Make copies
+			hk := make([]byte, len(item.hashedKey))
+			copy(hk, item.hashedKey)
+			pairs = append(pairs, keyPair{hashedKey: hk, plainKey: toBytesZeroCopy(item.plainKey), update: item.update})
+			return true
+		})
+
+		// Extract hashed keys for prefetch
+		if prefetchFn != nil && len(pairs) > 0 {
+			hashedKeys := make([][]byte, len(pairs))
+			for i, p := range pairs {
+				hashedKeys[i] = p.hashedKey
+			}
+			if err := prefetchFn(hashedKeys); err != nil {
+				return err
+			}
+		}
+
+		// Second pass: process all keys
+		for _, p := range pairs {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(p.hashedKey, p.plainKey, p.update); err != nil {
+				return err
+			}
+		}
+		t.tree.Clear(true)
+
+	default:
+		return nil
+	}
+	return nil
+}
+
 // Reset clears all updates
 func (t *Updates) Reset() {
 	switch t.mode {

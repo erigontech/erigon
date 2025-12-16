@@ -99,7 +99,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeUpdate, tv, tx.Debug().Dirs().Tmp)
 
 	if err := sd.SeekCommitment(ctx, tx); err != nil {
 		return nil, err
