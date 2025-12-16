@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -40,14 +41,16 @@ type Backtester struct {
 	db          kv.TemporalRoDB
 	blockReader services.FullBlockReader
 	outputDir   string
+	paraTrie    bool
 }
 
-func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string) Backtester {
+func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, paraTrie bool) Backtester {
 	return Backtester{
 		logger:      logger,
 		db:          db,
 		blockReader: br,
 		outputDir:   outputDir,
+		paraTrie:    paraTrie,
 	}
 }
 
@@ -131,7 +134,10 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return err
 	}
 	toTxNum := maxTxNum + 1
-	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
+	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum, "paraTrie", bt.paraTrie)
+	if bt.paraTrie {
+		statecfg.ExperimentalConcurrentCommitment = true
+	}
 	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger)
 	if err != nil {
 		return err

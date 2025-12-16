@@ -43,6 +43,7 @@ var backtestCommitmentCommand = cli.Command{
 		&cli.Uint64Flag{Name: "to", Value: math.MaxUint64, Usage: "block number to end historical backtesting at. Defaults to latest block with historical data in files."},
 		&cli.Int64Flag{Name: "tMinusN", Value: -1, Usage: "number of blocks to backtest starting from latest block minus N. Alternative to [from,to). Defaults to -1, i.e. by default use [from,to)"},
 		&cli.StringFlag{Name: "output-dir", Required: true, Usage: "directory to store all backtesting result artefacts such as graphs, metrics, profiling, etc."},
+		&cli.BoolFlag{Name: "para-trie", Value: false, Usage: "use para trie, defaults to false"},
 	}),
 	Action: func(cliCtx *cli.Context) error {
 		ctx := cliCtx.Context
@@ -59,6 +60,7 @@ var backtestCommitmentCommand = cli.Command{
 			tMinusN:   cliCtx.Int64("tMinusN"),
 			dataDir:   cliCtx.String(utils.DataDirFlag.Name),
 			outputDir: cliCtx.String("output-dir"),
+			paraTrie:  cliCtx.Bool("para-trie"),
 		}
 		err = doBacktestCommitment(ctx, args, logger)
 		if err != nil {
@@ -75,6 +77,7 @@ type backtestCommitmentArgs struct {
 	tMinusN   int64
 	dataDir   string
 	outputDir string
+	paraTrie  bool
 }
 
 func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logger log.Logger) error {
@@ -92,18 +95,18 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	_, _, _, br, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	snaps, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
-	blockReader, _ := br.IO()
-	db, err := temporal.New(chainDB, agg)
+	blockReader, _ := snaps.BlockRetire.IO()
+	db, err := temporal.New(chainDB, snaps.Aggregator)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	bt := backtester.New(logger, db, blockReader, args.outputDir)
+	bt := backtester.New(logger, db, blockReader, args.outputDir, args.paraTrie)
 	if args.tMinusN >= 0 {
 		return bt.RunTMinusN(ctx, uint64(args.tMinusN))
 	}
