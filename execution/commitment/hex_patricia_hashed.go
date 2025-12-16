@@ -2470,6 +2470,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
+	numWorkers = 32
 
 	if collectCommitmentMetrics {
 		hph.metrics.Reset()
