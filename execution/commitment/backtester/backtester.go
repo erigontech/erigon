@@ -17,6 +17,7 @@
 package backtester
 
 import (
+	"container/heap"
 	"context"
 	"fmt"
 	"math"
@@ -36,13 +37,10 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-type Backtester struct {
-	logger      log.Logger
-	db          kv.TemporalRoDB
-	blockReader services.FullBlockReader
-	outputDir   string
-	paraTrie    bool
-}
+const (
+	batchesPerChartsPage = 2
+	topN                 = 10
+)
 
 func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, paraTrie bool) Backtester {
 	return Backtester{
@@ -52,6 +50,14 @@ func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, out
 		outputDir:   outputDir,
 		paraTrie:    paraTrie,
 	}
+}
+
+type Backtester struct {
+	logger      log.Logger
+	db          kv.TemporalRoDB
+	blockReader services.FullBlockReader
+	outputDir   string
+	paraTrie    bool
 }
 
 func (bt Backtester) RunTMinusN(ctx context.Context, n uint64) error {
@@ -113,8 +119,17 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 			return err
 		}
 	}
-	bt.logger.Info("finished commitment backtest", "blocks", toBlock-fromBlock+1, "in", time.Since(start), "output", runOutputDir)
-	return bt.processResults(fromBlock, toBlock, runOutputDir)
+	resultsFilePath, err := bt.processResults(fromBlock, toBlock, runOutputDir)
+	if err != nil {
+		return err
+	}
+	bt.logger.Info(
+		"finished commitment backtest",
+		"blocks", toBlock-fromBlock+1,
+		"in", time.Since(start),
+		"results(click)", fmt.Sprintf("file://%s", resultsFilePath),
+	)
+	return nil
 }
 
 func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, runOutputDir string) error {
@@ -225,30 +240,41 @@ func (bt Backtester) replayChanges(tx kv.TemporalTx, d kv.Domain, sd *execctx.Sh
 	return nil
 }
 
-func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputDir string) error {
+func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputDir string) (string, error) {
 	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
-	var metrics []MetricValues
-	for block := fromBlock; block <= toBlock; block++ {
-		blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
-		commitmentMetricsFilePrefix := deriveBlockMetricsFilePrefix(blockOutputDir)
-		mVals, err := commitment.UnmarshallMetricValuesCsv(commitmentMetricsFilePrefix)
+	var chartsPageFilePaths []string
+	var topNSlowest slowestBatchesHeap
+	pageMetrics := make([]MetricValues, 0, batchesPerChartsPage)
+	for pageBlockFrom := fromBlock; pageBlockFrom <= toBlock; pageBlockFrom += batchesPerChartsPage {
+		pageBlockTo := min(pageBlockFrom+batchesPerChartsPage-1, toBlock)
+		pageMetrics = pageMetrics[:0]
+		for block := pageBlockFrom; block <= pageBlockTo; block++ {
+			blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
+			commitmentMetricsFilePrefix := deriveBlockMetricsFilePrefix(blockOutputDir)
+			mVals, err := commitment.UnmarshallMetricValuesCsv(commitmentMetricsFilePrefix)
+			if err != nil {
+				return "", err
+			}
+			if len(mVals) != 1 {
+				return "", fmt.Errorf("expected metrics for 1 batch: got=%d, block=%d", len(mVals), block)
+			}
+			mv := MetricValues{
+				BatchId:      block,
+				MetricValues: mVals[0],
+			}
+			pageMetrics = append(pageMetrics, mv)
+			heap.Push(&topNSlowest, mv)
+			if topNSlowest.Len() > topN {
+				topNSlowest.Pop()
+			}
+		}
+		chartsPageFilePath, err := renderChartsPage(pageMetrics, runOutputDir)
 		if err != nil {
-			return err
+			return "", err
 		}
-		if len(mVals) != 1 {
-			return fmt.Errorf("expected metrics for 1 batch: got=%d, block=%d", len(mVals), block)
-		}
-		metrics = append(metrics, MetricValues{
-			BatchId:      block,
-			MetricValues: mVals[0],
-		})
+		chartsPageFilePaths = append(chartsPageFilePaths, chartsPageFilePath)
 	}
-	chartsPageFilePath, err := renderChartsPage(metrics, runOutputDir)
-	if err != nil {
-		return err
-	}
-	bt.logger.Info("results page rendered", "open", fmt.Sprintf("file://%s", chartsPageFilePath))
-	return nil
+	return renderOverviewPage(&topNSlowest, chartsPageFilePaths, runOutputDir)
 }
 
 func checkDataAvailable(tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr rawdbv3.TxNumsReader) error {

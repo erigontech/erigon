@@ -19,56 +19,42 @@ package backtester
 import (
 	"bufio"
 	"cmp"
+	"container/heap"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
+	"github.com/go-echarts/go-echarts/v2/event"
 	"github.com/go-echarts/go-echarts/v2/opts"
+	"github.com/go-echarts/go-echarts/v2/types"
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-type MetricValues struct {
-	commitment.MetricValues
-	BatchId uint64
+func renderOverviewPage(top *slowestBatchesHeap, chartsPageFilePaths []string, outputDir string) (string, error) {
+	return renderPageToFile(
+		generateOverviewPage(top, chartsPageFilePaths),
+		path.Join(outputDir, "overview.html"),
+	)
 }
 
-func renderChartsPage(mv []MetricValues, outputDir string) (string, error) {
-	f, err := os.Create(path.Join(outputDir, "charts.html"))
-	if err != nil {
-		panic(err)
+func generateOverviewPage(top *slowestBatchesHeap, chartsPageFilePaths []string) *components.Page {
+	mv := make([]MetricValues, top.Len())
+	for i := len(mv) - 1; i >= 0; i-- {
+		mv[i] = heap.Pop(top).(MetricValues)
 	}
-	defer func() {
-		err := f.Close()
-		if err != nil {
-			log.Error("failed to close charts file while rendering", "file", f.Name(), "err", err)
-		}
-	}()
-	w := bufio.NewWriter(f)
-	defer func() {
-		err := w.Flush()
-		if err != nil {
-			log.Error("failed to flush charts file while rendering", "file", f.Name(), "err", err)
-		}
-	}()
-	err = generateChartsPage(mv).Render(w)
-	if err != nil {
-		return "", err
-	}
-	return f.Name(), nil
-}
-
-func generateChartsPage(mv []MetricValues) *components.Page {
 	page := components.NewPage()
-	page.SetPageTitle("commitment backtest charts")
+	page.SetPageTitle("commitment backtest results overview")
 	page.SetLayout(components.PageFlexLayout)
-	top10Slowest := generateTop10SlowestCharts(mv)
+	top10Slowest := generateTop10SlowestCharts(mv, chartsPageFilePaths)
 	// place 1 per row
 	top10Slowest.times.SetGlobalOptions(widthOpts("100vw"))
 	page.AddCharts(top10Slowest.times)
@@ -81,26 +67,8 @@ func generateChartsPage(mv []MetricValues) *components.Page {
 	top10Slowest.suGinis.SetGlobalOptions(widthOpts("45vw"))
 	page.AddCharts(top10Slowest.updates, top10Slowest.suGinis)
 	// place 1 per row
-	processingTimes := generateProcessingTimesChart(mv)
-	processingTimes.SetGlobalOptions(widthOpts("100vw"))
-	unfoldTimeGinis := generateUnfoldTimeGinisChart(mv)
-	unfoldTimeGinis.SetGlobalOptions(widthOpts("100vw"))
-	foldTimeGinis := generateFoldTimeGinisChart(mv)
-	foldTimeGinis.SetGlobalOptions(widthOpts("100vw"))
-	trieUpdates := generateTrieUpdatesChart(mv)
-	trieUpdates.SetGlobalOptions(widthOpts("100vw"))
-	storageUpdateGinis := generateStorageUpdateGinisChart(mv)
-	storageUpdateGinis.SetGlobalOptions(widthOpts("100vw"))
-	dbRw := generateDbRwChart(mv)
-	dbRw.SetGlobalOptions(widthOpts("100vw"))
-	page.AddCharts(
-		processingTimes,
-		unfoldTimeGinis,
-		foldTimeGinis,
-		trieUpdates,
-		storageUpdateGinis,
-		dbRw,
-	)
+	catalogue := generateChartPagesCatalogue(chartsPageFilePaths)
+	page.AddCharts(catalogue)
 	return page
 }
 
@@ -112,7 +80,7 @@ type top10SlowestCharts struct {
 	suGinis         *charts.Line
 }
 
-func generateTop10SlowestCharts(mv []MetricValues) top10SlowestCharts {
+func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string) top10SlowestCharts {
 	mv = slices.SortedStableFunc(slices.Values(mv), func(v1 MetricValues, v2 MetricValues) int {
 		return -cmp.Compare(v1.SpentProcessing.Milliseconds(), v2.SpentProcessing.Milliseconds())
 	})
@@ -163,6 +131,10 @@ func generateTop10SlowestCharts(mv []MetricValues) top10SlowestCharts {
 		subTitleOpts("top 10 slowest", "processing times (miliseconds)"),
 		legendOpts(),
 		gridOpts(),
+		charts.WithEventListeners(event.Listener{
+			EventName: "click",
+			Handler:   generateLocateChartPageFileJsFunc(chartsPageFilePaths),
+		}),
 	)
 	timesChart.SetXAxis(nums).
 		AddSeries("unfold", unfoldTimes, charts.WithLineChartOpts(opts.LineChart{Stack: "total"})).
@@ -213,6 +185,138 @@ func generateTop10SlowestCharts(mv []MetricValues) top10SlowestCharts {
 		updates:         updatesChart,
 		suGinis:         suGinisChart,
 	}
+}
+
+func generateLocateChartPageFileJsFunc(chartsPageFilePaths []string) types.FuncStr {
+	var itemListSb strings.Builder
+	itemListSb.WriteString("const fileInfos = [\n")
+	for i, filePath := range chartsPageFilePaths {
+		base := path.Base(filePath)
+		parts := strings.Split(strings.Replace(base, ".html", "", 1), "_")
+		from, err := strconv.ParseUint(parts[1], 10, 64)
+		if err != nil {
+			panic(fmt.Errorf("generateLocateChartPageFileJsFunc: could not parse from: %w", err))
+		}
+		to, err := strconv.ParseUint(parts[2], 10, 64)
+		if err != nil {
+			panic(fmt.Errorf("generateLocateChartPageFileJsFunc: could not parse to: %w", err))
+		}
+		itemListSb.WriteString(fmt.Sprintf("{ file: '%s', from: %d, to: %d }\n", base, from, to))
+		if i < len(chartsPageFilePaths)-1 {
+			itemListSb.WriteRune(',')
+		}
+		itemListSb.WriteRune('\n')
+	}
+	itemListSb.WriteString("];\n")
+	return opts.FuncOpts(fmt.Sprintf(
+		`function(params) {
+			console.log(params);
+			%s
+			console.log(fileInfos);
+			const batchId = parseInt(params.name);
+			console.log(batchId);
+			for (let i = 0; i < fileInfos.length; i++) {
+				const fileInfo = fileInfos[i];
+				if (fileInfo.from <= batchId && batchId <= fileInfo.to) {
+					window.open(fileInfo.file, '_blank');
+				}
+			}
+		}`,
+		itemListSb.String(),
+	))
+}
+
+func generateChartPagesCatalogue(chartsPageFilePaths []string) *charts.Bar {
+	// we use a vertical bar chart as a catalogue index with hyperlinks
+	barWidth := 25
+	chart := charts.NewBar()
+	chart.SetGlobalOptions(
+		titleOpts("Charts catalogue (clickable hyperlinks to pages)"),
+		gridOpts(),
+		charts.WithLegendOpts(opts.Legend{
+			Show: opts.Bool(false),
+		}),
+		charts.WithInitializationOpts(opts.Initialization{
+			Width:  "500px",
+			Height: fmt.Sprintf("%dpx", 100+len(chartsPageFilePaths)*(barWidth+5)),
+		}),
+		charts.WithYAxisOpts(opts.YAxis{
+			AxisLabel: &opts.AxisLabel{
+				Show: opts.Bool(false),
+			},
+		}),
+		charts.WithXAxisOpts(opts.XAxis{
+			AxisLabel: &opts.AxisLabel{
+				Show: opts.Bool(false),
+			},
+		}),
+		charts.WithEventListeners(event.Listener{
+			EventName: "click",
+			Handler: opts.FuncOpts(
+				`function(params) {
+					console.log(params);
+					window.open(params.name, '_blank');
+				}`,
+			),
+		}),
+	)
+	names := make([]string, len(chartsPageFilePaths))
+	vals := make([]opts.BarData, len(chartsPageFilePaths))
+	for i, filePath := range chartsPageFilePaths {
+		base := path.Base(filePath)
+		names[i] = base
+		vals[i] = opts.BarData{Value: 1}
+	}
+	chart.SetXAxis(names).
+		AddSeries(
+			"links",
+			vals,
+			charts.WithLabelOpts(opts.Label{
+				Show:      opts.Bool(true),
+				Position:  "inside",
+				Formatter: "{b}",
+			}),
+			charts.WithBarChartOpts(opts.BarChart{
+				BarWidth: fmt.Sprintf("%d", barWidth),
+			}),
+		)
+	chart.XYReversal()
+	return chart
+}
+
+func renderChartsPage(mv []MetricValues, outputDir string) (string, error) {
+	return renderPageToFile(
+		generateChartsPage(mv),
+		path.Join(outputDir, fmt.Sprintf("charts_%d_%d.html", mv[0].BatchId, mv[len(mv)-1].BatchId)),
+	)
+}
+
+func generateChartsPage(mv []MetricValues) *components.Page {
+	page := components.NewPage()
+	page.SetPageTitle(fmt.Sprintf("commitment backtest charts %d-%d", mv[0].BatchId, mv[len(mv)-1].BatchId))
+	page.SetLayout(components.PageFlexLayout)
+	// place 1 per row
+	processingTimes := generateProcessingTimesChart(mv)
+	processingTimes.SetGlobalOptions(widthOpts("100vw"))
+	unfoldTimeGinis := generateUnfoldTimeGinisChart(mv)
+	unfoldTimeGinis.SetGlobalOptions(widthOpts("100vw"))
+	foldTimeGinis := generateFoldTimeGinisChart(mv)
+	foldTimeGinis.SetGlobalOptions(widthOpts("100vw"))
+	trieUpdates := generateTrieUpdatesChart(mv)
+	trieUpdates.SetGlobalOptions(widthOpts("100vw"))
+	storageUpdateGinis := generateStorageUpdateGinisChart(mv)
+	storageUpdateGinis.SetGlobalOptions(widthOpts("100vw"))
+	dbRw := generateDbRwChart(mv)
+	dbRw.SetGlobalOptions(widthOpts("100vw"))
+	page.AddCharts(
+		processingTimes,
+		unfoldTimeGinis,
+		foldTimeGinis,
+		trieUpdates,
+		storageUpdateGinis,
+		dbRw,
+	)
+	return page
 }
 
 func generateProcessingTimesChart(mv []MetricValues) *charts.Line {
@@ -413,4 +517,29 @@ func forEachAccStat(as map[string]*commitment.AccountStats, f func(stat *commitm
 			f(stat)
 		}
 	}
+}
+
+func renderPageToFile(page *components.Page, filePath string) (string, error) {
+	f, err := os.Create(filePath)
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		err := f.Close()
+		if err != nil {
+			log.Error("failed to close charts file while rendering", "file", f.Name(), "err", err)
+		}
+	}()
+	w := bufio.NewWriter(f)
+	defer func() {
+		err := w.Flush()
+		if err != nil {
+			log.Error("failed to flush charts file while rendering", "file", f.Name(), "err", err)
+		}
+	}()
+	err = page.Render(w)
+	if err != nil {
+		return "", err
+	}
+	return f.Name(), nil
 }
