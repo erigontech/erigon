@@ -377,6 +377,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithWarmup(ctx conte
 		rootHash, err = hph.ProcessWithWarmup(ctx, sdc.updates, logPrefix, commitProgress, maxDepth, numWorkers, ctxFactory)
 	}
 
+	fmt.Println("AccumulateTime:", commitment.AccumulateTime)
+	commitment.AccumulateTime = 0
+
 	if err != nil {
 		return nil, err
 	}
