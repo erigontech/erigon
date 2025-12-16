@@ -50,6 +50,19 @@ type PersistentBlockCollector struct {
 	mu sync.Mutex
 }
 
+func openPersistentDB(ctx context.Context, logger log.Logger, persistDir string) (kv.RwDB, error) {
+	return mdbx.New(kv.Label(dbcfg.CaplinDB), logger).
+		Path(persistDir).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{
+				kv.Headers: kv.TableCfgItem{},
+			}
+		}).
+		GrowthStep(16 * datasize.MB).
+		MapSize(1 * datasize.TB).
+		Open(ctx)
+}
+
 // NewPersistentBlockCollector creates a new persistent block collector
 // that stores blocks in an MDBX database at the given directory
 func NewPersistentBlockCollector(
@@ -60,16 +73,7 @@ func NewPersistentBlockCollector(
 	persistDir string,
 ) *PersistentBlockCollector {
 	ctx := context.Background()
-	db, err := mdbx.New(kv.Label(dbcfg.CaplinDB), logger).
-		Path(persistDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				kv.Headers: kv.TableCfgItem{},
-			}
-		}).
-		GrowthStep(16 * datasize.MB).
-		MapSize(1 * datasize.TB).
-		Open(ctx)
+	db, err := openPersistentDB(ctx, logger, persistDir)
 	if err != nil {
 		logger.Error("[PersistentBlockCollector] Failed to open database", "err", err, "path", persistDir)
 		return nil
@@ -201,16 +205,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		p.logger.Warn("[BlockCollector] Failed to remove database directory", "err", err)
 	}
 
-	db, err := mdbx.New(kv.Label(dbcfg.CaplinDB), p.logger).
-		Path(p.persistDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				kv.Headers: kv.TableCfgItem{},
-			}
-		}).
-		GrowthStep(16 * datasize.MB).
-		MapSize(1 * datasize.TB).
-		Open(ctx)
+	db, err := openPersistentDB(ctx, p.logger, p.persistDir)
 	if err != nil {
 		p.logger.Error("[BlockCollector] Failed to reopen database", "err", err)
 		p.db = nil
