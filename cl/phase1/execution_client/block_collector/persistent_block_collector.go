@@ -147,14 +147,10 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				return err
 			}
 			// Copy the values since cursor data is only valid during iteration
-			keyCopy := make([]byte, len(k))
-			copy(keyCopy, k)
-			valueCopy := make([]byte, len(v))
-			copy(valueCopy, v)
 			blocks = append(blocks, struct {
 				key   []byte
 				value []byte
-			}{key: keyCopy, value: valueCopy})
+			}{key: common.Copy(k), value: common.Copy(v)})
 		}
 		return nil
 	}); err != nil {
