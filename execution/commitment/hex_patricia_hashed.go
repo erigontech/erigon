@@ -2485,8 +2485,18 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	// Prefetch callback - collects prefixes and warms them up in parallel
 	prefetchFn := func(hashedKeys [][]byte) error {
 		warmupStart := time.Now()
+
+		// Track max key length to verify coverage
+		maxKeyLen := 0
+		for _, hk := range hashedKeys {
+			if len(hk) > maxKeyLen {
+				maxKeyLen = len(hk)
+			}
+		}
+
 		prefixes := collectBranchPrefixesFromKeys(hashedKeys, maxDepth)
 		if len(prefixes) == 0 || numWorkers <= 0 {
+			fmt.Printf("Warmup: %d keys (maxLen=%d), 0 prefixes, skipping\n", len(hashedKeys), maxKeyLen)
 			return nil
 		}
 
@@ -2518,7 +2528,8 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 			})
 		}
 		err := g.Wait()
-		fmt.Printf("Warmup: %d keys, %d prefixes, %d workers, took %v\n", len(hashedKeys), len(prefixes), numWorkers, time.Since(warmupStart))
+		fmt.Printf("Warmup: %d keys (maxLen=%d), %d prefixes (maxDepth=%d), %d workers, took %v\n",
+			len(hashedKeys), maxKeyLen, len(prefixes), maxDepth, numWorkers, time.Since(warmupStart))
 		return err
 	}
 

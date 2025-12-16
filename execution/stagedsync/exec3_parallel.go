@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -338,10 +337,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 
 							// Use warmup to pre-fetch branch data in parallel (maxDepth=128 covers full key paths)
-							numWorkers := runtime.NumCPU()
-							if numWorkers < 2 {
-								numWorkers = 2
-							}
+							numWorkers := 64
 							rh, err := pe.doms.ComputeCommitmentWithWarmup(ctx, rwTx, pe.cfg.db, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress, 128, numWorkers)
 							close(commitProgress)
 							captured := pe.doms.SetTrace(false, false)
