@@ -83,9 +83,11 @@ func CollectBranchPrefixes(ctx context.Context, updates *commitment.Updates, max
 	return prefixes, nil
 }
 
-// CollectBranchPrefixesFromKeys extracts prefixes where branch nodes exist in the trie.
-// Instead of warming all theoretical prefixes, this only warms divergence points -
-// where consecutive sorted keys differ, which is where actual branch nodes exist.
+// CollectBranchPrefixesFromKeys extracts prefixes that will be accessed during trie traversal.
+// For sorted keys processed in order:
+// - First key: unfolds entire path from root to leaf
+// - Subsequent keys: fold up to divergence point, then unfold new path down
+// We warm all prefixes along paths that will be traversed.
 // This is used by HashSortWithPrefetch which provides all keys upfront (already sorted).
 func CollectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 	if len(hashedKeys) == 0 {
@@ -95,14 +97,8 @@ func CollectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 	seen := make(map[string]struct{})
 	var prefixes [][]byte
 
-	// Always add root (empty prefix)
-	prefixes = append(prefixes, commitment.HexNibblesToCompactBytes(nil))
-	seen[""] = struct{}{}
-
-	// For the first key, add the path to its first nibble (where it branches from root)
-	if len(hashedKeys[0]) > 0 && maxDepth >= 1 {
-		prefix := hashedKeys[0][:1]
-		compactPrefix := commitment.HexNibblesToCompactBytes(prefix)
+	addPrefix := func(nibbles []byte) {
+		compactPrefix := commitment.HexNibblesToCompactBytes(nibbles)
 		key := string(compactPrefix)
 		if _, exists := seen[key]; !exists {
 			seen[key] = struct{}{}
@@ -112,13 +108,23 @@ func CollectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 		}
 	}
 
-	// Find divergence points between consecutive keys
-	// These are where actual branch nodes exist in the trie
+	// For the first key, warm the entire path from root to maxDepth
+	// This is the initial unfold from root
+	first := hashedKeys[0]
+	maxLen := len(first)
+	if maxLen > maxDepth {
+		maxLen = maxDepth
+	}
+	for depth := 0; depth <= maxLen; depth++ {
+		addPrefix(first[:depth])
+	}
+
+	// For subsequent keys, find divergence and warm the NEW path from there
 	for i := 1; i < len(hashedKeys); i++ {
 		prev := hashedKeys[i-1]
 		curr := hashedKeys[i]
 
-		// Find the common prefix length (where they diverge)
+		// Find common prefix length (divergence point)
 		cpl := 0
 		minLen := len(prev)
 		if len(curr) < minLen {
@@ -128,36 +134,14 @@ func CollectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 			cpl++
 		}
 
-		// The divergence point is where a branch node must exist
-		divergeDepth := cpl + 1
-		if divergeDepth > maxDepth {
-			divergeDepth = maxDepth
+		// Warm prefixes along the NEW path from divergence to maxDepth
+		// This is what will be unfolded when processing this key
+		maxLen := len(curr)
+		if maxLen > maxDepth {
+			maxLen = maxDepth
 		}
-
-		// Add the divergence prefix (the common part + 1)
-		if divergeDepth > 0 && divergeDepth <= len(curr) {
-			prefix := curr[:divergeDepth]
-			compactPrefix := commitment.HexNibblesToCompactBytes(prefix)
-			key := string(compactPrefix)
-			if _, exists := seen[key]; !exists {
-				seen[key] = struct{}{}
-				prefixCopy := make([]byte, len(compactPrefix))
-				copy(prefixCopy, compactPrefix)
-				prefixes = append(prefixes, prefixCopy)
-			}
-		}
-
-		// Also add the previous key's branch at divergence point
-		if divergeDepth > 0 && divergeDepth <= len(prev) {
-			prefix := prev[:divergeDepth]
-			compactPrefix := commitment.HexNibblesToCompactBytes(prefix)
-			key := string(compactPrefix)
-			if _, exists := seen[key]; !exists {
-				seen[key] = struct{}{}
-				prefixCopy := make([]byte, len(compactPrefix))
-				copy(prefixCopy, compactPrefix)
-				prefixes = append(prefixes, prefixCopy)
-			}
+		for depth := cpl + 1; depth <= maxLen; depth++ {
+			addPrefix(curr[:depth])
 		}
 	}
 
