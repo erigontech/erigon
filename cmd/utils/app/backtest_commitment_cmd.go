@@ -44,6 +44,8 @@ var backtestCommitmentCommand = cli.Command{
 		&cli.Int64Flag{Name: "tMinusN", Value: -1, Usage: "number of blocks to backtest starting from latest block minus N. Alternative to [from,to). Defaults to -1, i.e. by default use [from,to)"},
 		&cli.StringFlag{Name: "output-dir", Required: true, Usage: "directory to store all backtesting result artefacts such as graphs, metrics, profiling, etc."},
 		&cli.BoolFlag{Name: "para-trie", Value: false, Usage: "use para trie, defaults to false"},
+		&cli.Uint64Flag{Name: "metrics-top-n", Usage: "override the number of top blocks to show in the overview metrics page"},
+		&cli.Uint64Flag{Name: "metrics-page-size", Usage: "override the number of blocks to show in the detailed block range metrics page"},
 	}),
 	Action: func(cliCtx *cli.Context) error {
 		ctx := cliCtx.Context
@@ -62,6 +64,14 @@ var backtestCommitmentCommand = cli.Command{
 			outputDir: cliCtx.String("output-dir"),
 			paraTrie:  cliCtx.Bool("para-trie"),
 		}
+		if cliCtx.IsSet("metrics-top-n") {
+			v := cliCtx.Uint64("metrics-top-n")
+			args.metricsTopN = &v
+		}
+		if cliCtx.IsSet("metrics-page-size") {
+			v := cliCtx.Uint64("metrics-page-size")
+			args.metricsPageSize = &v
+		}
 		err = doBacktestCommitment(ctx, args, logger)
 		if err != nil {
 			logger.Error("encountered an issue while backtesting", "err", err)
@@ -72,12 +82,14 @@ var backtestCommitmentCommand = cli.Command{
 }
 
 type backtestCommitmentArgs struct {
-	from      uint64
-	to        uint64
-	tMinusN   int64
-	dataDir   string
-	outputDir string
-	paraTrie  bool
+	from            uint64
+	to              uint64
+	tMinusN         int64
+	dataDir         string
+	outputDir       string
+	paraTrie        bool
+	metricsTopN     *uint64
+	metricsPageSize *uint64
 }
 
 func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logger log.Logger) error {
@@ -106,7 +118,17 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 		return err
 	}
 	defer db.Close()
-	bt := backtester.New(logger, db, blockReader, args.outputDir, args.paraTrie)
+	var opts []backtester.Opt
+	if args.paraTrie {
+		opts = append(opts, backtester.WithParaTrie(true))
+	}
+	if args.metricsTopN != nil {
+		opts = append(opts, backtester.WithChartsTopN(*args.metricsTopN))
+	}
+	if args.metricsPageSize != nil {
+		opts = append(opts, backtester.WithChartsPageSize(*args.metricsPageSize))
+	}
+	bt := backtester.New(logger, db, blockReader, args.outputDir, opts...)
 	if args.tMinusN >= 0 {
 		return bt.RunTMinusN(ctx, uint64(args.tMinusN))
 	}

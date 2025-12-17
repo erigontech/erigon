@@ -126,6 +126,7 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 		maxFoldTimesPerAcc[i] = opts.BarData{Name: name, Value: accMaxFoldTime}
 		foldTimeGinis[i] = opts.LineData{Name: name, Value: giniCoefficient(accFoldTimes)}
 	}
+	locateChartPageFileJsFunc := generateLocateChartPageFileJsFunc(chartsPageFilePaths)
 	timesChart := charts.NewBar()
 	timesChart.SetGlobalOptions(
 		subTitleOpts("top 10 slowest", "processing times (miliseconds)"),
@@ -133,7 +134,7 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 		gridOpts(),
 		charts.WithEventListeners(event.Listener{
 			EventName: "click",
-			Handler:   generateLocateChartPageFileJsFunc(chartsPageFilePaths),
+			Handler:   locateChartPageFileJsFunc,
 		}),
 	)
 	timesChart.SetXAxis(nums).
@@ -149,6 +150,10 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 		subTitleOpts("top 10 slowest", "unfolding times gini coefficient"),
 		legendOpts(),
 		gridOpts(),
+		charts.WithEventListeners(event.Listener{
+			EventName: "click",
+			Handler:   locateChartPageFileJsFunc,
+		}),
 	)
 	unfoldTimeGinisChart.SetXAxis(nums).
 		AddSeries("gini", unfoldTimeGinis)
@@ -157,6 +162,10 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 		subTitleOpts("top 10 slowest", "folding times gini coefficient"),
 		legendOpts(),
 		gridOpts(),
+		charts.WithEventListeners(event.Listener{
+			EventName: "click",
+			Handler:   locateChartPageFileJsFunc,
+		}),
 	)
 	foldTimeGinisChart.SetXAxis(nums).
 		AddSeries("gini", foldTimeGinis)
@@ -165,6 +174,10 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 		subTitleOpts("top 10 slowest", "trie updates"),
 		legendOpts(),
 		gridOpts(),
+		charts.WithEventListeners(event.Listener{
+			EventName: "click",
+			Handler:   locateChartPageFileJsFunc,
+		}),
 	)
 	updatesChart.SetXAxis(nums).
 		AddSeries("accs", accs).
@@ -175,6 +188,10 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 		subTitleOpts("top 10 slowest", "storage updates gini coefficient"),
 		legendOpts(),
 		gridOpts(),
+		charts.WithEventListeners(event.Listener{
+			EventName: "click",
+			Handler:   locateChartPageFileJsFunc,
+		}),
 	)
 	suGinisChart.SetXAxis(nums).
 		AddSeries("gini", suGinis)

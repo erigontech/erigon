@@ -37,27 +37,49 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-const (
-	batchesPerChartsPage = 2
-	topN                 = 10
-)
+type Opt func(bt *Backtester)
 
-func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, paraTrie bool) Backtester {
-	return Backtester{
-		logger:      logger,
-		db:          db,
-		blockReader: br,
-		outputDir:   outputDir,
-		paraTrie:    paraTrie,
+func WithParaTrie(paraTrie bool) Opt {
+	return func(bt *Backtester) {
+		bt.paraTrie = paraTrie
 	}
 }
 
+func WithChartsTopN(n uint64) Opt {
+	return func(bt *Backtester) {
+		bt.metricsTopN = n
+	}
+}
+
+func WithChartsPageSize(n uint64) Opt {
+	return func(bt *Backtester) {
+		bt.metricsPageSize = n
+	}
+}
+
+func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, opts ...Opt) Backtester {
+	bt := Backtester{
+		logger:          logger,
+		db:              db,
+		blockReader:     br,
+		outputDir:       outputDir,
+		metricsTopN:     10,
+		metricsPageSize: 32,
+	}
+	for _, opt := range opts {
+		opt(&bt)
+	}
+	return bt
+}
+
 type Backtester struct {
-	logger      log.Logger
-	db          kv.TemporalRoDB
-	blockReader services.FullBlockReader
-	outputDir   string
-	paraTrie    bool
+	logger          log.Logger
+	db              kv.TemporalRoDB
+	blockReader     services.FullBlockReader
+	outputDir       string
+	paraTrie        bool
+	metricsTopN     uint64
+	metricsPageSize uint64
 }
 
 func (bt Backtester) RunTMinusN(ctx context.Context, n uint64) error {
@@ -244,9 +266,9 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
 	var chartsPageFilePaths []string
 	var topNSlowest slowestBatchesHeap
-	pageMetrics := make([]MetricValues, 0, batchesPerChartsPage)
-	for pageBlockFrom := fromBlock; pageBlockFrom <= toBlock; pageBlockFrom += batchesPerChartsPage {
-		pageBlockTo := min(pageBlockFrom+batchesPerChartsPage-1, toBlock)
+	pageMetrics := make([]MetricValues, 0, bt.metricsPageSize)
+	for pageBlockFrom := fromBlock; pageBlockFrom <= toBlock; pageBlockFrom += bt.metricsPageSize {
+		pageBlockTo := min(pageBlockFrom+bt.metricsPageSize-1, toBlock)
 		pageMetrics = pageMetrics[:0]
 		for block := pageBlockFrom; block <= pageBlockTo; block++ {
 			blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
@@ -264,7 +286,7 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 			}
 			pageMetrics = append(pageMetrics, mv)
 			heap.Push(&topNSlowest, mv)
-			if topNSlowest.Len() > topN {
+			if uint64(topNSlowest.Len()) > bt.metricsTopN {
 				topNSlowest.Pop()
 			}
 		}
