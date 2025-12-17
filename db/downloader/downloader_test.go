@@ -21,7 +21,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,14 +69,10 @@ func TestConcurrentDownload(t *testing.T) {
 }
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	ctx := t.Context()
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	cfg, err := downloadercfg.New(ctx, dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
 	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
@@ -129,10 +124,6 @@ func TestNoEscape(t *testing.T) {
 }
 
 func TestVerifyData(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
@@ -146,17 +137,13 @@ func TestVerifyData(t *testing.T) {
 }
 
 func TestAddDel(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	cfg, err := downloadercfg.New(ctx, dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
+	d, err := New(ctx, cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
 
