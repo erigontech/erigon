@@ -1336,6 +1336,9 @@ type snapshotNotifier interface {
 
 func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
+		if s.SegmentsMax() == 0 {
+			return nil
+		}
 		return errors.New("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
 	if !s.Cfg().ProduceE2 {
