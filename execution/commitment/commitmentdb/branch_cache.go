@@ -83,9 +83,9 @@ func CollectBranchPrefixes(ctx context.Context, updates *commitment.Updates, max
 	return prefixes, nil
 }
 
-// CollectBranchPrefixesFromKeys extracts prefixes at divergence points between sorted keys.
-// Branch nodes exist where keys diverge - we only warm those specific points,
-// not every depth in between (the trie uses extension nodes to skip common paths).
+// CollectBranchPrefixesFromKeys extracts prefixes along the traversal path for sorted keys.
+// For each key, we warm all prefixes from its divergence point with the previous key
+// down to the leaf. This covers branch nodes that exist in the trie from other keys.
 // This is used by HashSortWithPrefetch which provides all keys upfront (already sorted).
 func CollectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 	if len(hashedKeys) == 0 {
@@ -106,38 +106,29 @@ func CollectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 		}
 	}
 
-	// Always add root
-	addPrefix(nil)
+	// First key: warm entire path from root to leaf
+	first := hashedKeys[0]
+	limit := min(len(first), maxDepth)
+	for depth := 0; depth <= limit; depth++ {
+		addPrefix(first[:depth])
+	}
 
-	// Find divergence points between consecutive sorted keys
-	// These are where actual branch nodes exist in the trie
+	// Subsequent keys: warm path from divergence point to leaf
 	for i := 1; i < len(hashedKeys); i++ {
 		prev := hashedKeys[i-1]
 		curr := hashedKeys[i]
 
 		// Find common prefix length (divergence point)
 		cpl := 0
-		minLen := len(prev)
-		if len(curr) < minLen {
-			minLen = len(curr)
-		}
+		minLen := min(len(prev), len(curr))
 		for cpl < minLen && prev[cpl] == curr[cpl] {
 			cpl++
 		}
 
-		// The branch node is at the common prefix (where they diverge)
-		// Warm both branches: common prefix + prev's nibble, common prefix + curr's nibble
-		if cpl < maxDepth {
-			if cpl < len(prev) {
-				addPrefix(prev[:cpl+1])
-			}
-			if cpl < len(curr) {
-				addPrefix(curr[:cpl+1])
-			}
-			// Also warm the common prefix itself (parent branch)
-			if cpl > 0 {
-				addPrefix(curr[:cpl])
-			}
+		// Warm all prefixes from divergence to leaf for the new key
+		limit := min(len(curr), maxDepth)
+		for depth := cpl; depth <= limit; depth++ {
+			addPrefix(curr[:depth])
 		}
 	}
 

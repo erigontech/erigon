@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -460,6 +461,26 @@ func readUvarint(data []byte) (uint64, int, error) {
 		return 0, 0, errors.New("value overflow for length")
 	}
 	return l, n, nil
+}
+
+// skipCellFields skips over the fields in branch data based on fieldBits.
+// Used during warmup traversal to find the right child's data.
+func skipCellFields(data []byte, pos int, fieldBits byte) int {
+	// Field flags: extension=1, accountAddr=2, storageAddr=4, hash=8, stateHash=16
+	for bit := byte(1); bit <= 16; bit <<= 1 {
+		if fieldBits&bit != 0 {
+			if pos >= len(data) {
+				return pos
+			}
+			// Read length varint
+			l, n := binary.Uvarint(data[pos:])
+			if n <= 0 {
+				return pos
+			}
+			pos += n + int(l) // Skip length + data
+		}
+	}
+	return pos
 }
 
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
@@ -2487,36 +2508,21 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 
 	defer func() { logEvery.Stop() }()
 
-	// Prefetch callback - collects prefixes and warms them up in parallel
+	// Prefetch callback - traverse trie structure in parallel, following actual branch nodes
 	prefetchFn := func(hashedKeys [][]byte) error {
-		warmupStart := time.Now()
-
-		// Track max key length to verify coverage
-		maxKeyLen := 0
-		for _, hk := range hashedKeys {
-			if len(hk) > maxKeyLen {
-				maxKeyLen = len(hk)
-			}
-		}
-
-		prefixes := collectBranchPrefixesFromKeys(hashedKeys, maxDepth)
-		if len(prefixes) == 0 || numWorkers <= 0 {
-			fmt.Printf("Warmup: %d keys (maxLen=%d), 0 prefixes, skipping\n", len(hashedKeys), maxKeyLen)
+		if len(hashedKeys) == 0 || numWorkers <= 0 {
 			return nil
 		}
+		warmupStart := time.Now()
 
-		// Track warmed prefixes for hit rate measurement
-		for _, p := range prefixes {
-			WarmedPrefixes[string(p)] = struct{}{}
-		}
-
-		// Warmup in parallel
-		work := make(chan []byte, len(prefixes))
-		for _, p := range prefixes {
-			work <- p
+		work := make(chan []byte, len(hashedKeys))
+		for _, hk := range hashedKeys {
+			work <- hk
 		}
 		close(work)
 
+		var totalReads atomic.Int64
+		var mu sync.Mutex
 		g, gctx := errgroup.WithContext(ctx)
 		for i := 0; i < numWorkers; i++ {
 			g.Go(func() error {
@@ -2525,21 +2531,95 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 					defer cleanup()
 				}
 
-				for prefix := range work {
+				var reads int64
+				localWarmed := make(map[string]struct{})
+				for hashedKey := range work {
 					select {
 					case <-gctx.Done():
 						return gctx.Err()
 					default:
 					}
-					// Just read to warm cache
-					_, _, _ = trieCtx.Branch(prefix)
+
+					// Traverse trie following actual branch node structure
+					depth := 0
+					for depth <= len(hashedKey) && depth <= maxDepth {
+						prefix := hexNibblesToCompactBytes(hashedKey[:depth])
+						branchData, _, _ := trieCtx.Branch(prefix)
+						reads++
+						localWarmed[string(prefix)] = struct{}{}
+
+						if len(branchData) < 2 {
+							// No branch data at this depth - end of path
+							break
+						}
+
+						// Parse branch data to find next depth
+						// Format: 2-byte bitmap + per-child field data
+						bitmap := binary.BigEndian.Uint16(branchData[0:2])
+
+						if depth >= len(hashedKey) {
+							break
+						}
+						nextNibble := hashedKey[depth]
+						childBit := uint16(1) << nextNibble
+
+						if bitmap&childBit == 0 {
+							// Child doesn't exist in this branch
+							break
+						}
+
+						// Find position of our child's data
+						// Count bits before our nibble to find offset
+						pos := 2
+						for n := uint8(0); n < nextNibble; n++ {
+							if bitmap&(uint16(1)<<n) != 0 {
+								// Skip this child's data
+								if pos >= len(branchData) {
+									break
+								}
+								fieldBits := branchData[pos]
+								pos++
+								pos = skipCellFields(branchData, pos, fieldBits)
+							}
+						}
+
+						if pos >= len(branchData) {
+							break
+						}
+
+						// Read our child's field bits
+						fieldBits := branchData[pos]
+						pos++
+
+						// Check if child has extension (fieldExtension = 1)
+						hasExtension := (fieldBits & 1) != 0
+						if hasExtension && pos < len(branchData) {
+							// Read extension length
+							extLen, n := binary.Uvarint(branchData[pos:])
+							if n > 0 && extLen > 0 {
+								// Skip by extension length
+								depth += int(extLen)
+								continue
+							}
+						}
+
+						// No extension or couldn't parse - move to next depth
+						depth++
+					}
 				}
+				totalReads.Add(reads)
+
+				mu.Lock()
+				for k := range localWarmed {
+					WarmedPrefixes[k] = struct{}{}
+				}
+				mu.Unlock()
 				return nil
 			})
 		}
 		err := g.Wait()
-		fmt.Printf("Warmup: %d keys (maxLen=%d), %d prefixes (maxDepth=%d), %d workers, took %v\n",
-			len(hashedKeys), maxKeyLen, len(prefixes), maxDepth, numWorkers, time.Since(warmupStart))
+		fmt.Printf("Warmup: %d keys, %d reads (maxDepth=%d), %d workers, took %v\n",
+			len(hashedKeys), totalReads.Load(), maxDepth, numWorkers, time.Since(warmupStart))
 		return err
 	}
 
@@ -2629,9 +2709,9 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	return rootHash, nil
 }
 
-// collectBranchPrefixesFromKeys extracts prefixes at divergence points between sorted keys.
-// Branch nodes exist where keys diverge - we only warm those specific points,
-// not every depth in between (the trie uses extension nodes to skip common paths).
+// collectBranchPrefixesFromKeys extracts prefixes along the traversal path for sorted keys.
+// For each key, we warm all prefixes from its divergence point with the previous key
+// down to the leaf. This covers branch nodes that exist in the trie from other keys.
 func collectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 	if len(hashedKeys) == 0 {
 		return nil
@@ -2651,38 +2731,29 @@ func collectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 		}
 	}
 
-	// Always add root
-	addPrefix(nil)
+	// First key: warm entire path from root to leaf
+	first := hashedKeys[0]
+	limit := min(len(first), maxDepth)
+	for depth := 0; depth <= limit; depth++ {
+		addPrefix(first[:depth])
+	}
 
-	// Find divergence points between consecutive sorted keys
-	// These are where actual branch nodes exist in the trie
+	// Subsequent keys: warm path from divergence point to leaf
 	for i := 1; i < len(hashedKeys); i++ {
 		prev := hashedKeys[i-1]
 		curr := hashedKeys[i]
 
 		// Find common prefix length (divergence point)
 		cpl := 0
-		minLen := len(prev)
-		if len(curr) < minLen {
-			minLen = len(curr)
-		}
+		minLen := min(len(prev), len(curr))
 		for cpl < minLen && prev[cpl] == curr[cpl] {
 			cpl++
 		}
 
-		// The branch node is at the common prefix (where they diverge)
-		// Warm both branches: common prefix + prev's nibble, common prefix + curr's nibble
-		if cpl < maxDepth {
-			if cpl < len(prev) {
-				addPrefix(prev[:cpl+1])
-			}
-			if cpl < len(curr) {
-				addPrefix(curr[:cpl+1])
-			}
-			// Also warm the common prefix itself (parent branch)
-			if cpl > 0 {
-				addPrefix(curr[:cpl])
-			}
+		// Warm all prefixes from divergence to leaf for the new key
+		limit := min(len(curr), maxDepth)
+		for depth := cpl; depth <= limit; depth++ {
+			addPrefix(curr[:depth])
 		}
 	}
 
