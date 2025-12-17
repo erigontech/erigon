@@ -83,6 +83,17 @@ func MadviseRandom(mmapHandle1 []byte) error {
 	return nil
 }
 
+// MadviseDontNeed tells the kernel that the pages can be freed.
+// This evicts pages from the OS page cache, useful for releasing memory pressure.
+func MadviseDontNeed(mmapHandle1 []byte) error {
+	err := unix.Madvise(mmapHandle1, syscall.MADV_DONTNEED)
+	if err != nil && !errors.Is(err, syscall.ENOSYS) {
+		// Ignore not implemented error in kernel because it still works.
+		return fmt.Errorf("madvise: %w", err)
+	}
+	return nil
+}
+
 // munmap unmaps a DB's data file from memory.
 func Munmap(mmapHandle1 []byte, _ *[MaxMapSize]byte) error {
 	// Ignore the unmap if we have no mapped data.

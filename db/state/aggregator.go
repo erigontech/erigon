@@ -464,6 +464,21 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
+// EvictCommitmentPages tells the OS to evict commitment domain file pages from cache.
+// This frees OS page cache memory that may have accumulated from previous reads.
+func (a *Aggregator) EvictCommitmentPages() {
+	d := a.d[kv.CommitmentDomain]
+	if d == nil {
+		return
+	}
+	d.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if item.decompressor != nil {
+			item.decompressor.MadvDontNeed()
+		}
+		return true
+	})
+}
+
 type VisibleFile = kv.VisibleFile
 type VisibleFiles = kv.VisibleFiles
 

@@ -600,6 +600,15 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 	return d
 }
 
+// MadvDontNeed tells the OS to evict pages from cache, freeing memory.
+// Unlike other Madv* methods, this doesn't affect readAheadRefcnt.
+func (d *Decompressor) MadvDontNeed() {
+	if d == nil || d.mmapHandle1 == nil {
+		return
+	}
+	_ = mmap.MadviseDontNeed(d.mmapHandle1)
+}
+
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
