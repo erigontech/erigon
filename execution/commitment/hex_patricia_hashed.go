@@ -1532,12 +1532,17 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 var AccumulateTime = time.Duration(0)
 var BranchCallCount = 0
 var MaxBranchDepth = 0
+var WarmedPrefixes = make(map[string]struct{})
+var WarmupHits = 0
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 	BranchCallCount++
+	if _, wasWarmed := WarmedPrefixes[string(key)]; wasWarmed {
+		WarmupHits++
+	}
 	if int(hph.currentKeyLen) > MaxBranchDepth {
 		MaxBranchDepth = int(hph.currentKeyLen)
 	}
@@ -2498,6 +2503,11 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		if len(prefixes) == 0 || numWorkers <= 0 {
 			fmt.Printf("Warmup: %d keys (maxLen=%d), 0 prefixes, skipping\n", len(hashedKeys), maxKeyLen)
 			return nil
+		}
+
+		// Track warmed prefixes for hit rate measurement
+		for _, p := range prefixes {
+			WarmedPrefixes[string(p)] = struct{}{}
 		}
 
 		// Warmup in parallel
