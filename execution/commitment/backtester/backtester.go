@@ -26,6 +26,8 @@ import (
 	"runtime/pprof"
 	"time"
 
+	"github.com/felixge/fgprof"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -64,7 +66,7 @@ func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, out
 		blockReader:     br,
 		outputDir:       outputDir,
 		metricsTopN:     10,
-		metricsPageSize: 32,
+		metricsPageSize: 1024,
 	}
 	for _, opt := range opts {
 		opt(&bt)
@@ -149,8 +151,9 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 		"finished commitment backtest",
 		"blocks", toBlock-fromBlock+1,
 		"in", time.Since(start),
-		"results", fmt.Sprintf("file://%s", resultsFilePath),
+		"results", runOutputDir,
 	)
+	bt.logger.Info("metrics", "at", fmt.Sprintf("file://%s", resultsFilePath))
 	return nil
 }
 
@@ -213,6 +216,18 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 			bt.logger.Error("failed to close cpu profile", "f", cpuProfilePath, "err", err)
 		}
 	}()
+	fgprofProfilePath := path.Join(blockOutputDir, "cpu.fgprof")
+	fgprofProfile, err := os.Create(fgprofProfilePath)
+	if err != nil {
+		return fmt.Errorf("failed to create fgprof profile: %w", err)
+	}
+	defer func() {
+		err := fgprofProfile.Close()
+		if err != nil {
+			bt.logger.Error("failed to close fgprof profile", "f", fgprofProfilePath, "err", err)
+		}
+	}()
+	stopFgprof := fgprof.Start(fgprofProfile, fgprof.FormatPprof)
 	err = pprof.StartCPUProfile(cpuProfile)
 	if err != nil {
 		return fmt.Errorf("failed to start cpu profile: %s: %w", cpuProfilePath, err)
@@ -224,6 +239,10 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	}
 	bt.logger.Info("computed commitment", "block", block, "in", time.Since(commitmentStart))
 	pprof.StopCPUProfile()
+	err = stopFgprof()
+	if err != nil {
+		return fmt.Errorf("failed to stop fgprof: %w", err)
+	}
 	canonicalHeader, err := bt.blockReader.HeaderByNumber(ctx, tx, block)
 	if err != nil {
 		return err
