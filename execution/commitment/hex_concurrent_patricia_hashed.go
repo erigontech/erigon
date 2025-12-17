@@ -172,6 +172,13 @@ func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
 	}
 }
 
+func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
+	p.root.EnableCsvMetrics(filePathPrefix)
+	for i := range p.mounts {
+		p.mounts[i].EnableCsvMetrics(filePathPrefix)
+	}
+}
+
 // pass -1 to enable trace just for root trie
 func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {
 	p.root.SetTrace(b)
