@@ -3,6 +3,7 @@ package commitment
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	ecrypto "github.com/erigontech/erigon/common/crypto"
@@ -45,8 +46,8 @@ func KeyToNibblizedHash(key []byte) []byte {
 	return nibblized
 }
 
-// hexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
-func hexNibblesToCompactBytes(key []byte) []byte {
+// HexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
+func HexNibblesToCompactBytes(key []byte) []byte {
 	var compactZeroByte byte
 	keyLen := len(key)
 	if hasTerm(key) { // trim terminator if needed
@@ -179,4 +180,18 @@ func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset i
 		k++
 	}
 	return nil
+}
+
+func PrefixStringToNibbles(hexStr string) ([]byte, error) {
+	nibbles := make([]byte, len(hexStr))
+
+	for i, char := range hexStr {
+		nibble, err := strconv.ParseUint(string(char), 16, 8)
+		if err != nil {
+			return nil, err
+		}
+		nibbles[i] = byte(nibble)
+	}
+
+	return nibbles, nil
 }
