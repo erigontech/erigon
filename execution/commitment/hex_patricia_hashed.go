@@ -2548,13 +2548,15 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 						reads++
 						localWarmed[string(prefix)] = struct{}{}
 
-						if len(branchData) < 2 {
-							// No branch data at this depth - end of path
+						// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
+						// Skip touch map (first 2 bytes)
+						if len(branchData) < 4 {
+							// No valid branch data at this depth - end of path
 							break
 						}
+						branchData = branchData[2:] // skip touch map
 
-						// Parse branch data to find next depth
-						// Format: 2-byte bitmap + per-child field data
+						// Parse bitmap (now at position 0-2)
 						bitmap := binary.BigEndian.Uint16(branchData[0:2])
 
 						if depth >= len(hashedKey) {
@@ -2570,7 +2572,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 
 						// Find position of our child's data
 						// Count bits before our nibble to find offset
-						pos := 2
+						pos := 2 // start after bitmap
 						for n := uint8(0); n < nextNibble; n++ {
 							if bitmap&(uint16(1)<<n) != 0 {
 								// Skip this child's data
