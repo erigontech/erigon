@@ -2629,11 +2629,9 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	return rootHash, nil
 }
 
-// collectBranchPrefixesFromKeys extracts prefixes that will be accessed during trie traversal.
-// For sorted keys processed in order:
-// - First key: unfolds entire path from root to leaf
-// - Subsequent keys: fold up to divergence point, then unfold new path down
-// We warm all prefixes along paths that will be traversed.
+// collectBranchPrefixesFromKeys extracts prefixes at divergence points between sorted keys.
+// Branch nodes exist where keys diverge - we only warm those specific points,
+// not every depth in between (the trie uses extension nodes to skip common paths).
 func collectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 	if len(hashedKeys) == 0 {
 		return nil
@@ -2653,18 +2651,11 @@ func collectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 		}
 	}
 
-	// For the first key, warm the entire path from root to maxDepth
-	// This is the initial unfold from root
-	first := hashedKeys[0]
-	maxLen := len(first)
-	if maxLen > maxDepth {
-		maxLen = maxDepth
-	}
-	for depth := 0; depth <= maxLen; depth++ {
-		addPrefix(first[:depth])
-	}
+	// Always add root
+	addPrefix(nil)
 
-	// For subsequent keys, find divergence and warm the NEW path from there
+	// Find divergence points between consecutive sorted keys
+	// These are where actual branch nodes exist in the trie
 	for i := 1; i < len(hashedKeys); i++ {
 		prev := hashedKeys[i-1]
 		curr := hashedKeys[i]
@@ -2679,14 +2670,19 @@ func collectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 			cpl++
 		}
 
-		// Warm prefixes along the NEW path from divergence to maxDepth
-		// This is what will be unfolded when processing this key
-		maxLen := len(curr)
-		if maxLen > maxDepth {
-			maxLen = maxDepth
-		}
-		for depth := cpl + 1; depth <= maxLen; depth++ {
-			addPrefix(curr[:depth])
+		// The branch node is at the common prefix (where they diverge)
+		// Warm both branches: common prefix + prev's nibble, common prefix + curr's nibble
+		if cpl < maxDepth {
+			if cpl < len(prev) {
+				addPrefix(prev[:cpl+1])
+			}
+			if cpl < len(curr) {
+				addPrefix(curr[:cpl+1])
+			}
+			// Also warm the common prefix itself (parent branch)
+			if cpl > 0 {
+				addPrefix(curr[:cpl])
+			}
 		}
 	}
 
