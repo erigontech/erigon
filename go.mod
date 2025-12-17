@@ -36,7 +36,6 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.5
 	github.com/crate-crypto/go-eth-kzg v1.4.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
-	github.com/deckarep/golang-set v1.8.0
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
