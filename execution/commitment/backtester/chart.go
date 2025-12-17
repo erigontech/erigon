@@ -241,7 +241,7 @@ func generateChartPagesCatalogue(chartsPageFilePaths []string) *charts.Bar {
 		}),
 		charts.WithInitializationOpts(opts.Initialization{
 			Width:  "500px",
-			Height: fmt.Sprintf("%dpx", 100+len(chartsPageFilePaths)*(barWidth+5)),
+			Height: fmt.Sprintf("%dpx", 100+len(chartsPageFilePaths)*(barWidth+10)),
 		}),
 		charts.WithYAxisOpts(opts.YAxis{
 			AxisLabel: &opts.AxisLabel{
