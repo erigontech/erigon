@@ -159,7 +159,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if numWorkers < 2 {
 				numWorkers = 2
 			}
-			rh, err := se.doms.ComputeCommitmentWithWarmup(ctx, se.applyTx, se.cfg.db, true, blockNum, inputTxNum-1, se.logPrefix, nil, 64, numWorkers)
+			rh, err := se.doms.ComputeCommitmentWithWarmup(ctx, se.applyTx, se.cfg.db, true, blockNum, inputTxNum-1, se.logPrefix, nil, 128, numWorkers)
 			se.doms.SetTrace(false, false)
 
 			if err != nil {
