@@ -385,7 +385,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithWarmup(ctx conte
 	commitment.BranchCallCount = 0
 	commitment.MaxBranchDepth = 0
 	commitment.WarmupHits = 0
-	commitment.WarmedPrefixes = make(map[string]struct{})
 
 	if err != nil {
 		return nil, err
