@@ -1130,16 +1130,10 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 				return fmt.Errorf("finding %s: %w", segNameMasked, err)
 			}
 			if !ok {
-				return fmt.Errorf("missing file %s", segNameMasked)
+				return fmt.Errorf("missing file-%s", segNameMasked)
 			}
 			if !verMap[snapType]["seg"].Supports(ver) {
 				return fmt.Errorf("expected version %s, filename: %s", verMap[snapType]["seg"].Current.String(), segName)
-			}
-			// check that the file exist
-			if exists, err := dir2.FileExist(filepath.Join(snapDir, segName)); err != nil {
-				return err
-			} else if !exists {
-				return fmt.Errorf("missing file %s", segName)
 			}
 			// check that the index file exist
 			idxName := strings.Replace(segName, ".seg", ".idx", 1)
