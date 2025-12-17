@@ -29,7 +29,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1553,7 +1552,6 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 var AccumulateTime = time.Duration(0)
 var BranchCallCount = 0
 var MaxBranchDepth = 0
-var WarmedPrefixes = make(map[string]struct{})
 var WarmupHits = 0
 
 // unfoldBranchNode returns true if unfolding has been done
@@ -1561,9 +1559,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 	BranchCallCount++
-	if _, wasWarmed := WarmedPrefixes[string(key)]; wasWarmed {
-		WarmupHits++
-	}
 	if int(hph.currentKeyLen) > MaxBranchDepth {
 		MaxBranchDepth = int(hph.currentKeyLen)
 	}
@@ -2543,7 +2538,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		close(work)
 
 		var totalReads atomic.Int64
-		var mu sync.Mutex
+
 		g, gctx := errgroup.WithContext(ctx)
 		for i := 0; i < numWorkers; i++ {
 			g.Go(func() error {
@@ -2624,13 +2619,6 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 					}
 				}
 				totalReads.Add(reads)
-
-				// Merge local warmed prefixes
-				mu.Lock()
-				for k := range localWarmed {
-					WarmedPrefixes[k] = struct{}{}
-				}
-				mu.Unlock()
 				return nil
 			})
 		}
