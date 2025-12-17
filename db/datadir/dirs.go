@@ -82,6 +82,7 @@ func New(datadir string) Dirs {
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
 		dirs.CaplinHistory,
+		filepath.Join(datadir, "logs"),
 	)
 
 	return dirs
