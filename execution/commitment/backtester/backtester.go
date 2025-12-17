@@ -149,7 +149,7 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 		"finished commitment backtest",
 		"blocks", toBlock-fromBlock+1,
 		"in", time.Since(start),
-		"results(click)", fmt.Sprintf("file://%s", resultsFilePath),
+		"results", fmt.Sprintf("file://%s", resultsFilePath),
 	)
 	return nil
 }
@@ -292,7 +292,7 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 			}
 			pageMetrics = append(pageMetrics, mv)
 		}
-		chartsPageFilePath, err := renderChartsPage(pageMetrics, runOutputDir)
+		chartsPageFilePath, err := renderDetailedPage(pageMetrics, runOutputDir)
 		if err != nil {
 			return "", err
 		}

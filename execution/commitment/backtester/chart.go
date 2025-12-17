@@ -18,7 +18,6 @@ package backtester
 
 import (
 	"bufio"
-	"cmp"
 	"container/heap"
 	"encoding/hex"
 	"fmt"
@@ -40,7 +39,7 @@ import (
 )
 
 func renderOverviewPage(top *slowestBatchesHeap, chartsPageFilePaths []string, outputDir string) (string, error) {
-	return renderPageToFile(
+	return renderChartsPageToFile(
 		generateOverviewPage(top, chartsPageFilePaths),
 		path.Join(outputDir, "overview.html"),
 	)
@@ -54,14 +53,12 @@ func generateOverviewPage(top *slowestBatchesHeap, chartsPageFilePaths []string)
 	page := components.NewPage()
 	page.SetPageTitle("commitment backtest results overview")
 	page.SetLayout(components.PageFlexLayout)
-	top10Slowest := generateTop10SlowestCharts(mv, chartsPageFilePaths)
-	// place 1 per row
-	top10Slowest.times.SetGlobalOptions(widthOpts("100vw"))
-	page.AddCharts(top10Slowest.times)
-	// place 2 per row
-	top10Slowest.unfoldTimeGinis.SetGlobalOptions(widthOpts("45vw"))
-	top10Slowest.foldTimeGinis.SetGlobalOptions(widthOpts("45vw"))
-	page.AddCharts(top10Slowest.unfoldTimeGinis, top10Slowest.foldTimeGinis)
+	top10Slowest := generateTopNSlowestCharts(mv, chartsPageFilePaths)
+	// place 3 per row
+	top10Slowest.times.SetGlobalOptions(widthOpts("30vw"))
+	top10Slowest.unfoldTimeGinis.SetGlobalOptions(widthOpts("30vw"))
+	top10Slowest.foldTimeGinis.SetGlobalOptions(widthOpts("30vw"))
+	page.AddCharts(top10Slowest.times, top10Slowest.unfoldTimeGinis, top10Slowest.foldTimeGinis)
 	// place 2 per row
 	top10Slowest.updates.SetGlobalOptions(widthOpts("45vw"))
 	top10Slowest.suGinis.SetGlobalOptions(widthOpts("45vw"))
@@ -72,7 +69,7 @@ func generateOverviewPage(top *slowestBatchesHeap, chartsPageFilePaths []string)
 	return page
 }
 
-type top10SlowestCharts struct {
+type topNSlowestCharts struct {
 	times           *charts.Bar
 	unfoldTimeGinis *charts.Line
 	foldTimeGinis   *charts.Line
@@ -80,13 +77,8 @@ type top10SlowestCharts struct {
 	suGinis         *charts.Line
 }
 
-func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string) top10SlowestCharts {
-	mv = slices.SortedStableFunc(slices.Values(mv), func(v1 MetricValues, v2 MetricValues) int {
-		return -cmp.Compare(v1.SpentProcessing.Milliseconds(), v2.SpentProcessing.Milliseconds())
-	})
-	if len(mv) > 10 {
-		mv = mv[:10]
-	}
+func generateTopNSlowestCharts(mv []MetricValues, chartsPageFilePaths []string) topNSlowestCharts {
+	topN := len(mv)
 	nums := make([]int, len(mv))
 	times := make([]opts.LineData, len(mv))
 	unfoldTimes := make([]opts.BarData, len(mv))
@@ -129,27 +121,25 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 	locateChartPageFileJsFunc := generateLocateChartPageFileJsFunc(chartsPageFilePaths)
 	timesChart := charts.NewBar()
 	timesChart.SetGlobalOptions(
-		subTitleOpts("top 10 slowest", "processing times (miliseconds)"),
+		titleOpts(fmt.Sprintf("top %d slowest processing times (ms)", topN)),
 		legendOpts(),
-		gridOpts(),
 		charts.WithEventListeners(event.Listener{
 			EventName: "click",
 			Handler:   locateChartPageFileJsFunc,
 		}),
 	)
 	timesChart.SetXAxis(nums).
-		AddSeries("unfold", unfoldTimes, charts.WithLineChartOpts(opts.LineChart{Stack: "total"})).
-		AddSeries("fold", foldTimes, charts.WithLineChartOpts(opts.LineChart{Stack: "total"})).
-		AddSeries("maxUnfoldTimePerAcc", maxUnfoldTimesPerAcc, charts.WithLineChartOpts(opts.LineChart{Stack: "perAcc"})).
-		AddSeries("maxFoldTimePerAcc", maxFoldTimesPerAcc, charts.WithLineChartOpts(opts.LineChart{Stack: "perAcc"}))
+		AddSeries("unfld", unfoldTimes, charts.WithLineChartOpts(opts.LineChart{Stack: "total"})).
+		AddSeries("fld", foldTimes, charts.WithLineChartOpts(opts.LineChart{Stack: "total"})).
+		AddSeries("maxUnfld", maxUnfoldTimesPerAcc, charts.WithLineChartOpts(opts.LineChart{Stack: "perAcc"})).
+		AddSeries("maxFld", maxFoldTimesPerAcc, charts.WithLineChartOpts(opts.LineChart{Stack: "perAcc"}))
 	timesLineChart := charts.NewLine()
 	timesLineChart.SetXAxis("total").AddSeries("total", times)
 	timesChart.Overlap(timesLineChart)
 	unfoldTimeGinisChart := charts.NewLine()
 	unfoldTimeGinisChart.SetGlobalOptions(
-		subTitleOpts("top 10 slowest", "unfolding times gini coefficient"),
+		titleOpts(fmt.Sprintf("top %d slowest unfolding times gini coefficient", topN)),
 		legendOpts(),
-		gridOpts(),
 		charts.WithEventListeners(event.Listener{
 			EventName: "click",
 			Handler:   locateChartPageFileJsFunc,
@@ -159,9 +149,8 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 		AddSeries("gini", unfoldTimeGinis)
 	foldTimeGinisChart := charts.NewLine()
 	foldTimeGinisChart.SetGlobalOptions(
-		subTitleOpts("top 10 slowest", "folding times gini coefficient"),
+		titleOpts(fmt.Sprintf("top %d slowest folding times gini coefficient", topN)),
 		legendOpts(),
-		gridOpts(),
 		charts.WithEventListeners(event.Listener{
 			EventName: "click",
 			Handler:   locateChartPageFileJsFunc,
@@ -171,9 +160,8 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 		AddSeries("gini", foldTimeGinis)
 	updatesChart := charts.NewBar()
 	updatesChart.SetGlobalOptions(
-		subTitleOpts("top 10 slowest", "trie updates"),
+		titleOpts(fmt.Sprintf("top %d slowest trie updates", topN)),
 		legendOpts(),
-		gridOpts(),
 		charts.WithEventListeners(event.Listener{
 			EventName: "click",
 			Handler:   locateChartPageFileJsFunc,
@@ -181,13 +169,12 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 	)
 	updatesChart.SetXAxis(nums).
 		AddSeries("accs", accs).
-		AddSeries("storage", storage).
-		AddSeries("maxSuPerAcc", maxSuPerAcc)
+		AddSeries("stor", storage).
+		AddSeries("maxStor", maxSuPerAcc)
 	suGinisChart := charts.NewLine()
 	suGinisChart.SetGlobalOptions(
-		subTitleOpts("top 10 slowest", "storage updates gini coefficient"),
+		titleOpts(fmt.Sprintf("top %d slowest storage updates gini coefficient", topN)),
 		legendOpts(),
-		gridOpts(),
 		charts.WithEventListeners(event.Listener{
 			EventName: "click",
 			Handler:   locateChartPageFileJsFunc,
@@ -195,7 +182,7 @@ func generateTop10SlowestCharts(mv []MetricValues, chartsPageFilePaths []string)
 	)
 	suGinisChart.SetXAxis(nums).
 		AddSeries("gini", suGinis)
-	return top10SlowestCharts{
+	return topNSlowestCharts{
 		times:           timesChart,
 		unfoldTimeGinis: unfoldTimeGinisChart,
 		foldTimeGinis:   foldTimeGinisChart,
@@ -212,11 +199,11 @@ func generateLocateChartPageFileJsFunc(chartsPageFilePaths []string) types.FuncS
 		parts := strings.Split(strings.Replace(base, ".html", "", 1), "_")
 		from, err := strconv.ParseUint(parts[1], 10, 64)
 		if err != nil {
-			panic(fmt.Errorf("generateLocateChartPageFileJsFunc: could not parse from: %w", err))
+			panic(fmt.Errorf("generate locate chart page file js func: could not parse from: %w", err))
 		}
 		to, err := strconv.ParseUint(parts[2], 10, 64)
 		if err != nil {
-			panic(fmt.Errorf("generateLocateChartPageFileJsFunc: could not parse to: %w", err))
+			panic(fmt.Errorf("generate locate chart page file js func: could not parse to: %w", err))
 		}
 		itemListSb.WriteString(fmt.Sprintf("{ file: '%s', from: %d, to: %d }\n", base, from, to))
 		if i < len(chartsPageFilePaths)-1 {
@@ -245,11 +232,10 @@ func generateLocateChartPageFileJsFunc(chartsPageFilePaths []string) types.FuncS
 
 func generateChartPagesCatalogue(chartsPageFilePaths []string) *charts.Bar {
 	// we use a vertical bar chart as a catalogue index with hyperlinks
-	barWidth := 25
+	barWidth := 40
 	chart := charts.NewBar()
 	chart.SetGlobalOptions(
-		titleOpts("Charts catalogue (clickable hyperlinks to pages)"),
-		gridOpts(),
+		titleOpts("detailed charts catalogue (clickable)"),
 		charts.WithLegendOpts(opts.Legend{
 			Show: opts.Bool(false),
 		}),
@@ -301,14 +287,14 @@ func generateChartPagesCatalogue(chartsPageFilePaths []string) *charts.Bar {
 	return chart
 }
 
-func renderChartsPage(mv []MetricValues, outputDir string) (string, error) {
-	return renderPageToFile(
-		generateChartsPage(mv),
+func renderDetailedPage(mv []MetricValues, outputDir string) (string, error) {
+	return renderChartsPageToFile(
+		generateDetailedPage(mv),
 		path.Join(outputDir, fmt.Sprintf("charts_%d_%d.html", mv[0].BatchId, mv[len(mv)-1].BatchId)),
 	)
 }
 
-func generateChartsPage(mv []MetricValues) *components.Page {
+func generateDetailedPage(mv []MetricValues) *components.Page {
 	page := components.NewPage()
 	page.SetPageTitle(fmt.Sprintf("commitment backtest charts %d-%d", mv[0].BatchId, mv[len(mv)-1].BatchId))
 	page.SetLayout(components.PageFlexLayout)
@@ -351,7 +337,7 @@ func generateProcessingTimesChart(mv []MetricValues) *charts.Line {
 	chart.SetGlobalOptions(
 		titleOpts("processing times"),
 		legendOpts(),
-		gridOpts(),
+		dataZoomOpts(),
 	)
 	stackOpts := []charts.SeriesOpts{
 		charts.WithLineChartOpts(opts.LineChart{Stack: "total"}),
@@ -379,7 +365,7 @@ func generateUnfoldTimeGinisChart(mv []MetricValues) *charts.Line {
 	chart.SetGlobalOptions(
 		titleOpts("unfolding times gini coefficient"),
 		legendOpts(),
-		gridOpts(),
+		dataZoomOpts(),
 	)
 	chart.SetXAxis(batchIds).
 		AddSeries("gini", unfoldTimeGinis)
@@ -401,7 +387,7 @@ func generateFoldTimeGinisChart(mv []MetricValues) *charts.Line {
 	chart.SetGlobalOptions(
 		titleOpts("folding times gini coefficient"),
 		legendOpts(),
-		gridOpts(),
+		dataZoomOpts(),
 	)
 	chart.SetXAxis(batchIds).
 		AddSeries("gini", foldTimeGinis)
@@ -421,7 +407,7 @@ func generateTrieUpdatesChart(mv []MetricValues) *charts.Line {
 	chart.SetGlobalOptions(
 		titleOpts("trie updates"),
 		legendOpts(),
-		gridOpts(),
+		dataZoomOpts(),
 	)
 	chart.SetXAxis(batchIds).
 		AddSeries("account", accountUpdates).
@@ -448,7 +434,7 @@ func generateStorageUpdateGinisChart(mv []MetricValues) *charts.Line {
 	chart.SetGlobalOptions(
 		titleOpts("storage updates gini coefficient"),
 		legendOpts(),
-		gridOpts(),
+		dataZoomOpts(),
 	)
 	chart.SetXAxis(batchIds).
 		AddSeries("gini", suGinis)
@@ -472,7 +458,7 @@ func generateDbRwChart(mv []MetricValues) *charts.Line {
 	chart.SetGlobalOptions(
 		titleOpts("db reads/writes"),
 		legendOpts(),
-		gridOpts(),
+		dataZoomOpts(),
 	)
 	chart.SetXAxis(batchIds).
 		AddSeries("account_r", accountReads).
@@ -487,11 +473,7 @@ func generateDbRwChart(mv []MetricValues) *charts.Line {
 }
 
 func titleOpts(title string) charts.GlobalOpts {
-	return charts.WithTitleOpts(opts.Title{Title: title, Left: "center", Top: "5%"})
-}
-
-func subTitleOpts(title string, subtitle string) charts.GlobalOpts {
-	return charts.WithTitleOpts(opts.Title{Title: title, Subtitle: subtitle, Left: "center", Top: "2%"})
+	return charts.WithTitleOpts(opts.Title{Title: title, Left: "center", Top: "10px"})
 }
 
 func widthOpts(width string) charts.GlobalOpts {
@@ -499,11 +481,11 @@ func widthOpts(width string) charts.GlobalOpts {
 }
 
 func legendOpts() charts.GlobalOpts {
-	return charts.WithLegendOpts(opts.Legend{Bottom: "5%", Left: "center"})
+	return charts.WithLegendOpts(opts.Legend{Left: "center", Top: "35px"})
 }
 
-func gridOpts() charts.GlobalOpts {
-	return charts.WithGridOpts(opts.Grid{Bottom: "15%"})
+func dataZoomOpts() charts.GlobalOpts {
+	return charts.WithDataZoomOpts(opts.DataZoom{Type: "slider"})
 }
 
 func giniCoefficient(values []uint64) float64 {
@@ -536,7 +518,7 @@ func forEachAccStat(as map[string]*commitment.AccountStats, f func(stat *commitm
 	}
 }
 
-func renderPageToFile(page *components.Page, filePath string) (string, error) {
+func renderChartsPageToFile(page *components.Page, filePath string) (string, error) {
 	f, err := os.Create(filePath)
 	if err != nil {
 		panic(err)
