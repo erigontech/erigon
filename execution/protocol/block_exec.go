@@ -386,10 +386,13 @@ func FinalizeBlockExecution(
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
-	engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
 		return ret, err
 	}, logger, tracer)
+	if err != nil {
+		return err
+	}
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}

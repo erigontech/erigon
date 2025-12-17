@@ -42,9 +42,6 @@ func FuzzPooledTransactions66(f *testing.F) {
 			rlpTxns = append(rlpTxns, slots.Txns[i].Rlp)
 		}
 		_ = EncodePooledTransactions66(rlpTxns, reqId, nil)
-		if err != nil {
-			t.Skip()
-		}
 	})
 }
 
