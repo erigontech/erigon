@@ -303,8 +303,6 @@ github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d h1:8E
 github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXEfZoBjV4buzjWmCmoqVLXiGCq0ZmQ2OjeRvQ=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
-github.com/erigontech/mdbx-go v0.39.11 h1:4qp5jDakeisZ+1ABaLcQe46acE/Z0Q+/mcCAahXRnR8=
-github.com/erigontech/mdbx-go v0.39.11/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
 github.com/erigontech/mdbx-go v0.40.1-0.20251216105356-05bcbbffc63c h1:1yxJYqC6vwxPQuyG4Vk831ZAqnU24wKKvtIwv3C5F8s=
 github.com/erigontech/mdbx-go v0.40.1-0.20251216105356-05bcbbffc63c/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
 github.com/erigontech/secp256k1 v1.2.0 h1:Q/HCBMdYYT0sh1xPZ9ZYEnU30oNyb/vt715cJhj7n7A=
