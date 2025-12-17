@@ -2704,7 +2704,7 @@ func (p *TxPool) logStats() {
 }
 
 // Deprecated need switch to streaming-like
-func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
+func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 	var txns []*metaTxn
 	var senders []common.Address
 	var subPoolTypes []SubPoolType
