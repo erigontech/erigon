@@ -26,10 +26,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -45,7 +47,7 @@ func TestHeaderStep(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -74,7 +76,18 @@ func TestHeaderStep(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -84,7 +97,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	t.Skip("revive me")
 	require, m := require.New(t), mock.Mock(t)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
@@ -113,14 +126,25 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, log.New(), m.BlockReader, nil); err != nil {
+		if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+			sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+			if err != nil {
+				return err
+			}
+			defer sd.Close()
+			if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+				return err
+			}
+
+			return sd.Flush(m.Ctx, tx)
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	chain, err = core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 1, func(i int, gen *core.BlockGen) {
+	chain, err = blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, &u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(err)
 		gen.AddTx(tx)
 	})
@@ -148,7 +172,7 @@ func TestReorg(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -182,25 +206,36 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Now generate three competing branches, one short and two longer ones
-	short, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
+	short, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
-	long1, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
+	long1, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
 	})
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	// Second long chain needs to be slightly shorter than the first long chain
-	long2, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 9, func(i int, b *core.BlockGen) {
+	long2, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 9, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
 	})
 	if err != nil {
@@ -233,8 +268,18 @@ func TestReorg(t *testing.T) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
 
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -277,13 +322,24 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// another short chain
 	// Now generate three competing branches, one short and two longer ones
-	short2, err := core.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
+	short2, err := blockgen.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -312,8 +368,18 @@ func TestReorg(t *testing.T) {
 		require.NoError(t, err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
 
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -322,21 +388,21 @@ func TestAnchorReplace(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	short, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11, func(i int, b *core.BlockGen) {
+	short, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	long, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *core.BlockGen) {
+	long, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *blockgen.BlockGen) {
 		if i < 10 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -410,7 +476,18 @@ func TestAnchorReplace(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -418,21 +495,21 @@ func TestAnchorReplace(t *testing.T) {
 func TestAnchorReplace2(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	short, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, b *core.BlockGen) {
+	short, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	long, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 30, func(i int, b *core.BlockGen) {
+	long, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 30, func(i int, b *blockgen.BlockGen) {
 		if i < 10 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -516,7 +593,18 @@ func TestAnchorReplace2(t *testing.T) {
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
-	if err := stageloop.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
+			return err
+		}
+
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

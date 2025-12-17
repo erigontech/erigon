@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -277,13 +277,13 @@ Loop:
 			return minBlockErr
 		}
 		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
-		if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
+		if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(minBlockErr, rules.ErrInvalidBlock) {
 			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
 		}
 
 		if to > s.BlockNumber {
 			var unwindReason UnwindReason
-			if errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
+			if errors.Is(minBlockErr, rules.ErrInvalidBlock) {
 				unwindReason = BadBlock(minBlockHash, minBlockErr)
 			} else {
 				unwindReason = OperationalErr(minBlockErr)
@@ -356,10 +356,11 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 			from, err := signer.SenderWithContext(cryptoContext, txn)
 			if err != nil {
 				job.err = fmt.Errorf("%w: error recovering sender for tx=%x, %v",
-					consensus.ErrInvalidBlock, txn.Hash(), err)
+					rules.ErrInvalidBlock, txn.Hash(), err)
 				break
 			}
-			copy(job.senders[i*length.Addr:], from[:])
+			fromValue := from.Value()
+			copy(job.senders[i*length.Addr:], fromValue[:])
 		}
 
 		// prevent sending to close channel

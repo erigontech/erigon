@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/runtime"
@@ -103,7 +104,7 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		// Do one warm-up run
 		output, gasUsed, err := execFunc()
 		result := testing.Benchmark(func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				haveOutput, haveGasUsed, haveErr := execFunc()
 				if !bytes.Equal(haveOutput, output) {
 					panic(fmt.Sprintf("output differs\nhave %x\nwant %x\n", haveOutput, output))
@@ -157,8 +158,8 @@ func runCmd(ctx *cli.Context) error {
 		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
 		chainConfig   *chain.Config
-		sender        = common.BytesToAddress([]byte("sender"))
-		receiver      = common.BytesToAddress([]byte("receiver"))
+		sender        = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
+		receiver      = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
@@ -186,7 +187,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(tx, log.Root())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.Root())
 	if err != nil {
 		return err
 	}
@@ -194,12 +195,12 @@ func runCmd(ctx *cli.Context) error {
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
-		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
+		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
 	statedb.CreateAccount(sender, true)
 
 	if ctx.String(ReceiverFlag.Name) != "" {
-		receiver = common.HexToAddress(ctx.String(ReceiverFlag.Name))
+		receiver = accounts.InternAddress(common.HexToAddress(ctx.String(ReceiverFlag.Name)))
 	}
 
 	var code []byte
@@ -260,7 +261,7 @@ func runCmd(ctx *cli.Context) error {
 		Value:       *value,
 		Difficulty:  genesisConfig.Difficulty,
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
-		Coinbase:    genesisConfig.Coinbase,
+		Coinbase:    accounts.InternAddress(genesisConfig.Coinbase),
 		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
 	}
 

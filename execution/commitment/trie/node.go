@@ -38,6 +38,7 @@ type Node interface {
 
 	// if not empty, returns node's RLP or hash thereof
 	reference() []byte
+	String() string
 }
 
 type (

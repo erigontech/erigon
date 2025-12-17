@@ -21,8 +21,6 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon/common"
 )
 
 var (
@@ -212,20 +210,6 @@ func ParseU256(payload []byte, pos int, x *uint256.Int) (int, error) {
 	}
 	x.SetBytes(payload[dataPos : dataPos+dataLen])
 	return dataPos + dataLen, nil
-}
-
-func U256Len(z *uint256.Int) int {
-	if z == nil {
-		return 1
-	}
-	nBits := z.BitLen()
-	if nBits == 0 {
-		return 1
-	}
-	if nBits <= 7 {
-		return 1
-	}
-	return 1 + common.BitLenToByteLen(nBits)
 }
 
 func ParseHash(payload []byte, pos int, hashbuf []byte) (int, error) {

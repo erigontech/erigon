@@ -187,7 +187,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil)
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil, nil)
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -206,9 +206,6 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	}
 
 	req.Header.Set("Accept", "application/octet-stream")
-	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync request failed %s", err)
-	}
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -887,9 +884,6 @@ func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 	}
 
 	req.Header.Set("Accept", "application/octet-stream")
-	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync request failed %s", err)
-	}
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

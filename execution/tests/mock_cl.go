@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/engineapi"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -138,7 +138,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 	// get the newly built block
-	newPayload, err := cl.engineApiClient.GetPayloadV4(ctx, *fcuRes.PayloadId)
+	newPayload, err := cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
 	if err != nil {
 		return nil, err
 	}

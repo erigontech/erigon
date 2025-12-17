@@ -27,8 +27,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const DelegateDesignationCodeSize = 23
@@ -68,13 +69,13 @@ func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 }
 
 func (tx *SetCodeTransaction) EncodingSize() int {
-	payloadSize, _, _, _, _ := tx.payloadSize()
+	payloadSize, _, _ := tx.payloadSize()
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (tx *SetCodeTransaction) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen int) {
-	payloadSize, nonceLen, gasLen, accessListLen = tx.DynamicFeeTransaction.payloadSize()
+func (tx *SetCodeTransaction) payloadSize() (payloadSize, accessListLen, authorizationsLen int) {
+	payloadSize, accessListLen = tx.DynamicFeeTransaction.payloadSize()
 	// size of Authorizations
 	authorizationsLen = authorizationsSize(tx.Authorizations)
 	payloadSize += rlp.ListPrefixLen(authorizationsLen) + authorizationsLen
@@ -100,7 +101,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	if tx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode TxType
@@ -108,20 +109,26 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.To)
+	}
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         *tx.FeeCap,
 		tipCap:           *tx.TipCap,
 		feeCap:           *tx.FeeCap,
-		to:               tx.To,
+		to:               to,
 		amount:           *tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,
@@ -149,21 +156,22 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	msg.authorizations = tx.Authorizations
 
 	var err error
-	msg.from, err = tx.Sender(s)
-	return &msg, err
+	if msg.from, err = tx.Sender(s); err != nil {
+		return nil, err
+	}
+	return &msg, nil
 }
 
-func (tx *SetCodeTransaction) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (tx *SetCodeTransaction) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.ZeroAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }
 
@@ -209,7 +217,7 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 	if tx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
@@ -223,7 +231,7 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen)
+	return tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen)
 }
 
 func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
@@ -293,13 +301,13 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen, authorizationsLen int) error {
+func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -307,11 +315,11 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(tx.TipCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.FeeCap, w, b); err != nil {
 		return err
 	}
 	// encode GasLimit
@@ -323,7 +331,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
 		return err
 	}
 	// encode Data
@@ -347,15 +355,15 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode V
-	if err := rlp.EncodeUint256(&tx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
 		return err
 	}
 	// encode R
-	if err := rlp.EncodeUint256(&tx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
 		return err
 	}
 	// encode S
-	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
 	return nil
@@ -363,16 +371,17 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.
-func ParseDelegation(code []byte) (common.Address, bool) {
+func ParseDelegation(code []byte) (accounts.Address, bool) {
 	if len(code) != DelegateDesignationCodeSize || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
-		return common.Address{}, false
+		return accounts.NilAddress, false
 	}
 	var addr common.Address
 	copy(addr[:], code[len(params.DelegatedDesignationPrefix):])
-	return addr, true
+	return accounts.InternAddress(addr), true
 }
 
 // AddressToDelegation adds the delegation prefix to the specified address.
-func AddressToDelegation(addr common.Address) []byte {
-	return append(params.DelegatedDesignationPrefix, addr.Bytes()...)
+func AddressToDelegation(addr accounts.Address) []byte {
+	addrVal := addr.Value()
+	return append(params.DelegatedDesignationPrefix, addrVal[:]...)
 }

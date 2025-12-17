@@ -30,6 +30,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -234,7 +235,7 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
-	// fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
+	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
@@ -349,7 +350,7 @@ func (branchData BranchData) String() string {
 	pos := 4
 	var sb strings.Builder
 	var cell cell
-	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
+	fmt.Fprintf(&sb, "(%d) touchMap %016b, afterMap %016b\n", len(branchData), touchMap, afterMap)
 	for bitset, j := touchMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
@@ -643,6 +644,93 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 		bitset ^= bit
 	}
 	return
+}
+
+func (branchData BranchData) Validate(branchKey []byte) error {
+	if len(branchData) == 0 {
+		return nil
+	}
+	_, afterMap, row, err := branchData.decodeCells()
+	if err != nil {
+		return err
+	}
+	if err = validateAfterMap(afterMap, row); err != nil {
+		return err
+	}
+	if err = validatePlainKeys(branchKey, row, sha3.NewLegacyKeccak256().(keccakState)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateAfterMap(afterMap uint16, row [16]*cell) error {
+	cellsInAfterMap := bits.OnesCount16(afterMap)
+	var decodedCellsCount int
+	for _, c := range row {
+		if c != nil {
+			decodedCellsCount++
+		}
+	}
+	if cellsInAfterMap != decodedCellsCount {
+		return fmt.Errorf("cells in after map does not match branch data: %d vs %d", cellsInAfterMap, decodedCellsCount)
+	}
+	return nil
+}
+
+func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) error {
+	uncompactedBranchKey := uncompactNibbles(branchKey)
+	if hasTerm(uncompactedBranchKey) {
+		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
+	}
+	if len(uncompactedBranchKey) > 128 {
+		return fmt.Errorf("branch key too long: %d", len(branchKey))
+	}
+	depth := int16(len(uncompactedBranchKey))
+	for _, c := range row {
+		if c == nil {
+			continue
+		}
+		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
+			continue
+		}
+		err := c.deriveHashedKeys(depth, keccak, length.Addr)
+		if err != nil {
+			return err
+		}
+		hashedExtLen := c.hashedExtLen
+		hashedExt := c.hashedExtension[:hashedExtLen]
+		if c.extLen > 0 && hashedExtLen >= c.extLen {
+			hashedExtLen -= c.extLen
+			hashedExt = hashedExt[:hashedExtLen]
+		}
+		branchKeyAndExtNibbles := make([]byte, len(uncompactedBranchKey)+int(hashedExtLen))
+		copy(branchKeyAndExtNibbles, uncompactedBranchKey)
+		copy(branchKeyAndExtNibbles[len(uncompactedBranchKey):], hashedExt)
+		var plainKeyNibbles []byte
+		if c.accountAddrLen > 0 {
+			plainKeyNibbles = KeyToHexNibbleHash(c.accountAddr[:])
+		}
+		if c.storageAddrLen > 0 {
+			plainKeyNibbles = KeyToHexNibbleHash(c.storageAddr[:])
+			if c.accountAddrLen > 0 {
+				//fmt.Printf("--- debug --- cell with accountAddrLen>0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+				if !bytes.Equal(c.accountAddr[:], c.storageAddr[:length.Addr]) {
+					return fmt.Errorf("accountAddr mismatch with storageAddr: %s != %x", common.BytesToAddress(c.accountAddr[:]), common.BytesToHash(c.storageAddr[:length.Addr]))
+				}
+			} else {
+				//nolint:staticcheck
+				//fmt.Printf("--- debug --- cell with accountAddrLen=0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+			}
+		}
+		//if c.extLen > 0 {
+		//	fmt.Printf("--- debug --- cell with plainKey and extLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+		//}
+		if !bytes.Equal(plainKeyNibbles, branchKeyAndExtNibbles) {
+			//fmt.Printf("--- debug --- branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+			return fmt.Errorf("branch and hashed extension nibbles dont match plainKey nibbles: %x vs %x", plainKeyNibbles, branchKeyAndExtNibbles)
+		}
+	}
+	return nil
 }
 
 type BranchMerger struct {
@@ -1084,12 +1172,12 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		c.update.Balance.Set(&acc.Balance)
 		c.update.Flags |= BalanceUpdate
 	}
-	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
-		if len(acc.CodeHash.Bytes()) == 0 {
+	if acc.CodeHash.Value() != c.update.CodeHash {
+		if acc.CodeHash.IsEmpty() {
 			c.update.CodeHash = empty.CodeHash
 		} else {
 			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash
+			c.update.CodeHash = acc.CodeHash.Value()
 		}
 	}
 }

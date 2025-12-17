@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -80,12 +80,12 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		if stx, ok := tx.(*types.SetCodeTransaction); ok {
 			authorizationsLen = uint64(len(stx.GetAuthorizations()))
 		}
-		requiredGas, floorGas, overflow := fixedgas.IntrinsicGas(msg.Data(), uint64(len(msg.AccessList())), uint64(msg.AccessList().StorageKeys()), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, rules.IsPrague, false, authorizationsLen)
+		requiredGas, floorGas, overflow := fixedgas.IntrinsicGas(msg.Data(), uint64(len(msg.AccessList())), uint64(msg.AccessList().StorageKeys()), msg.To().IsNil(), rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, rules.IsPrague, false, authorizationsLen)
 		if rules.IsPrague && floorGas > requiredGas {
 			requiredGas = floorGas
 		}
 		if overflow {
-			return nil, nil, 0, core.ErrGasUintOverflow
+			return nil, nil, 0, protocol.ErrGasUintOverflow
 		}
 		if requiredGas > msg.Gas() {
 			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", msg.Gas(), requiredGas)
@@ -93,7 +93,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 
 		if rules.IsLondon {
 			// EIP-1559 gas fee cap
-			err = core.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.TipCap(), nil, false /* isFree */)
+			err = protocol.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.TipCap(), nil, false /* isFree */)
 			if err != nil {
 				return nil, nil, 0, err
 			}
@@ -107,10 +107,11 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 
 		// EIP-2681: Limit account nonce to 2^64-1
 		if msg.Nonce()+1 < msg.Nonce() {
-			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", core.ErrNonceMax, msg.Nonce())
+			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", protocol.ErrNonceMax, msg.Nonce())
 		}
 		h := tx.Hash()
-		return &sender, &h, requiredGas, nil
+		senderValue := sender.Value()
+		return &senderValue, &h, requiredGas, nil
 	}
 
 	for _, testcase := range []struct {

@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -110,10 +109,10 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	return block, err
 }
 func (back *RemoteBackend) TxsV3Enabled() bool { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() snapshotsync.BlockSnapshots {
+func (back *RemoteBackend) Snapshots() services.BlockSnapshots {
 	return back.blockReader.Snapshots()
 }
-func (back *RemoteBackend) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 
 func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)
@@ -280,6 +279,29 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 			return err
 		}
 		onNewLogs(logs)
+	}
+	return nil
+}
+
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), requestor *atomic.Value) error {
+	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	requestor.Store(subscription.Send)
+	for {
+		receipts, err := subscription.Recv()
+		if errors.Is(err, io.EOF) {
+			log.Info("rpcdaemon: the receipts subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+		onNewReceipts(receipts)
 	}
 	return nil
 }

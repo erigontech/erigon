@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -425,8 +424,13 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		f := s.FilePath()
 		s.closeIdx()
 		s.closeSeg()
+		toRemove := make([]string, 0, 2)
+		toRemove = append(toRemove, f)
+		for _, index := range s.indexes {
+			toRemove = append(toRemove, index.FilePath())
+		}
 
-		removeOldFiles([]string{f})
+		removeOldFiles(toRemove)
 	}
 }
 
@@ -493,9 +497,7 @@ type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
 	for _, seg := range s {
-		if !seg.src.frozen {
-			seg.src.refcount.Add(1)
-		}
+		seg.src.refcount.Add(1)
 	}
 	return &RoTx{Segments: s}
 }
@@ -513,7 +515,7 @@ func (s *RoTx) Close() {
 
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
-		if src == nil || src.frozen {
+		if src == nil {
 			continue
 		}
 
@@ -525,20 +527,6 @@ func (s *RoTx) Close() {
 	}
 
 	//fmt.Println("CRO", s.segments)
-}
-
-type BlockSnapshots interface {
-	LogStat(label string)
-	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
-	SegmentsMax() uint64
-	Delete(fileName string) error
-	Types() []snaptype.Type
-	Close()
-	DownloadComplete()
-	RemoveOverlaps(onDelete func(l []string) error) error
-	DownloadReady() bool
-	Ready(context.Context) <-chan error
 }
 
 type retireOperators struct {
@@ -1413,7 +1401,7 @@ func (s *RoSnapshots) delete(fileName string) error {
 }
 
 // prune visible segments
-func (s *RoSnapshots) Delete(fileName string) error {
+func (s *RoSnapshots) Delete(fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
@@ -1422,8 +1410,10 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	defer v.Close()
 
 	defer s.recalcVisibleFiles(s.alignMin)
-	if err := s.delete(fileName); err != nil {
-		return fmt.Errorf("can't delete file: %w", err)
+	for _, fileName := range fileNames {
+		if err := s.delete(fileName); err != nil {
+			return fmt.Errorf("can't delete file: %w", err)
+		}
 	}
 	return nil
 }
@@ -1692,15 +1682,6 @@ func removeOldFiles(toDel []string) {
 	for _, f := range toDel {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = dir.RemoveFile(withoutExt + ".idx")
-		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
-		if isTxnType {
-			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
-			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
-		}
 	}
 }
 
@@ -1714,10 +1695,10 @@ func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Ran
 		var l, lSidecars []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
+			if f.Type != nil && f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
 				continue
 			}
-			if f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
+			if f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
 				lSidecars = append(lSidecars, f) // blobs are an exception
 				continue
 			}

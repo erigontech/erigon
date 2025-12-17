@@ -31,13 +31,25 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+)
+
+var (
+	errInvalidBlockRange    = "invalid block range params"
+	errBlockRangeIntoFuture = "block range extends beyond current head block"
+	errBlockHashWithRange   = "can't specify fromBlock/toBlock with blockHash"
+	errExceedMaxTopics      = "exceed max topics"
+)
+
+const (
+	// The maximum number of topic criteria allowed, vm.LOG4 - vm.LOG0
+	maxTopics = 4
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
@@ -77,7 +89,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 	defer tx.Rollback()
 
+	if len(crit.Topics) > maxTopics {
+		return nil, &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
+	}
+
 	if crit.BlockHash != nil {
+		if crit.FromBlock != nil || crit.ToBlock != nil {
+			return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
+		}
+
 		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return nil, err
@@ -110,7 +130,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 
 			if begin > latest {
-				return types.RPCLogs{}, nil
+				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 		end = latest
@@ -125,11 +145,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 					return nil, err
 				}
 			}
+
+			if end > latest {
+				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+			}
 		}
 	}
 
 	if end < begin {
-		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
+		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
 		latest, err := rpchelper.GetLatestBlockNumber(tx)

@@ -244,8 +244,8 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 }
 
 func makeMapFromTestFunc(f interface{}) reflect.Value {
-	stringT := reflect.TypeOf("")
-	testingT := reflect.TypeOf((*testing.T)(nil))
+	stringT := reflect.TypeFor[string]()
+	testingT := reflect.TypeFor[*testing.T]()
 	ftyp := reflect.TypeOf(f)
 	if ftyp.Kind() != reflect.Func || ftyp.NumIn() != 3 || ftyp.NumOut() != 0 || ftyp.In(0) != testingT || ftyp.In(1) != stringT {
 		panic(fmt.Sprintf("bad test function type: want func(*testing.T, string, <TestType>), have %s", ftyp))

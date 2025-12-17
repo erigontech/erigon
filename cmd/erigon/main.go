@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
 	erigoncli "github.com/erigontech/erigon/node/cli"
@@ -99,7 +98,7 @@ func runErigon(cliCtx *cli.Context) (err error) {
 		return err
 	}
 
-	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
+	//diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
 	err = ethNode.Serve()
 	if err != nil {

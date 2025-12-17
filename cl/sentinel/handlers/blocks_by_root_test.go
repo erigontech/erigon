@@ -99,7 +99,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
 	require.NoError(t, err)
 

@@ -106,11 +106,11 @@ func initGenesis(cliCtx *cli.Context) error {
 			tracer.Hooks.OnBlockchainInit(genesis.Config)
 		}
 	}
-	_, hash, err := genesiswrite.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
+	_, block, err := genesiswrite.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}
 	chaindb.Close()
-	logger.Info("Successfully wrote genesis state", "hash", hash.Hash())
+	logger.Info("Successfully wrote genesis state", "hash", block.Hash(), "root", block.Root())
 	return nil
 }

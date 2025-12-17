@@ -30,7 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/testdata"
@@ -584,7 +584,7 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	setCodeTx.DecodeRLP(rlpStream)
 	require.Len(t, txn.AuthAndNonces, 1)
-	require.Equal(t, expectedSigner.String(), txn.AuthAndNonces[0].authority)
+	require.Equal(t, expectedSigner, txn.AuthAndNonces[0].authority)
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {

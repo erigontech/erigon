@@ -37,7 +37,7 @@ type Account struct {
 	Nonce           uint64
 	Balance         uint256.Int
 	Root            common.Hash // merkle root of the storage trie
-	CodeHash        common.Hash // hash of the bytecode
+	CodeHash        CodeHash    // hash of the bytecode
 	Incarnation     uint64
 	PrevIncarnation uint64
 }
@@ -54,7 +54,7 @@ const (
 func NewAccount() Account {
 	return Account{
 		Root:     empty.RootHash,
-		CodeHash: empty.CodeHash,
+		CodeHash: EmptyCodeHash,
 	}
 }
 
@@ -81,17 +81,8 @@ func (a *Account) EncodingLengthForStorage() uint {
 }
 
 func (a *Account) EncodingLengthForHashing() uint {
-	balanceBytes := 0
-	if !a.Balance.LtUint64(128) {
-		balanceBytes = a.Balance.ByteLen()
-	}
-
-	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
-
-	structLength := balanceBytes + nonceBytes + 2
-
+	structLength := rlp.Uint256Len(a.Balance) + rlp.U64Len(a.Nonce)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
-
 	return uint(rlp.ListPrefixLen(structLength) + structLength)
 }
 
@@ -136,7 +127,8 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 	if !a.IsEmptyCodeHash() {
 		fieldSet |= 8
 		buffer[pos] = 32
-		copy(buffer[pos+1:], a.CodeHash.Bytes())
+		codeHashValue := a.CodeHash.Value()
+		copy(buffer[pos+1:], codeHashValue[:])
 		//pos += 33
 	}
 
@@ -200,13 +192,14 @@ func (a *Account) RLP() []byte {
 	return accRlp
 }
 
+// TODO(yperbasis): simplify
 func (a *Account) EncodeForHashing(buffer []byte) {
 	balanceBytes := 0
 	if !a.Balance.LtUint64(128) {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
+	nonceBytes := rlp.U64Len(a.Nonce) - 1
 
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
@@ -258,7 +251,8 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 	pos += 32
 	buffer[pos] = 128 + 32
 	pos++
-	copy(buffer[pos:], a.CodeHash[:])
+	codeHashValue := a.CodeHash.Value()
+	copy(buffer[pos:], codeHashValue[:])
 	//pos += 32
 }
 
@@ -268,12 +262,12 @@ func (a *Account) Copy(image *Account) {
 	a.Nonce = image.Nonce
 	a.Balance.Set(&image.Balance)
 	copy(a.Root[:], image.Root[:])
-	copy(a.CodeHash[:], image.CodeHash[:])
+	a.CodeHash = image.CodeHash
 	a.Incarnation = image.Incarnation
 }
 
 func (a *Account) Empty() bool {
-	return a == nil || (a.Nonce == 0 && a.Balance.IsZero() && a.CodeHash == empty.CodeHash)
+	return a == nil || (a.Nonce == 0 && a.Balance.IsZero() && a.CodeHash == EmptyCodeHash)
 }
 
 func (a *Account) DecodeForHashing(enc []byte) error {
@@ -294,7 +288,7 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 	a.Nonce = 0
 	a.Balance.Clear()
 	a.Root = empty.RootHash
-	a.CodeHash = empty.CodeHash
+	a.CodeHash = EmptyCodeHash
 	if length == 0 && structure {
 		return nil
 	}
@@ -403,7 +397,10 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 			)
 		}
 
-		copy(a.CodeHash[:], enc[newPos:newPos+codeHashBytes])
+		var codeHashValue common.Hash
+		copy(codeHashValue[:], enc[newPos:newPos+codeHashBytes])
+		a.CodeHash = InternCodeHash(codeHashValue)
+
 		pos = newPos + codeHashBytes
 	}
 
@@ -448,7 +445,7 @@ func (a *Account) Reset() {
 	a.Incarnation = 0
 	a.Balance.Clear()
 	a.Root = empty.RootHash
-	a.CodeHash = empty.CodeHash
+	a.CodeHash = EmptyCodeHash
 }
 
 func (a *Account) DecodeForStorage(enc []byte) error {
@@ -514,8 +511,9 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 				"malformed CBOR for Account.CodeHash: %s, Length %d",
 				enc[pos+1:], decodeLength)
 		}
-
-		a.CodeHash.SetBytes(enc[pos+1 : pos+decodeLength+1])
+		var codeHashValue common.Hash
+		copy(codeHashValue[:], enc[pos+1:pos+decodeLength+1])
+		a.CodeHash = InternCodeHash(codeHashValue)
 		pos += decodeLength + 1
 	}
 
@@ -588,11 +586,7 @@ func (a *Account) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (a *Account) IsEmptyCodeHash() bool {
-	return IsEmptyCodeHash(a.CodeHash)
-}
-
-func IsEmptyCodeHash(codeHash common.Hash) bool {
-	return codeHash == empty.CodeHash || codeHash == (common.Hash{})
+	return a.CodeHash.IsEmpty()
 }
 
 func (a *Account) IsEmptyRoot() bool {
@@ -646,7 +640,9 @@ func DeserialiseV3(a *Account, enc []byte) error {
 	codeHashBytes := int(enc[pos])
 	pos++
 	if codeHashBytes > 0 {
-		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
+		var codeHashValue common.Hash
+		copy(codeHashValue[:], enc[pos:pos+codeHashBytes])
+		a.CodeHash = InternCodeHash(codeHashValue)
 		pos += codeHashBytes
 	}
 	if pos >= len(enc) {
@@ -709,7 +705,8 @@ func SerialiseV3(a *Account) []byte {
 	} else {
 		value[pos] = 32
 		pos++
-		copy(value[pos:pos+32], a.CodeHash[:])
+		codeHashValue := a.CodeHash.Value()
+		copy(value[pos:pos+32], codeHashValue[:])
 		pos += 32
 	}
 	if a.Incarnation == 0 {
@@ -777,7 +774,8 @@ func SerialiseV3To(a *Account, value []byte) {
 	} else {
 		value[pos] = 32
 		pos++
-		copy(value[pos:pos+32], a.CodeHash[:])
+		codeHashValue := a.CodeHash.Value()
+		copy(value[pos:pos+32], codeHashValue[:])
 		pos += 32
 	}
 	if a.Incarnation == 0 {

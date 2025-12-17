@@ -19,9 +19,8 @@ package vm
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon/common"
 )
 
 type readonlyGetSetter interface {
@@ -66,9 +65,9 @@ func (evm *testVM) Run(_ Contract, _ uint64, _ []byte, readOnly bool) (ret []byt
 
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
 		res, _, err := evm.env.interpreter.Run(*NewContract(
-			common.Address{},
-			common.Address{},
-			common.Address{},
+			accounts.ZeroAddress,
+			accounts.ZeroAddress,
+			accounts.ZeroAddress,
 			uint256.Int{},
 			evm.env.config.JumpDestCache,
 		), 0, nil, evm.readOnlySliceTest[*evm.currentIdx])

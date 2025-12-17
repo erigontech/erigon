@@ -3,7 +3,6 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -19,13 +18,10 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
 	}()
 
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
 	txNumsReader := blockReader.TxnumReader(ctx)
 
 	if err := ValidateDomainProgress(db, kv.ReceiptDomain, txNumsReader); err != nil {
-		return nil
+		return err
 	}
 
 	tx, err := db.BeginTemporalRo(ctx)

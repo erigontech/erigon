@@ -42,7 +42,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	defer tx.Rollback()
 
 	latestState := rpchelper.NewLatestStateReader(tx)
-	plainStateAcc, err := latestState.ReadAccountData(addr)
+	plainStateAcc, err := latestState.ReadAccountData(accounts.InternAddress(addr))
 	if err != nil {
 		return nil, err
 	}
@@ -177,12 +177,12 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	}
 
 	// Trace block, find txn and contract creator
-	tracer := NewCreateTracer(ctx, addr)
+	tracer := NewCreateTracer(ctx, accounts.InternAddress(addr))
 	if err := api.genericTracer(tx, ctx, bn, creationTxnID, txIndex, chainConfig, tracer); err != nil {
 		return nil, err
 	}
 	return &ContractCreatorData{
 		Tx:      tracer.Tx.Hash(),
-		Creator: tracer.Creator,
+		Creator: tracer.Creator.Value(),
 	}, nil
 }

@@ -29,7 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -59,7 +59,7 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 
 func TestCallTraceOneByOne(t *testing.T) {
 	m := mock.Mock(t)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -92,15 +92,15 @@ func TestCallTraceOneByOne(t *testing.T) {
 
 func TestCallTraceUnwind(t *testing.T) {
 	m := mock.Mock(t)
-	var chainA, chainB *core.ChainPack
+	var chainA, chainB *blockgen.ChainPack
 	var err error
-	chainA, err = core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
+	chainA, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chainA: %v", err)
 	}
-	chainB, err = core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, gen *core.BlockGen) {
+	chainB, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, gen *blockgen.BlockGen) {
 		if i < 5 || i >= 10 {
 			gen.SetCoinbase(common.Address{1})
 		} else {
@@ -166,7 +166,7 @@ func TestCallTraceUnwind(t *testing.T) {
 
 func TestFilterNoAddresses(t *testing.T) {
 	m := mock.Mock(t)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -201,7 +201,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 
 	once := new(sync.Once)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *blockgen.BlockGen) {
 		once.Do(func() { block.SetCoinbase(common.Address{4}) })
 
 		var rcv common.Address

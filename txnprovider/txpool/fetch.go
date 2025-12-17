@@ -194,7 +194,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			f.logger.Debug("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
+			f.logger.Trace("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -332,12 +332,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 		}
 	case sentryproto.MessageId_POOLED_TRANSACTIONS_66, sentryproto.MessageId_TRANSACTIONS_66:
 		txns := TxnSlots{}
-		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-			return nil
-		}); err != nil {
-			return err
-		}
-
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {

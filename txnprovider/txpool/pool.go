@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,9 +48,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -382,9 +384,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if baseFeeChanged {
 		p.pending.best.pendingBaseFee = pendingBaseFee
 		p.pending.worst.pendingBaseFee = pendingBaseFee
-		p.baseFee.best.pendingBastFee = pendingBaseFee
+		p.baseFee.best.pendingBaseFee = pendingBaseFee
 		p.baseFee.worst.pendingBaseFee = pendingBaseFee
-		p.queued.best.pendingBastFee = pendingBaseFee
+		p.queued.best.pendingBaseFee = pendingBaseFee
 		p.queued.worst.pendingBaseFee = pendingBaseFee
 	}
 
@@ -938,7 +940,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 
 		var sender common.Address
 		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(sender)
+		txn.SetSender(accounts.InternAddress(sender))
 		txns = append(txns, txn)
 	}
 
@@ -1113,7 +1115,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	}
 
 	if blobCount != len(txn.BlobBundles) {
-		p.logger.Debug(fmt.Sprintf("blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
+		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	blobs := txn.Blobs()
@@ -1121,7 +1123,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	proofs := txn.Proofs()
 
 	if len(blobs) != len(commitments) {
-		log.Error(fmt.Sprintf("len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
+		log.Debug(fmt.Sprintf("TX POOL: len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	if p.isOsaka() {
@@ -1130,7 +1132,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	} else {
 		if len(commitments) != len(proofs) {
-			log.Error(fmt.Sprintf("NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
+			log.Debug(fmt.Sprintf("TX POOL: NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
 			return txpoolcfg.UnequalBlobTxExt
 		}
 	}
@@ -1308,7 +1310,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		txnMaxSize = 4 * txnSlotSize // 128KB
 
 		// Should be enough for a transaction with 6 blobs
-		blobTxnMaxSize = 800_000
+		blobTxnMaxSize = 1024 * 1024
 	)
 	txnType, err := PeekTransactionType(serializedTxn)
 	if err != nil {
@@ -1319,7 +1321,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		maxSize = blobTxnMaxSize
 	}
 	if len(serializedTxn) > maxSize {
-		return ErrRlpTooBig
+		return fmt.Errorf("%w: type=%d", ErrRlpTooBig, txnType)
 	}
 	return nil
 }
@@ -1650,10 +1652,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		//Regular txn threshold checks
 		tipThreshold := uint256.NewInt(0)
 		tipThreshold = tipThreshold.Mul(&found.TxnSlot.Tip, uint256.NewInt(100+priceBump))
-		tipThreshold.Div(tipThreshold, u256.N100)
+		tipThreshold.Div(tipThreshold, &u256.N100)
 		feecapThreshold := uint256.NewInt(0)
 		feecapThreshold.Mul(&found.TxnSlot.FeeCap, uint256.NewInt(100+priceBump))
-		feecapThreshold.Div(feecapThreshold, u256.N100)
+		feecapThreshold.Div(feecapThreshold, &u256.N100)
 
 		if mt.TxnSlot.Value.Cmp(&found.TxnSlot.Value) > 0 {
 			//Potential latent overdraft attack
@@ -1714,21 +1716,32 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[AuthAndNonce{senderAddr.String(), mt.TxnSlot.Nonce}]; ok {
+	if _, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
+	}
+
+	now := time.Now().Unix()
+	censoring := chain.ConfigValueLookup(p.chainConfig.CensoringSchedule, uint64(now))
+	if censoring != nil && slices.Contains(censoring.From, senderAddr) {
+		p.logger.Info("discarding transaction from a bad sender", "sender", senderAddr)
+		return txpoolcfg.InvalidSender
 	}
 
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
 			// Self authorization nonce should be senderNonce + 1
-			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce+1 {
+			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.NonceTooLow
 			}
 			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
 				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "at nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.ErrAuthorityReserved
+			}
+			if censoring != nil && censoring.Is7702Enabled && slices.Contains(censoring.From, a.authority) {
+				p.logger.Info("discarding transaction from a bad sender", "authority", a.authority)
+				return txpoolcfg.InvalidSender
 			}
 		}
 		for _, a := range mt.TxnSlot.AuthAndNonces {
@@ -2153,7 +2166,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	// Discard worst transactions from pending pool until it is within capacity limit
 	for p.pending.Len() > p.pending.limit {
 		tx := p.pending.PopWorst()
-		p.discardLocked(p.pending.PopWorst(), txpoolcfg.PendingPoolOverflow)
+		p.discardLocked(tx, txpoolcfg.PendingPoolOverflow)
 		sendChangeBatchEventToDiagnostics("Pending", "remove", []diaglib.TxnHashOrder{
 			{
 				OrderMarker: uint8(tx.subPool),
@@ -2691,9 +2704,11 @@ func (p *TxPool) logStats() {
 }
 
 // Deprecated need switch to streaming-like
-func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
+func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 	var txns []*metaTxn
 	var senders []common.Address
+	var subPoolTypes []SubPoolType
+	var rlpValues [][]byte
 
 	p.lock.Lock()
 
@@ -2701,6 +2716,8 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
 			txns = append(txns, mt)
 			senders = append(senders, sender)
+			subPoolTypes = append(subPoolTypes, mt.currentSubPool)
+			rlpValues = append(rlpValues, mt.TxnSlot.Rlp)
 		}
 
 		return true
@@ -2709,7 +2726,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 	p.lock.Unlock()
 
 	for i := range txns {
-		slotRlp := txns[i].TxnSlot.Rlp
+		slotRlp := rlpValues[i]
 		if slotRlp == nil {
 			v, err := tx.GetOne(kv.PoolTransaction, txns[i].TxnSlot.IDHash[:])
 			if err != nil {
@@ -2723,7 +2740,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 			slotRlp = v[20:]
 		}
 
-		f(slotRlp, senders[i], txns[i].currentSubPool)
+		f(slotRlp, senders[i], subPoolTypes[i])
 	}
 }
 

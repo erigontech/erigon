@@ -32,8 +32,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/go-viper/mapstructure/v2"
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -127,7 +126,7 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
-	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
+	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV4.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon")
 	rootCmd.Flags().BoolVar(&dbWritemap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, utils.DownloaderVerifyFlag.Usage)
@@ -179,7 +178,7 @@ func withChainFlag(cmd *cobra.Command) {
 }
 func withFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&filePath, "file", "", "")
-	if err := cmd.MarkFlagFilename(utils.DataDirFlag.Name); err != nil {
+	if err := cmd.MarkFlagFilename("file"); err != nil {
 		panic(err)
 	}
 }
@@ -289,12 +288,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	// Called manually to ensure all torrents are present before verification.
-	cfg.AddTorrentsFromDisk = false
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
+	cfg.LogPrefix = "[snapshots] "
+
+	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -334,17 +333,17 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 
 	// I'm kinda curious... but it was false before.
-	d.MainLoopInBackground(true)
+	d.InitBackgroundLogger(true)
 	if seedbox {
-		var downloadItems []*downloaderproto.AddItem
+		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)
 		for _, it := range snapCfg.Preverified.Items {
-			downloadItems = append(downloadItems, &downloaderproto.AddItem{
+			downloadItems = append(downloadItems, &downloaderproto.DownloadItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
 			})
 		}
-		if _, err := bittorrentServer.Add(ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
+		if _, err := bittorrentServer.Download(ctx, &downloaderproto.DownloadRequest{Items: downloadItems}); err != nil {
 			return err
 		}
 	}
@@ -671,8 +670,8 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
 
 	//if metrics.Enabled {
 	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
@@ -685,8 +684,8 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 	}
 	if creds == nil {
 		// no specific opts

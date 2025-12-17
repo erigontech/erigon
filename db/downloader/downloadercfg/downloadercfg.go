@@ -75,17 +75,14 @@ type Cfg struct {
 
 	ClientConfig *torrent.ClientConfig
 
-	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: RemoveFile this.
-	// Check with @mh0lt for best way to do this. I couldn't find the GitHub issue for cleaning up
-	// the Downloader API and responsibilities.
-	AddTorrentsFromDisk bool
-
 	MdbxWriteMap bool
 	// Don't trust any existing piece completion. Revalidate all pieces when added.
 	VerifyTorrentData bool
 	// Disable automatic data verification in the torrent client. We want to call VerifyData
 	// ourselves.
 	ManualDataVerification bool
+
+	LogPrefix string
 }
 
 // Before options/flags applied.
@@ -161,14 +158,13 @@ func New(
 	if opts.UploadRateLimit.Ok {
 		torrentConfig.UploadRateLimiter = rate.NewLimiter(opts.UploadRateLimit.Value, 0)
 	}
-	for value := range opts.DownloadRateLimit.Iter() {
+	for value := range opts.DownloadRateLimit.Iter {
 		switch value {
 		case rate.Inf:
 			torrentConfig.DownloadRateLimiter = nil
 		case 0:
 			torrentConfig.DialForPeerConns = false
 			torrentConfig.AcceptPeerConnections = false
-			torrentConfig.DisableTrackers = true
 			fallthrough
 		default:
 			torrentConfig.DownloadRateLimiter = rate.NewLimiter(value, 0)
@@ -176,7 +172,7 @@ func New(
 	}
 
 	// Override value set by download rate-limit.
-	for value := range opts.DisableTrackers.Iter() {
+	for value := range opts.DisableTrackers.Iter {
 		torrentConfig.DisableTrackers = value
 	}
 
@@ -236,7 +232,7 @@ func New(
 	}
 	// Previously this used a logger passed to the callers of this function. Do we need it here?
 	log.Info(
-		"torrent verbosity",
+		"Downloader torrent verbosity",
 		"erigon", verbosity,
 		// Only for deprecated analog.Logger stuff, if it comes up.
 		"anacrolix", analogLevel.LogString(),
@@ -272,17 +268,18 @@ func New(
 		}
 	}
 
+	// TODO: This can go away.
 	log.Info("processed webseed configuration",
 		"webseedHttpProviders", webseedHttpProviders,
 		"webseedUrlsOrFiles", webseedUrlsOrFiles)
 
 	cfg := Cfg{
-		Dirs:                dirs,
-		ChainName:           chainName,
-		ClientConfig:        torrentConfig,
-		AddTorrentsFromDisk: true,
-		MdbxWriteMap:        mdbxWriteMap,
-		VerifyTorrentData:   opts.Verify,
+		Dirs:              dirs,
+		ChainName:         chainName,
+		ClientConfig:      torrentConfig,
+		MdbxWriteMap:      mdbxWriteMap,
+		VerifyTorrentData: opts.Verify,
+		LogPrefix:         "[Downloader] ",
 	}
 	for _, s := range webseedHttpProviders {
 		// WebSeed URLs must have a trailing slash if the implementation should append the file
@@ -290,7 +287,7 @@ func New(
 		cfg.WebSeedUrls = append(cfg.WebSeedUrls, s.String()+"/")
 	}
 
-	for value := range opts.WebseedDownloadRateLimit.Iter() {
+	for value := range opts.WebseedDownloadRateLimit.Iter {
 		cfg.SeparateWebseedDownloadRateLimit.Set(value)
 	}
 

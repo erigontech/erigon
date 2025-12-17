@@ -69,11 +69,7 @@ func LastSeenBlock(tx kv.Getter) (uint64, error) {
 func PutLastSeenBlock(tx kv.Putter, n uint64, buf []byte) error {
 	buf = common.EnsureEnoughSize(buf, 8)
 	binary.BigEndian.PutUint64(buf, n)
-	err := tx.Put(kv.PoolInfo, PoolLastSeenBlockKey, buf)
-	if err != nil {
-		return err
-	}
-	return nil
+	return tx.Put(kv.PoolInfo, PoolLastSeenBlockKey, buf)
 }
 
 func ChainConfig(tx kv.Getter) (*chain.Config, error) {
@@ -96,10 +92,7 @@ func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 	if err := json.NewEncoder(wr).Encode(cc); err != nil {
 		return fmt.Errorf("invalid chain config JSON in pool db: %w", err)
 	}
-	if err := tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes()); err != nil {
-		return err
-	}
-	return nil
+	return tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes())
 }
 
 func initBor(cc *chain.Config) *chain.Config {

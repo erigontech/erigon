@@ -18,14 +18,15 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -65,9 +66,9 @@ func TestInterpreterReadonly(t *testing.T) {
 		env.interpreter = evmInterpreter
 
 		dummyContract := NewContract(
-			common.Address{},
-			common.Address{},
-			common.Address{},
+			accounts.ZeroAddress,
+			accounts.ZeroAddress,
+			accounts.ZeroAddress,
 			uint256.Int{},
 			c,
 		)
@@ -273,16 +274,17 @@ func TestReadonlyBasicCases(t *testing.T) {
 		copy(isEVMSliceTest, testCase.readonlySliceTest)
 		evmsTest[i].emvs = isEVMSliceTest
 
-		suffix := "-isEVMSliceTest"
+		var suffix strings.Builder
+		suffix.WriteString("-isEVMSliceTest")
 		for _, evmParam := range testCase.readonlySliceTest {
 			if evmParam {
-				suffix += "-true"
+				suffix.WriteString("-true")
 			} else {
-				suffix += "-false"
+				suffix.WriteString("-false")
 			}
 		}
 
-		evmsTest[i].suffix = suffix
+		evmsTest[i].suffix = suffix.String()
 	}
 
 	for _, testCase := range cases {
@@ -322,9 +324,9 @@ func TestReadonlyBasicCases(t *testing.T) {
 				env.interpreter = evmInterpreter
 
 				dummyContract := NewContract(
-					common.Address{},
-					common.Address{},
-					common.Address{},
+					accounts.ZeroAddress,
+					accounts.ZeroAddress,
+					accounts.ZeroAddress,
 					uint256.Int{},
 					c,
 				)
@@ -414,9 +416,9 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, uint64, er
 	*st.currentIdx++
 	c := NewJumpDestCache(16)
 	nextContract := *NewContract(
-		common.Address{},
-		common.Address{},
-		common.Address{},
+		accounts.ZeroAddress,
+		accounts.ZeroAddress,
+		accounts.ZeroAddress,
 		uint256.Int{},
 		c,
 	)
@@ -425,9 +427,10 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, uint64, er
 }
 
 func trace(isEVMSlice []bool, readOnlySlice []*readOnlyState) string {
-	res := "trace:\n"
+	var res strings.Builder
+	res.WriteString("trace:\n")
 	for i := 0; i < len(isEVMSlice); i++ {
-		res += fmt.Sprintf("%d: EVM %t, readonly %t\n", i, isEVMSlice[i], readOnlySlice[i].in)
+		res.WriteString(fmt.Sprintf("%d: EVM %t, readonly %t\n", i, isEVMSlice[i], readOnlySlice[i].in))
 	}
-	return res
+	return res.String()
 }

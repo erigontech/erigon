@@ -56,12 +56,9 @@ type Withdrawal struct {
 
 func (obj *Withdrawal) EncodingSize() int {
 	encodingSize := 21 /* Address */
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Index)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Validator)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Amount)
+	encodingSize += rlp.U64Len(obj.Index)
+	encodingSize += rlp.U64Len(obj.Validator)
+	encodingSize += rlp.U64Len(obj.Amount)
 	return encodingSize
 }
 

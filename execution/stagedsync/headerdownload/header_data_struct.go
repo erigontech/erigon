@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -57,7 +57,7 @@ type Link struct {
 	hash        common.Hash // Hash of the header
 	blockHeight uint64
 	persisted   bool    // Whether this link comes from the database record
-	verified    bool    // Ancestor of pre-verified header or verified by consensus engine
+	verified    bool    // Ancestor of pre-verified header or verified by rules engine
 	linked      bool    // Whether this link is connected (via chain of ParentHash to one of the persisted links)
 	idx         int     // Index in the heap
 	queueId     QueueID // which queue this link belongs to
@@ -278,7 +278,7 @@ type HeaderDownload struct {
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links                  map[common.Hash]*Link   // Links by header hash
-	engine                 consensus.Engine
+	engine                 rules.Engine
 	insertQueue            InsertQueue            // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces          *SeenAnnounces         // External announcement hashes, after header verification if hash is in this set - will broadcast it further
 	persistedLinkQueue     LinkQueue              // Priority queue of persisted links used to limit their number
@@ -299,7 +299,7 @@ type HeaderDownload struct {
 	trace                  bool
 	stats                  Stats
 
-	consensusHeaderReader consensus.ChainHeaderReader
+	consensusHeaderReader rules.ChainHeaderReader
 	headerReader          services.HeaderAndCanonicalReader
 
 	// Proof of Stake (PoS)
@@ -325,7 +325,7 @@ type HeaderRecord struct {
 func NewHeaderDownload(
 	anchorLimit int,
 	linkLimit int,
-	engine consensus.Engine,
+	engine rules.Engine,
 	headerReader services.HeaderAndCanonicalReader,
 	logger log.Logger,
 ) *HeaderDownload {

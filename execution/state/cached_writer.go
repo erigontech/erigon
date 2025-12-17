@@ -19,7 +19,6 @@ package state
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -35,45 +34,50 @@ func NewCachedWriter(w StateWriter, cache *shards.StateCache) *CachedWriter {
 	return &CachedWriter{w: w, cache: cache}
 }
 
-func (cw *CachedWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (cw *CachedWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if err := cw.w.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}
-	cw.cache.SetAccountWrite(address.Bytes(), account)
+	addressValue := address.Value()
+	cw.cache.SetAccountWrite(addressValue[:], account)
 	return nil
 }
 
-func (cw *CachedWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (cw *CachedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if err := cw.w.UpdateAccountCode(address, 1, codeHash, code); err != nil {
 		return err
 	}
-	cw.cache.SetCodeWrite(address.Bytes(), 1, code)
+	addressValue := address.Value()
+	cw.cache.SetCodeWrite(addressValue[:], 1, code)
 	return nil
 }
 
-func (cw *CachedWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (cw *CachedWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	if err := cw.w.DeleteAccount(address, original); err != nil {
 		return err
 	}
-	cw.cache.SetAccountDelete(address.Bytes())
+	addressValue := address.Value()
+	cw.cache.SetAccountDelete(addressValue[:])
 	return nil
 }
 
-func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+func (cw *CachedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	if err := cw.w.WriteAccountStorage(address, 1, key, original, value); err != nil {
 		return err
 	}
 	if original == value {
 		return nil
 	}
+	addressValue := address.Value()
+	keyValue := key.Value()
 	if value.IsZero() {
-		cw.cache.SetStorageDelete(address.Bytes(), 1, key[:])
+		cw.cache.SetStorageDelete(addressValue[:], 1, keyValue[:])
 	} else {
-		cw.cache.SetStorageWrite(address.Bytes(), 1, key[:], value.Bytes())
+		cw.cache.SetStorageWrite(addressValue[:], 1, keyValue[:], value.Bytes())
 	}
 	return nil
 }
 
-func (cw *CachedWriter) CreateContract(address common.Address) error {
+func (cw *CachedWriter) CreateContract(address accounts.Address) error {
 	return cw.w.CreateContract(address)
 }
