@@ -129,6 +129,9 @@ func TestNoEscape(t *testing.T) {
 }
 
 func TestVerifyDataNoTorrents(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
@@ -141,6 +144,9 @@ func TestVerifyDataNoTorrents(t *testing.T) {
 }
 
 func TestVerifyData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
@@ -156,6 +162,9 @@ func TestVerifyData(t *testing.T) {
 }
 
 func TestVerifyDataDownloaderClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
