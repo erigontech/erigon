@@ -2,7 +2,7 @@
 
 ## Background
 
-The commitment backtester intends to provide ways to:
+The commitment backtester aims to provide ways to:
 
 * easily re-execute commitment computations only (in isolation, without block re-execution) for past blocks
 * do correctness tests between different commitment computation algorithms (i.e. sequential vs parallel)
