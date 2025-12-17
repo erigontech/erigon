@@ -289,32 +289,36 @@ type transport interface {
 }
 
 func (c *conn) String() string {
-	s := c.flags.String()
+	var s strings.Builder
+	s.WriteString(c.flags.String())
 	if (c.node.ID() != enode.ID{}) {
-		s += " " + c.node.ID().String()
+		s.WriteString(" ")
+		s.WriteString(c.node.ID().String())
 	}
-	s += " " + c.fd.RemoteAddr().String()
-	return s
+	s.WriteString(" ")
+	s.WriteString(c.fd.RemoteAddr().String())
+	return s.String()
 }
 
 func (f connFlag) String() string {
-	s := ""
+	var s strings.Builder
 	if f&trustedConn != 0 {
-		s += "-trusted"
+		s.WriteString("-trusted")
 	}
 	if f&dynDialedConn != 0 {
-		s += "-dyndial"
+		s.WriteString("-dyndial")
 	}
 	if f&staticDialedConn != 0 {
-		s += "-staticdial"
+		s.WriteString("-staticdial")
 	}
 	if f&inboundConn != 0 {
-		s += "-inbound"
+		s.WriteString("-inbound")
 	}
-	if s != "" {
-		s = s[1:]
+	str := s.String()
+	if str != "" {
+		return str[1:]
 	}
-	return s
+	return str
 }
 
 func (c *conn) is(f connFlag) bool {
