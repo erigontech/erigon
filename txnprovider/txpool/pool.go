@@ -2750,15 +2750,12 @@ func sendChangeBatchEventToDiagnostics(pool string, event string, orderHashes []
 		return
 	}
 
-	toRemoveBatch := make([]diaglib.PoolChangeBatch, 0)
-	toRemoveBatch = append(toRemoveBatch, diaglib.PoolChangeBatch{
-		Pool:         pool,
-		Event:        event,
-		TxnHashOrder: orderHashes,
-	})
-
 	diaglib.Send(diaglib.PoolChangeBatchEvent{
-		Changes: toRemoveBatch,
+		Changes: []diaglib.PoolChangeBatch{{
+			Pool:         pool,
+			Event:        event,
+			TxnHashOrder: orderHashes,
+		}},
 	})
 }
 
