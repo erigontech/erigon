@@ -2548,7 +2548,6 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 				}
 
 				var reads int64
-				localWarmed := make(map[string]struct{})
 				for item := range work {
 					select {
 					case <-gctx.Done():
@@ -2561,11 +2560,9 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 					depth := item.startDepth
 					for depth <= len(hashedKey) && depth <= maxDepth {
 						prefix := hexNibblesToCompactBytes(hashedKey[:depth])
-						prefixKey := string(prefix)
 
 						branchData, _, _ := trieCtx.Branch(prefix)
 						reads++
-						localWarmed[prefixKey] = struct{}{}
 
 						// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 						if len(branchData) < 4 {
