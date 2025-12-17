@@ -284,11 +284,13 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 				BatchId:      block,
 				MetricValues: mVals[0],
 			}
-			pageMetrics = append(pageMetrics, mv)
-			heap.Push(&topNSlowest, mv)
-			if uint64(topNSlowest.Len()) > bt.metricsTopN {
-				topNSlowest.Pop()
+			if uint64(topNSlowest.Len()) < bt.metricsTopN {
+				heap.Push(&topNSlowest, mv)
+			} else if mv.SpentProcessing > topNSlowest[0].SpentProcessing {
+				heap.Pop(&topNSlowest)
+				heap.Push(&topNSlowest, mv)
 			}
+			pageMetrics = append(pageMetrics, mv)
 		}
 		chartsPageFilePath, err := renderChartsPage(pageMetrics, runOutputDir)
 		if err != nil {
