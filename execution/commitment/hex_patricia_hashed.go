@@ -2509,15 +2509,36 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	defer func() { logEvery.Stop() }()
 
 	// Prefetch callback - traverse trie structure in parallel, following actual branch nodes
+	// Process sequentially to track divergence and avoid re-reading shared prefixes
 	prefetchFn := func(hashedKeys [][]byte) error {
 		if len(hashedKeys) == 0 || numWorkers <= 0 {
 			return nil
 		}
 		warmupStart := time.Now()
 
-		work := make(chan []byte, len(hashedKeys))
-		for _, hk := range hashedKeys {
-			work <- hk
+		// Build work items with start depth based on divergence from previous key
+		type workItem struct {
+			key        []byte
+			startDepth int
+		}
+		workItems := make([]workItem, len(hashedKeys))
+		workItems[0] = workItem{hashedKeys[0], 0} // First key starts from root
+
+		for i := 1; i < len(hashedKeys); i++ {
+			prev := hashedKeys[i-1]
+			curr := hashedKeys[i]
+			// Find common prefix length
+			cpl := 0
+			minLen := min(len(prev), len(curr))
+			for cpl < minLen && prev[cpl] == curr[cpl] {
+				cpl++
+			}
+			workItems[i] = workItem{curr, cpl}
+		}
+
+		work := make(chan workItem, len(workItems))
+		for _, item := range workItems {
+			work <- item
 		}
 		close(work)
 
@@ -2533,30 +2554,30 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 
 				var reads int64
 				localWarmed := make(map[string]struct{})
-				for hashedKey := range work {
+				for item := range work {
 					select {
 					case <-gctx.Done():
 						return gctx.Err()
 					default:
 					}
 
-					// Traverse trie following actual branch node structure
-					depth := 0
+					hashedKey := item.key
+					// Start from divergence point, not root
+					depth := item.startDepth
 					for depth <= len(hashedKey) && depth <= maxDepth {
 						prefix := hexNibblesToCompactBytes(hashedKey[:depth])
+						prefixKey := string(prefix)
+
 						branchData, _, _ := trieCtx.Branch(prefix)
 						reads++
-						localWarmed[string(prefix)] = struct{}{}
+						localWarmed[prefixKey] = struct{}{}
 
 						// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
-						// Skip touch map (first 2 bytes)
 						if len(branchData) < 4 {
-							// No valid branch data at this depth - end of path
 							break
 						}
 						branchData = branchData[2:] // skip touch map
 
-						// Parse bitmap (now at position 0-2)
 						bitmap := binary.BigEndian.Uint16(branchData[0:2])
 
 						if depth >= len(hashedKey) {
@@ -2566,16 +2587,13 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 						childBit := uint16(1) << nextNibble
 
 						if bitmap&childBit == 0 {
-							// Child doesn't exist in this branch
 							break
 						}
 
 						// Find position of our child's data
-						// Count bits before our nibble to find offset
-						pos := 2 // start after bitmap
+						pos := 2
 						for n := uint8(0); n < nextNibble; n++ {
 							if bitmap&(uint16(1)<<n) != 0 {
-								// Skip this child's data
 								if pos >= len(branchData) {
 									break
 								}
@@ -2589,28 +2607,25 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 							break
 						}
 
-						// Read our child's field bits
 						fieldBits := branchData[pos]
 						pos++
 
-						// Check if child has extension (fieldExtension = 1)
+						// Check if child has extension
 						hasExtension := (fieldBits & 1) != 0
 						if hasExtension && pos < len(branchData) {
-							// Read extension length
 							extLen, n := binary.Uvarint(branchData[pos:])
 							if n > 0 && extLen > 0 {
-								// Skip by extension length
 								depth += int(extLen)
 								continue
 							}
 						}
 
-						// No extension or couldn't parse - move to next depth
 						depth++
 					}
 				}
 				totalReads.Add(reads)
 
+				// Merge local warmed prefixes
 				mu.Lock()
 				for k := range localWarmed {
 					WarmedPrefixes[k] = struct{}{}
