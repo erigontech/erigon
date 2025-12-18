@@ -25,7 +25,7 @@ import (
 
 func Test_CheckEmpty(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 func Test_CheckNormal(t *testing.T) {
@@ -33,7 +33,7 @@ func Test_CheckNormal(t *testing.T) {
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {10, 20}, {20, 30},
 	})
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 func Test_CheckGaps(t *testing.T) {
@@ -41,7 +41,7 @@ func Test_CheckGaps(t *testing.T) {
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {20, 30},
 	})
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 func Test_CheckStartFrom0(t *testing.T) {
@@ -49,7 +49,7 @@ func Test_CheckStartFrom0(t *testing.T) {
 	touchFiles(t, dirs, []snapRange{
 		{10, 20}, {20, 30},
 	})
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 func Test_CheckOverlaps(t *testing.T) {
@@ -57,7 +57,7 @@ func Test_CheckOverlaps(t *testing.T) {
 	touchFiles(t, dirs, []snapRange{
 		{0, 15}, {10, 30},
 	})
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 func Test_OneFileMissing(t *testing.T) {
@@ -67,15 +67,15 @@ func Test_OneFileMissing(t *testing.T) {
 	})
 	// delete one idx file
 	delFile(t, dirs.Snap, "v1.0-000010-000020-beaconblocks.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {10, 20}, {20, 30},
 	})
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 	// delete seg file
 	delFile(t, dirs.SnapCaplin, "v1.0-000010-000020-ActiveValidatorIndicies.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 func Test_LastFileMissingForOneEnum(t *testing.T) {
@@ -86,7 +86,7 @@ func Test_LastFileMissingForOneEnum(t *testing.T) {
 	// delete one idx file
 	delFile(t, dirs.SnapCaplin, "v1.0-000020-000030-BlockRoot.idx")
 	delFile(t, dirs.SnapCaplin, "v1.0-000020-000030-BlockRoot.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 func Test_VersionLessThanMin(t *testing.T) {
@@ -95,28 +95,28 @@ func Test_VersionLessThanMin(t *testing.T) {
 		{0, 10}, {10, 20}, {20, 30},
 	})
 	touchFile(t, dirs.Snap, "v0.9-000010-000020-beaconblocks.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	delFile(t, dirs.Snap, "v0.9-000010-000020-beaconblocks.idx")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	touchFile(t, dirs.Snap, "v0.9-000010-000020-beaconblocks.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	delFile(t, dirs.Snap, "v0.9-000010-000020-beaconblocks.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	touchFile(t, dirs.SnapCaplin, "v0.9-000010-000020-ActiveValidatorIndicies.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	delFile(t, dirs.SnapCaplin, "v0.9-000010-000020-ActiveValidatorIndicies.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	touchFile(t, dirs.SnapCaplin, "v0.9-000010-000020-ActiveValidatorIndicies.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	delFile(t, dirs.SnapCaplin, "v0.9-000010-000020-ActiveValidatorIndicies.idx")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 func Test_VersionMoreThanCurrent(t *testing.T) {
@@ -125,28 +125,28 @@ func Test_VersionMoreThanCurrent(t *testing.T) {
 		{0, 10}, {10, 20}, {20, 30},
 	})
 	touchFile(t, dirs.Snap, "v20.0-000010-000020-beaconblocks.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	delFile(t, dirs.Snap, "v20.0-000010-000020-beaconblocks.idx")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	touchFile(t, dirs.Snap, "v20.0-000010-000020-beaconblocks.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	delFile(t, dirs.Snap, "v20.0-000010-000020-beaconblocks.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	touchFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	delFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	touchFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 
 	delFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.idx")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
 type snapRange struct {

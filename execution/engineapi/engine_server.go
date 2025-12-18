@@ -18,9 +18,11 @@ package engineapi
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -279,10 +282,38 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
+	var blockAccessList types.BlockAccessList
+	var err error
+	if version >= clparams.GloasVersion {
+		if req.BlockAccessList == nil {
+			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
+		}
+		if len(*req.BlockAccessList) == 0 {
+			blockAccessList = nil
+			header.BlockAccessListHash = &empty.BlockAccessListHash
+		} else {
+			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
+			if err != nil {
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
+			}
+			if err := blockAccessList.Validate(); err != nil {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
+			}
+			hash := crypto.Keccak256Hash(*req.BlockAccessList)
+			header.BlockAccessListHash = &hash
+		}
+	} else if req.BlockAccessList != nil {
+		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
+	}
+	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
+
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) {
+		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
+		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
+		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -357,7 +388,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, nil)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, blockAccessList)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
@@ -554,7 +585,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
 		(!s.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
-		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) {
+		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) ||
+		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
+		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -756,14 +789,7 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 func compareCapabilities(from []string, to []string) []string {
 	result := make([]string, 0)
 	for _, f := range from {
-		found := false
-		for _, t := range to {
-			if f == t {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(to, f) {
 			result = append(result, f)
 		}
 	}

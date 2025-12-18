@@ -21,8 +21,7 @@ For a comprehensive understanding and the latest instructions, the official docu
 * **Remote Running Instructions**: For detailed instructions on running RPC in Remote mode, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
 
 {% hint style="success" %}
-To interact with the **RPC Service** visit the dedicated
-page [Interacting with Erigon](../../../fundamentals/interacting-with-erigon/interacting-with-erigon/).
+To interact with the **RPC Service** visit the dedicated page [Interacting with Erigon](../../interacting-with-erigon/).
 {% endhint %}
 
 ## Command Line Options

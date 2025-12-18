@@ -32,8 +32,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/go-viper/mapstructure/v2"
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -292,7 +291,9 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
+	cfg.LogPrefix = "[snapshots] "
+
+	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -669,8 +670,8 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
 
 	//if metrics.Enabled {
 	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
@@ -683,8 +684,8 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 	}
 	if creds == nil {
 		// no specific opts

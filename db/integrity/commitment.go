@@ -65,6 +65,9 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	}
 	var integrityErr error
 	for i, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
 		recompute := !onlyRecomputeLastFile || i == len(files)-1
 		err = checkCommitmentRootInFile(ctx, db, br, file, recompute, logger)
 		if err != nil {
@@ -280,7 +283,6 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	if dbg.EnvBool("CHECK_COMMITMENT_KVS_DEREF_SEQUENTIAL", false) {
 		eg.SetLimit(1)
 	}
-	var integrityErr error
 	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
@@ -316,7 +318,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		"referencedStorages", referencedStorages.Load(),
 		"plainStorages", plainStorages.Load(),
 	)
-	return integrityErr
+	return nil
 }
 
 type derefCounts struct {
@@ -580,7 +582,6 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	} else {
 		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
-	var integrityErr error
 	var totalVals atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
@@ -611,7 +612,7 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	total := totalVals.Load()
 	rate := float64(total) / dur.Seconds()
 	logger.Info("checked commitment history vals", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate)
-	return integrityErr
+	return nil
 }
 
 func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, failFast bool, logger log.Logger) (uint64, error) {
@@ -667,7 +668,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 			if err != nil {
-				return 0, err
+				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
 			maxTxNum, err := txNumReader.Max(tx, blockNum)
 			if err != nil {

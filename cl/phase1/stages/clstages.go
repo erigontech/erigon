@@ -61,6 +61,7 @@ type Cfg struct {
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	peerDas                 das.PeerDas
+	blobDownloader          *network2.BlobHistoryDownloader
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	caplinConfig            clparams.CaplinConfig
 	hasDownloaded           bool
@@ -76,6 +77,7 @@ type Args struct {
 }
 
 func ClStagesCfg(
+	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,
 	antiquary *antiquary.Antiquary,
 	ethClock eth_clock.EthereumClock,
@@ -96,6 +98,21 @@ func ClStagesCfg(
 	attestationDataProducer attestation_producer.AttestationDataProducer,
 	peerDas das.PeerDas,
 ) *Cfg {
+	blobDownloader := network2.NewBlobHistoryDownloader(
+		ctx,
+		beaconCfg,
+		rpc,
+		indiciesDB,
+		blobStore,
+		blockReader,
+		sn,
+		forkChoice,
+		forkChoice,
+		caplinConfig.ArchiveBlobs,
+		caplinConfig.ImmediateBlobsBackfilling,
+		log.Root(),
+	)
+
 	return &Cfg{
 		rpc:                     rpc,
 		antiquary:               antiquary,
@@ -111,10 +128,11 @@ func ClStagesCfg(
 		sn:                      sn,
 		blockReader:             blockReader,
 		peerDas:                 peerDas,
+		blobDownloader:          blobDownloader,
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
-		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.Tmp),
+		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.CaplinHistory),
 		attestationDataProducer: attestationDataProducer,
 	}
 }
@@ -250,7 +268,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}

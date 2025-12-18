@@ -94,6 +94,7 @@ type Trie interface {
 	SetTraceDomain(bool)
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
+	EnableCsvMetrics(filePathPrefix string)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant

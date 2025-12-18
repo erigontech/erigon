@@ -18,12 +18,15 @@ package downloader
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -32,26 +35,61 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
-func TestChangeInfoHashOfSameFile(t *testing.T) {
+func TestConcurrentDownload(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
+		t.Skip("copied from TestChangeInfoHashOfSameFile")
 	}
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
-	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("aa"), "a.seg")
+	const conc = 2
+	waits := make(chan func(ctx context.Context) error, conc)
+	g, ctx := errgroup.WithContext(t.Context())
+	for range conc {
+		g.Go(func() error {
+			wait, err := d.testStartSingleDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+			if err != nil {
+				return err
+			}
+			waits <- wait
+			return nil
+		})
+	}
+	require.NoError(g.Wait())
+	close(waits)
+	d.Close()
+	for w := range waits {
+		// Make sure we don't get stuck. The torrents shouldn't exist, and the Downloader is closed.
+		w(t.Context())
+	}
+}
+
+func TestChangeInfoHashOfSameFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
+	ctx := t.Context()
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+	defer d.Close()
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 	tt, ok := d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 
 	// adding same file twice is ok
-	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 
 	// adding same file with another infoHash - is ok, must be skipped
@@ -59,7 +97,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//	- release of re-compressed version of same file,
 	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
-	err = d.addPreverifiedUnlocked(snaptype.Hex2InfoHash("bb"), "a.seg")
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
 	//require.Error(err)
 	_ = err
@@ -69,41 +107,71 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 }
 
 func TestNoEscape(t *testing.T) {
-	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	ctx := context.Background()
 
 	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
 	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 
 	// reject escaping snapshots dir
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
-	require.Error(err)
+	assert.NotErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
-	require.Error(err)
+	assert.NotErrorIs(t, err, fs.ErrNotExist)
+}
+
+func TestVerifyDataNoTorrents(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+	defer d.Close()
+	err = d.VerifyData(d.ctx, nil, false)
+	require.NoError(err)
 }
 
 func TestVerifyData(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
+	os.WriteFile(filepath.Join(dirs.Snap, "a"), nil, 0o444)
+	err = d.AddNewSeedableFile(t.Context(), "a")
+	require.NoError(err)
+	err = d.VerifyData(d.ctx, nil, false)
+	require.NoError(err)
+}
 
+func TestVerifyDataDownloaderClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+	d.Close()
 	err = d.VerifyData(d.ctx, nil, false)
 	require.NoError(err)
 }
@@ -119,14 +187,14 @@ func TestAddDel(t *testing.T) {
 
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
 
 	f1Abs := filepath.Join(dirs.Snap, "a.seg")      // block file
 	f2Abs := filepath.Join(dirs.SnapDomain, "a.kv") // state file
 	_, _ = os.Create(f1Abs)
-	_, _ = os.Create(f2Abs)
+	require.NoError(os.WriteFile(f2Abs, []byte("a.kv"), 0o666))
 
 	server, _ := NewGrpcServer(d)
 	// Add: expect relative paths

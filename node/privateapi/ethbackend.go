@@ -69,9 +69,10 @@ type EthBackendServer struct {
 	bridgeStore           bridge.Store
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
-	logsFilter  *LogsFilterAggregator
-	logger      log.Logger
-	chainConfig *chain.Config
+	logsFilter     *LogsFilterAggregator
+	receiptsFilter *ReceiptsFilterAggregator
+	logger         log.Logger
+	chainConfig    *chain.Config
 }
 
 type EthBackend interface {
@@ -95,6 +96,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 		blockReader:           blockReader,
 		bridgeStore:           bridgeStore,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
+		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 		chainConfig:           chainConfig,
@@ -121,6 +123,29 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 			}
 		}
 	}()
+
+	rch, rclean := s.notifications.Events.AddReceiptsSubscription()
+	go func() {
+		var err error
+		defer rclean()
+		defer func() {
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					logger.Warn("[rpc] terminated subscription to `receipts` events", "reason", err)
+				}
+			}
+		}()
+		for {
+			select {
+			case <-s.ctx.Done():
+				err = s.ctx.Err()
+				return
+			case receipts := <-rch:
+				s.receiptsFilter.distributeReceipts(receipts)
+			}
+		}
+	}()
+
 	return s
 }
 
@@ -403,6 +428,13 @@ func (s *EthBackendServer) SubscribeLogs(server remoteproto.ETHBACKEND_Subscribe
 		return s.logsFilter.subscribeLogs(server)
 	}
 	return errors.New("no logs filter available")
+}
+
+func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_SubscribeReceiptsServer) (err error) {
+	if s.receiptsFilter != nil {
+		return s.receiptsFilter.subscribeReceipts(server)
+	}
+	return errors.New("no receipts filter available")
 }
 
 func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remoteproto.BorTxnLookupRequest) (*remoteproto.BorTxnLookupReply, error) {

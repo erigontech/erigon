@@ -118,7 +118,7 @@ jobs:
           run_suite eels/consume-engine
         continue-on-error: true
       - name: Upload output log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hive-workspace-log
           path: hive/workspace/logs

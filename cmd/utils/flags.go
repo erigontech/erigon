@@ -122,6 +122,10 @@ var (
 		Name:  "override.osaka",
 		Usage: "Manually specify the Osaka fork time, overriding the bundled setting",
 	}
+	OverrideBalancerFlag = flags.BigFlag{
+		Name:  "override.balancer",
+		Usage: "Manually specify the Balancer fork time, overriding the bundled setting",
+	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
 		Usage: "Avoid overriding chain config already stored in the DB",
@@ -1941,6 +1945,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
 		cfg.OverrideOsakaTime = flags.GlobalBig(ctx, OverrideOsakaFlag.Name)
 	}
+	if ctx.IsSet(OverrideBalancerFlag.Name) {
+		cfg.OverrideBalancerTime = flags.GlobalBig(ctx, OverrideBalancerFlag.Name)
+	}
 	cfg.KeepStoredChainConfig = ctx.Bool(KeepStoredChainConfigFlag.Name)
 
 	if clparams.EmbeddedSupported(cfg.NetworkID) || cfg.CaplinConfig.IsDevnet() {
@@ -2077,6 +2084,12 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 				flags.Uint(f.Name, f.Value, f.Usage)
 			case *cli.StringFlag:
 				flags.String(f.Name, f.Value, f.Usage)
+			case *cli.StringSliceFlag:
+				var val []string
+				if f.Value != nil {
+					val = f.Value.Value()
+				}
+				flags.StringSlice(f.Name, val, f.Usage)
 			case *cli.BoolFlag:
 				flags.Bool(f.Name, false, f.Usage)
 			default:

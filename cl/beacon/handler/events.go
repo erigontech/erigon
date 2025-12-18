@@ -25,6 +25,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+
 	event "github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -33,6 +34,7 @@ import (
 var validTopics = map[event.EventTopic]struct{}{
 	// operation events
 	event.OpAttestation:       {},
+	event.OpSingleAttestation: {},
 	event.OpAttesterSlashing:  {},
 	event.OpBlobSidecar:       {},
 	event.OpDataColumnSidecar: {},

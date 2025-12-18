@@ -27,7 +27,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -167,7 +166,7 @@ func DoCall(
 	}
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
-		if err := stateOverrides.OverrideAndCommit(state, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(state, nil, blockCtx.Rules(chainConfig)); err != nil {
 			return nil, err
 		}
 	}
@@ -274,7 +273,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	txCtx := protocol.NewEVMTxContext(r.message)
 	ibs := state.New(r.stateReader)
 	if r.stateOverrides != nil {
-		if err := r.stateOverrides.OverrideAndCommit(ibs, r.rules); err != nil {
+		if err := r.stateOverrides.Override(ibs, nil, r.rules); err != nil {
 			return nil, err
 		}
 	}
@@ -288,9 +287,6 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
-	dbg.TraceInstructions = true
-	dbg.TraceTransactionIO = true
-	r.evm.IntraBlockState().SetTrace(true)
 	result, err := protocol.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err

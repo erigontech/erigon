@@ -10,7 +10,7 @@ The modular, staged approach to logging allows for granular control over verbosi
 
 {% hint style="success" %}
 Erigon offers a `--metrics` flag for using prometheus/grafana monitoring,
-see [Creating a Dashboard](../fundamentals/creating-a-dashboard.md/).
+see [Creating a Dashboard](creating-a-dashboard.md).
 {% endhint %}
 
 ## Logging Framework Architecture

@@ -19,7 +19,7 @@ erigon [options]
 {% tab title="Docker" %}
 
 * You can use Docker Compose like in
-  this [example](../easy-nodes/how-to-run-an-ethereum-node/#id-2.-configure-and-launch-erigon)
+  this [example](../get-started/easy-nodes/how-to-run-an-ethereum-node/README.md#id-2.-configure-and-launch-erigon)
 * Alternatively you can use the Docker syntax, for example:
 
   `docker run -it erigontech/erigon:v3.2.2 [options]`
