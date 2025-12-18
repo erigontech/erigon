@@ -575,18 +575,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if st.evm.ProcessingHook.IsArbitrum() {
 		var multiGas multigas.MultiGas
 		multiGas, floorGas7623, overflow = multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
-		gas = multiGas.SingleGas()
 		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
+		gas = multiGas.SingleGas()
 	} else {
 		// Check clauses 4-5, subtract intrinsic gas if everything is correct
 		gas, floorGas7623, overflow = fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
 	}
-	// Check clauses 4-5, subtract intrinsic gas if everything is correct
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
 	// TODO check on !arb looks scary, review back
 	if st.gasRemaining < gas || (!rules.IsArbitrum && st.gasRemaining < floorGas7623) {
+		fmt.Printf("st.gasRemaining %d, gas %d, floorGas7623 %d\n", st.gasRemaining, gas, floorGas7623)
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
 	}
 
@@ -602,6 +602,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("Checking floor data gas at tx with msg gas limit %d and floorDataGas %d\n", msg.Gas(), floorDataGas)
 		if msg.Gas() < floorDataGas {
 			return nil, fmt.Errorf("%w: have %d, want %d", errors.New("floor data gas bigger than gasLimit"), msg.Gas(), floorDataGas)
 		}
