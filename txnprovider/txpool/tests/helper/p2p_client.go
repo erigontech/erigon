@@ -102,6 +102,8 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	
+	genesisHash := [32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis))
 
 	_, err = sentryClient.SetStatus(context.TODO(), &sentryproto.StatusData{
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
