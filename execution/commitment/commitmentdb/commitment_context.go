@@ -314,8 +314,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 // by reading Branch data in parallel before processing.
 // Works with both ModeDirect and ModeUpdate.
 // maxDepth determines how deep to collect prefixes (e.g., 4 means prefixes up to 4 nibbles).
-// numWorkers is the number of parallel goroutines to use for warmup.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithWarmup(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress, maxDepth int, numWorkers int) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithWarmup(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress, maxDepth int) (rootHash []byte, err error) {
+	numWorkers := 6
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())

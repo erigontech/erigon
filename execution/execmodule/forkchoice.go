@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -649,11 +648,6 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		defer UpdateForkChoicePruneDuration(pruneStart)
 
 		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-			aggTx := state.AggTx(tx)
-			if aggTx != nil {
-				fmt.Println("Evicting commitment pages from aggTx cache")
-				aggTx.Agg().EvictCommitmentPages()
-			}
 			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
 				return err
 			}
