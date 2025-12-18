@@ -91,29 +91,24 @@ type preverifiedSnapshot = snapshot
 type Downloader struct {
 	addWebSeedOpts     []torrent.AddWebSeedsOpt
 	metainfoHttpClient *http.Client
-	torrentClient      *torrent.Client
-
-	cfg *downloadercfg.Cfg
-
-	torrentStorage storage.ClientImplCloser
+	cfg                *downloadercfg.Cfg
+	logger             log.Logger
+	torrentFS          *AtomicTorrentFS
 
 	ctx  context.Context
 	stop context.CancelFunc
-	wg   sync.WaitGroup
-
-	logger log.Logger
-	// There's no way to include a prefix easily. We need the [style] for consistency.
-	logPrefix string
-
-	torrentFS *AtomicTorrentFS
 
 	// The background logger only runs when there are no active downloads.
 	activeDownloadRequestsLock sync.Mutex
 	activeDownloadRequests     int
 	zeroActiveDownloadRequests sync.Cond
 
-	// This protects adding/removing torrents from the client and...?
-	lock                   sync.RWMutex
+	// Synchronizes state-sensitive changes to things affected by Downloader.Close.
+	lock           sync.RWMutex
+	torrentClient  *torrent.Client
+	torrentStorage storage.ClientImplCloser
+	// Tasks with lifetimes attached to Downloader.
+	wg                     sync.WaitGroup
 	initedBackgroundLogger bool
 	torrentsByName         map[snapshotName]*torrent.Torrent
 	// Torrents that were added for download. The first time a torrent is added here, the adder is
@@ -418,7 +413,9 @@ func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
 		return
 	}
 	d.initedBackgroundLogger = true
-	d.spawn(d.backgroundLogger)
+	// This go is actually intended. We hold the downloader lock but spawn also takes it. But
+	// Downloader.spawn checks that the Downloader isn't closed so it's fine.
+	go d.spawn(d.backgroundLogger)
 }
 
 func (d *Downloader) snapDir() string { return d.cfg.Dirs.Snap }
@@ -621,6 +618,7 @@ func (d *Downloader) VerifyData(
 		defer logEvery.Stop()
 		d.spawn(func() {
 			for {
+				// d.ctx?
 				select {
 				case <-ctx.Done():
 					return
@@ -1205,15 +1203,21 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 }
 
 func (d *Downloader) Close() {
-	d.logger.Info("Stopping downloader", "files", len(d.torrentClient.Torrents()))
+	d.log(log.LvlInfo, "Stopping", "files", len(d.torrentClient.Torrents()))
+	d.lockingClose()
+	d.wg.Wait()
+	d.log(log.LvlInfo, "Stopped")
+}
+
+func (d *Downloader) lockingClose() {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	d.stop()
-	d.logger.Debug("Closing torrents")
+	d.log(log.LvlDebug, "Closing torrents")
 	d.torrentClient.Close()
 	if err := d.torrentStorage.Close(); err != nil {
 		d.log(log.LvlWarn, "Error closing torrent storage", "err", err)
 	}
-	d.wg.Wait()
-	d.log(log.LvlInfo, "Stopped")
 }
 
 func (d *Downloader) PeerID() []byte {
@@ -1445,13 +1449,18 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	}
 }
 
-// This should be passing the Downloader.ctx to its tasks, but VerifyData bucks the trend.
-func (d *Downloader) spawn(f func()) {
+func (d *Downloader) spawn(f func()) bool {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.ctx.Err() != nil {
+		return false
+	}
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
 		f()
 	}()
+	return true
 }
 
 // Delete - stop seeding, remove file, remove .torrent. TODO: Double check the usage of this.
