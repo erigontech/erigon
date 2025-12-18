@@ -1549,25 +1549,14 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 	return tr, nil
 }
 
-var AccumulateTime = time.Duration(0)
-var BranchCallCount = 0
-var MaxBranchDepth = 0
-var WarmupHits = 0
-
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
-	BranchCallCount++
-	if int(hph.currentKeyLen) > MaxBranchDepth {
-		MaxBranchDepth = int(hph.currentKeyLen)
-	}
-	start := time.Now()
 	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
 		return err
 	}
-	AccumulateTime += time.Since(start)
 	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 

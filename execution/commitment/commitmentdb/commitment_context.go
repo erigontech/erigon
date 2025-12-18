@@ -377,15 +377,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithWarmup(ctx conte
 		rootHash, err = hph.ProcessWithWarmup(ctx, sdc.updates, logPrefix, commitProgress, maxDepth, numWorkers, ctxFactory)
 	}
 
-	fmt.Printf("Branch stats: calls=%d, maxDepth=%d, totalTime=%v, warmupHits=%d/%d (%.1f%%)\n",
-		commitment.BranchCallCount, commitment.MaxBranchDepth, commitment.AccumulateTime,
-		commitment.WarmupHits, commitment.BranchCallCount,
-		float64(commitment.WarmupHits)/float64(max(commitment.BranchCallCount, 1))*100)
-	commitment.AccumulateTime = 0
-	commitment.BranchCallCount = 0
-	commitment.MaxBranchDepth = 0
-	commitment.WarmupHits = 0
-
 	if err != nil {
 		return nil, err
 	}
