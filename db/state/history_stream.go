@@ -777,11 +777,19 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			ht.histReader.Reset(offset)
 		}
 
-		for ht.histReader.HasNext() {
-			k, v, _, _ := ht.histReader.Next2(nil)
-			if bytes.Equal(k, ht.histKey) {
+		if ht.hc.h.HistoryValuesOnCompressedPage <= 1 {
+			for ht.histReader.HasNext() {
+				v, _ := ht.histReader.Next(nil)
 				ht.v = bytes.Clone(v)
 				return nil
+			}
+		} else {
+			for ht.histReader.HasNext() {
+				k, v, _, _ := ht.histReader.Next2(nil)
+				if bytes.Equal(k, ht.histKey) {
+					ht.v = bytes.Clone(v)
+					return nil
+				}
 			}
 		}
 
