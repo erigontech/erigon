@@ -53,7 +53,7 @@ type Server struct {
 	idgen           func() ID
 	run             atomic.Bool
 	codecs          mapset.Set[ServerCodec]
-	
+
 	batchConcurrency    uint
 	disableStreaming    bool
 	traceRequests       bool // Whether to print requests at INFO level
