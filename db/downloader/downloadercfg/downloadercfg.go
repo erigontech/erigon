@@ -73,7 +73,8 @@ type Cfg struct {
 	// TODO: Can we get rid of this?
 	ChainName string
 
-	ClientConfig *torrent.ClientConfig
+	ClientConfig   *torrent.ClientConfig
+	TorrentLogFile *os.File
 
 	MdbxWriteMap bool
 	// Don't trust any existing piece completion. Revalidate all pieces when added.
@@ -81,6 +82,15 @@ type Cfg struct {
 	// Disable automatic data verification in the torrent client. We want to call VerifyData
 	// ourselves.
 	ManualDataVerification bool
+
+	LogPrefix string
+}
+
+func (cfg *Cfg) CloseTorrentLogFile() error {
+	if cfg.TorrentLogFile != nil {
+		return cfg.TorrentLogFile.Close()
+	}
+	return nil
 }
 
 // Before options/flags applied.
@@ -266,6 +276,7 @@ func New(
 		}
 	}
 
+	// TODO: This can go away.
 	log.Info("processed webseed configuration",
 		"webseedHttpProviders", webseedHttpProviders,
 		"webseedUrlsOrFiles", webseedUrlsOrFiles)
@@ -274,8 +285,10 @@ func New(
 		Dirs:              dirs,
 		ChainName:         chainName,
 		ClientConfig:      torrentConfig,
+		TorrentLogFile:    torrentLogFile,
 		MdbxWriteMap:      mdbxWriteMap,
 		VerifyTorrentData: opts.Verify,
+		LogPrefix:         "[Downloader] ",
 	}
 	for _, s := range webseedHttpProviders {
 		// WebSeed URLs must have a trailing slash if the implementation should append the file

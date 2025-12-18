@@ -45,7 +45,6 @@ import (
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/metrics"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -122,6 +121,10 @@ var (
 	OverrideOsakaFlag = flags.BigFlag{
 		Name:  "override.osaka",
 		Usage: "Manually specify the Osaka fork time, overriding the bundled setting",
+	}
+	OverrideBalancerFlag = flags.BigFlag{
+		Name:  "override.balancer",
+		Usage: "Manually specify the Balancer fork time, overriding the bundled setting",
 	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
@@ -1089,18 +1092,6 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
-
-	// ErigonDB geometry settings
-	ErigonDBStepSizeFlag = cli.Uint64Flag{
-		Name:  "erigondb.override.stepsize",
-		Usage: "Override the number of transactions per step; may lead to a corrupted database if used incorrectly",
-		Value: config3.DefaultStepSize,
-	}
-	ErigonDBStepsInFrozenFileFlag = cli.Uint64Flag{
-		Name:  "erigondb.override.stepsinfrozenfile",
-		Usage: "Override the number of steps in frozen snapshot files; may lead to a corrupted database if used incorrectly",
-		Value: config3.DefaultStepsInFrozenFile,
-	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1902,9 +1893,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
 
-	cfg.ErigonDBStepSize = ctx.Int(ErigonDBStepSizeFlag.Name)
-	cfg.ErigonDBStepsInFrozenFile = ctx.Int(ErigonDBStepsInFrozenFileFlag.Name)
-
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
 	}
@@ -1956,6 +1944,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
 		cfg.OverrideOsakaTime = flags.GlobalBig(ctx, OverrideOsakaFlag.Name)
+	}
+	if ctx.IsSet(OverrideBalancerFlag.Name) {
+		cfg.OverrideBalancerTime = flags.GlobalBig(ctx, OverrideBalancerFlag.Name)
 	}
 	cfg.KeepStoredChainConfig = ctx.Bool(KeepStoredChainConfigFlag.Name)
 
@@ -2093,6 +2084,12 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 				flags.Uint(f.Name, f.Value, f.Usage)
 			case *cli.StringFlag:
 				flags.String(f.Name, f.Value, f.Usage)
+			case *cli.StringSliceFlag:
+				var val []string
+				if f.Value != nil {
+					val = f.Value.Value()
+				}
+				flags.StringSlice(f.Name, val, f.Usage)
 			case *cli.BoolFlag:
 				flags.Bool(f.Name, false, f.Usage)
 			default:

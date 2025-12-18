@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/sha3"
@@ -385,10 +386,13 @@ func FinalizeBlockExecution(
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
-	engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
 		return ret, err
 	}, logger, tracer)
+	if err != nil {
+		return err
+	}
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
@@ -400,13 +404,13 @@ var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
 func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if gasUsed != h.GasUsed {
-		var txgas string
+		var txgas strings.Builder
 		sep := ""
 		for _, receipt := range receipts {
-			txgas += fmt.Sprintf("%s%d=%d", sep, receipt.TransactionIndex, receipt.GasUsed)
+			txgas.WriteString(fmt.Sprintf("%s%d=%d", sep, receipt.TransactionIndex, receipt.GasUsed))
 			sep = ", "
 		}
-		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", gasUsed, "txgas", txgas)
+		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", gasUsed, "txgas", txgas.String())
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
 	}

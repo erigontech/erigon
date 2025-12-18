@@ -121,13 +121,11 @@ func (a Announcements) DedupHashes() Hashes {
 	c := make(Hashes, unique*length.Hash)
 	copy(c[:], a.hashes[0:length.Hash])
 	dest := length.Hash
-	j := 1
 	origin := length.Hash
 	for i := 1; i < len(a.ts); i++ {
 		if !bytes.Equal(a.hashes[origin:origin+length.Hash], a.hashes[origin-length.Hash:origin]) {
 			copy(c[dest:dest+length.Hash], a.hashes[origin:origin+length.Hash])
 			dest += length.Hash
-			j++
 		}
 		origin += length.Hash
 	}

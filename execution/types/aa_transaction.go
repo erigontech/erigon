@@ -222,14 +222,9 @@ func (tx *AccountAbstractionTransaction) RawSignatureValues() (*uint256.Int, *ui
 }
 
 func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListLen, authorizationsLen int) {
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.ChainID)
-
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.NonceKey)
-
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
+	payloadSize += rlp.Uint256Len(*tx.ChainID)
+	payloadSize += rlp.Uint256Len(*tx.NonceKey)
+	payloadSize += rlp.U64Len(tx.Nonce)
 
 	payloadSize++
 	if !tx.SenderAddress.IsNil() {
@@ -251,29 +246,14 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	}
 
 	payloadSize += rlp.StringLen(tx.PaymasterData)
-
 	payloadSize += rlp.StringLen(tx.ExecutionData)
-
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.BuilderFee)
-
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.Tip)
-
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*tx.FeeCap)
-
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.ValidationGasLimit)
-
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.PaymasterValidationGasLimit)
-
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.PostOpGasLimit)
-
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.GasLimit)
+	payloadSize += rlp.Uint256Len(*tx.BuilderFee)
+	payloadSize += rlp.Uint256Len(*tx.Tip)
+	payloadSize += rlp.Uint256Len(*tx.FeeCap)
+	payloadSize += rlp.U64Len(tx.ValidationGasLimit)
+	payloadSize += rlp.U64Len(tx.PaymasterValidationGasLimit)
+	payloadSize += rlp.U64Len(tx.PostOpGasLimit)
+	payloadSize += rlp.U64Len(tx.GasLimit)
 
 	accessListLen = accessListSize(tx.AccessList)
 	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen

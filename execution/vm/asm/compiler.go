@@ -109,16 +109,16 @@ func (c *Compiler) Compile() (string, []error) {
 	}
 
 	// turn the binary to hex
-	var bin string
+	var bin strings.Builder
 	for _, v := range c.binary {
 		switch v := v.(type) {
 		case vm.OpCode:
-			bin += hex.EncodeToString([]byte{byte(v)})
+			bin.WriteString(hex.EncodeToString([]byte{byte(v)}))
 		case []byte:
-			bin += hex.EncodeToString(v)
+			bin.WriteString(hex.EncodeToString(v))
 		}
 	}
-	return bin, errors
+	return bin.String(), errors
 }
 
 // next returns the next token and increments the

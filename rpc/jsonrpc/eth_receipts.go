@@ -40,6 +40,18 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+var (
+	errInvalidBlockRange    = "invalid block range params"
+	errBlockRangeIntoFuture = "block range extends beyond current head block"
+	errBlockHashWithRange   = "can't specify fromBlock/toBlock with blockHash"
+	errExceedMaxTopics      = "exceed max topics"
+)
+
+const (
+	// The maximum number of topic criteria allowed, vm.LOG4 - vm.LOG0
+	maxTopics = 4
+)
+
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -77,7 +89,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 	defer tx.Rollback()
 
+	if len(crit.Topics) > maxTopics {
+		return nil, &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
+	}
+
 	if crit.BlockHash != nil {
+		if crit.FromBlock != nil || crit.ToBlock != nil {
+			return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
+		}
+
 		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return nil, err
@@ -110,7 +130,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 
 			if begin > latest {
-				return types.RPCLogs{}, nil
+				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 		end = latest
@@ -125,11 +145,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 					return nil, err
 				}
 			}
+
+			if end > latest {
+				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+			}
 		}
 	}
 
 	if end < begin {
-		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
+		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
@@ -140,6 +164,16 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			return nil, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
 		}
 		end = latest
+	}
+
+	// Check if the requested blocks have been executed.
+	// This prevents returning empty results when blocks exist but haven't been executed yet.
+	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	if begin > latestExecuted || end > latestExecuted {
+		return nil, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing)", begin, end, latestExecuted)
 	}
 
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit)

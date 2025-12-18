@@ -277,7 +277,7 @@ func prefixLenCountChart(fname string, data *overallStat) *charts.Pie {
 
 	pie := charts.NewPie()
 	pie.SetGlobalOptions(
-		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: opts.Bool(true)}),
 		charts.WithTitleOpts(opts.Title{Subtitle: filepath.Base(fname), Title: "key prefix length distribution (bytes)", Top: "25"}),
 	)
 
@@ -327,9 +327,9 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 	graph := charts.NewTreeMap()
 	graph.SetGlobalOptions(
 		charts.WithInitializationOpts(opts.Initialization{Theme: types.ThemeMacarons}),
-		charts.WithLegendOpts(opts.Legend{Show: false}),
+		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
 		charts.WithTooltipOpts(opts.Tooltip{
-			Show:      true,
+			Show:      opts.Bool(true),
 			Formatter: opts.FuncOpts(ToolTipFormatter),
 		}),
 	)
@@ -339,14 +339,14 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 		SetSeriesOptions(
 			charts.WithTreeMapOpts(
 				opts.TreeMapChart{
-					UpperLabel: &opts.UpperLabel{Show: true, Color: "#fff"},
+					UpperLabel: &opts.UpperLabel{Show: opts.Bool(true), Color: "#fff"},
 					Levels: &[]opts.TreeMapLevel{
 						{ // Series
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#777",
 								BorderWidth: 1,
 								GapWidth:    1},
-							UpperLabel: &opts.UpperLabel{Show: true},
+							UpperLabel: &opts.UpperLabel{Show: opts.Bool(true)},
 						},
 						{ // Level
 							ItemStyle: &opts.ItemStyle{
@@ -369,7 +369,7 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 				},
 			),
 			charts.WithItemStyleOpts(opts.ItemStyle{BorderColor: "#fff"}),
-			charts.WithLabelOpts(opts.Label{Show: true, Position: "inside", Color: "White"}),
+			charts.WithLabelOpts(opts.Label{Show: opts.Bool(true), Position: "inside", Color: "White"}),
 		)
 	return graph
 }
@@ -409,8 +409,8 @@ function (info) {
 func countersChart(fname string, data *overallStat) *charts.Sankey {
 	sankey := charts.NewSankey()
 	sankey.SetGlobalOptions(
-		charts.WithLegendOpts(opts.Legend{Show: true}),
-		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
+		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: opts.Bool(true)}),
 	)
 
 	nodes := []opts.SankeyNode{
@@ -436,7 +436,7 @@ func countersChart(fname string, data *overallStat) *charts.Sankey {
 				Curveness: 0.5,
 			}),
 			charts.WithLabelOpts(opts.Label{
-				Show: true,
+				Show: opts.Bool(true),
 			}),
 		)
 	return sankey
@@ -445,8 +445,8 @@ func countersChart(fname string, data *overallStat) *charts.Sankey {
 func mediansChart(fname string, data *overallStat) *charts.Sankey {
 	sankey := charts.NewSankey()
 	sankey.SetGlobalOptions(
-		charts.WithLegendOpts(opts.Legend{Show: true}),
-		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
+		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: opts.Bool(true)}),
 	)
 
 	nodes := []opts.SankeyNode{
@@ -472,7 +472,7 @@ func mediansChart(fname string, data *overallStat) *charts.Sankey {
 				Curveness: 0.5,
 			}),
 			charts.WithLabelOpts(opts.Label{
-				Show: true,
+				Show: opts.Bool(true),
 			}),
 		)
 	return sankey

@@ -711,15 +711,23 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	for index := range segments {
 		segment := segments[index]
 		// The same slot=>offset mapping is used for both beacon blocks and blob sidecars.
-		if segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
+		if segment.Type != nil && segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
 			continue
 		}
-		if segment.Type.HasIndexFiles(segment, logger) {
+		if segment.CaplinTypeString == "" {
 			continue
 		}
+
+		indexFile := filepath.Join(segment.Dir(), snaptype.IdxFileName(segment.Version, segment.From, segment.To, segment.CaplinTypeString))
+		if _, err := os.Stat(indexFile); err == nil {
+			continue
+		}
+		logger.Info("building index file", "seg", segment.Name())
+
 		p := &background.Progress{}
 		noneDone = false
-		if err := BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
+
+		if err := simpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
 			return err
 		}
 	}

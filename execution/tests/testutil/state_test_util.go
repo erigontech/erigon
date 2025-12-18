@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -106,6 +105,7 @@ type stTransaction struct {
 	Data                 []string                  `json:"data"`
 	Value                []string                  `json:"value"`
 	AccessLists          []*types.AccessList       `json:"accessLists,omitempty"`
+	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
 	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
 }
@@ -196,7 +196,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := genesiswrite.GenesisToBlock(tb, t.genesis(config), dirs, log.Root())
+	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
@@ -233,16 +233,6 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	msg, err := toMessage(t.Json.Tx, post, baseFee)
 	if err != nil {
 		return nil, common.Hash{}, 0, err
-	}
-	if len(post.Tx) != 0 {
-		txn, err := types.UnmarshalTransactionFromBinary(post.Tx, false /* blobTxnsAreWrappedWithBlobs */)
-		if err != nil {
-			return nil, common.Hash{}, 0, err
-		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, (&evmtypes.BlockContext{}).Rules(config))
-		if err != nil {
-			return nil, common.Hash{}, 0, err
-		}
 	}
 
 	// Prepare the EVM.
@@ -504,6 +494,11 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (protocol.Mes
 			}
 		}
 		msg.SetAuthorizations(authorizations)
+	}
+
+	// Add blob versioned hashes if present.
+	if len(tx.BlobVersionedHashes) > 0 {
+		msg.SetBlobVersionedHashes(tx.BlobVersionedHashes)
 	}
 
 	return msg, nil

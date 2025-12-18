@@ -185,6 +185,10 @@ func (v Versions) String() string {
 	return v.Current.String()
 }
 
+func (v Versions) Supports(ver Version) bool {
+	return ver.GreaterOrEqual(v.MinSupported) && ver.LessOrEqual(v.Current)
+}
+
 // FindFilesWithVersionsByPattern return an filepath by pattern
 func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, error) {
 	matches, err := filepath.Glob(pattern)
