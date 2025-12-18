@@ -661,9 +661,9 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	return hi.k, hi.v, nil
 }
 
-//// for KeyTrace
+//// for TraceKey
 
-type HistoryKeyTraceFiles struct {
+type HistoryTraceKeyFiles struct {
 	hc *HistoryRoTx
 
 	fromTxNum, toTxNum uint64
@@ -681,7 +681,7 @@ type HistoryKeyTraceFiles struct {
 	histReader        *seg.PagedReader
 }
 
-func (ht *HistoryKeyTraceFiles) init() error {
+func (ht *HistoryTraceKeyFiles) init() error {
 	ht.efbuf = make([]byte, 256)
 	ht.v = make([]byte, 256)
 	ht.histKey = make([]byte, 0, len(ht.key)+8)
@@ -689,7 +689,7 @@ func (ht *HistoryKeyTraceFiles) init() error {
 	return ht.advance()
 }
 
-func (ht *HistoryKeyTraceFiles) Close() {
+func (ht *HistoryTraceKeyFiles) Close() {
 	if ht.seqItr != nil {
 		ht.seqItr.Close()
 	}
@@ -697,11 +697,11 @@ func (ht *HistoryKeyTraceFiles) Close() {
 	ht.histReader = nil
 }
 
-func (ht *HistoryKeyTraceFiles) HasNext() bool {
+func (ht *HistoryTraceKeyFiles) HasNext() bool {
 	return ht.hasNext
 }
 
-func (ht *HistoryKeyTraceFiles) advance() error {
+func (ht *HistoryTraceKeyFiles) advance() error {
 	if !ht.hasNext {
 		return nil
 	}
@@ -749,7 +749,7 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 
 		txNum, err := ht.seqItr.Next()
 		if err != nil {
-			return fmt.Errorf("HistoryKeyTraceFiles.Next: seqItr.Next() error: %w", err)
+			return fmt.Errorf("HistoryTraceKeyFiles.Next: seqItr.Next() error: %w", err)
 		}
 
 		if txNum >= ht.toTxNum {
@@ -771,7 +771,7 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 			offset, ok := idxReader.Lookup(ht.histKey)
 			if !ok {
 				// shouldn't since key/txNum in ef
-				return fmt.Errorf("HistoryKeyTraceFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+				return fmt.Errorf("HistoryTraceKeyFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 			}
 
 			ht.histReader.Reset(offset)
@@ -786,14 +786,14 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 		}
 
 		// shouldn't happen as key/txNum in ef
-		return fmt.Errorf("HistoryKeyTraceFiles.Next: no history value found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+		return fmt.Errorf("HistoryTraceKeyFiles.Next: no history value found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 	}
 
 	ht.hasNext = false
 	return nil
 }
 
-func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
+func (ht *HistoryTraceKeyFiles) Next() (uint64, []byte, error) {
 	select {
 	case <-ht.ctx.Done():
 		return 0, nil, ht.ctx.Err()
@@ -804,7 +804,7 @@ func (ht *HistoryKeyTraceFiles) Next() (uint64, []byte, error) {
 	return ht.txNum, ht.v, nil
 }
 
-type HistoryKeyTraceDB struct {
+type HistoryTraceKeyDB struct {
 	largeValues bool
 	roTx        kv.Tx
 	valsTable   string
@@ -822,11 +822,11 @@ type HistoryKeyTraceDB struct {
 	valsCDup              kv.CursorDupSort
 }
 
-func (ht *HistoryKeyTraceDB) init() error {
+func (ht *HistoryTraceKeyDB) init() error {
 	return ht.advance()
 }
 
-func (ht *HistoryKeyTraceDB) Close() {
+func (ht *HistoryTraceKeyDB) Close() {
 	if ht.valsC != nil {
 		ht.valsC.Close()
 		ht.valsC = nil
@@ -838,11 +838,11 @@ func (ht *HistoryKeyTraceDB) Close() {
 	}
 }
 
-func (ht *HistoryKeyTraceDB) HasNext() bool {
+func (ht *HistoryTraceKeyDB) HasNext() bool {
 	return ht.k != nil
 }
 
-func (ht *HistoryKeyTraceDB) Next() (uint64, []byte, error) {
+func (ht *HistoryTraceKeyDB) Next() (uint64, []byte, error) {
 	select {
 	case <-ht.ctx.Done():
 		return 0, nil, ht.ctx.Err()
@@ -855,14 +855,14 @@ func (ht *HistoryKeyTraceDB) Next() (uint64, []byte, error) {
 	return txNum, v, nil
 }
 
-func (ht *HistoryKeyTraceDB) advance() error {
+func (ht *HistoryTraceKeyDB) advance() error {
 	if ht.largeValues {
 		return ht.advanceLargeVals()
 	}
 	return ht.advanceSmallVals()
 }
 
-func (ht *HistoryKeyTraceDB) advanceSmallVals() error {
+func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 	var err error
 	if ht.valsCDup == nil {
 		if ht.valsCDup, err = ht.roTx.CursorDupSort(ht.valsTable); err != nil {
@@ -904,7 +904,7 @@ func (ht *HistoryKeyTraceDB) advanceSmallVals() error {
 	return nil
 }
 
-func (ht *HistoryKeyTraceDB) advanceLargeVals() error {
+func (ht *HistoryTraceKeyDB) advanceLargeVals() error {
 	var err error
 	if ht.valsC == nil {
 		if ht.valsC, err = ht.roTx.Cursor(ht.valsTable); err != nil {

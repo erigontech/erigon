@@ -2525,15 +2525,15 @@ func TestCanBuild(t *testing.T) {
 	_ = writer.PutWithPrev(k, hexutil.EncodeTs(d.stepSize*2+1), d.stepSize*2, nil, 0)
 }
 
-func TestKeyTrace_SmallVals(t *testing.T) {
-	testKeyTrace(t, false)
+func TestTraceKey_SmallVals(t *testing.T) {
+	testTraceKey(t, false)
 }
 
-func TestKeyTrace_LargeVals(t *testing.T) {
-	testKeyTrace(t, true)
+func TestTraceKey_LargeVals(t *testing.T) {
+	testTraceKey(t, true)
 }
 
-func testKeyTrace(t *testing.T, largeVals bool) {
+func testTraceKey(t *testing.T, largeVals bool) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -2568,7 +2568,7 @@ func testKeyTrace(t *testing.T, largeVals bool) {
 
 	//from, to := uint64(10), uint64(21)
 	t.Logf("from: %d, to: %d", from, to)
-	it, err := dc.KeyTrace(ctx, keyBytes, from, to, roTx)
+	it, err := dc.TraceKey(ctx, keyBytes, from, to, roTx)
 	require.NoError(t, err)
 	defer it.Close()
 
