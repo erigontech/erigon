@@ -360,10 +360,9 @@ func TestHistoryAfterPrune(t *testing.T) {
 			cur, err = tx.Cursor(table)
 			require.NoError(err)
 			defer cur.Close()
-			var k []byte
-			k, _, err = cur.First()
+			k, v, err := cur.First()
 			require.NoError(err)
-			require.Nilf(k, "table=%s", table)
+			require.Nilf(k, "table=%s, k=%s, v=%s", table, k, v)
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
