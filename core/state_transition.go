@@ -528,6 +528,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// 5. there is no overflow when calculating intrinsic gas
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
+	fmt.Printf("available gas before preCheck: %d\n", st.gasRemaining)
+
 	// Arbitrum: drop tip for delayed (and old) messages
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
 		mmsg := st.msg.(*types.Message)
@@ -580,12 +582,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	//} else {
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
 	gas2, floorGas76232, overflow2 := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
-	fmt.Printf("Mg %d, fg7623 %d, ovf %v\n", multiGas.SingleGas(), floorGas7623, overflow)
-	fmt.Printf("g %d, fg7623 %d, ovf %v\n", gas2, floorGas76232, overflow2)
 	if multiGas.SingleGas() != gas2 || floorGas7623 != floorGas76232 || overflow != overflow2 {
+		fmt.Printf("Mg %d, fg7623 %d, ovf %v\n", multiGas.SingleGas(), floorGas7623, overflow)
+		fmt.Printf("g %d, fg7623 %d, ovf %v\n", gas2, floorGas76232, overflow2)
 		panic("intrinsic gas mismatch between multigas and fixedgas")
 	}
 	//}
+
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -609,6 +612,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		fmt.Printf("Checking floor data gas at tx with msg gas limit %d and floorDataGas %d\n", msg.Gas(), floorDataGas)
 		if msg.Gas() < floorDataGas {
 			return nil, fmt.Errorf("%w: have %d, want %d", errors.New("floor data gas bigger than gasLimit"), msg.Gas(), floorDataGas)
+		}
+		if floorDataGas != floorGas7623 {
+			fmt.Errorf("fdg %d - intrinsic gas %d", floorDataGas, floorGas7623)
 		}
 	}
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
@@ -702,14 +708,16 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
 				// After EIP-7623: Data-heavy transactions pay the floor gas.
 				if st.gasUsed() < floorGas7623 {
+					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
 					prev := st.gasRemaining
 					st.gasRemaining = st.initialGas - floorGas7623
-					spent := prev - st.gasRemaining
-					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, spent) //floorGas7623-usedMultiGas.SingleGas())
 					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 						t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
 					}
 				}
+				//if peakGasUsed < floorGas7623 {
+				//	peakGasUsed = floorGas7623
+				//}// todo
 			}
 
 		} else { // Other networks
@@ -725,6 +733,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 		st.refundGas()
 	} else if rules.IsPrague {
+		fmt.Println("i was not supposed to be in non-arbitrum prague")
 		floorOrUsed := max(floorGas7623, st.gasUsed())
 		if st.initialGas < floorOrUsed {
 			panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (Prague floor): initialGas=%d, floorOrUsed=%d", st.initialGas, floorOrUsed))
