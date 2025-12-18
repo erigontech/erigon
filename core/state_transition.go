@@ -26,7 +26,6 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon/arb/multigas"
-	"github.com/erigontech/erigon/arb/osver"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/holiman/uint256"
 
@@ -235,9 +234,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			}
 
 			isCancun := st.evm.ChainRules().IsCancun
-			if st.evm.ChainRules().IsArbitrum {
-				isCancun = isCancun && st.evm.Context.ArbOSVersion >= osver.ArbosVersion_20
-			}
+			//if st.evm.ChainRules().IsArbitrum {
+			//	isCancun = isCancun && st.evm.Context.ArbOSVersion >= osver.ArbosVersion_20
+			//}
 			if isCancun {
 				maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
 				if overflow {
@@ -278,6 +277,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		panic(fmt.Sprintf("gasRemaining overflow in buyGas: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas()))
 	}
 
+	//fmt.Printf("buyGas: adding gas %d from %x\n", st.msg.Gas(), st.msg.From())
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	st.evm.BlobFee = blobGasVal
@@ -386,8 +386,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	// }
 	// EIP-7825: Transaction Gas Limit Cap
 	// TODO should skip for arbitrum?
-	if /*!st.evm.ChainRules().IsArbitrum &&*/
-	st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	if !st.evm.ChainRules().IsArbitrum &&
+		st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
 	}
 
@@ -532,12 +532,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
 		mmsg := st.msg.(*types.Message)
 		mmsg.SetGasPrice(st.evm.Context.BaseFee)
-		// mmsg.SetFeeCap(common.Num0)
 		mmsg.SetTip(common.Num0)
 		mmsg.TxRunContext = types.NewMessageCommitContext(nil)
 
 		st.gasPrice = st.evm.Context.BaseFee
-		// st.feeCap = common.Num0
 		st.tipCap = common.Num0
 		st.msg = mmsg
 	}
@@ -570,23 +568,28 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	var floorGas7623 uint64
 	var overflow bool
 	var usedMultiGas = multigas.ZeroGas()
+	var multiGas multigas.MultiGas
 
 	// TODO only for arbos50?
-	if st.evm.ProcessingHook.IsArbitrum() {
-		var multiGas multigas.MultiGas
-		multiGas, floorGas7623, overflow = multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
-		gas = multiGas.SingleGas()
-		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
-	} else {
-		// Check clauses 4-5, subtract intrinsic gas if everything is correct
-		gas, floorGas7623, overflow = fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
-	}
+	//if st.evm.ProcessingHook.IsArbitrum() {
+	multiGas, floorGas7623, overflow = multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	//usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
+	gas = multiGas.SingleGas()
+	//} else {
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
+	gas2, floorGas76232, overflow2 := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	if multiGas.SingleGas() != gas2 || floorGas7623 != floorGas76232 || overflow != overflow2 {
+		fmt.Printf("Mg %d, fg7623 %d, ovf %v\n", multiGas.SingleGas(), floorGas7623, overflow)
+		fmt.Printf("g %d, fg7623 %d, ovf %v\n", gas2, floorGas76232, overflow2)
+		panic("intrinsic gas mismatch between multigas and fixedgas")
+	}
+	//}
+
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	// TODO check on !arb looks scary, review back
-	if st.gasRemaining < gas || (!rules.IsArbitrum && st.gasRemaining < floorGas7623) {
+	if !rules.IsArbitrum && (st.gasRemaining < gas || st.gasRemaining < floorGas7623) {
+		fmt.Printf("st.gasRemaining %d, gas %d, floorGas7623 %d\n", st.gasRemaining, gas, floorGas7623)
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
 	}
 
@@ -602,8 +605,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("Checking floor data gas at tx with msg gas limit %d and floorDataGas %d\n", msg.Gas(), floorDataGas)
 		if msg.Gas() < floorDataGas {
 			return nil, fmt.Errorf("%w: have %d, want %d", errors.New("floor data gas bigger than gasLimit"), msg.Gas(), floorDataGas)
+		}
+		if floorDataGas != floorGas7623 {
+			fmt.Errorf("fdg %d - intrinsic gas %d", floorDataGas, floorGas7623)
 		}
 	}
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
@@ -614,10 +621,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (intrinsic gas): gasRemaining=%d, gas=%d", st.gasRemaining, gas))
 	}
 	st.gasRemaining -= gas
+	usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 
-	//usedMultiGas := multigas.ZeroGas()
-	//usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
-	// TODO arbitrum
 	tipReceipient, multiGas, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining, gas)
 	if err != nil {
 		return nil, err
@@ -680,8 +685,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			// Refund the gas that was held to limit the amount of computation done.
 			//st.gasRemaining += st.calcHeldGasRefund() // affects .gasUsed()
 			frg := st.evm.ProcessingHook.ForceRefundGas()
-			fmt.Printf("[%d] gas used %d force refund gas: %d, remains %d\n",
-				st.evm.Context.BlockNumber, st.gasUsed(), frg, st.gasRemaining)
+			//fmt.Printf("[%d] gas used %d force refund gas: %d, remains %d\n",
+			//	st.evm.Context.BlockNumber, st.gasUsed(), frg, st.gasRemaining)
 			st.gasRemaining += frg
 
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
@@ -699,14 +704,16 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
 				// After EIP-7623: Data-heavy transactions pay the floor gas.
 				if st.gasUsed() < floorGas7623 {
+					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
 					prev := st.gasRemaining
 					st.gasRemaining = st.initialGas - floorGas7623
-					spent := prev - st.gasRemaining
-					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, spent) //floorGas7623-usedMultiGas.SingleGas())
 					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 						t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
 					}
 				}
+				//if peakGasUsed < floorGas7623 {
+				//	peakGasUsed = floorGas7623
+				//}// todo
 			}
 
 		} else { // Other networks
@@ -722,11 +729,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 		st.refundGas()
 	} else if rules.IsPrague {
-		floorOrUsed := max(floorGas7623, st.gasUsed())
-		if st.initialGas < floorOrUsed {
-			panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (Prague floor): initialGas=%d, floorOrUsed=%d", st.initialGas, floorOrUsed))
-		}
-		st.gasRemaining = st.initialGas - floorOrUsed
+		fmt.Println("i was not supposed to be in non-arbitrum prague")
+		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
 
 	effectiveTip := st.gasPrice
