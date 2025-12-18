@@ -570,17 +570,22 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	var floorGas7623 uint64
 	var overflow bool
 	var usedMultiGas = multigas.ZeroGas()
+	var multiGas multigas.MultiGas
 
 	// TODO only for arbos50?
-	if st.evm.ProcessingHook.IsArbitrum() {
-		var multiGas multigas.MultiGas
-		multiGas, floorGas7623, overflow = multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
-		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
-		gas = multiGas.SingleGas()
-	} else {
-		// Check clauses 4-5, subtract intrinsic gas if everything is correct
-		gas, floorGas7623, overflow = fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	//if st.evm.ProcessingHook.IsArbitrum() {
+	multiGas, floorGas7623, overflow = multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	//usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
+	gas = multiGas.SingleGas()
+	//} else {
+	// Check clauses 4-5, subtract intrinsic gas if everything is correct
+	gas2, floorGas76232, overflow2 := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	if multiGas.SingleGas() != gas2 || floorGas7623 != floorGas76232 || overflow != overflow2 {
+		fmt.Printf("Mg %d, fg7623 %d, ovf %v\n", multiGas.SingleGas(), floorGas7623, overflow)
+		fmt.Printf("g %d, fg7623 %d, ovf %v\n", gas2, floorGas76232, overflow2)
+		panic("intrinsic gas mismatch between multigas and fixedgas")
 	}
+	//}
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -614,8 +619,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (intrinsic gas): gasRemaining=%d, gas=%d", st.gasRemaining, gas))
 	}
 	st.gasRemaining -= gas
+	usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 
-	//usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	tipReceipient, multiGas, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining, gas)
 	if err != nil {
 		return nil, err
