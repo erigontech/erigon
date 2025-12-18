@@ -1070,7 +1070,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	iit.ii.logger.Info("ii pruning res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "pruned", stat.PruneCountTx, "dups", stat.DupsDeleted, "spent ms", time.Since(start).Milliseconds())
+	iit.ii.logger.Info("ii pruning res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "dups", stat.DupsDeleted, "spent ms", time.Since(start).Milliseconds())
 
 	return stat, err
 }
