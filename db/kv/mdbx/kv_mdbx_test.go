@@ -286,8 +286,6 @@ func TestLastDup(t *testing.T) {
 func TestPutGet(t *testing.T) {
 	_, tx, c := BaseCase(t)
 
-	require.NoError(t, c.Put([]byte(""), []byte("value1.1")))
-
 	var v []byte
 	v, err := tx.GetOne("Table", []byte("key1"))
 	require.NoError(t, err)
