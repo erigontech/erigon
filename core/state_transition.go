@@ -580,9 +580,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	//} else {
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
 	gas2, floorGas76232, overflow2 := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	fmt.Printf("Mg %d, fg7623 %d, ovf %v\n", multiGas.SingleGas(), floorGas7623, overflow)
+	fmt.Printf("g %d, fg7623 %d, ovf %v\n", gas2, floorGas76232, overflow2)
 	if multiGas.SingleGas() != gas2 || floorGas7623 != floorGas76232 || overflow != overflow2 {
-		fmt.Printf("Mg %d, fg7623 %d, ovf %v\n", multiGas.SingleGas(), floorGas7623, overflow)
-		fmt.Printf("g %d, fg7623 %d, ovf %v\n", gas2, floorGas76232, overflow2)
 		panic("intrinsic gas mismatch between multigas and fixedgas")
 	}
 	//}
