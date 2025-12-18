@@ -220,9 +220,7 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 			return fmt.Errorf("different result (Erigon) returns OK, while G/OE returns error code=%d message=%s", errValg.GetInt("code"), errValg.GetStringBytes("message"))
 		}
 	} else {
-		s1 := strings.ToUpper(string(errVal.GetStringBytes("message")))
-		s2 := strings.ToUpper(string(errValg.GetStringBytes("message")))
-		if strings.Compare(s1, s2) != 0 {
+		if !strings.EqualFold(string(errVal.GetStringBytes("message")), string(errValg.GetStringBytes("message"))) {
 			if errs != nil {
 				fmt.Printf("different error-message for method %s, errCtx: %s\n", methodName, errCtx)
 				fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
