@@ -1617,6 +1617,10 @@ func (s *Ethereum) Stop() error {
 		s.logger.Error("background component error", "err", err)
 	}
 
+	if s.config.Downloader != nil {
+		_ = s.config.Downloader.CloseTorrentLogFile()
+	}
+
 	return nil
 }
 
