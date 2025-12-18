@@ -65,9 +65,9 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	accountB := bal[1]
 
-	// Storage reads should be sorted and deduplicated.
-	if len(accountB.StorageReads) != 2 || accountB.StorageReads[0] != slot1 || accountB.StorageReads[1] != slot2 {
-		t.Fatalf("unexpected storage reads ordering: %+v", accountB.StorageReads)
+	// Storage reads are only recorded for slots without writes.
+	if len(accountB.StorageReads) != 0 {
+		t.Fatalf("unexpected storage reads: %+v", accountB.StorageReads)
 	}
 
 	// Storage slots should be sorted lexicographically.
