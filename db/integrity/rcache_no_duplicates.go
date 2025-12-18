@@ -3,6 +3,7 @@ package integrity
 import (
 	"context"
 	"fmt"
+	"math"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -43,21 +44,26 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
 
-	if fromBlock > 0 {
-		fromBlock = 20_000_000
-		toBlock = 20_000_002
-	}
+	// if fromBlock > 0 {
+	// 	fromBlock = 0
+	// 	toBlock = 1
+	// 	// fromBlock = 10075000
+	// 	// toBlock = 10075002
+	// }
 
-	for i := 2430214143; i <= 2430214145; i++ {
-		receipt, ok2, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			TxNum: uint64(i),
-		})
-		if receipt != nil {
-			fmt.Println("debug receipt:", i, receipt.FirstLogIndexWithinBlock, err, ok2)
-		} else {
-			fmt.Println("debug receipt:", i, receipt, err, ok2)
-		}
-	}
+	// for i := 727505610; i <= 727505615; i++ {
+	// 	receipt, ok2, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+	// 		TxNum: uint64(i),
+	// 	})
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	if receipt != nil {
+	// 		fmt.Println("debug receipt:", i, receipt.FirstLogIndexWithinBlock, err, ok2)
+	// 	} else {
+	// 		fmt.Println("debug receipt:", i, receipt, err, ok2)
+	// 	}
+	// }
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)
 }
 
@@ -94,17 +100,31 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 		if err != nil {
 			return err
 		}
-		fmt.Println("wuiiii0", txNum)
+		//fmt.Println("wuiiii0", txNum)
 
 		if r == nil {
 			continue
 		}
 
-		fmt.Println("wuiiii", txNum, r.FirstLogIndexWithinBlock)
+		if txNum == math.MaxUint64 {
+			// latest rcache..skip
+			break
+		}
+		for txNum > _max {
+			blockNum++
+			_min = _max + 1
+			_max, _ = txNumsReader.Max(tx, blockNum)
+			expectedFirstLogIdx = 0
+			prevCumUsedGas = -1
+		}
+
+		// if txNum%10000000 == 0 {
+		// 	fmt.Println("wuiiii", txNum, r.FirstLogIndexWithinBlock, r.CumulativeGasUsed, len(r.Logs), r.TransactionIndex)
+		// }
 
 		logIdx := r.FirstLogIndexWithinBlock
 		exactLogIdx := logIdx == expectedFirstLogIdx
-		if !exactLogIdx && txNum < _max {
+		if !exactLogIdx && txNum <= _max {
 			err := fmt.Errorf("RCacheNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, expectedFirstLogIdx=%d", txNum, blockNum, _min, _max, logIdx, expectedFirstLogIdx)
 			if failFast {
 				return err
@@ -115,7 +135,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 
 		cumUsedGas := r.CumulativeGasUsed
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
-		if !strongMonotonicCumGasUsed && txNum < _max { // system tx can be skipped
+		if !strongMonotonicCumGasUsed && txNum <= _max { // system tx can be skipped
 			err := fmt.Errorf("RCacheNoDups: non-monotonic cumUsedGas at txnum: %d, block: %d(%d-%d), cumUsedGas=%d, prevCumUsedGas=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
 			if failFast {
 				return err
@@ -123,14 +143,6 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 			log.Error(err.Error())
 		}
 		prevCumUsedGas = int(cumUsedGas)
-
-		for txNum >= _max {
-			blockNum++
-			_min = _max + 1
-			_max, _ = txNumsReader.Max(tx, blockNum)
-			expectedFirstLogIdx = 0
-			prevCumUsedGas = -1
-		}
 
 		if txNum%1000 == 0 {
 			select {

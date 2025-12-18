@@ -138,7 +138,8 @@ func (g *PagedReader) Reset(offset uint64) {
 		g.file.Reset(offset)
 		return
 	}
-	if g.currentPageOffset == offset { // don't reset internal state in this case: likely user just iterating over all values
+	if g.currentPageOffset == offset {
+		// don't reset internal state in this case: likely user just iterating over all values
 		return
 	}
 

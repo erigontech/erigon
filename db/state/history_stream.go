@@ -661,7 +661,7 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	return hi.k, hi.v, nil
 }
 
-////
+//// for KeyTrace
 
 type HistoryKeyTraceFiles struct {
 	hc *HistoryRoTx
@@ -756,16 +756,19 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 			moveToNextFileFn()
 			continue
 		}
+		ht.histKey = ht.hc.encodeTs(txNum, ht.key)
+		ht.txNum = txNum
 
 		if ht.histReader == nil {
 			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)
+			getter := ht.hc.statelessGetter(ht.fileIdx)
+			getter.Reset(0)
 			ht.histReader = seg.NewPagedReader(
-				ht.hc.statelessGetter(ht.fileIdx),
+				getter,
 				ht.hc.h.HistoryValuesOnCompressedPage,
 				true,
 			)
-			ht.histKey = ht.hc.encodeTs(txNum, ht.key)
-			offset, ok := idxReader.TwoLayerLookup(ht.histKey)
+			offset, ok := idxReader.Lookup(ht.histKey)
 			if !ok {
 				// shouldn't since key/txNum in ef
 				return fmt.Errorf("HistoryKeyTraceFiles.Next: no history offset found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
@@ -774,15 +777,16 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 			ht.histReader.Reset(offset)
 		}
 
-		if !ht.histReader.HasNext() {
-			// shouldn't happen since key/txNum in ef
-			return fmt.Errorf("HistoryKeyTraceFiles.Next: no history value found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
+		for ht.histReader.HasNext() {
+			k, v, _, _ := ht.histReader.Next2(nil)
+			if bytes.Equal(k, ht.histKey) {
+				ht.v = bytes.Clone(v)
+				return nil
+			}
 		}
 
-		ht.txNum = txNum
-		v, _ := ht.histReader.Next(nil)
-		ht.v = common.Copy(v)
-		return nil
+		// shouldn't happen as key/txNum in ef
+		return fmt.Errorf("HistoryKeyTraceFiles.Next: no history value found for key %s at txNum %d in file %s", hexutil.Encode(ht.key), txNum, item.src.decompressor.FileName())
 	}
 
 	ht.hasNext = false
