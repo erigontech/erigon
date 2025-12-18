@@ -925,7 +925,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 
 	ii := iit.ii
-	ii.logger.Info("ii pruning", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit)
 
 	//defer func() {
 	//	ii.logger.Error("[snapshots] prune index",
@@ -1071,7 +1070,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	iit.ii.logger.Info("ii pruning res", "name", iit.name, "pruned", stat.PruneCountTx)
+	iit.ii.logger.Info("ii pruning res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "pruned", stat.PruneCountTx)
 
 	return stat, err
 }
