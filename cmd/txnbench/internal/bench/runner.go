@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 	"math"
 	"os"
 	"time"
 
+	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 	"github.com/pelletier/go-toml/v2"
 )
 

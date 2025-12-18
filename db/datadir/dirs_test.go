@@ -1,12 +1,12 @@
 package datadir
 
 import (
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/stretchr/testify/require"
 )
 

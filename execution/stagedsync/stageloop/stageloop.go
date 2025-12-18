@@ -144,7 +144,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 	initialCycle, firstCycle := true, false
 
-	tx, err := db.BeginTemporalRw(ctx)  //nolint
+	tx, err := db.BeginTemporalRw(ctx) //nolint
 	if err != nil {
 		return err
 	}

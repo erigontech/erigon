@@ -23,14 +23,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
 	"io"
 	"math"
 	"math/bits"
 	"os"
 	"path/filepath"
-
-	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
@@ -40,6 +37,8 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/version"
+	"github.com/spaolacci/murmur3"
 )
 
 var ErrCollision = errors.New("duplicate key")
