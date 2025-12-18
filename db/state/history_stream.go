@@ -879,7 +879,7 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 			return nil
 		}
 		ht.k = ht.key
-		ht.v, err = ht.valsCDup.SeekBothRange(ht.key, ht.startTxNumBytes[:])
+		ht.v, err = ht.valsCDup.SeekBothRange(ht.key, ht.startTxNumBytes)
 		if err != nil {
 			return err
 		}
@@ -912,7 +912,7 @@ func (ht *HistoryTraceKeyDB) advanceLargeVals() error {
 		}
 		startTxNumBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(startTxNumBytes, ht.fromTxNum)
-		seek := append([]byte{}, append(ht.key, startTxNumBytes[:]...)...)
+		seek := append([]byte{}, append(ht.key, startTxNumBytes...)...)
 		firstKey, v, err := ht.valsC.Seek(seek)
 		if err != nil {
 			return err
