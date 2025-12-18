@@ -83,7 +83,7 @@ Flags for managing how old chain data is handled and stored.
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
 * `--prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables faster `eth_getProof` for executed blocks.
-    * Default: `false`&#x20;
+  * Default: `false`&#x20;
 * `--prune.include-commitment-history` : (experimental) Enables the storage of commitment history. When enabled, it
   allows for blazing fast retrieval of Merkle proofs for executed blocks using the `eth_getProof` JSON-RPC method.
   * Default: `false`

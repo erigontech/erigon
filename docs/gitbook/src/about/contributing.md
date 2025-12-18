@@ -14,9 +14,9 @@ To contribute to the Erigon Docs, you can either:
     1. Install MdBook;
     2. Create a new branch in GitHub;
    3. To render the documentation locally, navigate in your terminal to the `/docs/gitbook` folder and run
-       `mdbook serve`.
+      `mdbook serve`.
    4. Edit and preview your changes locally. Only modify content in Markdown format. Ensure all updates are verified in
-       the local render.
+      the local render.
    5. Submit a pull request (PR) on GitHub.
 
 {% embed url="https://github.com/erigontech/erigon" %}
