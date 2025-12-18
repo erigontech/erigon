@@ -1259,32 +1259,6 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 	return nil
 }
 
-// ForEachHashedKey iterates over hashed keys without consuming the updates.
-// This is useful for collecting prefixes for branch warmup.
-// Only supported for ModeUpdate mode.
-func (t *Updates) ForEachHashedKey(ctx context.Context, fn func(hashedKey []byte) error) error {
-	if t.mode != ModeUpdate {
-		return nil // Not supported for ModeDirect
-	}
-
-	var iterErr error
-	t.tree.Ascend(func(item *KeyUpdate) bool {
-		select {
-		case <-ctx.Done():
-			iterErr = ctx.Err()
-			return false
-		default:
-		}
-
-		if err := fn(item.hashedKey); err != nil {
-			iterErr = err
-			return false
-		}
-		return true
-	})
-	return iterErr
-}
-
 // keyPair holds a hashed key and plain key pair for prefetch processing
 type keyPair struct {
 	hashedKey []byte

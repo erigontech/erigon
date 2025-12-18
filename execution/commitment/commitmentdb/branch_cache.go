@@ -53,36 +53,6 @@ func WarmupBranches(ctx context.Context, prefixes [][]byte, numWorkers int, ctxF
 	return g.Wait()
 }
 
-// CollectBranchPrefixes extracts all unique prefixes from hashed keys up to maxDepth.
-// These prefixes are converted to compact bytes format used by Branch().
-// Uses ForEachHashedKey which is non-destructive (only works for ModeUpdate mode).
-func CollectBranchPrefixes(ctx context.Context, updates *commitment.Updates, maxDepth int) ([][]byte, error) {
-	seen := make(map[string]struct{})
-	var prefixes [][]byte
-
-	err := updates.ForEachHashedKey(ctx, func(hashedKey []byte) error {
-		// Add all prefixes of this hashed key up to maxDepth
-		for depth := 0; depth <= maxDepth && depth <= len(hashedKey); depth++ {
-			prefix := hashedKey[:depth]
-			compactPrefix := commitment.HexNibblesToCompactBytes(prefix)
-			key := string(compactPrefix)
-			if _, exists := seen[key]; !exists {
-				seen[key] = struct{}{}
-				// Make a copy since compactPrefix might be reused
-				prefixCopy := make([]byte, len(compactPrefix))
-				copy(prefixCopy, compactPrefix)
-				prefixes = append(prefixes, prefixCopy)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return prefixes, nil
-}
-
 // CollectBranchPrefixesFromKeys extracts prefixes along the traversal path for sorted keys.
 // For each key, we warm all prefixes from its divergence point with the previous key
 // down to the leaf. This covers branch nodes that exist in the trie from other keys.
