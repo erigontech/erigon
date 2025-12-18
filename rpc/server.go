@@ -25,7 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	mapset "github.com/deckarep/golang-set"
+	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -52,7 +52,7 @@ type Server struct {
 	methodAllowList AllowList
 	idgen           func() ID
 	run             atomic.Bool
-	codecs          mapset.Set // mapset.Set[ServerCodec] requires go 1.20
+	codecs          mapset.Set[ServerCodec]
 
 	batchConcurrency    uint
 	disableStreaming    bool
@@ -65,7 +65,7 @@ type Server struct {
 
 // NewServer creates a new server instance with no registered handlers.
 func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
-	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), batchConcurrency: batchConcurrency,
+	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
@@ -149,8 +149,8 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 func (s *Server) Stop() {
 	if s.run.CompareAndSwap(true, false) {
 		s.logger.Info("RPC server shutting down")
-		s.codecs.Each(func(c any) bool {
-			c.(ServerCodec).Close()
+		s.codecs.Each(func(c ServerCodec) bool {
+			c.Close()
 			return true
 		})
 	}
