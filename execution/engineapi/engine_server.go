@@ -642,7 +642,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if status == nil {
 		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
 
-		status, err = s.HandlesForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
+		status, err = s.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
 				return &engine_types.ForkChoiceUpdatedResponse{
@@ -936,7 +936,7 @@ func convertGrpcStatusToEngineStatus(status executionproto.ExecutionStatus) engi
 	panic("giulio u stupid.")
 }
 
-func (e *EngineServer) HandlesForkChoice(
+func (e *EngineServer) HandleForkChoice(
 	ctx context.Context,
 	logPrefix string,
 	forkChoice *engine_types.ForkChoiceState,
