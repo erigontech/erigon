@@ -22,7 +22,7 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 
 	// Setup the timers
 	readyTimeout := time.NewTimer(10 * time.Second)
-	readyInterval := time.NewTimer(50 * time.Millisecond)
+	readyInterval := time.NewTicker(50 * time.Millisecond)
 
 	// Ensure the timers are stopped to release resources
 	defer readyTimeout.Stop()
