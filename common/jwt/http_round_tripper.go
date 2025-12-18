@@ -40,7 +40,7 @@ func (t *HttpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	tokenString, err := token.SignedString(t.jwtSecret)
 	if err != nil {
-		return nil, fmt.Errorf("JwtRoundTripper failed to produce a JWT token, err: %w", err)
+		return nil, fmt.Errorf("HttpRoundTripper failed to produce a JWT token, err: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+tokenString)
