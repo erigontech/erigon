@@ -3,7 +3,6 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"math"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -85,10 +84,6 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 			continue
 		}
 
-		if txNum == math.MaxUint64 {
-			// latest rcache..skip
-			break
-		}
 		for txNum > _max {
 			blockNum++
 			_min = _max + 1
