@@ -21,11 +21,11 @@ package vm
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon/arb/multigas"
 
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"

@@ -828,9 +828,6 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 		if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
 			return fmt.Errorf("error writing block %d: %w", blockNum, err)
 		}
-		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
-		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, blk.Hash(), blockNum, blk.RawBody()); err != nil {
 			return fmt.Errorf("cannot write body: %s", err)
 		}
@@ -840,8 +837,12 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 			return fmt.Errorf("failed to read parent total difficulty for block %d: %w", blockNum, err)
 		}
 		td := new(big.Int).Add(parentTd, blk.Difficulty())
-		if err := rawdb.WriteTd(tx, blk.Hash(), blockNum, td); err != nil {
+		if err = rawdb.WriteTd(tx, blk.Hash(), blockNum, td); err != nil {
 			return fmt.Errorf("failed to write total difficulty %d: %w", blockNum, err)
+		}
+
+		if err = rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 		}
 
 		latest = blk

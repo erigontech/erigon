@@ -15,7 +15,7 @@ require github.com/erigontech/nitro-erigon v0.0.0-00010101000000-000000000000
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250919055321-38f4df84f6b9
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20251211115026-397d20c1351d
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.9
 	github.com/erigontech/secp256k1 v1.2.0
@@ -111,7 +111,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe
+	github.com/supranational/blst v0.3.15
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.2.13
