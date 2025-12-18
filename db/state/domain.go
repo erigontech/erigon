@@ -1968,8 +1968,8 @@ func versionTooLowPanic(filename string, version version.Versions) {
 }
 
 // [startTxNum, endTxNum)]
-func (dt *DomainRoTx) KeyTrace(ctx context.Context, key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
-	// need to do this first as KeyTrace doesn't work if internal seg readers are seeked into different locations
+func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
+	// need to do this first as TraceKey doesn't work if internal seg readers are seeked into different locations
 	v2, ok, err := dt.GetAsOf(key, endTxNum, roTx)
 	if err != nil {
 		return nil, err
@@ -1978,7 +1978,7 @@ func (dt *DomainRoTx) KeyTrace(ctx context.Context, key []byte, startTxNum, endT
 		v2 = nil
 	}
 
-	ht, err := dt.ht.DebugHistoryKeyTrace(ctx, key, startTxNum, endTxNum, roTx)
+	ht, err := dt.ht.DebugHistoryTraceKey(ctx, key, startTxNum, endTxNum, roTx)
 	if err != nil {
 		return nil, err
 	}

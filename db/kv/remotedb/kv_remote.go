@@ -258,7 +258,7 @@ func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Ste
 func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	panic("not implemented")
 }
-func (tx *tx) KeyTrace(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
+func (tx *tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
 	panic("not implemented")
 }
 func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented") }
