@@ -60,6 +60,7 @@ These are distributed in toml files in the following format. They can be hosted 
 
 ## $CHAIN.toml
 
-There is an embedded toml file in [erigon seg repository](https://github.com/erigontech/erigon-snapshot) during the erigon build process. It contains 
+There is an embedded toml file in [erigon seg repository](https://github.com/erigontech/erigon-snapshot) during the
+erigon build process. It contains
 the `well known` hash for a particular segment file in the following format. 
 
