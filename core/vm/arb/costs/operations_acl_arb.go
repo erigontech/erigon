@@ -3,16 +3,16 @@ package costs
 import (
 	"fmt"
 
-	"github.com/erigontech/nitro-erigon/util/arbmath"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/nitro-erigon/util/arbmath"
 )
 
 // Computes the cost of doing a state load in wasm
@@ -41,12 +41,12 @@ func WasmStateLoadCost(db *state.IntraBlockState, program common.Address, key co
 func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, value common.Hash) multigas.MultiGas {
 	clearingRefund := params.SstoreClearsScheduleRefundEIP3529
 
-	cost := multigas.ZeroGas()
 	current := new(uint256.Int)
 	if err := db.GetState(program, key, current); err != nil {
 		panic(err)
 	}
 
+	cost := multigas.ZeroGas()
 	// Check slot presence in the access list
 	if addrPresent, slotPresent := db.SlotInAccessList(program, key); !slotPresent {
 		cost.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, params.ColdSloadCostEIP2929)
