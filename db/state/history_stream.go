@@ -678,7 +678,7 @@ type HistoryKeyTraceFiles struct {
 	fileIdx           int
 	efbuf, v, histKey []byte
 	seqItr            stream.U64 // stores iterator returned by multiencseq.SequenceReader#Iterator
-	histReader        *seg.Reader
+	histReader        *seg.PagedReader
 }
 
 func (ht *HistoryKeyTraceFiles) init() error {
@@ -715,11 +715,11 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 	}
 	for ht.fileIdx < len(ht.hc.iit.files) {
 		item := ht.hc.iit.files[ht.fileIdx]
-		if ht.toTxNum < item.startTxNum {
+		if ht.fromTxNum > item.endTxNum {
 			moveToNextFileFn()
 			continue
 		}
-		if ht.fromTxNum >= item.endTxNum {
+		if ht.toTxNum <= item.startTxNum {
 			// done
 			ht.hasNext = false
 			return nil
@@ -759,7 +759,11 @@ func (ht *HistoryKeyTraceFiles) advance() error {
 
 		if ht.histReader == nil {
 			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)
-			ht.histReader = ht.hc.statelessGetter(ht.fileIdx)
+			ht.histReader = seg.NewPagedReader(
+				ht.hc.statelessGetter(ht.fileIdx),
+				ht.hc.h.HistoryValuesOnCompressedPage,
+				true,
+			)
 			ht.histKey = ht.hc.encodeTs(txNum, ht.key)
 			offset, ok := idxReader.TwoLayerLookup(ht.histKey)
 			if !ok {
