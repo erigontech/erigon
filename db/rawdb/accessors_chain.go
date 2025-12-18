@@ -1259,8 +1259,6 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 		return nil, false, nil
 	}
 
-	//fmt.Println("ReadReceiptCacheV2", "txnum", query.TxNum+1, "v", hexutil.Encode(v)[:20], "v", len(v))
-
 	// Convert the receipts from their storage form to their internal representation
 	receipt := &types.ReceiptForStorage{}
 	if err := rlp.DecodeBytes(v, receipt); err != nil {

@@ -44,26 +44,6 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
 
-	// if fromBlock > 0 {
-	// 	fromBlock = 0
-	// 	toBlock = 1
-	// 	// fromBlock = 10075000
-	// 	// toBlock = 10075002
-	// }
-
-	// for i := 727505610; i <= 727505615; i++ {
-	// 	receipt, ok2, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-	// 		TxNum: uint64(i),
-	// 	})
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// 	if receipt != nil {
-	// 		fmt.Println("debug receipt:", i, receipt.FirstLogIndexWithinBlock, err, ok2)
-	// 	} else {
-	// 		fmt.Println("debug receipt:", i, receipt, err, ok2)
-	// 	}
-	// }
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)
 }
 
@@ -100,7 +80,6 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 		if err != nil {
 			return err
 		}
-		//fmt.Println("wuiiii0", txNum)
 
 		if r == nil {
 			continue
@@ -117,10 +96,6 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 			expectedFirstLogIdx = 0
 			prevCumUsedGas = -1
 		}
-
-		// if txNum%10000000 == 0 {
-		// 	fmt.Println("wuiiii", txNum, r.FirstLogIndexWithinBlock, r.CumulativeGasUsed, len(r.Logs), r.TransactionIndex)
-		// }
 
 		logIdx := r.FirstLogIndexWithinBlock
 		exactLogIdx := logIdx == expectedFirstLogIdx
@@ -203,7 +178,6 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 			}
 			defer tx.Rollback()
 
-			// chunkErr := ReceiptsNoDupsRange(ctx, chunkStart, chunkEnd, tx, blockReader, failFast)
 			chunkErr := fn(ctx, chunkStart, chunkEnd, tx, blockReader, failFast)
 			if chunkErr != nil {
 				return chunkErr
