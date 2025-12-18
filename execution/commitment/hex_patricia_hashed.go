@@ -2609,8 +2609,13 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 			})
 		}
 		err := g.Wait()
-		fmt.Printf("Warmup: %d keys, %d reads (maxDepth=%d), %d workers, took %v\n",
-			len(hashedKeys), totalReads.Load(), maxDepth, numWorkers, time.Since(warmupStart))
+		log.Debug(fmt.Sprintf("[%s][warmup] completed", logPrefix),
+			"keys", common.PrettyCounter(len(hashedKeys)),
+			"reads", common.PrettyCounter(totalReads.Load()),
+			"maxDepth", maxDepth,
+			"workers", numWorkers,
+			"spent", time.Since(warmupStart),
+		)
 		return err
 	}
 
