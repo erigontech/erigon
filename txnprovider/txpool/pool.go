@@ -837,6 +837,12 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	}
 
 	txns.Resize(uint(count))
+	if len(toRemove) > 0 {
+		for _, mt := range toRemove {
+			p.pending.Remove(mt, "best", p.logger)
+		}
+	}
+
 	return true, count, nil
 }
 
