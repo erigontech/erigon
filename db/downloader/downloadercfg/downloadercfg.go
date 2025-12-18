@@ -73,7 +73,8 @@ type Cfg struct {
 	// TODO: Can we get rid of this?
 	ChainName string
 
-	ClientConfig *torrent.ClientConfig
+	ClientConfig   *torrent.ClientConfig
+	TorrentLogFile *os.File
 
 	MdbxWriteMap bool
 	// Don't trust any existing piece completion. Revalidate all pieces when added.
@@ -83,6 +84,13 @@ type Cfg struct {
 	ManualDataVerification bool
 
 	LogPrefix string
+}
+
+func (cfg *Cfg) CloseTorrentLogFile() error {
+	if cfg.TorrentLogFile != nil {
+		return cfg.TorrentLogFile.Close()
+	}
+	return nil
 }
 
 // Before options/flags applied.
@@ -277,6 +285,7 @@ func New(
 		Dirs:              dirs,
 		ChainName:         chainName,
 		ClientConfig:      torrentConfig,
+		TorrentLogFile:    torrentLogFile,
 		MdbxWriteMap:      mdbxWriteMap,
 		VerifyTorrentData: opts.Verify,
 		LogPrefix:         "[Downloader] ",
