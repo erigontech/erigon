@@ -437,6 +437,8 @@ type TemporalDebugTx interface {
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
 	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
+	// if latest state is included (i.e. toTxNum=uint64.max), it returns the latest
+	// value with txNum=MaxUint64
 	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
 
 	DomainFiles(domain ...Domain) VisibleFiles
