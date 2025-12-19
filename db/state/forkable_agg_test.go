@@ -2,458 +2,659 @@ package state
 
 import (
 	"context"
-	"encoding/binary"
-	"errors"
-	"fmt"
-	"math"
+	"math/rand"
+	"runtime"
+	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
-const MaxUint64 = ^uint64(0)
+func TestOpenFolder(t *testing.T) {
+	// bunch of blocks/txs/headers files...
+	// open folder
+	// check dirtyFile presence
 
-type BufferFactory interface {
-	New() etl.Buffer
-}
+	dirs, db, log := setupDb(t)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
 
-var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
+	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
 
-type Forkable[T ForkableBaseTxI] struct {
-	*ProtoForkable
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Rollback()
 
-	canonicalTbl string // for marked structures
+	aggTx := agg.BeginTemporalTx()
+	defer aggTx.Close()
 
-	// whether this forkable is responsible for updating the canonical table (multiple forkables can share the same canonical table)
-	// only one forkable should be responsible for updating the canonical table.
-	updateCanonical bool
+	headerTx := aggTx.Marked(headerId)
+	bodyTx := aggTx.Marked(bodyId)
 
-	valsTbl string
+	amount := 56
 
-	//	ts4Bytes   bool               // caplin entities are encoded as 4 bytes
-	pruneFrom  Num      // should this be rootnum? Num is fine for now.
-	beginTxGen func() T // returns a tx over files
+	// populate forkables
+	canonicalHashes := fillForkables(t, rwtx, headerTx, bodyTx, amount)
 
-	rel RootRelationI
-}
+	// check GET
+	checkGet := func(headerTx, bodyTx MarkedTxI, rwtx kv.RwTx) {
+		for i := range amount {
+			HEADER_M, BODY_M := 100, 101
+			if i%3 == 0 {
+				// just use different value
+				HEADER_M, BODY_M = 200, 201
+			}
+			v, err := headerTx.Get(Num(i), rwtx)
+			require.NoError(t, err)
+			require.Equal(t, Num(i*HEADER_M).EncTo8Bytes(), v)
 
-type AppOpts func(ForkableConfig)
+			v, err = bodyTx.Get(Num(i), rwtx)
+			require.NoError(t, err)
+			require.Equal(t, Num(i*BODY_M).EncTo8Bytes(), v)
 
-func App_WithFreezer(freezer Freezer) AppOpts {
-	return func(a ForkableConfig) {
-		a.SetFreezer(freezer)
-	}
-}
-
-func App_WithIndexBuilders(builders ...AccessorIndexBuilder) AppOpts {
-	return func(a ForkableConfig) {
-		a.SetIndexBuilders(builders...)
-	}
-}
-
-func App_WithPruneFrom(pruneFrom Num) AppOpts {
-	return func(a ForkableConfig) {
-		a.SetPruneFrom(pruneFrom)
-	}
-}
-
-func App_WithUpdateCanonical() AppOpts {
-	return func(a ForkableConfig) {
-		a.UpdateCanonicalTbl()
-	}
-}
-
-// func App
-func NewMarkedForkable(id kv.ForkableId, schema *statecfg.ForkableCfg, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
-	a, err := create[MarkedTxI](id, schema, canonicalTbl, relation, dirs, logger, options...)
-	if err != nil {
-		return nil, err
-	}
-
-	a.beginTxGen = func() MarkedTxI {
-		return &MarkedTx{ap: a, ProtoForkableTx: a.ProtoForkable.BeginFilesRo()}
-	}
-
-	return a, nil
-}
-
-func NewUnmarkedForkable(id kv.ForkableId, schema *statecfg.ForkableCfg, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
-	a, err := create[UnmarkedTxI](id, schema, "", relation, dirs, logger, options...)
-	if err != nil {
-		return nil, err
-	}
-
-	// un-marked structure have default freezer and builders
-	if a.freezer == nil {
-		freezer := &SimpleRelationalFreezer{rel: relation, valsTbl: schema.ValsTbl}
-		a.freezer = freezer
-	}
-
-	if a.builders == nil {
-		// mapping num -> offset
-		args := NewAccessorArgs(false, false, schema.ValuesOnCompressedPage, a.StepSize())
-		builder := NewSimpleAccessorBuilder(args, id, dirs.Tmp, logger)
-		a.builders = []AccessorIndexBuilder{builder}
-	}
-
-	a.beginTxGen = func() UnmarkedTxI {
-		return &UnmarkedTx{ap: a, ProtoForkableTx: a.ProtoForkable.BeginFilesRo()}
-	}
-
-	return a, nil
-}
-
-func create[T ForkableBaseTxI](id kv.ForkableId, schema *statecfg.ForkableCfg, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
-	a := &Forkable[T]{
-		ProtoForkable: NewProto(id, nil, nil, dirs, logger),
-	}
-	a.rel = relation
-	a.valsTbl = schema.ValsTbl
-	a.cfg = schema
-	a.canonicalTbl = canonicalTbl
-	for _, opt := range options {
-		opt(a)
-	}
-	return a, nil
-}
-
-func (a *Forkable[T]) PruneFrom() Num {
-	return a.pruneFrom
-}
-
-func (a *Forkable[T]) encTs(ts kv.EncToBytesI) []byte {
-	return ts.EncToBytes(true)
-}
-
-func (a *Forkable[MarkedTxI]) valsTblKey(ts Num, hash []byte) []byte {
-	// key for valsTbl
-	// relevant only for marked forkable
-	// assuming hash is common.Hash which is 32 bytes
-	const HashBytes = 32
-	k := make([]byte, 8+HashBytes)
-	binary.BigEndian.PutUint64(k, uint64(ts))
-	copy(k[8:], hash)
-	return k
-}
-
-func (a *Forkable[MarkedTxI]) valsTblKey2(ts []byte, hash []byte) []byte {
-	// key for valsTbl
-	// relevant only for marked forkable
-	// assuming hash is common.Hash which is 32 bytes
-	const HashBytes = 32
-	k := make([]byte, 8+HashBytes)
-	copy(k, ts)
-	copy(k[8:], hash)
-	return k
-}
-
-func (a *Forkable[T]) BeginTemporalTx() T {
-	return a.beginTxGen()
-}
-
-func (a *Forkable[T]) SetFreezer(freezer Freezer) {
-	a.freezer = freezer
-}
-
-func (a *Forkable[T]) SetIndexBuilders(builders ...AccessorIndexBuilder) {
-	a.builders = builders
-}
-
-func (a *Forkable[T]) SetPruneFrom(pruneFrom Num) {
-	a.pruneFrom = pruneFrom
-}
-
-func (a *Forkable[T]) UpdateCanonicalTbl() {
-	a.updateCanonical = true
-}
-
-// align the snapshots of this forkable entity
-// with others members of entity set
-func (a *Forkable[T]) Aligned(aligned bool) {
-	a.unaligned = !aligned
-}
-
-func (a *Forkable[T]) Repo() *SnapshotRepo {
-	return a.snaps
-}
-
-// marked tx
-type MarkedTx struct {
-	*ProtoForkableTx
-	ap *Forkable[MarkedTxI]
-}
-
-func (m *MarkedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
-	v, found, _, err := m.GetFromFiles(num)
-	if err != nil {
-		return nil, err
-	}
-
-	if found {
-		return v, nil
-	} else if num < m.VisibleFilesMaxNum() {
-		// expected in file, but not added to file (gap)
-		return nil, nil
-	}
-
-	return m.GetDb(num, nil, tx)
-}
-
-func (m *MarkedTx) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
-	a := m.ap
-	if hash == nil {
-		// find canonical hash
-		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(num))
-		if err != nil {
-			return nil, err
-		}
-		hash = canHash
-	}
-	return tx.GetOne(a.valsTbl, m.ap.valsTblKey(num, hash))
-}
-
-func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
-	// can then val
-	a := m.ap
-	if m.ap.updateCanonical {
-		if err := tx.Append(a.canonicalTbl, a.encTs(num), hash); err != nil {
-			return err
+			chash, err := rwtx.GetOne(kv.HeaderCanonical, RootNum(i).EncTo8Bytes())
+			require.NoError(t, err)
+			require.Equal(t, canonicalHashes[i], chash)
 		}
 	}
 
-	key := m.ap.valsTblKey(num, hash)
-	return tx.Put(a.valsTbl, key, val)
+	checkGet(headerTx, bodyTx, rwtx)
+
+	// create files
+	aggTx.Close()
+	require.NoError(t, rwtx.Commit())
+
+	rwtx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+	checkGet(headerTx, bodyTx, rwtx)
+	rwtx.Commit()
+
+	ch := agg.BuildFilesInBackground(RootNum(amount))
+	select {
+	case <-ch:
+	case <-time.After(time.Second * 10):
+		t.Fatal("timeout")
+	}
+
+	headerF, bodyF := agg.marked[0], agg.marked[1]
+	headerItems := headerF.snaps.dirtyFiles.Items()
+	bodyItems := bodyF.snaps.dirtyFiles.Items()
+	require.Equal(t, 5, len(headerItems))
+	require.Equal(t, 5, len(bodyItems))
+	for i := range headerItems {
+		require.Equal(t, uint64(10*i), headerItems[i].startTxNum)
+		require.Equal(t, uint64(10*(i+1)), headerItems[i].endTxNum)
+	}
+	for i := range bodyItems {
+		require.Equal(t, uint64(10*i), bodyItems[i].startTxNum)
+		require.Equal(t, uint64(10*(i+1)), bodyItems[i].endTxNum)
+	}
+
+	rwtx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+
+	aggTx = agg.BeginTemporalTx()
+	defer aggTx.Close()
+
+	headerTx = aggTx.Marked(headerId)
+	bodyTx = aggTx.Marked(bodyId)
+	checkGet(headerTx, bodyTx, rwtx)
+
+	// let's try open folder now
+	aggTx.Close()
+	require.NoError(t, rwtx.Commit())
+
+	agg.Close()
+	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+
+	require.NoError(t, agg.OpenFolder())
+	headerF, bodyF = agg.marked[0], agg.marked[1]
+	headerItems = headerF.snaps.dirtyFiles.Items()
+	bodyItems = bodyF.snaps.dirtyFiles.Items()
+	require.Equal(t, 5, len(headerItems))
+	require.Equal(t, 5, len(bodyItems))
+	for i := range headerItems {
+		require.Equal(t, uint64(10*i), headerItems[i].startTxNum)
+		require.Equal(t, uint64(10*(i+1)), headerItems[i].endTxNum)
+	}
+	for i := range bodyItems {
+		require.Equal(t, uint64(10*i), bodyItems[i].startTxNum)
+		require.Equal(t, uint64(10*(i+1)), bodyItems[i].endTxNum)
+	}
 }
 
-func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (fs ForkablePruneStat, err error) {
-	a := m.ap
-	efrom, err := a.rel.RootNum2Num(from, tx) // for marked, id==num
-	if err != nil {
-		return
+func TestRecalcVisibleFilesAligned(t *testing.T) {
+	// different configurations of forkables - aligned and not aligned
+
+	dirs, db, log := setupDb(t)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
+
+	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+
+	amount := 36
+
+	// progress must be aligned
+	// so, headers files is 0-1, 1-2, 2-3
+	// bodies files is 0-1, 1-2
+	// visiblefiles of headers = 0-1, 1-2
+	// visiblefiles of bodies = 0-1, 1-2
+
+	aggTx := agg.BeginTemporalTx()
+	defer aggTx.Close()
+	headerTx, bodyTx := aggTx.Marked(headerId), aggTx.Marked(bodyId)
+	fillForkables(t, rwtx, headerTx, bodyTx, amount)
+
+	// create files
+	aggTx.Close()
+	require.NoError(t, rwtx.Commit())
+	ch := agg.BuildFilesInBackground(RootNum(amount))
+	select {
+	case <-ch:
+	case <-time.After(time.Second * 10):
+		t.Fatal("timeout")
 	}
-	fromKey := a.encTs(efrom)
-	delCnt, err := DeleteRangeFromTbl(ctx, a.canonicalTbl, fromKey, nil, MaxUint64, nil, a.logger, tx)
-	fs.Set(efrom, Num(MaxUint64), delCnt)
+
+	// delete last bodies file...
+	bodiesFiles := agg.marked[1].snaps.dirtyFiles.Items()
+	require.Equal(t, 3, len(bodiesFiles))
+	lastBodyFile := bodiesFiles[len(bodiesFiles)-1].decompressor.FilePath()
+	agg.Close()
+	require.NoError(t, dir.RemoveFile(lastBodyFile))
+
+	// now open folder and check visiblefiles
+	agg.Close()
+	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+
+	require.NoError(t, agg.OpenFolder())
+	headerF, bodyF := agg.marked[0], agg.marked[1]
+	headerItems := headerF.snaps.VisibleFiles()
+	bodyItems := bodyF.snaps.VisibleFiles()
+	require.Equal(t, 2, len(headerItems))
+	require.Equal(t, 2, len(bodyItems))
+
+}
+
+func TestRecalcVisibleFilesUnaligned(t *testing.T) {
+	dirs, db, log := setupDb(t)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
+	bodies.unaligned = true
+
+	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+
+	amount := 36
+
+	// can have different unaligned progresses
+	// so, headers is 0-1, 1-2, 2-3
+	// bodies is 0-1, 1-2
+	// visiblefiles of headers = 0-1, 1-2,2-3
+	// visiblefiles of bodies = 0-1, 1-2
+	// BuildFiles only builds pending bodies
+
+	aggTx := agg.BeginTemporalTx()
+	defer aggTx.Close()
+	headerTx, bodyTx := aggTx.Marked(headerId), aggTx.Marked(bodyId)
+	fillForkables(t, rwtx, headerTx, bodyTx, amount)
+
+	// create files
+	aggTx.Close()
+	require.NoError(t, rwtx.Commit())
+	ch := agg.BuildFilesInBackground(RootNum(amount))
+	select {
+	case <-ch:
+	case <-time.After(time.Second * 10):
+		t.Fatal("timeout")
+	}
+
+	// delete last bodies file...
+	bodiesFiles := agg.marked[1].snaps.dirtyFiles.Items()
+	require.Equal(t, 3, len(bodiesFiles))
+	lastBodyFile := bodiesFiles[len(bodiesFiles)-1].decompressor.FilePath()
+	agg.Close()
+	require.NoError(t, dir.RemoveFile(lastBodyFile))
+
+	// now open folder and check visiblefiles
+	agg.Close()
+	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+
+	require.NoError(t, agg.OpenFolder())
+	headerF, bodyF := agg.marked[0], agg.marked[1]
+	headerItems := headerF.snaps.VisibleFiles()
+	bodyItems := bodyF.snaps.VisibleFiles()
+	require.Equal(t, 3, len(headerItems))
+	require.Equal(t, 2, len(bodyItems))
+
+	// buildFiles should call 2-3 for bodies, and not for headers
+	hfreezer, bfreezer := &inspectingFreezer{t: t, currentFreezer: header.freezer}, &inspectingFreezer{t: t, currentFreezer: bodies.freezer}
+	header.freezer = hfreezer
+	bodies.freezer = bfreezer
+
+	agg.Close()
+	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+	require.NoError(t, agg.OpenFolder())
+
+	// nothing for headers
+	bfreezer.Expect(20, 30)
+
+	ch = agg.BuildFilesInBackground(RootNum(amount))
+	select {
+	case <-ch:
+	case <-time.After(time.Second * 10):
+		t.Fatal("timeout")
+	}
+
+	hfreezer.Check()
+	bfreezer.Check()
+}
+
+func TestClose(t *testing.T) {
+	// dirty files/visible files should be closed
+	dirs, db, log := setupDb(t)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
+	bodies.unaligned = true
+
+	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+
+	amount := 36
+	aggTx := agg.BeginTemporalTx()
+	defer aggTx.Close()
+	headerTx, bodyTx := aggTx.Marked(headerId), aggTx.Marked(bodyId)
+	fillForkables(t, rwtx, headerTx, bodyTx, amount)
+
+	// create files
+	aggTx.Close()
+	require.NoError(t, rwtx.Commit())
+	ch := agg.BuildFilesInBackground(RootNum(amount))
+	select {
+	case <-ch:
+	case <-time.After(time.Second * 10):
+		t.Fatal("timeout")
+	}
+
+	checkRefCnt := func(expected int32) {
+		for _, marked := range agg.marked {
+			marked.snaps.dirtyFiles.Walk(func(f []*FilesItem) bool {
+				for _, f := range f {
+					require.Equal(t, expected, f.refcount.Load())
+				}
+				return true
+			})
+		}
+	}
+
+	checkRefCnt(0)
+
+	aggTx = agg.BeginTemporalTx()
+	defer aggTx.Close()
+	checkRefCnt(1)
+}
+
+func TestRecalcVisibleFiles2(t *testing.T) {
+	// ReferencingIntegrityChecker (need to optimise it first -- it does file exist check
+	// everytime )
+}
+
+func TestForkableAggState(t *testing.T) {
+	// check AlignedMaxRootNum, MaxRootNum, HasRootNumUpto
+}
+
+func TestMergedFileGet(t *testing.T) {
+	// ideally - smallest step file => adduncompressed word (fast build)
+	// merged file -- addWord (compressed)
+	// this reflects in the GetFiles() as well...ensure that is the case, and correct logic is applied
+	// we go with this simple logic..this is not something user should bother with.
+	dirs, db, log := setupDb(t)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
+
+	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	defer agg.Close()
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Rollback()
+
+	aggTx := agg.BeginTemporalTx()
+	defer aggTx.Close()
+
+	headerTx := aggTx.Marked(headerId)
+	bodyTx := aggTx.Marked(bodyId)
+
+	amount := 200 //rand.Int() % 5000
+	t.Logf("amount of headers: %d", amount)
+
+	// populate forkables
+	canonicalHashes := fillForkables(t, rwtx, headerTx, bodyTx, amount)
+
+	// check GET
+	checkGet := func(headerTx, bodyTx MarkedTxI, rwtx kv.RwTx) {
+		for i := range amount {
+			HEADER_M, BODY_M := 100, 101
+			if i%3 == 0 {
+				// just use different value
+				HEADER_M, BODY_M = 200, 201
+			}
+			v, err := headerTx.Get(Num(i), rwtx)
+			require.NoError(t, err)
+			require.Equal(t, Num(i*HEADER_M).EncTo8Bytes(), v)
+
+			v, err = bodyTx.Get(Num(i), rwtx)
+			require.NoError(t, err)
+			require.Equal(t, Num(i*BODY_M).EncTo8Bytes(), v)
+
+			chash, err := rwtx.GetOne(kv.HeaderCanonical, RootNum(i).EncTo8Bytes())
+			require.NoError(t, err)
+			require.Equal(t, canonicalHashes[i], chash)
+		}
+	}
+
+	checkGet(headerTx, bodyTx, rwtx)
+
+	// create files
+	aggTx.Close()
+	require.NoError(t, rwtx.Commit())
+
+	rwtx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+	checkGet(headerTx, bodyTx, rwtx)
+	rwtx.Commit()
+
+	agg.SetMergeDisabled(false)
+	require.NoError(t, agg.BuildFiles(RootNum(amount)))
+
+	snapCfg := Registry.SnapshotConfig(headerId)
+	nVisibleFiles := int(calculateNumberOfFiles(uint64(amount), snapCfg))
+	nDirtyFiles := nVisibleFiles
+
+	// check dirty files count
+	headerF, bodyF := agg.marked[0], agg.marked[1]
+	headerItems := headerF.snaps.dirtyFiles.Items()
+	bodyItems := bodyF.snaps.dirtyFiles.Items()
+	require.Equal(t, nDirtyFiles, len(headerItems))
+	require.Equal(t, nDirtyFiles, len(bodyItems))
+
+	// check visiblefiles count
+	require.Equal(t, nVisibleFiles, len(headerF.snaps.visibleFiles()))
+	require.Equal(t, nVisibleFiles, len(bodyF.snaps.visibleFiles()))
+
+	aggTx = agg.BeginTemporalTx()
+	defer aggTx.Close()
+	rwtx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+	headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
+	checkGet(headerTx, bodyTx, rwtx)
+
+}
+
+func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
+	tb.Helper()
+	logger := log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	return dirs, db, logger
+}
+
+func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (kv.ForkableId, *Forkable[MarkedTxI]) {
+	t.Helper()
+	headerId := kv.ForkableId(1)
+	cfg := registerEntity(dirs, "headers", headerId)
+
+	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.Headers, ValuesOnCompressedPage: 1}
+	builder := NewSimpleAccessorBuilder(NewAccessorArgs(false, false, fcfg.ValuesOnCompressedPage, cfg.RootNumPerStep), headerId, dirs.Tmp, log,
+		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
+
+	ma, err := NewMarkedForkable(headerId, fcfg, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
+		App_WithPruneFrom(Num(1)),
+		App_WithIndexBuilders(builder),
+		App_WithUpdateCanonical())
+	require.NoError(t, err)
+
+	freezer := &SimpleMarkedFreezer{mfork: ma}
+	ma.SetFreezer(freezer)
+	t.Cleanup(func() {
+		ma.Close()
+		db.Close()
+		// cleans up closed/orphaned files on windows;
+		// prevents "cannot access the file because it is being used by another process" error
+		runtime.GC()
+		cleanupFiles(t, ma.snaps, dirs)
+	})
+
+	return headerId, ma
+}
+
+func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (kv.ForkableId, *Forkable[MarkedTxI]) {
+	t.Helper()
+	bodyId := kv.ForkableId(2)
+	cfg := registerEntity(dirs, "bodies", bodyId)
+
+	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.BlockBody, ValuesOnCompressedPage: 1}
+	args := NewAccessorArgs(false, false, fcfg.ValuesOnCompressedPage, cfg.RootNumPerStep)
+	builder := NewSimpleAccessorBuilder(args, bodyId, dirs.Tmp, log,
+		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
+
+	ma, err := NewMarkedForkable(bodyId, fcfg, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
+		App_WithPruneFrom(Num(1)),
+		App_WithIndexBuilders(builder))
+	require.NoError(t, err)
+
+	freezer := &SimpleMarkedFreezer{mfork: ma}
+	ma.SetFreezer(freezer)
+	t.Cleanup(func() {
+		ma.Close()
+		db.Close()
+		runtime.GC()
+		cleanupFiles(t, ma.snaps, dirs)
+	})
+
+	return bodyId, ma
+}
+
+func registerEntity(dirs datadir.Dirs, name string, id kv.ForkableId) *SnapshotConfig {
+	stepSize := uint64(10)
+	ver := version.V1_0_standart
+	schema := NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, NewE2SnapSchemaVersion(ver, ver))
+
+	snapCfg := NewSnapshotConfig(&SnapshotCreationConfig{
+		RootNumPerStep: 10,
+		MergeStages:    []uint64{80, 160},
+		MinimumSize:    10,
+		SafetyMargin:   5,
+	}, schema)
+	registerEntityWithSnapshotConfig(dirs, id, name, snapCfg)
+	return snapCfg
+}
+
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, id kv.ForkableId, name string, cfg *SnapshotConfig) {
+	RegisterForkable(name, id, dirs, nil, WithSnapshotConfig(cfg))
+}
+
+func calculateNumberOfFiles(amount uint64, snapConfig *SnapshotConfig) (nfiles uint64) {
+	amount -= snapConfig.SafetyMargin
+	for i := len(snapConfig.MergeStages) - 1; i >= 0; i-- {
+		mergeStageSize := snapConfig.MergeStages[i]
+		nfiles += amount / mergeStageSize
+		amount %= mergeStageSize
+	}
+
+	nfiles += amount / snapConfig.MinimumSize
+
 	return
 }
 
-func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, logEvery *time.Ticker, tx kv.RwTx) (fs ForkablePruneStat, err error) {
-	pruneTo := min(m.VisibleFilesMaxRootNum(), to)
-	a := m.ap
-	fromKeyPrefix := a.encTs(a.pruneFrom)
-	eto, err := a.rel.RootNum2Num(pruneTo, tx)
-	if err != nil {
-		return fs, err
+type TRand struct {
+	rnd *rand.Rand
+}
+
+func NewTRand() *TRand {
+	seed := time.Now().UnixNano()
+	src := rand.NewSource(seed)
+	return &TRand{rnd: rand.New(src)}
+}
+
+func (tr *TRand) RandHash() common.Hash {
+	return common.Hash(tr.RandBytes(32))
+}
+
+func (tr *TRand) RandBytes(size int) []byte {
+	arr := make([]byte, size)
+	for i := 0; i < size; i++ {
+		arr[i] = byte(tr.rnd.Intn(256))
 	}
-	toKeyPrefix := a.encTs(eto)
-	del, err := DeleteRangeFromTbl(ctx, a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, logEvery, a.logger, tx)
-	fs.Set(a.pruneFrom, eto, del)
-	if err != nil {
-		return
-	}
-	_, err = DeleteRangeFromTbl(ctx, a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, logEvery, a.logger, tx)
-	return
+	return arr
 }
 
-func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
-	a := m.ap
-	lastNum, _ := kv.LastKey(tx, a.canonicalTbl)
-	if len(lastNum) == 0 {
-		return false, nil
-	}
-	iLastNum := binary.BigEndian.Uint64(lastNum)
-	eto, err := a.rel.RootNum2Num(to, tx)
-	if err != nil {
-		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
-	}
+func fillForkables(t *testing.T, rwtx kv.RwTx, headerTx, bodyTx MarkedTxI, amount int) (canonicalHashes [][]byte) {
+	t.Helper()
+	tr := NewTRand()
+	canonicalHashes = make([][]byte, amount)
 
-	return iLastNum+1 >= eto.Uint64(), nil
-}
+	putter := func(headerTx, bodyTx MarkedTxI, i int, override bool) []byte {
+		HEADER_M, BODY_M := 100, 101
+		if override {
+			// just use different value
+			HEADER_M, BODY_M = 200, 201
+		}
+		hash := tr.RandHash().Bytes()
+		err := headerTx.Put(Num(i), hash, Num(i*HEADER_M).EncTo8Bytes(), rwtx)
+		require.NoError(t, err)
 
-func (m *MarkedTx) Progress(tx kv.Tx) (Num, error) {
-	return progress(m.ap.canonicalTbl, tx, m)
-}
-
-func (m *MarkedTx) DebugFiles() ForkableFilesTxI {
-	return m
-}
-
-func (m *MarkedTx) DebugDb() MarkedDbTxI {
-	return m
-}
-
-// unmarked tx
-type UnmarkedTx struct {
-	*ProtoForkableTx
-	ap *Forkable[UnmarkedTxI]
-}
-
-func (m *UnmarkedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
-	v, found, _, err := m.GetFromFiles(num)
-	if err != nil {
-		return nil, err
+		err = bodyTx.Put(Num(i), hash, Num(i*BODY_M).EncTo8Bytes(), rwtx)
+		require.NoError(t, err)
+		return hash
 	}
 
-	if found {
-		return v, nil
+	for i := range amount {
+		canonicalHashes[i] = putter(headerTx, bodyTx, i, false)
+		if i%3 == 0 {
+			canonicalHashes[i] = putter(headerTx, bodyTx, i, true)
+		}
 	}
 
-	return m.GetDb(num, tx)
+	return canonicalHashes
 }
 
-func (m *UnmarkedTx) GetDb(num Num, tx kv.Tx) (Bytes, error) {
-	return tx.GetOne(m.ap.valsTbl, m.ap.encTs(num))
+type inspectingFreezer struct {
+	// in order
+	t                    *testing.T
+	expectFrom, expectTo []uint64
+	currentFreezer       Freezer
 }
 
-func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
-	return tx.Append(m.ap.valsTbl, m.ap.encTs(entityNum), value)
+func (i *inspectingFreezer) Expect(from, to RootNum) {
+	i.expectFrom = append(i.expectFrom, uint64(from))
+	i.expectTo = append(i.expectTo, uint64(to))
 }
 
-func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (fs ForkablePruneStat, err error) {
-	ap := m.ap
-	fromN, err := ap.rel.RootNum2Num(from, tx)
-	if err != nil {
-		return fs, err
-	}
-	delCnt, err := DeleteRangeFromTbl(ctx, ap.valsTbl, ap.encTs(fromN), nil, MaxUint64, nil, ap.logger, tx)
-	fs.Set(fromN, Num(MaxUint64), delCnt)
-	return
+func (i *inspectingFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) (NumMetadata, error) {
+	require.GreaterOrEqual(i.t, len(i.expectFrom), 1)
+	require.Equal(i.t, i.expectFrom[0], uint64(from))
+	require.Equal(i.t, i.expectTo[0], uint64(to))
+
+	i.expectFrom = i.expectFrom[1:]
+	i.expectTo = i.expectTo[1:]
+
+	return i.currentFreezer.Freeze(ctx, from, to, coll, db)
 }
 
-func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, logEvery *time.Ticker, tx kv.RwTx) (fs ForkablePruneStat, err error) {
-	ap := m.ap
-	pruneTo := min(m.VisibleFilesMaxRootNum(), to)
-	toNum, err := ap.rel.RootNum2Num(pruneTo, tx)
-	if err != nil {
-		return fs, err
-	}
-
-	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toNum)
-	delCnt, err := DeleteRangeFromTbl(ctx, ap.valsTbl, eFrom, eTo, limit, logEvery, ap.logger, tx)
-	fs.Set(ap.pruneFrom, toNum, delCnt)
-	return
+func (i *inspectingFreezer) Check() {
+	require.Equal(i.t, 0, len(i.expectFrom))
+	require.Equal(i.t, 0, len(i.expectTo))
 }
 
-func (m *UnmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
-	a := m.ap
-	lastNum, _ := kv.LastKey(tx, a.valsTbl)
-	if len(lastNum) == 0 {
-		return false, nil
-	}
-	iLastNum := binary.BigEndian.Uint64(lastNum)
-	eto, err := a.rel.RootNum2Num(to, tx)
-	if err != nil {
-		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
-	}
+func TestUnmarkedForkableUnwindDeletesVals(t *testing.T) {
+	dirs, db, log := setupDb(t)
+	defer db.Close()
 
-	return iLastNum >= eto.Uint64(), nil
-}
+	unmarkedId := kv.ForkableId(3)
+	_ = registerEntity(dirs, "unmarked_test", unmarkedId)
 
-func (m *UnmarkedTx) Progress(tx kv.Tx) (Num, error) {
-	return progress(m.ap.valsTbl, tx, m)
-}
+	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.BlockBody, ValuesOnCompressedPage: 1}
+	unmarked, err := NewUnmarkedForkable(unmarkedId, fcfg, IdentityRootRelationInstance, dirs, log)
+	require.NoError(t, err)
+	defer unmarked.Close()
 
-func (m *UnmarkedTx) DebugFiles() ForkableFilesTxI {
-	return m
-}
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Rollback()
 
-func (m *UnmarkedTx) DebugDb() UnmarkedDbTxI {
-	return m
-}
+	unmarkedTx := &UnmarkedTx{ap: unmarked, ProtoForkableTx: unmarked.ProtoForkable.BeginFilesRo()}
+	defer unmarkedTx.Close()
 
-func (m *UnmarkedTx) BufferedWriter() *UnmarkedBufferedWriter {
-	return &UnmarkedBufferedWriter{
-		values:  etl.NewCollector(Registry.Name(m.id)+".etl.flush", m.ap.dirs.Tmp, etl.SmallSortableBuffers.Get(), m.a.logger).LogLvl(log.LvlTrace),
-		valsTbl: m.ap.valsTbl,
-	}
-}
-
-type UnmarkedBufferedWriter struct {
-	values  *etl.Collector
-	valsTbl string
-	f       *Forkable[UnmarkedTxI]
-}
-
-func (w *UnmarkedBufferedWriter) Put(n Num, v Bytes) error {
-	key := w.f.encTs(n)
-	return w.values.Collect(key, v)
-}
-
-func (w *UnmarkedBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
-	if w.values == nil {
-		return nil
-	}
-	return w.values.Load(tx, w.valsTbl, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
-}
-
-func (w *UnmarkedBufferedWriter) Close() {
-	if w == nil {
-		return
-	}
-	if w.values != nil {
-		w.values.Close()
-		w.values = nil
-	}
-}
-
-////////////////////////
-
-func progress(tbl string, tx kv.Tx, f ForkableFilesTxI) (Num, error) {
-	c, err := tx.Cursor(tbl)
-	if err != nil {
-		return 0, err
+	for i := 0; i < 10; i++ {
+		err := unmarkedTx.Append(Num(i), []byte{byte(i)}, rwtx)
+		require.NoError(t, err)
 	}
 
-	defer c.Close()
-	k, _, err := c.Last()
-	if err != nil {
-		return 0, err
+	from := RootNum(5)
+	fs, err := unmarkedTx.Unwind(context.Background(), from, rwtx)
+	require.NoError(t, err)
+	require.Greater(t, fs.PruneCount, uint64(0))
+
+	for i := 0; i < 5; i++ {
+		v, err := rwtx.GetOne(kv.BlockBody, kv.EncToBytes(uint64(i), true))
+		require.NoError(t, err)
+		require.NotNil(t, v)
 	}
 
-	var num uint64
-	if k != nil {
-		num = binary.BigEndian.Uint64(k)
+	for i := 5; i < 10; i++ {
+		v, err := rwtx.GetOne(kv.BlockBody, kv.EncToBytes(uint64(i), true))
+		require.NoError(t, err)
+		require.Nil(t, v)
 	}
-	filesProgress := f.VisibleFilesMaxNum()
-	if filesProgress > 0 {
-		filesProgress--
-	}
-	return max(Num(num), filesProgress), nil
-}
-
-var (
-	_ MarkedTxI   = (*MarkedTx)(nil)
-	_ UnmarkedTxI = (*UnmarkedTx)(nil)
-	//_ AppendingTxI = (*AppendingTx)(nil)
-)
-
-type ForkablePruneStat struct {
-	MinNum, MaxNum Num
-	PruneCount     uint64
-}
-
-var EmptyForkablePruneStat = ForkablePruneStat{MinNum: Num(uint64(math.MaxUint64)), MaxNum: Num(0)}
-
-func (ps *ForkablePruneStat) Set(minNum, maxNum Num, pruneCount uint64) {
-	ps.MinNum = minNum
-	ps.MaxNum = maxNum
-	ps.PruneCount = pruneCount
-}
-
-func (ps *ForkablePruneStat) PrunedNothing() bool {
-	return ps.PruneCount == 0
-}
-
-func (ps *ForkablePruneStat) Accumulate(other *ForkablePruneStat) {
-	if other == nil {
-		return
-	}
-	ps.PruneCount += other.PruneCount
-	ps.MinNum = min(ps.MinNum, other.MinNum)
-	ps.MaxNum = max(ps.MaxNum, other.MaxNum)
 }
