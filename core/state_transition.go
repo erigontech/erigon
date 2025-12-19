@@ -277,7 +277,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		panic(fmt.Sprintf("gasRemaining overflow in buyGas: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas()))
 	}
 
-	fmt.Printf("buyGas: adding gas %d\n", st.msg.Gas())
+	fmt.Printf("buyGas: adding gas %d from %x\n", st.msg.Gas(), st.msg.From())
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	st.evm.BlobFee = blobGasVal
@@ -528,18 +528,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// 5. there is no overflow when calculating intrinsic gas
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
-	fmt.Printf("available gas before preCheck: %d\n", st.gasRemaining)
-
 	// Arbitrum: drop tip for delayed (and old) messages
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
 		mmsg := st.msg.(*types.Message)
 		mmsg.SetGasPrice(st.evm.Context.BaseFee)
-		// mmsg.SetFeeCap(common.Num0)
 		mmsg.SetTip(common.Num0)
-		mmsg.TxRunContext = types.NewMessageCommitContext(nil)
+		//mmsg.TxRunContext = types.NewMessageCommitContext(nil)
 
 		st.gasPrice = st.evm.Context.BaseFee
-		// st.feeCap = common.Num0
 		st.tipCap = common.Num0
 		st.msg = mmsg
 	}
