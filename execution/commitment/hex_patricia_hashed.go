@@ -1007,7 +1007,10 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
+			accountStart := time.Now()
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+			AccountReadDuration.Add(int64(time.Since(accountStart)))
+			AccountReadCount.Add(1)
 			if err != nil {
 				return nil, err
 			}
@@ -1943,7 +1946,10 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
 					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
+					accountStart := time.Now()
 					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+					AccountReadDuration.Add(int64(time.Since(accountStart)))
+					AccountReadCount.Add(1)
 					if err != nil {
 						return fmt.Errorf("failed to get account: %w", err)
 					}
@@ -1954,7 +1960,10 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				}
 				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
 					hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
+					storageStart := time.Now()
 					upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+					StorageReadDuration.Add(int64(time.Since(storageStart)))
+					StorageReadCount.Add(1)
 					if err != nil {
 						return fmt.Errorf("failed to get storage: %w", err)
 					}
