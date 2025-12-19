@@ -128,11 +128,10 @@ func TestNoEscape(t *testing.T) {
 	assert.NotErrorIs(t, err, fs.ErrNotExist)
 }
 
-func TestVerifyData(t *testing.T) {
+func TestVerifyDataNoTorrents(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
@@ -140,7 +139,39 @@ func TestVerifyData(t *testing.T) {
 	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
+	err = d.VerifyData(d.ctx, nil, false)
+	require.NoError(err)
+}
 
+func TestVerifyData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+	defer d.Close()
+	os.WriteFile(filepath.Join(dirs.Snap, "a"), nil, 0o444)
+	err = d.AddNewSeedableFile(t.Context(), "a")
+	require.NoError(err)
+	err = d.VerifyData(d.ctx, nil, false)
+	require.NoError(err)
+}
+
+func TestVerifyDataDownloaderClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+	d.Close()
 	err = d.VerifyData(d.ctx, nil, false)
 	require.NoError(err)
 }

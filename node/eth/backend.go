@@ -991,7 +991,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentLogs, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
+	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
@@ -1617,6 +1617,10 @@ func (s *Ethereum) Stop() error {
 		s.logger.Error("background component error", "err", err)
 	}
 
+	if s.config.Downloader != nil {
+		_ = s.config.Downloader.CloseTorrentLogFile()
+	}
+
 	return nil
 }
 
@@ -1647,6 +1651,7 @@ func (s *Ethereum) SentryCtx() context.Context {
 func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
 	return s.sentriesClient
 }
+
 func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
 }

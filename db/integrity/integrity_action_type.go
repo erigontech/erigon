@@ -40,8 +40,8 @@ const (
 var AllChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents,
 	BorSpans, BorCheckpoints, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentKvDeref, CommitmentHistVal, StateProgress,
+	CommitmentKvi, CommitmentKvDeref, StateProgress,
 	Publishable,
 }
 
-var NonDefaultChecks = []Check{}
+var NonDefaultChecks = []Check{CommitmentHistVal}

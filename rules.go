@@ -73,7 +73,7 @@ func cursorDeferClose(m dsl.Matcher) {
 		`$c, $err := $db.RwCursorDupSort($table); $chk; $close`,
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		//At(m["rollback"]).
+		//At(m["close"]).
 		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
@@ -87,7 +87,7 @@ func streamDeferClose(m dsl.Matcher) {
 		`$c, $err := $db.Prefix($params); $chk; $close`,
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		//At(m["rollback"]).
+		//At(m["close"]).
 		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
