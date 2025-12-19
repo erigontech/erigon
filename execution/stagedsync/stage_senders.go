@@ -359,7 +359,7 @@ Loop:
 		if err = s.Update(tx, to); err != nil {
 			return err
 		}
-		logger.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
+		log.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
 	}
 
 	if !useExternalTx {
