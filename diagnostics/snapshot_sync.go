@@ -42,19 +42,10 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient
 		writeResourcesUsage(w, diag)
 	})
 
-	metricsMux.HandleFunc("/network-speed", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		writeNetworkSpeed(w, diag)
-	})
-
 	metricsMux.HandleFunc("/sync-stages", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		writeSyncStages(w, diag)
 	})
-}
-
-func writeNetworkSpeed(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	diag.NetworkSpeedJson(w)
 }
 
 func writeResourcesUsage(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {

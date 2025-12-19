@@ -131,6 +131,11 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			for key, value := range beaconResponse.Headers() {
 				w.Header().Set(key, value)
 			}
+			// If the JSON body includes "version", also expose it via the standard header.
+			// Many consumers rely on this header for fork-specific types.
+			if beaconResponse.Version != nil && w.Header().Get("Eth-Consensus-Version") == "" {
+				w.Header().Set("Eth-Consensus-Version", beaconResponse.Version.String())
+			}
 		}
 		switch {
 		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):

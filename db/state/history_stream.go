@@ -790,11 +790,19 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			ht.histReader.Reset(offset)
 		}
 
-		for ht.histReader.HasNext() {
-			k, v, _, _ := ht.histReader.Next2(nil)
-			if bytes.Equal(k, ht.histKey) {
+		if ht.hc.h.HistoryValuesOnCompressedPage <= 1 {
+			for ht.histReader.HasNext() {
+				v, _ := ht.histReader.Next(nil)
 				ht.v = bytes.Clone(v)
 				return nil
+			}
+		} else {
+			for ht.histReader.HasNext() {
+				k, v, _, _ := ht.histReader.Next2(nil)
+				if bytes.Equal(k, ht.histKey) {
+					ht.v = bytes.Clone(v)
+					return nil
+				}
 			}
 		}
 
@@ -892,7 +900,7 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 			return nil
 		}
 		ht.k = ht.key
-		ht.v, err = ht.valsCDup.SeekBothRange(ht.key, ht.startTxNumBytes[:])
+		ht.v, err = ht.valsCDup.SeekBothRange(ht.key, ht.startTxNumBytes)
 		if err != nil {
 			return err
 		}
@@ -925,7 +933,7 @@ func (ht *HistoryTraceKeyDB) advanceLargeVals() error {
 		}
 		startTxNumBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(startTxNumBytes, ht.fromTxNum)
-		seek := append([]byte{}, append(ht.key, startTxNumBytes[:]...)...)
+		seek := append([]byte{}, append(ht.key, startTxNumBytes...)...)
 		firstKey, v, err := ht.valsC.Seek(seek)
 		if err != nil {
 			return err
