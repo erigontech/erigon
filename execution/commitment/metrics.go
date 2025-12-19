@@ -20,24 +20,33 @@ import (
 // Global timing variables for detailed performance analysis
 // These can be reset between blocks to measure per-block timings
 var (
-	BranchReadDuration atomic.Int64 // Total time spent in ctx.Branch() calls (nanoseconds)
-	HashingDuration    atomic.Int64 // Total time spent in hashing operations (nanoseconds)
-	BranchReadCount    atomic.Int64 // Number of Branch() calls
-	HashingCount       atomic.Int64 // Number of hash operations
+	BranchReadDuration  atomic.Int64 // Total time spent in ctx.Branch() calls (nanoseconds)
+	HashingDuration     atomic.Int64 // Total time spent in hashing operations (nanoseconds)
+	AccountReadDuration atomic.Int64 // Total time spent in ctx.Account() calls (nanoseconds)
+	StorageReadDuration atomic.Int64 // Total time spent in ctx.Storage() calls (nanoseconds)
+	BranchReadCount     atomic.Int64 // Number of Branch() calls
+	HashingCount        atomic.Int64 // Number of hash operations
+	AccountReadCount    atomic.Int64 // Number of Account() calls
+	StorageReadCount    atomic.Int64 // Number of Storage() calls
 )
 
 // ResetTimings resets all global timing counters
 func ResetTimings() {
 	BranchReadDuration.Store(0)
 	HashingDuration.Store(0)
+	AccountReadDuration.Store(0)
+	StorageReadDuration.Store(0)
 	BranchReadCount.Store(0)
 	HashingCount.Store(0)
+	AccountReadCount.Store(0)
+	StorageReadCount.Store(0)
 }
 
 // GetTimings returns the current timing values
-func GetTimings() (branchReadDur, hashingDur time.Duration, branchCount, hashCount int64) {
+func GetTimings() (branchReadDur, hashingDur, accountReadDur, storageReadDur time.Duration, branchCount, hashCount, accountCount, storageCount int64) {
 	return time.Duration(BranchReadDuration.Load()), time.Duration(HashingDuration.Load()),
-		BranchReadCount.Load(), HashingCount.Load()
+		time.Duration(AccountReadDuration.Load()), time.Duration(StorageReadDuration.Load()),
+		BranchReadCount.Load(), HashingCount.Load(), AccountReadCount.Load(), StorageReadCount.Load()
 }
 
 type CsvMetrics interface {

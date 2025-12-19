@@ -2148,13 +2148,19 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		// Update the cell
 		if int16(len(plainKey)) == hph.accountKeyLen {
 			hph.metrics.AccountLoad(plainKey)
+			accountStart := time.Now()
 			stateUpdate, err = hph.ctx.Account(plainKey)
+			AccountReadDuration.Add(int64(time.Since(accountStart)))
+			AccountReadCount.Add(1)
 			if err != nil {
 				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 			}
 		} else {
 			hph.metrics.StorageLoad(plainKey)
+			storageStart := time.Now()
 			stateUpdate, err = hph.ctx.Storage(plainKey)
+			StorageReadDuration.Add(int64(time.Since(storageStart)))
+			StorageReadCount.Add(1)
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
