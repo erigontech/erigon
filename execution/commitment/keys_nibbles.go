@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	ecrypto "github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
@@ -163,6 +164,7 @@ func updatedNibs(num uint16) string {
 // Note that this function does not respect plainKey length so hashing it at once without splitting to account/storage part.
 func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) error {
 	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1] // bounds checks elimination
+	start := time.Now()
 	keccak.Reset()
 	if _, err := keccak.Write(plainKey); err != nil {
 		return err
@@ -170,6 +172,8 @@ func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset i
 	if _, err := keccak.Read(hashBuf); err != nil {
 		return err
 	}
+	KeyHashingDuration.Add(int64(time.Since(start)))
+	KeyHashingCount.Add(1)
 	hashBuf = hashBuf[hashedKeyOffset/2:]
 	var k int
 	if hashedKeyOffset%2 == 1 { // write zero byte as compacted since hashedKeyOffset is odd

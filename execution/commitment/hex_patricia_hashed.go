@@ -1060,6 +1060,11 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 }
 
 func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byte) ([]byte, error) {
+	hashStart := time.Now()
+	defer func() {
+		HashingDuration.Add(int64(time.Since(hashStart)))
+		HashingCount.Add(1)
+	}()
 	var err error
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
@@ -1163,7 +1168,10 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
+			accountStart := time.Now()
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+			AccountReadDuration.Add(int64(time.Since(accountStart)))
+			AccountReadCount.Add(1)
 			if err != nil {
 				return nil, err
 			}
@@ -1693,7 +1701,10 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
+	branchStart := time.Now()
 	branchData, step, err := hph.ctx.Branch(key)
+	BranchReadDuration.Add(int64(time.Since(branchStart)))
+	BranchReadCount.Add(1)
 	if err != nil {
 		return err
 	}
@@ -2103,7 +2114,10 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						upd, _ = hph.warmupCache.GetAccount(cell.accountAddr[:cell.accountAddrLen])
 					}
 					if upd == nil {
+						accountStart := time.Now()
 						upd, err = hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+						AccountReadDuration.Add(int64(time.Since(accountStart)))
+						AccountReadCount.Add(1)
 						if err != nil {
 							return fmt.Errorf("failed to get account: %w", err)
 						}
@@ -2122,7 +2136,10 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						upd, _ = hph.warmupCache.GetStorage(cell.storageAddr[:cell.storageAddrLen])
 					}
 					if upd == nil {
+						storageStart := time.Now()
 						upd, err = hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+						StorageReadDuration.Add(int64(time.Since(storageStart)))
+						StorageReadCount.Add(1)
 						if err != nil {
 							return fmt.Errorf("failed to get storage: %w", err)
 						}
@@ -2317,13 +2334,19 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		// Update the cell
 		if int16(len(plainKey)) == hph.accountKeyLen {
 			hph.metrics.AccountLoad(plainKey)
+			accountStart := time.Now()
 			stateUpdate, err = hph.ctx.Account(plainKey)
+			AccountReadDuration.Add(int64(time.Since(accountStart)))
+			AccountReadCount.Add(1)
 			if err != nil {
 				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 			}
 		} else {
 			hph.metrics.StorageLoad(plainKey)
+			storageStart := time.Now()
 			stateUpdate, err = hph.ctx.Storage(plainKey)
+			StorageReadDuration.Add(int64(time.Since(storageStart)))
+			StorageReadCount.Add(1)
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
