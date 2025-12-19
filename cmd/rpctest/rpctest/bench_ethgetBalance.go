@@ -19,6 +19,7 @@ package rpctest
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -128,6 +129,8 @@ func BenchEthGetBalanceRandomAccount(erigonURL string, blocksToProcess int) erro
 	processedAccounts := 0
 	timeStart := time.Now()
 
+	var wg sync.WaitGroup
+
 	for i := 0; i < blocksToProcess; i++ {
 		bn := uint64(rand.Intn(
 			int(blockNumber.Number.Uint64()),
@@ -146,19 +149,27 @@ func BenchEthGetBalanceRandomAccount(erigonURL string, blocksToProcess int) erro
 		processedAccounts += len(b.Result.Transactions)
 
 		for txn := range b.Result.Transactions {
-			tx := b.Result.Transactions[txn]
-			var balance EthBalance
-			account := tx.From
+			wg.Add(1)
 
-			res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(account, bn), &balance)
-			if res.Err != nil {
-				return fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err)
-			}
-			if balance.Error != nil {
-				return fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
-			}
+			go func() {
+				defer wg.Done()
+
+				tx := b.Result.Transactions[txn]
+				var balance EthBalance
+				account := tx.From
+
+				res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(account, bn), &balance)
+				if res.Err != nil {
+					panic(fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err))
+				}
+				if balance.Error != nil {
+					panic(fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message))
+				}
+			}()
 		}
 	}
+
+	wg.Wait()
 
 	perAcc := float64(time.Since(timeStart)) / float64(time.Millisecond) / float64(processedAccounts)
 	fmt.Printf("Processed accounts: %d took %dms perTx %.2fms\n", processedAccounts, time.Since(timeStart)/time.Millisecond, perAcc)
