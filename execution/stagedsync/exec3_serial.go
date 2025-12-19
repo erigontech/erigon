@@ -136,7 +136,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			inputTxNum++
 		}
 
+		blockExecStart := time.Now()
 		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
+		blockExecDuration := time.Since(blockExecStart)
 
 		if err != nil {
 			return nil, rwTx, err
@@ -148,6 +150,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return b.HeaderNoCopy(), rwTx, nil
 		}
 
+		var commitmentDuration time.Duration
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
 			if dbg.TraceBlock(blockNum) {
@@ -160,7 +163,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return nil, rwTx, err
 			}
 
-			computeCommitmentDuration += time.Since(start)
+			commitmentDuration = time.Since(start)
+			computeCommitmentDuration += commitmentDuration
 			if shouldGenerateChangesets {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
 				if !se.inMemExec {
@@ -175,6 +179,10 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
+		}
+
+		if se.inMemExec {
+			log.Debug(fmt.Sprintf("[%s] block timings", se.logPrefix), "block", blockNum, "execution", blockExecDuration, "commitment", commitmentDuration)
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
