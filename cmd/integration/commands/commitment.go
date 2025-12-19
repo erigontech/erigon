@@ -21,29 +21,41 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
 )
 
 var branchPrefixFlag string
 
 func init() {
+	withChain(commitmentCmd)
 	withDataDir(commitmentCmd)
+	withConfig(commitmentCmd)
 	// commitment branch
 	commitmentBranchCmd.Flags().StringVar(&branchPrefixFlag, "prefix", "", "hex prefix to read (e.g., 'aa', '0a1b')")
 	commitmentCmd.AddCommand(commitmentBranchCmd)
 
 	// commitment rebuild
-	withConfig(cmdCommitmentRebuild)
 	withReset(cmdCommitmentRebuild)
 	withSqueeze(cmdCommitmentRebuild)
 	withBlock(cmdCommitmentRebuild)
@@ -55,6 +67,11 @@ func init() {
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
+
+	// commitment print
+	commitmentCmd.AddCommand(cmdCommitmentPrint)
+
+	rootCmd.AddCommand(commitmentCmd)
 
 }
 
@@ -159,4 +176,119 @@ var cmdCommitmentRebuild = &cobra.Command{
 			return
 		}
 	},
+}
+
+func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	if reset {
+		return rawdbreset.Reset(ctx, db, stages.Execution)
+	}
+
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
+
+	rwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer rwTx.Rollback()
+
+	// remove all existing state commitment snapshots
+	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
+		return err
+	}
+
+	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
+	sconf := statecfg.Schema.CommitmentDomain
+	for _, tn := range sconf.Tables() {
+		log.Info("Clearing", "table", tn)
+		if err := rwTx.ClearTable(tn); err != nil {
+			return fmt.Errorf("failed to clear table %s: %w", tn, err)
+		}
+	}
+	if err := rwTx.Commit(); err != nil {
+		return err
+	}
+
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	if err = agg.OpenFolder(); err != nil { // reopen after snapshot file deletions
+		return fmt.Errorf("failed to re-open aggregator: %w", err)
+	}
+
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
+
+	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
+		return err
+	}
+	return nil
+}
+
+// integration commitment print
+var cmdCommitmentPrint = &cobra.Command{
+	Use:   "print",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := printCommitment(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
+
+	// disable hard alignment; allowing commitment and storage/account to have
+	// different visibleFiles
+	agg.DisableAllDependencies()
+
+	acRo := agg.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
+	defer acRo.Close()
+	defer acRo.MadvNormal().DisableReadAhead()
+
+	commitmentFiles := acRo.Files(kv.CommitmentDomain)
+	fmt.Printf("Commitment files: %d\n", len(commitmentFiles))
+	for _, f := range commitmentFiles {
+		name := filepath.Base(f.Fullpath())
+		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
+		rootNodePrefix := []byte("state")
+		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
+		if err != nil {
+			return fmt.Errorf("failed to get root node from files: %w", err)
+		}
+		rootString, err := commitment.HexTrieStateToShortString(rootNode)
+		if err != nil {
+			return fmt.Errorf("failed to extract state root from root node: %w", err)
+		}
+		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
+	}
+
+	str, err := dbstate.CheckCommitmentForPrint(ctx, db)
+	if err != nil {
+		return fmt.Errorf("failed to check commitment: %w", err)
+	}
+	fmt.Printf("\n%s", str)
+
+	return nil
 }
