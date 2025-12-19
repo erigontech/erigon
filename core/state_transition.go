@@ -277,7 +277,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		panic(fmt.Sprintf("gasRemaining overflow in buyGas: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas()))
 	}
 
-	fmt.Printf("buyGas: adding gas %d from %x\n", st.msg.Gas(), st.msg.From())
+	//fmt.Printf("buyGas: adding gas %d from %x\n", st.msg.Gas(), st.msg.From())
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	st.evm.BlobFee = blobGasVal
@@ -533,7 +533,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		mmsg := st.msg.(*types.Message)
 		mmsg.SetGasPrice(st.evm.Context.BaseFee)
 		mmsg.SetTip(common.Num0)
-		//mmsg.TxRunContext = types.NewMessageCommitContext(nil)
+		mmsg.TxRunContext = types.NewMessageCommitContext(nil)
 
 		st.gasPrice = st.evm.Context.BaseFee
 		st.tipCap = common.Num0
