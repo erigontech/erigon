@@ -16,6 +16,15 @@ const FlagDone statusFlag = 0
 const FlagEstimate statusFlag = 1
 const UnknownDep = -2
 
+// numShards is the number of shards for the VersionMap. Must be a power of 2.
+const numShards = 64
+
+// shard holds a subset of the VersionMap data with its own lock for reduced contention.
+type shard struct {
+	mu sync.RWMutex
+	s  map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]
+}
+
 type AccountPath int8
 
 func (p AccountPath) String() string {
@@ -66,14 +75,19 @@ func (k AccountKey) String() string {
 }
 
 type VersionMap struct {
-	mu    sync.RWMutex
-	s     map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]
-	trace bool
+	shards [numShards]shard
+	trace  bool
+}
+
+// getShard returns the shard for the given address.
+func (vm *VersionMap) getShard(addr accounts.Address) *shard {
+	return &vm.shards[addr.Value()[0]&(numShards-1)]
 }
 
 func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
-	vm := &VersionMap{
-		s: map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
+	vm := &VersionMap{}
+	for i := range vm.shards {
+		vm.shards[i].s = make(map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell])
 	}
 	vm.WriteChanges(changes)
 	return vm
@@ -83,15 +97,15 @@ func (vm *VersionMap) SetTrace(trace bool) {
 	vm.trace = trace
 }
 
-func (vm *VersionMap) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func(addr accounts.Address, path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
-	it, ok := vm.s[addr]
+func (sh *shard) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func() *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
+	it, ok := sh.s[addr]
 
 	if ok {
 		cells, ok = it[AccountKey{path, key}]
 	}
 
 	if !ok && fNoKey != nil {
-		cells = fNoKey(addr, path, key)
+		cells = fNoKey()
 	}
 
 	return
@@ -118,16 +132,17 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 }
 
 func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data interface{}, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
+	sh := vm.getShard(addr)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
-	cells := vm.getKeyCells(addr, path, key, func(addr accounts.Address, path AccountPath, key accounts.StorageKey) (cells *btree.Map[int, *WriteCell]) {
-		it, ok := vm.s[addr]
+	cells := sh.getKeyCells(addr, path, key, func() (cells *btree.Map[int, *WriteCell]) {
+		it, ok := sh.s[addr]
 		cells = &btree.Map[int, *WriteCell]{}
 		if ok {
 			it[AccountKey{path, key}] = cells
 		} else {
-			vm.s[addr] = map[AccountKey]*btree.Map[int, *WriteCell]{
+			sh.s[addr] = map[AccountKey]*btree.Map[int, *WriteCell]{
 				{path, key}: cells,
 			}
 		}
@@ -170,13 +185,14 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 		return res
 	}
 
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
+	sh := vm.getShard(addr)
+	sh.mu.RLock()
+	defer sh.mu.RUnlock()
 
 	res.depIdx = UnknownDep
 	res.incarnation = -1
 
-	cells := vm.getKeyCells(addr, path, key, nil)
+	cells := sh.getKeyCells(addr, path, key, nil)
 
 	if cells == nil {
 		return
@@ -223,10 +239,11 @@ func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool
 }
 
 func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
+	sh := vm.getShard(addr)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
-	cells := vm.getKeyCells(addr, path, key, func(_ accounts.Address, _ AccountPath, _ accounts.StorageKey) *btree.Map[int, *WriteCell] {
+	cells := sh.getKeyCells(addr, path, key, func() *btree.Map[int, *WriteCell] {
 		panic(errors.New("path must already exist"))
 	})
 
@@ -238,10 +255,11 @@ func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key 
 }
 
 func (vm *VersionMap) MarkComplete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
+	sh := vm.getShard(addr)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
-	cells := vm.getKeyCells(addr, path, key, func(_ accounts.Address, _ AccountPath, _ accounts.StorageKey) *btree.Map[int, *WriteCell] {
+	cells := sh.getKeyCells(addr, path, key, func() *btree.Map[int, *WriteCell] {
 		panic(errors.New("path must already exist"))
 	})
 
@@ -253,9 +271,10 @@ func (vm *VersionMap) MarkComplete(addr accounts.Address, path AccountPath, key 
 }
 
 func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, checkExists bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	cells := vm.getKeyCells(addr, path, key, nil)
+	sh := vm.getShard(addr)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	cells := sh.getKeyCells(addr, path, key, nil)
 
 	if cells == nil {
 		if !checkExists {
@@ -269,9 +288,10 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 }
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	if writes, ok := vm.s[addr]; ok {
+	sh := vm.getShard(addr)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if writes, ok := sh.s[addr]; ok {
 		for _, cells := range writes {
 			cells.Delete(txIdx)
 		}

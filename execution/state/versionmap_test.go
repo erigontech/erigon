@@ -351,3 +351,32 @@ func TestReadTimeSameLocation(t *testing.T) {
 		mvh1.Read(ap1, AddressPath, accounts.NilKey, 2)
 	}
 }
+
+// BenchmarkConcurrentReadWrite tests parallel read/write performance across different addresses.
+// This benchmark validates that the sharded VersionMap scales well with concurrent access.
+func BenchmarkConcurrentReadWrite(b *testing.B) {
+	vm := NewVersionMap(nil)
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			addr := getAddress(i)
+			vm.Write(addr, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(i, 1), true)
+			vm.Read(addr, AddressPath, accounts.NilKey, i+1)
+			i++
+		}
+	})
+}
+
+// BenchmarkConcurrentReadWriteSameAddress tests parallel read/write on the same address (high contention).
+func BenchmarkConcurrentReadWriteSameAddress(b *testing.B) {
+	vm := NewVersionMap(nil)
+	addr := getAddress(1)
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			vm.Write(addr, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(i, 1), true)
+			vm.Read(addr, AddressPath, accounts.NilKey, i+1)
+			i++
+		}
+	})
+}
