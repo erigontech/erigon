@@ -26,7 +26,6 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon/arb/multigas"
-	"github.com/erigontech/erigon/arb/osver"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/holiman/uint256"
 
@@ -235,9 +234,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			}
 
 			isCancun := st.evm.ChainRules().IsCancun
-			if st.evm.ChainRules().IsArbitrum {
-				isCancun = isCancun && st.evm.Context.ArbOSVersion >= osver.ArbosVersion_20
-			}
+			//if st.evm.ChainRules().IsArbitrum {
+			//	isCancun = isCancun && st.evm.Context.ArbOSVersion >= osver.ArbosVersion_20
+			//}
 			if isCancun {
 				maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
 				if overflow {
@@ -278,6 +277,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		panic(fmt.Sprintf("gasRemaining overflow in buyGas: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas()))
 	}
 
+	fmt.Printf("buyGas: adding gas %d\n", st.msg.Gas())
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	st.evm.BlobFee = blobGasVal
