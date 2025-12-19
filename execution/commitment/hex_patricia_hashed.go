@@ -2673,9 +2673,6 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		}
 		close(work)
 
-		var branchReads atomic.Int64
-		var pathAccountReads, pathStorageReads atomic.Int64 // prefetch for sibling cells on trie path
-
 		// Cache to store warmed Account/Storage results
 		cache := NewWarmupCache()
 
@@ -2701,7 +2698,6 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 						prefix := hexNibblesToCompactBytes(hashedKey[:depth])
 
 						branchData, _, _ := trieCtx.Branch(prefix)
-						branchReads.Add(1)
 
 						// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 						if len(branchData) < 4 {
@@ -2713,12 +2709,10 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 						for _, addr := range cellAccounts {
 							update, _ := trieCtx.Account(addr)
 							cache.SetAccount(addr, update)
-							pathAccountReads.Add(1)
 						}
 						for _, addr := range cellStorages {
 							update, _ := trieCtx.Storage(addr)
 							cache.SetStorage(addr, update)
-							pathStorageReads.Add(1)
 						}
 
 						branchData = branchData[2:] // skip touch map
@@ -2774,9 +2768,6 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		err := g.Wait()
 		log.Debug(fmt.Sprintf("[%s][warmup] completed", logPrefix),
 			"keys", common.PrettyCounter(len(hashedKeys)),
-			"branchReads", common.PrettyCounter(branchReads.Load()),
-			"pathAccounts", common.PrettyCounter(pathAccountReads.Load()),
-			"pathStorages", common.PrettyCounter(pathStorageReads.Load()),
 			"maxDepth", maxDepth,
 			"workers", numWorkers,
 			"spent", time.Since(warmupStart),
