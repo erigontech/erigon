@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"strconv"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
@@ -448,8 +450,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				Status:          executionproto.ExecutionStatus_Success,
 				ValidationError: validationError,
 			}, false)
+			e.logHeadUpdated(blockHash, fcuHeader, 0, time.Duration(0), "head validated", false)
 		}
-		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator, e.recentReceipts); err != nil {
+		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator, e.recentLogs); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
@@ -591,34 +594,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		blockTimings := e.forkValidator.GetTimings(blockHash)
-		logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64(), "txnum", txnum, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0))}
-		if mergeExtendingFork {
-			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
-			if !e.syncCfg.ParallelStateFlushing {
-				totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
-			}
-			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
-			mgasPerSec := gasUsedMgas / totalTime.Seconds()
-			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
-
-			const blockRange = 300 // ~1 hour
-			const alpha = 2.0 / (blockRange + 1)
-
-			if e.avgMgasSec == 0 {
-				e.avgMgasSec = mgasPerSec
-			}
-			e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
-			logArgs = append(logArgs, "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
-			if !e.syncCfg.ParallelStateFlushing {
-				logArgs = append(logArgs, "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork])
-			}
-		}
-		logArgs = append(logArgs, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		if log {
-			e.logger.Info("head updated", logArgs...)
+			e.logHeadUpdated(blockHash, fcuHeader, txnum, commitTime, "head updated", stateFlushingInParallel)
 		}
 	}
 	if *headNumber >= startPruneFrom {
@@ -646,6 +623,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		defer e.semaphore.Release(1)
 		pruneStart := time.Now()
 		defer UpdateForkChoicePruneDuration(pruneStart)
+
 		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
 			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
 				return err
@@ -665,4 +643,50 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			e.logger.Info("Timings: Post-Forkchoice", timings...)
 		}
 	}()
+}
+
+func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, commitTime time.Duration, msg string, debug bool) {
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	blockTimings := e.forkValidator.GetTimings(blockHash)
+
+	logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64()}
+	if txnum != 0 {
+		logArgs = append(logArgs, "txnum", txnum)
+	}
+	logArgs = append(logArgs, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)))
+
+	logArgs = append(logArgs, "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex])
+	if !debug {
+		totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
+		if !e.syncCfg.ParallelStateFlushing {
+			totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
+		}
+		gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
+		mgasPerSec := gasUsedMgas / totalTime.Seconds()
+		metrics.ChainTipMgasPerSec.Add(mgasPerSec)
+
+		const blockRange = 300 // ~1 hour
+		const alpha = 2.0 / (blockRange + 1)
+
+		if e.avgMgasSec == 0 || e.avgMgasSec == math.Inf(1) {
+			e.avgMgasSec = mgasPerSec
+		}
+		e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
+		logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+	}
+	if commitTime > 0 {
+		logArgs = append(logArgs, "commit", commitTime)
+	}
+	if !e.syncCfg.ParallelStateFlushing {
+		logArgs = append(logArgs, "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork])
+	}
+
+	logArgs = append(logArgs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+	dbgLevel := log.LvlInfo
+	if debug {
+		dbgLevel = log.LvlDebug
+	}
+	e.logger.Log(dbgLevel, msg, logArgs...)
 }
