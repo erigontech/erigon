@@ -48,14 +48,17 @@ import (
 var branchPrefixFlag string
 
 func init() {
-	withChain(commitmentCmd)
-	withDataDir(commitmentCmd)
-	withConfig(commitmentCmd)
+
 	// commitment branch
+	withDataDir(commitmentBranchCmd)
+	withConfig(commitmentBranchCmd)
 	commitmentBranchCmd.Flags().StringVar(&branchPrefixFlag, "prefix", "", "hex prefix to read (e.g., 'aa', '0a1b')")
 	commitmentCmd.AddCommand(commitmentBranchCmd)
 
 	// commitment rebuild
+	withChain(cmdCommitmentRebuild)
+	withDataDir(cmdCommitmentRebuild)
+	withConfig(cmdCommitmentRebuild)
 	withReset(cmdCommitmentRebuild)
 	withSqueeze(cmdCommitmentRebuild)
 	withBlock(cmdCommitmentRebuild)
@@ -69,6 +72,9 @@ func init() {
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
+	withChain(cmdCommitmentPrint)
+	withDataDir(cmdCommitmentPrint)
+	withConfig(cmdCommitmentPrint)
 	commitmentCmd.AddCommand(cmdCommitmentPrint)
 
 	rootCmd.AddCommand(commitmentCmd)
