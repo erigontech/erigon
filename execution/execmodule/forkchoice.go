@@ -673,7 +673,10 @@ func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeade
 			e.avgMgasSec = mgasPerSec
 		}
 		e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
-		logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+		// if mgasPerSec or avgMgasPerSec are 0, Inf or -Inf, do not log it but dont return either
+		if mgasPerSec > 0 && mgasPerSec != math.Inf(1) && e.avgMgasSec > 0 && e.avgMgasSec != math.Inf(1) {
+			logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "avg mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+		}
 	}
 	if commitTime > 0 {
 		logArgs = append(logArgs, "commit", commitTime)
