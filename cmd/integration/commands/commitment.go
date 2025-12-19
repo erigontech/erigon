@@ -50,6 +50,7 @@ var branchPrefixFlag string
 func init() {
 
 	// commitment branch
+	withChain(commitmentBranchCmd)
 	withDataDir(commitmentBranchCmd)
 	withConfig(commitmentBranchCmd)
 	commitmentBranchCmd.Flags().StringVar(&branchPrefixFlag, "prefix", "", "hex prefix to read (e.g., 'aa', '0a1b')")
@@ -93,7 +94,7 @@ var commitmentBranchCmd = &cobra.Command{
 for the specified prefix. The prefix should be provided as hex nibbles.
 
 Examples:
-  integration commitment branch --datadir ~/data/eth-mainnet --prefix aa
+  integration commitment branch --chain=mainnet --datadir ~/data/eth-mainnet --prefix aa
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
 	Run: func(cmd *cobra.Command, args []string) {
