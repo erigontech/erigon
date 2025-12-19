@@ -379,12 +379,14 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	// Update pendingBase for all pool queues and slices
 	if baseFeeChanged {
-		p.pending.best.pendingBaseFee = pendingBaseFee
-		p.pending.worst.pendingBaseFee = pendingBaseFee
-		p.baseFee.best.pendingBaseFee = pendingBaseFee
-		p.baseFee.worst.pendingBaseFee = pendingBaseFee
-		p.queued.best.pendingBaseFee = pendingBaseFee
-		p.queued.worst.pendingBaseFee = pendingBaseFee
+		var pendingBaseFee256 uint256.Int
+		pendingBaseFee256.SetUint64(pendingBaseFee)
+		p.pending.best.pendingBaseFee = pendingBaseFee256
+		p.pending.worst.pendingBaseFee = pendingBaseFee256
+		p.baseFee.best.pendingBaseFee = pendingBaseFee256
+		p.baseFee.worst.pendingBaseFee = pendingBaseFee256
+		p.queued.best.pendingBaseFee = pendingBaseFee256
+		p.queued.worst.pendingBaseFee = pendingBaseFee256
 	}
 
 	pendingBlobFee := stateChanges.PendingBlobFeePerGas
@@ -2462,6 +2464,16 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
 		return err
 	}
+	// Initialise cached pendingBaseFee values in all queues so that their
+	// comparators use the correct base fee even before the first OnNewBlock.
+	var pendingBaseFee256 uint256.Int
+	pendingBaseFee256.SetUint64(pendingBaseFee)
+	p.pending.best.pendingBaseFee = pendingBaseFee256
+	p.pending.worst.pendingBaseFee = pendingBaseFee256
+	p.baseFee.best.pendingBaseFee = pendingBaseFee256
+	p.baseFee.worst.pendingBaseFee = pendingBaseFee256
+	p.queued.best.pendingBaseFee = pendingBaseFee256
+	p.queued.worst.pendingBaseFee = pendingBaseFee256
 	p.pendingBaseFee.Store(pendingBaseFee)
 	p.pendingBlobFee.Store(pendingBlobFee)
 	p.blockGasLimit.Store(blockGasLimit)
