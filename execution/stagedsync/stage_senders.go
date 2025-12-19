@@ -116,6 +116,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer logEvery.Stop()
 
 	startFrom := s.BlockNumber + 1
+	recoveryStart := time.Now()
 
 	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
 	out := make(chan *senderRecoveryJob, cfg.batchSize)
@@ -165,7 +166,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 				pendingMu.Lock()
 				n += uint64(lastBlockIndex)
 				pendingMu.Unlock()
-				logger.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", n, "ch", fmt.Sprintf("%d/%d", len(jobs), cap(jobs)))
 			case j, ok = <-out:
 				if !ok {
 					return
@@ -359,6 +359,7 @@ Loop:
 		if err = s.Update(tx, to); err != nil {
 			return err
 		}
+		logger.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
 	}
 
 	if !useExternalTx {
