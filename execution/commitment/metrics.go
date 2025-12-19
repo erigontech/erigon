@@ -17,6 +17,29 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+// Global timing variables for detailed performance analysis
+// These can be reset between blocks to measure per-block timings
+var (
+	BranchReadDuration atomic.Int64 // Total time spent in ctx.Branch() calls (nanoseconds)
+	HashingDuration    atomic.Int64 // Total time spent in hashing operations (nanoseconds)
+	BranchReadCount    atomic.Int64 // Number of Branch() calls
+	HashingCount       atomic.Int64 // Number of hash operations
+)
+
+// ResetTimings resets all global timing counters
+func ResetTimings() {
+	BranchReadDuration.Store(0)
+	HashingDuration.Store(0)
+	BranchReadCount.Store(0)
+	HashingCount.Store(0)
+}
+
+// GetTimings returns the current timing values
+func GetTimings() (branchReadDur, hashingDur time.Duration, branchCount, hashCount int64) {
+	return time.Duration(BranchReadDuration.Load()), time.Duration(HashingDuration.Load()),
+		BranchReadCount.Load(), HashingCount.Load()
+}
+
 type CsvMetrics interface {
 	Headers() []string
 	Values() [][]string

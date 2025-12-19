@@ -899,6 +899,11 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 }
 
 func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byte) ([]byte, error) {
+	hashStart := time.Now()
+	defer func() {
+		HashingDuration.Add(int64(time.Since(hashStart)))
+		HashingCount.Add(1)
+	}()
 	var err error
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
@@ -1532,7 +1537,10 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
+	branchStart := time.Now()
 	branchData, step, err := hph.ctx.Branch(key)
+	BranchReadDuration.Add(int64(time.Since(branchStart)))
+	BranchReadCount.Add(1)
 	if err != nil {
 		return err
 	}

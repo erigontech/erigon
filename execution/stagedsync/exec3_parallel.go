@@ -336,6 +336,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								lastExecutedLog = time.Now()
 							}
 
+							commitment.ResetTimings()
 							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
 							captured := pe.doms.SetTrace(false, false)
@@ -375,7 +376,16 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							if pe.inMemExec {
 								commitmentDuration := time.Since(commitStart)
 								totalDuration := applyResult.ExecDuration + commitmentDuration
-								log.Debug(fmt.Sprintf("[%s] block timings", pe.logPrefix), "block", applyResult.BlockNum, "total", totalDuration, "execution", applyResult.ExecDuration, "commitment", commitmentDuration)
+								branchReadDur, hashingDur, branchCount, hashCount := commitment.GetTimings()
+								log.Debug(fmt.Sprintf("[%s] block timings", pe.logPrefix),
+									"block", applyResult.BlockNum,
+									"total", totalDuration,
+									"execution", applyResult.ExecDuration,
+									"commitment", commitmentDuration,
+									"branchRead", branchReadDur,
+									"branchCount", branchCount,
+									"hashing", hashingDur,
+									"hashCount", hashCount)
 							}
 						}
 
