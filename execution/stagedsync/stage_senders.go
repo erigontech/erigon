@@ -161,11 +161,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			select {
 			case <-quitCh:
 				return
-			case <-logEvery.C:
-				n := s.BlockNumber
-				pendingMu.Lock()
-				n += uint64(lastBlockIndex)
-				pendingMu.Unlock()
 			case j, ok = <-out:
 				if !ok {
 					return
