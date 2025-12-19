@@ -2481,15 +2481,6 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 
-	if collectCommitmentMetrics {
-		hph.metrics.Reset()
-		hph.metrics.updates.Store(updatesCount)
-		defer func() {
-			hph.metrics.TotalProcessingTimeInc(start)
-			hph.metrics.WriteToCSV()
-		}()
-	}
-
 	defer func() { logEvery.Stop() }()
 
 	// Prefetch callback - traverse trie structure in parallel, following actual branch nodes
