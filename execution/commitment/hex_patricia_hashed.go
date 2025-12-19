@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,6 +54,43 @@ import (
 type keccakState interface {
 	hash.Hash
 	Read([]byte) (int, error)
+}
+
+// WarmupCache stores prefetched Account and Storage data from warmup phase.
+// Thread-safe for concurrent writes during warmup.
+type WarmupCache struct {
+	accounts sync.Map // key: string(address), value: *Update
+	storages sync.Map // key: string(address), value: *Update
+}
+
+func NewWarmupCache() *WarmupCache {
+	return &WarmupCache{}
+}
+
+func (c *WarmupCache) SetAccount(addr []byte, update *Update) {
+	if update != nil {
+		c.accounts.Store(string(addr), update)
+	}
+}
+
+func (c *WarmupCache) SetStorage(addr []byte, update *Update) {
+	if update != nil {
+		c.storages.Store(string(addr), update)
+	}
+}
+
+func (c *WarmupCache) GetAccount(addr []byte) (*Update, bool) {
+	if v, ok := c.accounts.Load(string(addr)); ok {
+		return v.(*Update), true
+	}
+	return nil, false
+}
+
+func (c *WarmupCache) GetStorage(addr []byte) (*Update, bool) {
+	if v, ok := c.storages.Load(string(addr)); ok {
+		return v.(*Update), true
+	}
+	return nil, false
 }
 
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
@@ -99,6 +137,9 @@ type HexPatriciaHashed struct {
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
+
+	// Cache for warmed Account/Storage data from prefetch phase
+	warmupCache *WarmupCache
 }
 
 // Clones current trie state to allow concurrent processing.
@@ -2055,9 +2096,17 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
 					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
-					if err != nil {
-						return fmt.Errorf("failed to get account: %w", err)
+					// Try warmup cache first
+					var upd *Update
+					var err error
+					if hph.warmupCache != nil {
+						upd, _ = hph.warmupCache.GetAccount(cell.accountAddr[:cell.accountAddrLen])
+					}
+					if upd == nil {
+						upd, err = hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+						if err != nil {
+							return fmt.Errorf("failed to get account: %w", err)
+						}
 					}
 					cell.setFromUpdate(upd)
 					// if update is empty, loaded flag was not updated so do it manually
@@ -2066,9 +2115,17 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				}
 				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
 					hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
-					upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
-					if err != nil {
-						return fmt.Errorf("failed to get storage: %w", err)
+					// Try warmup cache first
+					var upd *Update
+					var err error
+					if hph.warmupCache != nil {
+						upd, _ = hph.warmupCache.GetStorage(cell.storageAddr[:cell.storageAddrLen])
+					}
+					if upd == nil {
+						upd, err = hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+						if err != nil {
+							return fmt.Errorf("failed to get storage: %w", err)
+						}
 					}
 					cell.setFromUpdate(upd)
 					// if update is empty, loaded flag was not updated so do it manually
@@ -2619,6 +2676,9 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		var branchReads atomic.Int64
 		var pathAccountReads, pathStorageReads atomic.Int64 // prefetch for sibling cells on trie path
 
+		// Cache to store warmed Account/Storage results
+		cache := NewWarmupCache()
+
 		g, gctx := errgroup.WithContext(ctx)
 		for i := 0; i < numWorkers; i++ {
 			g.Go(func() error {
@@ -2651,11 +2711,13 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 						// Extract and prefetch account/storage addresses from sibling cells on trie path
 						cellAccounts, cellStorages := extractBranchCellAddresses(branchData)
 						for _, addr := range cellAccounts {
-							trieCtx.Account(addr)
+							update, _ := trieCtx.Account(addr)
+							cache.SetAccount(addr, update)
 							pathAccountReads.Add(1)
 						}
 						for _, addr := range cellStorages {
-							trieCtx.Storage(addr)
+							update, _ := trieCtx.Storage(addr)
+							cache.SetStorage(addr, update)
 							pathStorageReads.Add(1)
 						}
 
@@ -2719,6 +2781,8 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 			"workers", numWorkers,
 			"spent", time.Since(warmupStart),
 		)
+		// Store cache for use during fold()
+		hph.warmupCache = cache
 		return err
 	}
 
@@ -2804,6 +2868,9 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 
 	log.Debug("commitment with warmup finished",
 		"keys", common.PrettyCounter(ki), "spent", time.Since(start))
+
+	// Clear warmup cache after processing is done
+	hph.warmupCache = nil
 
 	return rootHash, nil
 }
