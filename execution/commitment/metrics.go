@@ -24,10 +24,12 @@ var (
 	HashingDuration     atomic.Int64 // Total time spent in hashing operations (nanoseconds)
 	AccountReadDuration atomic.Int64 // Total time spent in ctx.Account() calls (nanoseconds)
 	StorageReadDuration atomic.Int64 // Total time spent in ctx.Storage() calls (nanoseconds)
+	KeyHashingDuration  atomic.Int64 // Total time spent in key hashing (keccak) (nanoseconds)
 	BranchReadCount     atomic.Int64 // Number of Branch() calls
 	HashingCount        atomic.Int64 // Number of hash operations
 	AccountReadCount    atomic.Int64 // Number of Account() calls
 	StorageReadCount    atomic.Int64 // Number of Storage() calls
+	KeyHashingCount     atomic.Int64 // Number of key hash operations
 )
 
 // ResetTimings resets all global timing counters
@@ -36,17 +38,21 @@ func ResetTimings() {
 	HashingDuration.Store(0)
 	AccountReadDuration.Store(0)
 	StorageReadDuration.Store(0)
+	KeyHashingDuration.Store(0)
 	BranchReadCount.Store(0)
 	HashingCount.Store(0)
 	AccountReadCount.Store(0)
 	StorageReadCount.Store(0)
+	KeyHashingCount.Store(0)
 }
 
 // GetTimings returns the current timing values
-func GetTimings() (branchReadDur, hashingDur, accountReadDur, storageReadDur time.Duration, branchCount, hashCount, accountCount, storageCount int64) {
+func GetTimings() (branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur time.Duration, branchCount, hashCount, accountCount, storageCount, keyHashCount int64) {
 	return time.Duration(BranchReadDuration.Load()), time.Duration(HashingDuration.Load()),
 		time.Duration(AccountReadDuration.Load()), time.Duration(StorageReadDuration.Load()),
-		BranchReadCount.Load(), HashingCount.Load(), AccountReadCount.Load(), StorageReadCount.Load()
+		time.Duration(KeyHashingDuration.Load()),
+		BranchReadCount.Load(), HashingCount.Load(), AccountReadCount.Load(), StorageReadCount.Load(),
+		KeyHashingCount.Load()
 }
 
 type CsvMetrics interface {
