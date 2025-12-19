@@ -330,6 +330,29 @@ func (m *TransformedDuo[K, v]) Close() {
 	}
 }
 
+// TransformedDuoV - analog `map` (in terms of map-filter-reduce pattern) but with different value type
+type TransformedDuoV[K, V, VR any] struct {
+	it        Duo[K, V]
+	transform func(K, V) (K, VR, error)
+}
+
+func TransformDuoV[K, V, VR any](it Duo[K, V], transform func(K, V) (K, VR, error)) *TransformedDuoV[K, V, VR] {
+	return &TransformedDuoV[K, V, VR]{it: it, transform: transform}
+}
+func (m *TransformedDuoV[K, V, VR]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformedDuoV[K, V, VR]) Next() (k K, vr VR, err error) {
+	k, v, err := m.it.Next()
+	if err != nil {
+		return k, vr, err
+	}
+	return m.transform(k, v)
+}
+func (m *TransformedDuoV[K, V, VR]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
+}
+
 // FilteredDuo - analog `map` (in terms of map-filter-reduce pattern)
 // please avoid reading from Disk/DB more elements and then filter them. Better
 // push-down filter conditions to lower-level iterator to reduce disk reads amount.
