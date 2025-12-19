@@ -482,6 +482,105 @@ func skipCellFields(data []byte, pos int, fieldBits byte) int {
 	return pos
 }
 
+// extractBranchCellAddresses parses branch data and extracts all account and storage addresses
+// found in cells. These are sibling cells on the trie path that may need to be loaded during fold().
+// Returns slices of account addresses and storage addresses.
+func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, storageAddrs [][]byte) {
+	if len(branchData) < 4 {
+		return nil, nil
+	}
+	// Skip touch map (first 2 bytes)
+	branchData = branchData[2:]
+	bitmap := binary.BigEndian.Uint16(branchData[0:2])
+	pos := 2
+
+	// Iterate over all cells in the branch
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		bitset ^= bit
+
+		if pos >= len(branchData) {
+			break
+		}
+		fieldBits := branchData[pos]
+		pos++
+
+		// Parse each field
+		// extension (bit 0)
+		if fieldBits&1 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+
+		// accountAddr (bit 1)
+		if fieldBits&2 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n
+			if l > 0 && pos+int(l) <= len(branchData) {
+				addr := make([]byte, l)
+				copy(addr, branchData[pos:pos+int(l)])
+				accountAddrs = append(accountAddrs, addr)
+				pos += int(l)
+			}
+		}
+
+		// storageAddr (bit 2)
+		if fieldBits&4 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n
+			if l > 0 && pos+int(l) <= len(branchData) {
+				addr := make([]byte, l)
+				copy(addr, branchData[pos:pos+int(l)])
+				storageAddrs = append(storageAddrs, addr)
+				pos += int(l)
+			}
+		}
+
+		// hash (bit 3)
+		if fieldBits&8 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+
+		// stateHash (bit 4)
+		if fieldBits&16 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+	}
+	return accountAddrs, storageAddrs
+}
+
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
@@ -2484,7 +2583,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	defer func() { logEvery.Stop() }()
 
 	// Prefetch callback - traverse trie structure in parallel, following actual branch nodes
-	// Process sequentially to track divergence and avoid re-reading shared prefixes
+	// Also prefetch Account and Storage addresses found in sibling cells on the trie path
 	prefetchFn := func(hashedKeys [][]byte) error {
 		if len(hashedKeys) == 0 || numWorkers <= 0 {
 			return nil
@@ -2493,7 +2592,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 
 		// Build work items with start depth based on divergence from previous key
 		type workItem struct {
-			key        []byte
+			hashedKey  []byte
 			startDepth int
 		}
 		workItems := make([]workItem, len(hashedKeys))
@@ -2508,7 +2607,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 			for cpl < minLen && prev[cpl] == curr[cpl] {
 				cpl++
 			}
-			workItems[i] = workItem{curr, cpl}
+			workItems[i] = workItem{hashedKeys[i], cpl}
 		}
 
 		work := make(chan workItem, len(workItems))
@@ -2517,7 +2616,8 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		}
 		close(work)
 
-		var totalReads atomic.Int64
+		var branchReads atomic.Int64
+		var pathAccountReads, pathStorageReads atomic.Int64 // prefetch for sibling cells on trie path
 
 		g, gctx := errgroup.WithContext(ctx)
 		for i := 0; i < numWorkers; i++ {
@@ -2527,7 +2627,6 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 					defer cleanup()
 				}
 
-				var reads int64
 				for item := range work {
 					select {
 					case <-gctx.Done():
@@ -2535,19 +2634,31 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 					default:
 					}
 
-					hashedKey := item.key
+					hashedKey := item.hashedKey
 					// Start from divergence point, not root
 					depth := item.startDepth
 					for depth <= len(hashedKey) && depth <= maxDepth {
 						prefix := hexNibblesToCompactBytes(hashedKey[:depth])
 
 						branchData, _, _ := trieCtx.Branch(prefix)
-						reads++
+						branchReads.Add(1)
 
 						// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 						if len(branchData) < 4 {
 							break
 						}
+
+						// Extract and prefetch account/storage addresses from sibling cells on trie path
+						cellAccounts, cellStorages := extractBranchCellAddresses(branchData)
+						for _, addr := range cellAccounts {
+							trieCtx.Account(addr)
+							pathAccountReads.Add(1)
+						}
+						for _, addr := range cellStorages {
+							trieCtx.Storage(addr)
+							pathStorageReads.Add(1)
+						}
+
 						branchData = branchData[2:] // skip touch map
 
 						bitmap := binary.BigEndian.Uint16(branchData[0:2])
@@ -2595,14 +2706,15 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 						depth++
 					}
 				}
-				totalReads.Add(reads)
 				return nil
 			})
 		}
 		err := g.Wait()
 		log.Debug(fmt.Sprintf("[%s][warmup] completed", logPrefix),
 			"keys", common.PrettyCounter(len(hashedKeys)),
-			"reads", common.PrettyCounter(totalReads.Load()),
+			"branchReads", common.PrettyCounter(branchReads.Load()),
+			"pathAccounts", common.PrettyCounter(pathAccountReads.Load()),
+			"pathStorages", common.PrettyCounter(pathStorageReads.Load()),
 			"maxDepth", maxDepth,
 			"workers", numWorkers,
 			"spent", time.Since(warmupStart),

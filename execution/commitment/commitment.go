@@ -1269,7 +1269,7 @@ type keyPair struct {
 
 // HashSortWithPrefetch loads all keys first, calls prefetchFn with hashed keys for warming up,
 // then processes each key with the main callback. This works with both ModeDirect and ModeUpdate.
-// The prefetchFn receives all hashed keys and can be used to warm up branch caches in parallel.
+// The prefetchFn receives all hashed keys and can be used to warm up branch and account/storage caches in parallel.
 func (t *Updates) HashSortWithPrefetch(ctx context.Context, prefetchFn func(hashedKeys [][]byte) error, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
