@@ -66,7 +66,6 @@ func init() {
 	withUnwind(cmdCommitmentRebuild)
 	withPruneTo(cmdCommitmentRebuild)
 	withIntegrityChecks(cmdCommitmentRebuild)
-	withChain(cmdCommitmentRebuild)
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
