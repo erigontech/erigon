@@ -280,6 +280,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
+				&preverifiedFlag,
 			},
 		},
 		{
