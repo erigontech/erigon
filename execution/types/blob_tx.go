@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -62,7 +63,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		checkNonce: true,
 		checkGas:   true,
 
-		TxRunContext: new(MessageRunContext),
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 		Tx:           stx,
 	}
 	if !rules.IsCancun {

@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/holiman/uint256"
@@ -146,7 +147,8 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce: !skipAccountChecks[tx.Type()],
 
 		// TxRunMode: MessageRunMode, // must be set separately?
-		Tx: tx,
+		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	// if baseFee != nil {
 	// 	msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -538,7 +540,8 @@ func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
 
-		Tx: tx,
+		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -963,7 +966,8 @@ func (t *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rul
 		amount:     *t.GetValue(),
 		checkNonce: !skipAccountChecks[t.Type()],
 
-		Tx: t,
+		Tx:           t,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -1673,6 +1677,7 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 
 		EffectiveGas: tx.EffectiveGasUsed,
 		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -2023,7 +2028,8 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
 
-		Tx: tx,
+		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -2312,18 +2318,19 @@ func (tx *ArbitrumInternalTx) WithSignature(signer Signer, sig []byte) (Transact
 }
 func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := &Message{
-		gasPrice:   *tx.GetPrice(),
-		tipCap:     *tx.GetTipCap(),
-		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGasLimit(),
-		nonce:      tx.GetNonce(),
-		accessList: tx.GetAccessList(),
-		from:       ArbosAddress,
-		to:         tx.GetTo(),
-		data:       tx.GetData(),
-		amount:     *tx.GetValue(),
-		checkNonce: !skipAccountChecks[tx.Type()],
-		Tx:         tx,
+		gasPrice:     *tx.GetPrice(),
+		tipCap:       *tx.GetTipCap(),
+		feeCap:       *tx.GetFeeCap(),
+		gasLimit:     tx.GetGasLimit(),
+		nonce:        tx.GetNonce(),
+		accessList:   tx.GetAccessList(),
+		from:         ArbosAddress,
+		to:           tx.GetTo(),
+		data:         tx.GetData(),
+		amount:       *tx.GetValue(),
+		checkNonce:   !skipAccountChecks[tx.Type()],
+		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 
 	if baseFee != nil {
