@@ -734,11 +734,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.refundGas()
 	} else if rules.IsPrague {
 		fmt.Println("i was not supposed to be in non-arbitrum prague")
-		floorOrUsed := max(floorGas7623, st.gasUsed())
-		if st.initialGas < floorOrUsed {
-			panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (Prague floor): initialGas=%d, floorOrUsed=%d", st.initialGas, floorOrUsed))
-		}
-		st.gasRemaining = st.initialGas - floorOrUsed
+		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
 
 	effectiveTip := st.gasPrice
