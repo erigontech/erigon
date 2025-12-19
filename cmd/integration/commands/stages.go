@@ -245,27 +245,6 @@ var cmdPrintCommitment = &cobra.Command{
 	},
 }
 
-var cmdCommitmentRebuild = &cobra.Command{
-	Use:   "commitment_rebuild",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
 var cmdStageTxLookup = &cobra.Command{
 	Use:   "stage_tx_lookup",
 	Short: "",
@@ -539,19 +518,7 @@ func init() {
 	withDomain(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
-	withConfig(cmdCommitmentRebuild)
-	withDataDir(cmdCommitmentRebuild)
-	withReset(cmdCommitmentRebuild)
-	withSqueeze(cmdCommitmentRebuild)
-	withBlock(cmdCommitmentRebuild)
-	withConcurrentCommitment(cmdCommitmentRebuild)
-	withUnwind(cmdCommitmentRebuild)
-	withPruneTo(cmdCommitmentRebuild)
-	withIntegrityChecks(cmdCommitmentRebuild)
-	withChain(cmdCommitmentRebuild)
-	withHeimdall(cmdCommitmentRebuild)
-	withChaosMonkey(cmdCommitmentRebuild)
-	rootCmd.AddCommand(cmdCommitmentRebuild)
+	rootCmd.AddCommand(commitmentCmd)
 
 	withConfig(cmdPrintCommitment)
 	withDataDir(cmdPrintCommitment)

@@ -17,7 +17,9 @@
 package commands
 
 import (
+	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -35,11 +37,25 @@ import (
 var branchPrefixFlag string
 
 func init() {
-	withDataDir(commitmentBranchCmd)
+	withDataDir(commitmentCmd)
+	// commitment branch
 	commitmentBranchCmd.Flags().StringVar(&branchPrefixFlag, "prefix", "", "hex prefix to read (e.g., 'aa', '0a1b')")
-
 	commitmentCmd.AddCommand(commitmentBranchCmd)
-	rootCmd.AddCommand(commitmentCmd)
+
+	// commitment rebuild
+	withConfig(cmdCommitmentRebuild)
+	withReset(cmdCommitmentRebuild)
+	withSqueeze(cmdCommitmentRebuild)
+	withBlock(cmdCommitmentRebuild)
+	withConcurrentCommitment(cmdCommitmentRebuild)
+	withUnwind(cmdCommitmentRebuild)
+	withPruneTo(cmdCommitmentRebuild)
+	withIntegrityChecks(cmdCommitmentRebuild)
+	withChain(cmdCommitmentRebuild)
+	withHeimdall(cmdCommitmentRebuild)
+	withChaosMonkey(cmdCommitmentRebuild)
+	commitmentCmd.AddCommand(cmdCommitmentRebuild)
+
 }
 
 var commitmentCmd = &cobra.Command{
@@ -47,6 +63,7 @@ var commitmentCmd = &cobra.Command{
 	Short: "Commitment domain commands",
 }
 
+// integration commitment branch
 var commitmentBranchCmd = &cobra.Command{
 	Use:   "branch",
 	Short: "Read branch data from the commitment domain",
@@ -120,4 +137,26 @@ func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, logg
 	fmt.Printf("\nParsed branch data:\n%s\n", branchData.String())
 
 	return nil
+}
+
+// integration commitment rebuild
+var cmdCommitmentRebuild = &cobra.Command{
+	Use:   "rebuild",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
 }
