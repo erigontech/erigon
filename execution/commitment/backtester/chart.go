@@ -236,13 +236,14 @@ func generateTopBranchLoads(branchLoads [128][16]uint64) *charts.HeatMap {
 	data := make([]opts.HeatMapData, 0, 128*16)
 	var maxLoads float32
 	for x := range branchLoads {
+		branchDepth := x + 1
 		for y := range branchLoads[x] {
 			data = append(data, opts.HeatMapData{
-				Value: [3]uint64{uint64(x), uint64(y), branchLoads[x][y]},
+				Value: [3]uint64{uint64(branchDepth), uint64(y), branchLoads[x][y]},
 			})
 			maxLoads = max(maxLoads, float32(branchLoads[x][y]))
 		}
-		xAxisCategoryData[x] = x + 1
+		xAxisCategoryData[x] = branchDepth
 	}
 	yAxisCategoryData := make([]string, 0, 16)
 	for b := '0'; b <= '9'; b++ {
@@ -265,7 +266,7 @@ func generateTopBranchLoads(branchLoads [128][16]uint64) *charts.HeatMap {
 		}),
 		charts.WithVisualMapOpts(opts.VisualMap{
 			Calculable: opts.Bool(true),
-			Top:        "top",
+			Top:        "middle",
 			Min:        0,
 			Max:        maxLoads,
 			InRange: &opts.VisualMapInRange{
