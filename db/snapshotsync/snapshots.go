@@ -1335,10 +1335,10 @@ type snapshotNotifier interface {
 }
 
 func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
-	if s.IndicesMax() >= s.SegmentsMax() {
-		return nil
-	}
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
+		if s.SegmentsMax() == 0 {
+			return nil
+		}
 		return errors.New("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
 	if !s.Cfg().ProduceE2 {
@@ -1351,14 +1351,17 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger); err != nil {
+	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger)
+	if err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
 
-	if err := s.OpenFolder(); err != nil {
-		return err
+	if newIdxBuilt {
+		if err := s.OpenFolder(); err != nil {
+			return err
+		}
+		s.LogStat("missed-idx:open")
 	}
-	s.LogStat("missed-idx:open")
 	if notifier != nil {
 		notifier.OnNewSnapshot()
 	}
@@ -1418,13 +1421,13 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 	return nil
 }
 
-func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
-		return nil
+		return
 	}
 
-	if _, err := snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
-		return err
+	if _, err = snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
+		return
 	}
 
 	dir, tmpDir := dirs.Snap, dirs.Tmp
@@ -1467,6 +1470,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				if t.HasIndexFiles(info, logger) {
 					continue
 				}
+				newIdxBuilt = true
 
 				segment.closeIdx()
 
@@ -1507,12 +1511,12 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	// Block main thread
 	select {
 	case <-finish:
-		if err := g.Wait(); err != nil {
-			return err
+		if err = g.Wait(); err != nil {
+			return
 		}
-		return ie
+		return newIdxBuilt, ie
 	case <-ctx.Done():
-		return ctx.Err()
+		return newIdxBuilt, ctx.Err()
 	}
 }
 

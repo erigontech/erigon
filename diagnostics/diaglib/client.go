@@ -137,7 +137,6 @@ func (d *DiagnosticClient) Setup() {
 	d.setupHeadersDiagnostics(rootCtx)
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
-	d.setupSpeedtestDiagnostics(rootCtx)
 
 	d.setupTxPoolDiagnostics(rootCtx)
 

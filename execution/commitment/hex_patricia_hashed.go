@@ -1530,7 +1530,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
@@ -1819,7 +1819,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	}
 
 	depth := hph.depths[row]
-	updateKey := hexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
+	updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {
