@@ -579,14 +579,6 @@ func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) 
 	sc.setRead(&ai, false /* absent */)
 }
 
-// hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetAccountRead(addrHash common.Hash, account *accounts.Account) {
-	var ai AccountItem
-	ai.addrHash.SetBytes(addrHash.Bytes())
-	ai.account.Copy(account)
-	sc.setRead(&ai, false /* absent */)
-}
-
 func (sc *StateCache) GetAccountByHashedAddress(addrHash common.Hash) (*accounts.Account, bool) {
 	var key AccountItem
 	key.addrHash.SetBytes(addrHash.Bytes())
@@ -742,60 +734,6 @@ func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, locatio
 	h.Sha.Read(si.locHash[:])
 	si.value.SetBytes(value)
 	sc.setRead(&si, false /* absent */)
-}
-
-// hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetStorageRead(addrHash common.Hash, incarnation uint64, locHash common.Hash, val []byte) {
-	var i StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	copy(i.addrHash[:], addrHash.Bytes())
-	i.incarnation = incarnation
-	i.locHash.SetBytes(locHash.Bytes())
-	i.value.SetBytes(val)
-	sc.setRead(&i, false /* absent */)
-}
-
-// hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetAccountWrite(addrHash common.Hash, account *accounts.Account) {
-	var ai AccountItem
-	copy(ai.addrHash[:], addrHash.Bytes())
-	ai.account.Copy(account)
-	var awi AccountWriteItem
-	awi.ai = &ai
-	sc.setWrite(&ai, &awi, false /* delete */)
-}
-
-// hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetAccountDelete(addrHash common.Hash) {
-	var ai AccountItem
-	copy(ai.addrHash[:], addrHash.Bytes())
-	var awi AccountWriteItem
-	awi.ai = &ai
-	sc.setWrite(&ai, &awi, true /* delete */)
-}
-
-// hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetStorageDelete(addrHash common.Hash, incarnation uint64, locHash common.Hash) {
-	var si StorageItem
-	copy(si.addrHash[:], addrHash.Bytes())
-	si.incarnation = incarnation
-	copy(si.locHash[:], locHash.Bytes())
-	var swi StorageWriteItem
-	swi.si = &si
-	sc.setWrite(&si, &swi, true /* delete */)
-}
-
-// hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetStorageWrite(addrHash common.Hash, incarnation uint64, locHash common.Hash, v []byte) {
-	var si StorageItem
-	copy(si.addrHash[:], addrHash.Bytes())
-	si.incarnation = incarnation
-	copy(si.locHash[:], locHash.Bytes())
-	si.value.SetBytes(v)
-	var swi StorageWriteItem
-	swi.si = &si
-	sc.setWrite(&si, &swi, false /* delete */)
 }
 
 func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, location []byte) {

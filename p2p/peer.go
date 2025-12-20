@@ -27,7 +27,6 @@ import (
 	"net"
 	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -242,31 +241,6 @@ func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byt
 
 func (p *Peer) Log() log.Logger {
 	return p.log
-}
-
-func makeFirstCharCap(input string) string {
-	// Convert the entire string to lowercase
-	input = strings.ToLower(input)
-	// Use strings.Title to capitalize the first letter of each word
-	input = strings.ToUpper(input[:1]) + input[1:]
-	return input
-}
-
-func convertToCamelCase(input string) string {
-	parts := strings.Split(input, "_")
-	if len(parts) == 1 {
-		return input
-	}
-
-	var result strings.Builder
-
-	for _, part := range parts {
-		if len(part) > 0 && part != parts[len(parts)-1] {
-			result.WriteString(makeFirstCharCap(part))
-		}
-	}
-
-	return result.String()
 }
 
 func (p *Peer) run() (peerErr *PeerError) {
