@@ -103,7 +103,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.T
 		}
 		logIdxAfterTx := uint32(uvarint(v))
 		if txNum != txNum2 {
-			return fmt.Errorf("CheckReceiptsNoDups: mismatched txNums in cumulativeGasUsed, cumulativeBlobGasUsed, logIdxAfterTx: %d, %d, %d", txNum, txNum2, txNum3)
+			return fmt.Errorf("CheckReceiptsNoDups: mismatched txNums in cumulativeGasUsed, cumulativeBlobGasUsed, logIdxAfterTx: %d, %d", txNum, txNum2)
 		}
 
 		blockChanged := txNum == _min
