@@ -93,6 +93,7 @@ be extracted.
 ![](examples/overview_page1.png)
 ![](examples/overview_page2.png)
 ![](examples/overview_page3.png)
+![](examples/overview_page4.png)
 
 ### Detailed timeseries page
 
