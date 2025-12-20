@@ -559,7 +559,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 	rollbackOnReturn = false
-	e.runPostForkchoiceInBackground(ctx, sd, finishProgressBefore, isSynced, initialCycle)
+	e.runPostForkchoiceInBackground(sd, finishProgressBefore, isSynced, initialCycle)
 
 	return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
@@ -568,81 +568,82 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}, stateFlushingInParallel)
 }
 
-func (e *EthereumExecutionModule) runPostForkchoiceInBackground(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) {
+func (e *EthereumExecutionModule) runPostForkchoiceInBackground(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) {
 	if !e.doingPostForkchoice.CompareAndSwap(false, true) {
 		return
 	}
 	go func() {
-		defer e.doingPostForkchoice.Store(false)
-		var timings []interface{}
-		// Wait for semaphore to be available
-		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
-			return
-		}
-		defer e.semaphore.Release(1)
-
-		tx, err := e.db.BeginTemporalRw(ctx) //nolint
-		if err != nil {
-			e.logger.Error("runPostForkchoiceInBackground", "error", err)
-			return
-		}
-		defer func() {
-			tx.Rollback()
-		}()
-
-		flushStart := time.Now()
-		if err := sd.Flush(ctx, tx); err != nil {
-			e.logger.Error("runPostForkchoiceInBackground", "error", err)
-			return
-		}
-		timings = append(timings, "flush", time.Since(flushStart))
-		sd.ClearRam(true)
-		commitStart := time.Now()
-		if err := tx.Commit(); err != nil {
-			e.logger.Error("runPostForkchoiceInBackground", "error", err)
-			return
-		}
-		timings = append(timings, "commit", time.Since(commitStart))
-		if e.hook != nil {
-			if err := e.db.View(ctx, func(tx kv.Tx) error {
-				return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
-			}); err != nil {
-				e.logger.Error("runPostForkchoiceInBackground", "error", err)
-				return
-			}
-		}
-
-		// force fsync after notifications are sent
-		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-			return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
-		}); err != nil {
-			e.logger.Error("runPostForkchoiceInBackground", "error", err)
-			return
-		}
-
-		pruneStart := time.Now()
-		defer UpdateForkChoicePruneDuration(pruneStart)
-		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-
-			if err := e.executionPipeline.RunPrune(ctx, e.db, tx, initialCycle, 2*time.Second); err != nil {
+		err := func() error {
+			defer e.doingPostForkchoice.Store(false)
+			var timings []interface{}
+			// Wait for semaphore to be available
+			if err := e.semaphore.Acquire(e.bacgroundCtx, 1); err != nil {
 				return err
 			}
-			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-				timings = append(timings, pruneTimings...)
+			defer e.semaphore.Release(1)
+			tx, err := e.db.BeginTemporalRw(e.bacgroundCtx) //nolint
+			if err != nil {
+				return err
+			}
+			defer func() {
+				tx.Rollback()
+			}()
+
+			flushStart := time.Now()
+			if err := sd.Flush(e.bacgroundCtx, tx); err != nil {
+				return err
+			}
+			timings = append(timings, "flush", time.Since(flushStart))
+			sd.ClearRam(true)
+			commitStart := time.Now()
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			timings = append(timings, "commit", time.Since(commitStart))
+			if e.hook != nil {
+				if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
+					return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
+				}); err != nil {
+					return err
+				}
+			}
+
+			// force fsync after notifications are sent
+			if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
+				return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
+			}); err != nil {
+				return err
+			}
+
+			pruneStart := time.Now()
+			defer UpdateForkChoicePruneDuration(pruneStart)
+			if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
+
+				if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, 2*time.Second); err != nil {
+					return err
+				}
+				if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
+					timings = append(timings, pruneTimings...)
+				}
+
+				return nil
+			}); err != nil {
+				return err
+			}
+
+			if len(timings) > 0 {
+				timings = append(timings, "initialCycle", initialCycle)
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				e.logger.Info("Timings: Post-Forkchoice", timings...)
 			}
 
 			return nil
-		}); err != nil {
-			e.logger.Error("runPostForkchoiceInBackground", "error", err)
-			return
-		}
+		}()
 
-		if len(timings) > 0 {
-			timings = append(timings, "initialCycle", initialCycle)
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-			e.logger.Info("Timings: Post-Forkchoice", timings...)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 		}
 	}()
 }
