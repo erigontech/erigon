@@ -19,6 +19,7 @@ package backtester
 import (
 	"container/heap"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"os"
@@ -285,6 +286,7 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
 	var chartsPageFilePaths []string
 	var topNSlowest slowestBatchesHeap
+	var branchLoads [128][16]uint64
 	pageMetrics := make([]MetricValues, 0, bt.metricsPageSize)
 	for pageBlockFrom := fromBlock; pageBlockFrom <= toBlock; pageBlockFrom += bt.metricsPageSize {
 		pageBlockTo := min(pageBlockFrom+bt.metricsPageSize-1, toBlock)
@@ -309,6 +311,21 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 				heap.Pop(&topNSlowest)
 				heap.Push(&topNSlowest, mv)
 			}
+			for _, mVal := range mVals {
+				for branchKey, branchStats := range mVal.Branches {
+					nibbles, err := hex.DecodeString(branchKey)
+					if err != nil {
+						return "", err
+					}
+					depth := len(nibbles)
+					lastNibbleIdx := len(nibbles) - 1
+					if commitment.HasTerm(nibbles) {
+						lastNibbleIdx -= 1
+					}
+					lastNibble := nibbles[lastNibbleIdx]
+					branchLoads[depth-1][lastNibble] += branchStats.LoadBranch
+				}
+			}
 			pageMetrics = append(pageMetrics, mv)
 		}
 		chartsPageFilePath, err := renderDetailedPage(pageMetrics, runOutputDir)
@@ -317,7 +334,11 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 		}
 		chartsPageFilePaths = append(chartsPageFilePaths, chartsPageFilePath)
 	}
-	return renderOverviewPage(&topNSlowest, chartsPageFilePaths, runOutputDir)
+	agg := crossPageAggMetrics{
+		top:         &topNSlowest,
+		branchLoads: branchLoads,
+	}
+	return renderOverviewPage(agg, chartsPageFilePaths, runOutputDir)
 }
 
 func checkDataAvailable(tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr rawdbv3.TxNumsReader) error {
