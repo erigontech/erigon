@@ -24,8 +24,9 @@ type MetricValues struct {
 }
 
 type crossPageAggMetrics struct {
-	top         *slowestBatchesHeap
-	branchLoads [128][16]uint64
+	top                  *slowestBatchesHeap
+	branchJumpdestCounts [128][16]uint64
+	branchKeyLenCounts   [128]uint64
 }
 
 type slowestBatchesHeap []MetricValues

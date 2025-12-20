@@ -286,7 +286,8 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
 	var chartsPageFilePaths []string
 	var topNSlowest slowestBatchesHeap
-	var branchLoads [128][16]uint64
+	var branchJumpdestCounts [128][16]uint64
+	var branchKeyLenCounts [128]uint64
 	pageMetrics := make([]MetricValues, 0, bt.metricsPageSize)
 	for pageBlockFrom := fromBlock; pageBlockFrom <= toBlock; pageBlockFrom += bt.metricsPageSize {
 		pageBlockTo := min(pageBlockFrom+bt.metricsPageSize-1, toBlock)
@@ -311,20 +312,18 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 				heap.Pop(&topNSlowest)
 				heap.Push(&topNSlowest, mv)
 			}
-			for _, mVal := range mVals {
-				for branchKey, branchStats := range mVal.Branches {
-					nibbles, err := hex.DecodeString(branchKey)
-					if err != nil {
-						return "", err
-					}
-					depth := len(nibbles)
-					lastNibbleIdx := len(nibbles) - 1
-					if commitment.HasTerm(nibbles) {
-						lastNibbleIdx -= 1
-					}
-					lastNibble := nibbles[lastNibbleIdx]
-					branchLoads[depth-1][lastNibble] += branchStats.LoadBranch
+			for branchKey, branchStats := range mVals[0].Branches {
+				nibbles, err := hex.DecodeString(branchKey)
+				if err != nil {
+					return "", err
 				}
+				if commitment.HasTerm(nibbles) {
+					nibbles = nibbles[:len(nibbles)-1]
+				}
+				lastNibble := nibbles[len(nibbles)-1]
+				depth := len(nibbles) - 1
+				branchJumpdestCounts[depth][lastNibble] += branchStats.LoadBranch
+				branchKeyLenCounts[depth]++
 			}
 			pageMetrics = append(pageMetrics, mv)
 		}
@@ -335,8 +334,9 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 		chartsPageFilePaths = append(chartsPageFilePaths, chartsPageFilePath)
 	}
 	agg := crossPageAggMetrics{
-		top:         &topNSlowest,
-		branchLoads: branchLoads,
+		top:                  &topNSlowest,
+		branchJumpdestCounts: branchJumpdestCounts,
+		branchKeyLenCounts:   branchKeyLenCounts,
 	}
 	return renderOverviewPage(agg, chartsPageFilePaths, runOutputDir)
 }

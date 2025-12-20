@@ -61,9 +61,13 @@ func generateOverviewPage(agg crossPageAggMetrics, chartsPageFilePaths []string)
 	top10Slowest.suGinis.SetGlobalOptions(widthOpts("45vw"))
 	page.AddCharts(top10Slowest.updates, top10Slowest.suGinis)
 	// place 1 per row
-	topBranchLoads := generateTopBranchLoads(agg.branchLoads)
-	topBranchLoads.SetGlobalOptions(widthOpts("90vw"))
-	page.AddCharts(topBranchLoads)
+	branchJumpdestHeatmap := generateBranchJumpdestHeatmap(agg.branchJumpdestCounts)
+	branchJumpdestHeatmap.SetGlobalOptions(widthOpts("90vw"))
+	page.AddCharts(branchJumpdestHeatmap)
+	// place 1 per row
+	branchKeyLenCountsBarChart := generateBranchKeyLenCountsBarChart(agg.branchKeyLenCounts)
+	branchKeyLenCountsBarChart.SetGlobalOptions(widthOpts("90vw"))
+	page.AddCharts(branchKeyLenCountsBarChart)
 	// footer catalogue
 	catalogue := generateChartPagesCatalogue(chartsPageFilePaths)
 	page.AddCharts(catalogue)
@@ -231,17 +235,17 @@ func generateLocateChartPageFileJsFunc(chartsPageFilePaths []string) types.FuncS
 	))
 }
 
-func generateTopBranchLoads(branchLoads [128][16]uint64) *charts.HeatMap {
+func generateBranchJumpdestHeatmap(branchJumpdestCounts [128][16]uint64) *charts.HeatMap {
 	xAxisCategoryData := make([]int, 128)
 	data := make([]opts.HeatMapData, 0, 128*16)
-	var maxLoads float32
-	for x := range branchLoads {
+	var maxCount float32
+	for x := range branchJumpdestCounts {
 		branchDepth := x + 1
-		for y := range branchLoads[x] {
+		for y := range branchJumpdestCounts[x] {
 			data = append(data, opts.HeatMapData{
-				Value: [3]uint64{uint64(branchDepth), uint64(y), branchLoads[x][y]},
+				Value: [3]uint64{uint64(branchDepth), uint64(y), branchJumpdestCounts[x][y]},
 			})
-			maxLoads = max(maxLoads, float32(branchLoads[x][y]))
+			maxCount = max(maxCount, float32(branchJumpdestCounts[x][y]))
 		}
 		xAxisCategoryData[x] = branchDepth
 	}
@@ -268,7 +272,7 @@ func generateTopBranchLoads(branchLoads [128][16]uint64) *charts.HeatMap {
 			Calculable: opts.Bool(true),
 			Top:        "middle",
 			Min:        0,
-			Max:        maxLoads,
+			Max:        maxCount,
 			InRange: &opts.VisualMapInRange{
 				Color: []string{"#50a3ba", "#eac736", "#d94e5d"},
 			},
@@ -278,6 +282,23 @@ func generateTopBranchLoads(branchLoads [128][16]uint64) *charts.HeatMap {
 		}),
 	)
 	chart.SetXAxis(xAxisCategoryData).AddSeries("jumpdest", data)
+	return chart
+}
+
+func generateBranchKeyLenCountsBarChart(branchKeyLenCounts [128]uint64) *charts.Bar {
+	xAxisCategoryData := make([]int, 128)
+	data := make([]opts.BarData, len(branchKeyLenCounts))
+	for i := range branchKeyLenCounts {
+		xAxisCategoryData[i] = i + 1
+		data[i] = opts.BarData{Value: branchKeyLenCounts[i]}
+	}
+	chart := charts.NewBar()
+	chart.SetGlobalOptions(
+		titleOpts("branch key len counts"),
+		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(false)}),
+		charts.WithXAxisOpts(opts.XAxis{Type: "category"}),
+	)
+	chart.SetXAxis(xAxisCategoryData).AddSeries("counts", data)
 	return chart
 }
 
