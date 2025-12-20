@@ -666,7 +666,7 @@ func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeade
 		mgasPerSec := gasUsedMgas / totalTime.Seconds()
 		metrics.ChainTipMgasPerSec.Add(mgasPerSec)
 
-		const blockRange = 300 // ~1 hour
+		const blockRange = 30 // ~1 hour
 		const alpha = 2.0 / (blockRange + 1)
 
 		if e.avgMgasSec == 0 || e.avgMgasSec == math.Inf(1) {
