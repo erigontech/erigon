@@ -414,7 +414,7 @@ func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
 	w.txNum = txNum
 	w.rs.domains.SetTxNum(txNum)
 }
-func (w *BufferedWriter) SetTx(tx kv.Tx) {}
+func (w *BufferedWriter) SetTx(tx kv.TemporalTx) {}
 
 func (w *BufferedWriter) WriteSet() StateUpdates {
 	return w.writeSet

@@ -322,7 +322,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 // like compute gas used for block and then to set state reader to continue processing on latest data.
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
-	if resettable, ok := reader.(interface{ SetTx(kv.Tx) }); ok {
+	if resettable, ok := reader.(interface{ SetTx(kv.TemporalTx) }); ok {
 		resettable.SetTx(rw.chainTx)
 	}
 	rw.ibs = state.New(rw.stateReader)

@@ -44,7 +44,7 @@ func NewHistoryReaderV3() *HistoryReaderV3 {
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.Tx)                          { hr.ttx = tx.(kv.TemporalTx) }
+func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx)                  { hr.ttx = tx }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64)                   { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64                        { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) { hr.trace = trace }
