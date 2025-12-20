@@ -242,7 +242,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 
 		//asserts
 		if produce.ReceiptDomain {
-			if err = AssertReceipts(ctx, cfg, tx, fromBlock, toBlock); err != nil {
+			if err = AssertReceipts(ctx, cfg, db, fromBlock, toBlock); err != nil {
 				return err
 			}
 		}
@@ -283,14 +283,14 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	return nil
 }
 
-func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, tx kv.TemporalTx, fromBlock, toBlock uint64) (err error) {
+func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, db kv.TemporalRoDB, fromBlock, toBlock uint64) (err error) {
 	if !dbg.AssertEnabled {
 		return
 	}
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
-	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
+	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, db, cfg.BlockReader, true)
 }
 
 func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, tx kv.TemporalRwTx, doms *execctx.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
