@@ -130,7 +130,17 @@ func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 }
 
 func (sd *SharedDomains) Merge(other *SharedDomains) error {
-	return sd.mem.Merge(other.mem)
+	if sd.txNum > other.txNum {
+		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
+	}
+
+	if err := sd.mem.Merge(other.mem); err != nil {
+		return err
+	}
+
+	sd.txNum = other.txNum
+	sd.blockNum.Store(other.blockNum.Load())
+	return nil
 }
 
 type temporalGetter struct {

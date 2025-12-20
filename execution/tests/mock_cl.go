@@ -72,8 +72,8 @@ func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *ty
 }
 
 // BuildCanonicalBlock builds a new block and sets it as canonical.
-func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuildingOption) (*MockClPayload, error) {
-	clPayload, err := cl.BuildNewPayload(ctx, opts...)
+func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuildingOption) (clPayload *MockClPayload, err error) {
+	clPayload, err = cl.BuildNewPayload(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}

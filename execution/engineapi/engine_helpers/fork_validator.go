@@ -148,7 +148,7 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.Sha
 	// Flush changes to db.
 	if fv.sharedDom != nil {
 		sd.Merge(fv.sharedDom)
-		_, err := sd.ComputeCommitment(ctx, tx, true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment", nil)
+		_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment", nil)
 		if err != nil {
 			return err
 		}
