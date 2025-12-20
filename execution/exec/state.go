@@ -237,16 +237,26 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) {
 	rw.chainTx = chainTx
 
 	if rw.chainTx != nil {
-		type resettable interface {
+		type withSetGetter interface {
 			SetGetter(kv.TemporalGetter)
 		}
 
-		if resettable, ok := rw.stateReader.(resettable); ok {
-			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+		type withSetTx interface {
+			SetTx(kv.TemporalTx)
 		}
 
-		if resettable, ok := rw.stateWriter.(resettable); ok {
-			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+		switch typedReader := rw.stateReader.(type) {
+		case withSetGetter:
+			typedReader.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+		case withSetTx:
+			typedReader.SetTx(rw.chainTx)
+		}
+
+		switch typedWriter := rw.stateWriter.(type) {
+		case withSetGetter:
+			typedWriter.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+		case withSetTx:
+			typedWriter.SetTx(rw.chainTx)
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
