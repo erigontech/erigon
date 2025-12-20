@@ -81,6 +81,9 @@ type VersionMap struct {
 
 // getShard returns the shard for the given address.
 func (vm *VersionMap) getShard(addr accounts.Address) *shard {
+	if addr.IsNil() {
+		return &vm.shards[0]
+	}
 	return &vm.shards[addr.Value()[0]&(numShards-1)]
 }
 
