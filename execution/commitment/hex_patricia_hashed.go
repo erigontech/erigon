@@ -29,12 +29,10 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -54,43 +52,6 @@ import (
 type keccakState interface {
 	hash.Hash
 	Read([]byte) (int, error)
-}
-
-// WarmupCache stores prefetched Account and Storage data from warmup phase.
-// Thread-safe for concurrent writes during warmup.
-type WarmupCache struct {
-	accounts sync.Map // key: string(address), value: *Update
-	storages sync.Map // key: string(address), value: *Update
-}
-
-func NewWarmupCache() *WarmupCache {
-	return &WarmupCache{}
-}
-
-func (c *WarmupCache) SetAccount(addr []byte, update *Update) {
-	if update != nil {
-		c.accounts.Store(string(addr), update)
-	}
-}
-
-func (c *WarmupCache) SetStorage(addr []byte, update *Update) {
-	if update != nil {
-		c.storages.Store(string(addr), update)
-	}
-}
-
-func (c *WarmupCache) GetAccount(addr []byte) (*Update, bool) {
-	if v, ok := c.accounts.Load(string(addr)); ok {
-		return v.(*Update), true
-	}
-	return nil, false
-}
-
-func (c *WarmupCache) GetStorage(addr []byte) (*Update, bool) {
-	if v, ok := c.storages.Load(string(addr)); ok {
-		return v.(*Update), true
-	}
-	return nil, false
 }
 
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
@@ -2645,9 +2606,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-// TrieContextFactory creates new PatriciaContext instances for parallel warmup.
-type TrieContextFactory func() (PatriciaContext, func())
-
 // ProcessWithWarmup is like Process but pre-warms MDBX page cache by reading Branch data
 // in parallel before processing. Works with both ModeDirect and ModeUpdate.
 func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, maxDepth int, numWorkers int, ctxFactory TrieContextFactory) (rootHash []byte, err error) {
@@ -2662,146 +2620,17 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 
 	defer func() { logEvery.Stop() }()
 
-	// Prefetch callback - traverse trie structure in parallel, following actual branch nodes
-	// Also prefetch Account and Storage addresses found in sibling cells on the trie path
-	prefetchFn := func(hashedKeys [][]byte) error {
-		if len(hashedKeys) == 0 || numWorkers <= 0 {
-			return nil
-		}
-		warmupStart := time.Now()
-
-		// Build work items with start depth based on divergence from previous key
-		type workItem struct {
-			hashedKey  []byte
-			startDepth int
-		}
-		workItems := make([]workItem, len(hashedKeys))
-		workItems[0] = workItem{hashedKeys[0], 0} // First key starts from root
-
-		for i := 1; i < len(hashedKeys); i++ {
-			prev := hashedKeys[i-1]
-			curr := hashedKeys[i]
-			// Find common prefix length
-			cpl := 0
-			minLen := min(len(prev), len(curr))
-			for cpl < minLen && prev[cpl] == curr[cpl] {
-				cpl++
-			}
-			workItems[i] = workItem{hashedKeys[i], cpl}
-		}
-
-		work := make(chan workItem, len(workItems))
-		for _, item := range workItems {
-			work <- item
-		}
-		close(work)
-
-		// Cache to store warmed Account/Storage results
-		cache := NewWarmupCache()
-
-		g, gctx := errgroup.WithContext(ctx)
-		for i := 0; i < numWorkers; i++ {
-			g.Go(func() error {
-				trieCtx, cleanup := ctxFactory()
-				if cleanup != nil {
-					defer cleanup()
-				}
-
-				for item := range work {
-					select {
-					case <-gctx.Done():
-						return gctx.Err()
-					default:
-					}
-
-					hashedKey := item.hashedKey
-					// Start from divergence point, not root
-					depth := item.startDepth
-					for depth <= len(hashedKey) && depth <= maxDepth {
-						prefix := hexNibblesToCompactBytes(hashedKey[:depth])
-
-						branchData, _, _ := trieCtx.Branch(prefix)
-
-						// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
-						if len(branchData) < 4 {
-							break
-						}
-
-						// Extract and prefetch account/storage addresses from sibling cells on trie path
-						cellAccounts, cellStorages := extractBranchCellAddresses(branchData)
-						for _, addr := range cellAccounts {
-							update, _ := trieCtx.Account(addr)
-							cache.SetAccount(addr, update)
-						}
-						for _, addr := range cellStorages {
-							update, _ := trieCtx.Storage(addr)
-							cache.SetStorage(addr, update)
-						}
-
-						branchData = branchData[2:] // skip touch map
-
-						bitmap := binary.BigEndian.Uint16(branchData[0:2])
-
-						if depth >= len(hashedKey) {
-							break
-						}
-						nextNibble := hashedKey[depth]
-						childBit := uint16(1) << nextNibble
-
-						if bitmap&childBit == 0 {
-							break
-						}
-
-						// Find position of our child's data
-						pos := 2
-						for n := uint8(0); n < nextNibble; n++ {
-							if bitmap&(uint16(1)<<n) != 0 {
-								if pos >= len(branchData) {
-									break
-								}
-								fieldBits := branchData[pos]
-								pos++
-								pos = skipCellFields(branchData, pos, fieldBits)
-							}
-						}
-
-						if pos >= len(branchData) {
-							break
-						}
-
-						fieldBits := branchData[pos]
-						pos++
-
-						// Check if child has extension
-						hasExtension := (fieldBits & 1) != 0
-						if hasExtension && pos < len(branchData) {
-							extLen, n := binary.Uvarint(branchData[pos:])
-							if n > 0 && extLen > 0 {
-								depth += int(extLen)
-								continue
-							}
-						}
-
-						depth++
-					}
-				}
-				return nil
-			})
-		}
-		err := g.Wait()
-		log.Debug(fmt.Sprintf("[%s][warmup] completed", logPrefix),
-			"keys", common.PrettyCounter(len(hashedKeys)),
-			"maxDepth", maxDepth,
-			"workers", numWorkers,
-			"spent", time.Since(warmupStart),
-		)
-		// Store cache for use during fold()
-		hph.warmupCache = cache
-		return err
-	}
+	// Create and start the warmuper
+	warmuper := NewWarmuper(ctx, ctxFactory, maxDepth, numWorkers, logPrefix)
+	warmuper.Start()
+	defer warmuper.Close()
 
 	// Use HashSortWithPrefetch - loads all keys, warms up, then processes
-	err = updates.HashSortWithPrefetch(ctx, prefetchFn, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	err = updates.HashSortWithPrefetch(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		// Store warmup cache for use during fold() - only do once after warmup completes
+		if hph.warmupCache == nil {
+			hph.warmupCache = warmuper.cache
+		}
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
