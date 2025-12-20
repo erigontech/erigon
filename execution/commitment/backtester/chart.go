@@ -254,7 +254,7 @@ func generateTopBranchLoads(branchLoads [128][16]uint64) *charts.HeatMap {
 	}
 	chart := charts.NewHeatMap()
 	chart.SetGlobalOptions(
-		titleOpts("branch loads"),
+		titleOpts("branch load jumps"),
 		charts.WithXAxisOpts(opts.XAxis{
 			Type:      "category",
 			SplitArea: &opts.SplitArea{Show: opts.Bool(true)},
@@ -277,7 +277,7 @@ func generateTopBranchLoads(branchLoads [128][16]uint64) *charts.HeatMap {
 			Show: opts.Bool(false),
 		}),
 	)
-	chart.SetXAxis(xAxisCategoryData).AddSeries("branchLoads", data)
+	chart.SetXAxis(xAxisCategoryData).AddSeries("jumpdest", data)
 	return chart
 }
 
