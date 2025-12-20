@@ -2,6 +2,7 @@ package integrity
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -39,7 +40,12 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, ReceiptsNoDupsRange)
 }
 
-func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
+func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	txNumsReader := blockReader.TxnumReader(ctx)
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
@@ -59,12 +65,45 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 	prevLogIdxAfterTx := uint32(0)
 	blockNum := fromBlock
 	var _min, _max uint64
-	_min, _ = txNumsReader.Min(tx, fromBlock)
+	_min = fromTxNum
 	_max, _ = txNumsReader.Max(tx, fromBlock)
-	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-		cumUsedGas, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+
+	cumGasUsedTx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer cumGasUsedTx.Rollback()
+	cumUsedGasIt, err := cumGasUsedTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.CumulativeGasUsedInBlockKey, fromTxNum, toTxNum+1)
+	if err != nil {
+		return err
+	}
+	defer cumUsedGasIt.Close()
+
+	logIdxAfterTxTx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer logIdxAfterTxTx.Rollback()
+
+	logIdxAfterTxIt, err := logIdxAfterTxTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.LogIndexAfterTxKey, fromTxNum, toTxNum+1)
+	if err != nil {
+		return err
+	}
+	defer logIdxAfterTxIt.Close()
+
+	for cumUsedGasIt.HasNext() {
+		txNum, v, err := cumUsedGasIt.Next()
 		if err != nil {
 			return err
+		}
+		cumUsedGas := uvarint(v)
+		txNum2, v, err := logIdxAfterTxIt.Next()
+		if err != nil {
+			return err
+		}
+		logIdxAfterTx := uint32(uvarint(v))
+		if txNum != txNum2 {
+			return fmt.Errorf("CheckReceiptsNoDups: mismatched txNums in cumulativeGasUsed, cumulativeBlobGasUsed, logIdxAfterTx: %d, %d, %d", txNum, txNum2, txNum3)
 		}
 
 		blockChanged := txNum == _min
@@ -94,7 +133,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 		prevCumUsedGas = int(cumUsedGas)
 		prevLogIdxAfterTx = logIdxAfterTx
 
-		if txNum == _max {
+		for txNum >= _max {
 			blockNum++
 			_min = _max + 1
 			_max, _ = txNumsReader.Max(tx, blockNum)
@@ -108,6 +147,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -145,4 +185,9 @@ func ValidateDomainProgress(db kv.TemporalRoDB, domain kv.Domain, txNumsReader r
 
 	// }
 	return nil
+}
+
+func uvarint(in []byte) (res uint64) {
+	res, _ = binary.Uvarint(in)
+	return res
 }
