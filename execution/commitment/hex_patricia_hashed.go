@@ -485,10 +485,11 @@ func skipCellFields(data []byte, pos int, fieldBits byte) int {
 	return pos
 }
 
-// extractBranchCellAddresses parses branch data and extracts all account and storage addresses
-// found in cells. These are sibling cells on the trie path that may need to be loaded during fold().
-// Returns slices of account addresses and storage addresses.
-func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, storageAddrs [][]byte) {
+// extractBranchCellAddresses extracts account/storage addresses from branch data.
+// pathNibble is the nibble on the update path (-1 if none) - its addresses are always
+// extracted since that cell will have stateHash cleared during update.
+// Sibling cells with stateHash (memoized) are skipped.
+func extractBranchCellAddresses(branchData []byte, pathNibble int) (accountAddrs [][]byte, storageAddrs [][]byte) {
 	if len(branchData) < 4 {
 		return nil, nil
 	}
@@ -500,6 +501,7 @@ func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, stora
 	// Iterate over all cells in the branch
 	for bitset := bitmap; bitset != 0; {
 		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
 		bitset ^= bit
 
 		if pos >= len(branchData) {
@@ -508,9 +510,11 @@ func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, stora
 		fieldBits := branchData[pos]
 		pos++
 
-		// If cell has stateHash (bit 4), it's memoized - skip extracting addresses
-		// since account/storage data won't need to be loaded
+		// Cell on update path will have stateHash cleared - always extract its addresses.
+		// Sibling cells with stateHash (bit 4) are memoized - skip them.
+		isOnPath := nibble == pathNibble
 		hasMemoizedHash := fieldBits&16 != 0
+		shouldExtract := isOnPath || !hasMemoizedHash
 
 		// Parse each field
 		// extension (bit 0)
@@ -536,7 +540,7 @@ func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, stora
 			}
 			pos += n
 			if l > 0 && pos+int(l) <= len(branchData) {
-				if !hasMemoizedHash {
+				if shouldExtract {
 					addr := make([]byte, l)
 					copy(addr, branchData[pos:pos+int(l)])
 					accountAddrs = append(accountAddrs, addr)
@@ -556,7 +560,7 @@ func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, stora
 			}
 			pos += n
 			if l > 0 && pos+int(l) <= len(branchData) {
-				if !hasMemoizedHash {
+				if shouldExtract {
 					addr := make([]byte, l)
 					copy(addr, branchData[pos:pos+int(l)])
 					storageAddrs = append(storageAddrs, addr)

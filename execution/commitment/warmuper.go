@@ -197,9 +197,15 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			break
 		}
 
-		// Extract and prefetch account/storage addresses from sibling cells on trie path
-		// Skip addresses already in the cache
-		cellAccounts, cellStorages := extractBranchCellAddresses(branchData)
+		if depth >= len(hashedKey) {
+			break
+		}
+		nextNibble := int(hashedKey[depth])
+
+		// Extract and prefetch account/storage addresses
+		// Path nibble's cell will have stateHash cleared - always extract it
+		// Memoized siblings are skipped
+		cellAccounts, cellStorages := extractBranchCellAddresses(branchData, nextNibble)
 		for _, addr := range cellAccounts {
 			if _, ok := w.cache.GetAccount(addr); !ok {
 				update, _ := trieCtx.Account(addr)
@@ -216,11 +222,6 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		branchData = branchData[2:] // skip touch map
 
 		bitmap := binary.BigEndian.Uint16(branchData[0:2])
-
-		if depth >= len(hashedKey) {
-			break
-		}
-		nextNibble := hashedKey[depth]
 		childBit := uint16(1) << nextNibble
 
 		if bitmap&childBit == 0 {
@@ -229,7 +230,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		// Find position of our child's data
 		pos := 2
-		for n := uint8(0); n < nextNibble; n++ {
+		for n := 0; n < nextNibble; n++ {
 			if bitmap&(uint16(1)<<n) != 0 {
 				if pos >= len(branchData) {
 					break
