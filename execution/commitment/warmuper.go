@@ -146,6 +146,9 @@ func (w *Warmuper) Start() {
 					return w.ctx.Err()
 				default:
 				}
+				if w.closed.Load() {
+					return nil
+				}
 
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 				w.keysProcessed.Add(1)
@@ -268,6 +271,12 @@ func (w *Warmuper) Stats() WarmupStats {
 		KeysProcessed: w.keysProcessed.Load(),
 		Duration:      duration,
 	}
+}
+
+// Cache returns the warmup cache. The cache is thread-safe and can be accessed
+// while warmup is still in progress.
+func (w *Warmuper) Cache() *WarmupCache {
+	return w.cache
 }
 
 // Close cancels all warmup work and releases resources.

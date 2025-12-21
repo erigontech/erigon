@@ -26,7 +26,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -1269,7 +1268,8 @@ type keyPair struct {
 
 // HashSortWithPrefetch loads all keys first, submits them to the warmuper for parallel warming,
 // then processes each key with the main callback. This works with both ModeDirect and ModeUpdate.
-// The warmuper receives keys incrementally and warms up branch and account/storage caches in parallel.
+// The warmuper receives keys incrementally and warms up in parallel with processing.
+// Caller is responsible for calling warmuper.Wait() after processing completes.
 // If warmuper is nil, no warmup is performed.
 func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
@@ -1308,16 +1308,7 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 
 		t.initCollector()
 
-		// Wait for warmup to complete
-		start := time.Now()
-		if warmuper != nil {
-			if _, err := warmuper.Wait(); err != nil {
-				return err
-			}
-		}
-		log.Debug("Prefetch hashed keys completed", "count", len(pairs), "duration", time.Since(start))
-
-		// Second pass: process all keys
+		// Process all keys - warmup runs in parallel
 		for _, p := range pairs {
 			select {
 			case <-ctx.Done():
@@ -1360,14 +1351,7 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 			return true
 		})
 
-		// Wait for warmup to complete
-		if warmuper != nil {
-			if _, err := warmuper.Wait(); err != nil {
-				return err
-			}
-		}
-
-		// Second pass: process all keys
+		// Process all keys - warmup runs in parallel
 		for _, p := range pairs {
 			select {
 			case <-ctx.Done():

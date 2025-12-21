@@ -2620,17 +2620,16 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 
 	defer func() { logEvery.Stop() }()
 
-	// Create and start the warmuper
+	// Create and start the warmuper - warmup runs in parallel with processing
 	warmuper := NewWarmuper(ctx, ctxFactory, maxDepth, numWorkers, logPrefix)
 	warmuper.Start()
 	defer warmuper.Close()
 
-	// Use HashSortWithPrefetch - loads all keys, warms up, then processes
+	// Set warmup cache immediately - it's thread-safe and will be populated during warmup
+	hph.warmupCache = warmuper.Cache()
+
+	// Use HashSortWithPrefetch - submits keys to warmuper while processing runs in parallel
 	err = updates.HashSortWithPrefetch(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		// Store warmup cache for use during fold() - only do once after warmup completes
-		if hph.warmupCache == nil {
-			hph.warmupCache = warmuper.cache
-		}
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -2690,6 +2689,11 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	})
 	if err != nil {
 		return nil, fmt.Errorf("hash sort with prefetch failed: %w", err)
+	}
+
+	// Wait for warmup to complete before folding
+	if _, err := warmuper.Wait(); err != nil {
+		return nil, fmt.Errorf("warmup failed: %w", err)
 	}
 
 	// Folding everything up to the root
