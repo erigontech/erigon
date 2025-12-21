@@ -2692,9 +2692,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	}
 
 	// Wait for warmup to complete before folding
-	if _, err := warmuper.Wait(); err != nil {
-		return nil, fmt.Errorf("warmup failed: %w", err)
-	}
+	warmuper.Close()
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
