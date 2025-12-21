@@ -2691,7 +2691,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 		return nil, fmt.Errorf("hash sort with prefetch failed: %w", err)
 	}
 
-	// Wait for warmup to complete before folding
+	// Stop warmup workers - we don't need to wait for completion
 	warmuper.Close()
 
 	// Folding everything up to the root
