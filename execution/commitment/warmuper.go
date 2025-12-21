@@ -146,9 +146,6 @@ func (w *Warmuper) Start() {
 					return w.ctx.Err()
 				default:
 				}
-				if w.closed.Load() {
-					return nil
-				}
 
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 				w.keysProcessed.Add(1)
@@ -285,11 +282,5 @@ func (w *Warmuper) Close() {
 		return // Already closed
 	}
 	w.cancel()
-	if w.started.Load() && w.work != nil {
-		// Drain the work channel if needed
-		select {
-		case <-w.work:
-		default:
-		}
-	}
+	close(w.work)
 }
