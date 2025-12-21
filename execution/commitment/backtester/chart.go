@@ -235,7 +235,7 @@ func generateLocateChartPageFileJsFunc(chartsPageFilePaths []string) types.FuncS
 	))
 }
 
-func generateBranchJumpdestHeatmap(branchJumpdestCounts [128][16]uint64) *charts.HeatMap {
+func generateBranchJumpdestHeatmap(branchJumpdestCounts *[128][16]uint64) *charts.HeatMap {
 	xAxisCategoryData := make([]int, 128)
 	data := make([]opts.HeatMapData, 0, 128*16)
 	var maxCount float32
@@ -285,7 +285,7 @@ func generateBranchJumpdestHeatmap(branchJumpdestCounts [128][16]uint64) *charts
 	return chart
 }
 
-func generateBranchKeyLenCountsBarChart(branchKeyLenCounts [128]uint64) *charts.Bar {
+func generateBranchKeyLenCountsBarChart(branchKeyLenCounts *[128]uint64) *charts.Bar {
 	xAxisCategoryData := make([]int, 128)
 	data := make([]opts.BarData, len(branchKeyLenCounts))
 	for i := range branchKeyLenCounts {

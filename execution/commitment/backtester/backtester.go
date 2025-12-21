@@ -335,8 +335,8 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 	}
 	agg := crossPageAggMetrics{
 		top:                  &topNSlowest,
-		branchJumpdestCounts: branchJumpdestCounts,
-		branchKeyLenCounts:   branchKeyLenCounts,
+		branchJumpdestCounts: &branchJumpdestCounts,
+		branchKeyLenCounts:   &branchKeyLenCounts,
 	}
 	return renderOverviewPage(agg, chartsPageFilePaths, runOutputDir)
 }
