@@ -508,6 +508,10 @@ func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, stora
 		fieldBits := branchData[pos]
 		pos++
 
+		// If cell has stateHash (bit 4), it's memoized - skip extracting addresses
+		// since account/storage data won't need to be loaded
+		hasMemoizedHash := fieldBits&16 != 0
+
 		// Parse each field
 		// extension (bit 0)
 		if fieldBits&1 != 0 {
@@ -532,9 +536,11 @@ func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, stora
 			}
 			pos += n
 			if l > 0 && pos+int(l) <= len(branchData) {
-				addr := make([]byte, l)
-				copy(addr, branchData[pos:pos+int(l)])
-				accountAddrs = append(accountAddrs, addr)
+				if !hasMemoizedHash {
+					addr := make([]byte, l)
+					copy(addr, branchData[pos:pos+int(l)])
+					accountAddrs = append(accountAddrs, addr)
+				}
 				pos += int(l)
 			}
 		}
@@ -550,9 +556,11 @@ func extractBranchCellAddresses(branchData []byte) (accountAddrs [][]byte, stora
 			}
 			pos += n
 			if l > 0 && pos+int(l) <= len(branchData) {
-				addr := make([]byte, l)
-				copy(addr, branchData[pos:pos+int(l)])
-				storageAddrs = append(storageAddrs, addr)
+				if !hasMemoizedHash {
+					addr := make([]byte, l)
+					copy(addr, branchData[pos:pos+int(l)])
+					storageAddrs = append(storageAddrs, addr)
+				}
 				pos += int(l)
 			}
 		}
