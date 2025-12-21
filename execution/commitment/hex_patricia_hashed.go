@@ -2634,7 +2634,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	defer func() { logEvery.Stop() }()
 
 	// Create and start the warmuper - warmup runs in parallel with processing
-	warmuper := NewWarmuper(ctx, ctxFactory, maxDepth, 16, logPrefix)
+	warmuper := NewWarmuper(ctx, ctxFactory, maxDepth, 6, logPrefix)
 	warmuper.Start()
 	defer warmuper.Close()
 

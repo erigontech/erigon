@@ -184,14 +184,13 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		// Check cache first
 		var branchData []byte
-		var step kv.Step
 		if entry, ok := w.cache.GetBranch(prefix); ok {
-			branchData, step = entry.Data, entry.Step
+			branchData = entry.Data
 		} else {
+			var step kv.Step
 			branchData, step, _ = trieCtx.Branch(prefix)
 			w.cache.SetBranch(prefix, branchData, step)
 		}
-		_ = step // step is stored in cache for later use
 
 		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 		if len(branchData) < 4 {
