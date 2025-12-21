@@ -155,6 +155,7 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	//fmt.Printf("--- debug --- sending out req: time=%s, body: %s\n", time.Now(), string(body))
 	req, err := http.NewRequestWithContext(ctx, "POST", hc.url, io.NopCloser(bytes.NewReader(body)))
 	if err != nil {
 		return nil, err
@@ -166,9 +167,11 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 	req.Header = hc.headers.Clone()
 	hc.mu.Unlock()
 
+	//fmt.Printf("--- debug --- req: time=%s %v+\n", time.Now(), req)
 	// do request
 	resp, err := hc.client.Do(req)
 	if err != nil {
+		//fmt.Printf("--- debug --- could not read do req: time=%s %s\n", time.Now(), err)
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -176,13 +179,16 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 	// read the response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		//fmt.Printf("--- debug --- could not read resp body: %s\n", err)
 		return nil, err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		//fmt.Printf("--- debug --- got back response with back status: %d\n", resp.StatusCode)
 		return nil, fmt.Errorf("%s: %s", resp.Status, string(respBody))
 	}
 
+	//fmt.Printf("--- debug --- got back response: body: %s\n", string(respBody))
 	return respBody, nil
 }
 

@@ -305,6 +305,16 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 	}
 }
 
+func (bnh BlockNumberOrHash) MarshalJSON() ([]byte, error) {
+	if bnh.BlockNumber != nil {
+		return []byte(fmt.Sprintf(`"%s"`, hexutil.EncodeUint64(uint64(*bnh.BlockNumber)))), nil
+	}
+	if bnh.BlockHash != nil {
+		return bnh.BlockHash.MarshalText()
+	}
+	panic("BlockNumberOrHash MarshalJSON: invalid block number or block hash")
+}
+
 func (bnh *BlockNumberOrHash) Number() (BlockNumber, bool) {
 	if bnh.BlockNumber != nil {
 		return *bnh.BlockNumber, true
@@ -349,6 +359,10 @@ type BlockReference BlockNumberOrHash
 
 func (br *BlockReference) UnmarshalJSON(data []byte) error {
 	return ((*BlockNumberOrHash)(br)).UnmarshalJSON(data)
+}
+
+func (br BlockReference) MarshalJSON() ([]byte, error) {
+	return (BlockNumberOrHash)(br).MarshalJSON()
 }
 
 func (br BlockReference) Number() (BlockNumber, bool) {

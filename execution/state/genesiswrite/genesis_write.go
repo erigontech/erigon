@@ -352,45 +352,10 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
 	statedb.SetTrace(false)
 
-	hasConstructorAllocation := false
-	for _, account := range g.Alloc {
-		if len(account.Constructor) > 0 {
-			hasConstructorAllocation = true
-			break
-		}
-	}
-	// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
-	if hasConstructorAllocation && g.Config.Aura != nil {
-		statedb.CreateAccount(common.Address{}, false)
+	if err = GenesisWriteState(g, statedb); err != nil {
+		return nil, nil, err
 	}
 
-	addrs := sortedAllocAddresses(g.Alloc)
-	for _, addr := range addrs {
-		account := g.Alloc[addr]
-
-		balance, overflow := uint256.FromBig(account.Balance)
-		if overflow {
-			panic("overflow at genesis allocs")
-		}
-		statedb.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
-		statedb.SetCode(addr, account.Code)
-		statedb.SetNonce(addr, account.Nonce)
-		var slotVal uint256.Int
-		for key, value := range account.Storage {
-			slotVal.SetBytes(value.Bytes())
-			statedb.SetState(addr, key, slotVal)
-		}
-
-		if len(account.Constructor) > 0 {
-			if _, err = protocol.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
-				return nil, nil, err
-			}
-		}
-
-		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
-			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
-		}
-	}
 	if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 		return nil, nil, err
 	}
@@ -403,6 +368,50 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	head.Root = common.BytesToHash(rh)
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+}
+
+func GenesisWriteState(g *types.Genesis, ibs *state.IntraBlockState) error {
+	head, _ := GenesisWithoutStateToBlock(g)
+	hasConstructorAllocation := false
+	for _, account := range g.Alloc {
+		if len(account.Constructor) > 0 {
+			hasConstructorAllocation = true
+			break
+		}
+	}
+	// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
+	if hasConstructorAllocation && g.Config.Aura != nil {
+		ibs.CreateAccount(common.Address{}, false)
+	}
+
+	addrs := sortedAllocAddresses(g.Alloc)
+	for _, addr := range addrs {
+		account := g.Alloc[addr]
+
+		balance, overflow := uint256.FromBig(account.Balance)
+		if overflow {
+			panic("overflow at genesis allocs")
+		}
+		ibs.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
+		ibs.SetCode(addr, account.Code)
+		ibs.SetNonce(addr, account.Nonce)
+		var slotVal uint256.Int
+		for key, value := range account.Storage {
+			slotVal.SetBytes(value.Bytes())
+			ibs.SetState(addr, key, slotVal)
+		}
+
+		if len(account.Constructor) > 0 {
+			if _, err := protocol.SysCreate(addr, account.Constructor, g.Config, ibs, head); err != nil {
+				return err
+			}
+		}
+
+		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
+			ibs.SetIncarnation(addr, state.FirstContractIncarnation)
+		}
+	}
+	return nil
 }
 
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.

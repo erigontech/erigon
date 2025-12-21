@@ -19,7 +19,6 @@ package stagedsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -52,6 +53,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 // Cases:
@@ -252,6 +255,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	startBlockNum := blockNum
+	maxBlockNum = 1
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	var lastCommittedTxNum uint64
@@ -372,7 +376,7 @@ func ExecV3(ctx context.Context,
 		lastCommittedTxNum = se.lastCommittedTxNum
 	}
 
-	if false && !inMemExec {
+	if true && !inMemExec {
 		dumpPlainStateDebug(applyTx, doms)
 	}
 
@@ -754,49 +758,91 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 
+	reqGen := requests.NewRequestGenerator("http://135.125.119.2:8545", log.Root())
 	{
 		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
 		for it.HasNext() {
-			k, v, err := it.Next()
+			accK, accV, err := it.Next()
 			if err != nil {
 				panic(err)
 			}
+			t := trie.New(common.Hash{})
+			{
+				nextSubTree, _ := kv.NextSubtree(accK)
+				it, err := tx.Debug().RangeLatest(kv.StorageDomain, accK, nextSubTree, -1)
+				if err != nil {
+					panic(1)
+				}
+				for it.HasNext() {
+					k, v, err := it.Next()
+					if err != nil {
+						panic(err)
+					}
+					loc := k[length.Addr:]
+					h, _ := common.HashData(loc)
+					t.Update(h[:], v)
+					//fmt.Printf("%x->%x->%x\n", k[:length.Addr], k[length.Addr:], v)
+				}
+			}
+			//accCode, _, err := tx.GetLatest(kv.CodeDomain, accK)
+			//if err != nil {
+			//	panic(err)
+			//}
 			a := accounts.NewAccount()
-			accounts.DeserialiseV3(&a, v)
-			fmt.Printf("%x, %d, %d, %d, %x\n", k, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash)
-		}
-	}
-	{
-		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
-		if err != nil {
-			panic(1)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
+			accounts.DeserialiseV3(&a, accV)
+			a.Root = t.Hash()
+			fmt.Printf("%x, %d, %d, %d, %s, %s\n", accK, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash, a.Root)
+			accAddr := common.Address(accK[:])
+			fmt.Printf("checking with nethermind: %s\n", accAddr)
+			goldAcc, err := reqGen.EthGetAccount(accAddr, rpc.BlockNumber(doms.BlockNum()).AsBlockReference())
 			if err != nil {
 				panic(err)
 			}
-			fmt.Printf("%x, %x\n", k, v)
+			if g, o := goldAcc.Balance.Uint64(), a.Balance.ToBig().Uint64(); g != o {
+				fmt.Printf("acc balance diff: %s->%d!=%d\n", accAddr, g, o)
+			}
+			if g, o := goldAcc.Nonce.Uint64(), a.Nonce; g != o {
+				fmt.Printf("acc nonce diff: %s->%d!=%d\n", accAddr, g, o)
+			}
+			if g, o := goldAcc.StorageRoot, a.Root; g != o {
+				fmt.Printf("acc root hash diff: %s->%s!=%s\n", accAddr, g, o)
+			}
+			if g, o := goldAcc.CodeHash, a.CodeHash; g != o {
+				fmt.Printf("acc code hash diff: %s->%s!=%s\n", accAddr, g, o)
+			}
 		}
 	}
+	//{
+	//	it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
+	//	if err != nil {
+	//		panic(1)
+	//	}
+	//	for it.HasNext() {
+	//		k, v, err := it.Next()
+	//		if err != nil {
+	//			panic(err)
+	//		}
+	//		fmt.Printf("%x->%x->%x\n", k[:length.Addr], k[length.Addr:], v)
+	//	}
+	//}
 	{
-		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
-		if err != nil {
-			panic(1)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("%x, %x\n", k, v)
-			if bytes.Equal(k, []byte("state")) {
-				fmt.Printf("state: t=%d b=%d\n", binary.BigEndian.Uint64(v[:8]), binary.BigEndian.Uint64(v[8:]))
-			}
-		}
+		//it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
+		//if err != nil {
+		//	panic(1)
+		//}
+		//for it.HasNext() {
+		//	k, v, err := it.Next()
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//	fmt.Printf("%x, %x\n", k, v)
+		//	if bytes.Equal(k, []byte("state")) {
+		//		fmt.Printf("state: t=%d b=%d\n", binary.BigEndian.Uint64(v[:8]), binary.BigEndian.Uint64(v[8:]))
+		//	}
+		//}
 	}
 }
 

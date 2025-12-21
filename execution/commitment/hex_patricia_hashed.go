@@ -2460,6 +2460,7 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
 func (hph *HexPatriciaHashed) Reset() {
+	fmt.Printf("--- debug --- HexPatriciaHashed.Reset called\n")
 	hph.root.reset()
 	hph.rootTouched = false
 	hph.rootChecked = false

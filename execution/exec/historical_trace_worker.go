@@ -179,6 +179,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNumber() == 0 {
 			// Genesis block
+			//err = genesiswrite.GenesisWriteState(rw.execArgs.Genesis, rw.ibs)
 			_, ibs, err = genesiswrite.GenesisToBlock(nil, rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))

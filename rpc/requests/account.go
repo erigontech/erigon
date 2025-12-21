@@ -79,6 +79,19 @@ func (reqGen *requestGenerator) GetTransactionCount(address common.Address, bloc
 	return result.ToInt(), nil
 }
 
+type EthGetAccountAtResult struct {
+	CodeHash    common.Hash  `json:"codeHash"`
+	StorageRoot common.Hash  `json:"storageRoot"`
+	Balance     *hexutil.Big `json:"balance"`
+	Nonce       *hexutil.Big `json:"nonce"`
+}
+
+func (reqGen *requestGenerator) EthGetAccount(address common.Address, blockRef rpc.BlockReference) (EthGetAccountAtResult, error) {
+	var resp EthGetAccountAtResult
+	err := reqGen.rpcCall(context.Background(), &resp, Methods.EthGetAccount, address, blockRef)
+	return resp, err
+}
+
 func (reqGen *requestGenerator) DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error) {
 	var b DebugAccountAt
 

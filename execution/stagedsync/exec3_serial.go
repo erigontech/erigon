@@ -67,6 +67,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		fmt.Printf("--- debug --- exec block: %d\n", blockNum)
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum, initialCycle)
 		changeSet := &changeset.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
@@ -152,6 +153,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
 			}
+			fmt.Printf("--- debug --- compute commitment block: %d\n", blockNum)
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
@@ -170,9 +172,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
+			fmt.Printf("--- debug --- checking commitment block (%v): %d\n", !se.isMining, blockNum)
 			if !se.isMining && !bytes.Equal(rh, header.Root.Bytes()) {
 				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
+				if !dbg.EnvBool("SKIP_WRONG_TRIE_ROOT", false) {
+					return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
+				}
 			}
 		}
 

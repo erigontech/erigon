@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-
 	"reflect"
 	"slices"
 	"strconv"
@@ -257,6 +256,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 // close cancels all requests except for inflightReq and waits for
 // call goroutines to shut down.
 func (h *handler) close(err error, inflightReq *requestOp) {
+	//h.logger.Warn("--- debug --- handler close", "err", err)
 	h.cancelAllRequests(err, inflightReq)
 	h.callWG.Wait()
 	h.cancelRoot()

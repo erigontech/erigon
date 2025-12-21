@@ -151,6 +151,7 @@ func (op *requestOp) wait(ctx context.Context, c *Client) (*jsonrpcMessage, erro
 		}
 		return nil, ctx.Err()
 	case resp := <-op.resp:
+		//fmt.Printf("--- debug --- wait got resp back: time=%s %v\n", time.Now(), resp)
 		return resp, op.err
 	}
 }
@@ -307,8 +308,10 @@ func (c *Client) CallContext(ctx context.Context, result any, method string, arg
 	op := &requestOp{ids: []json.RawMessage{msg.ID}, resp: make(chan *jsonrpcMessage, 1)}
 
 	if c.isHTTP {
+		//fmt.Printf("--- debug --- call isHttp: yes\n")
 		err = c.sendHTTP(ctx, op, msg)
 	} else {
+		//fmt.Printf("--- debug --- call isHttp: yes\n")
 		err = c.send(ctx, op, msg)
 	}
 	if err != nil {
@@ -324,7 +327,9 @@ func (c *Client) CallContext(ctx context.Context, result any, method string, arg
 	case len(resp.Result) == 0:
 		return ErrNoResult
 	default:
-		return json.Unmarshal(resp.Result, &result)
+		//fmt.Printf("--- debug --- wait finished about to parse %d bytes\n", len(resp.Result))
+		err := json.Unmarshal(resp.Result, &result)
+		return err
 	}
 }
 
@@ -589,7 +594,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			}
 
 		case err := <-c.readErr:
-			conn.handler.logger.Trace("RPC connection read error", "err", err)
+			conn.handler.logger.Info("RPC connection read error", "err", err)
 			// A read error is fatal for the connection, and all pending requests must be cancelled, including any
 			// that might still be considered in-flight.
 			conn.close(err, nil)

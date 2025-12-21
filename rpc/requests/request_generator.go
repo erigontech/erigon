@@ -85,6 +85,7 @@ type RequestGenerator interface {
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
+	EthGetAccount(address common.Address, blockRef rpc.BlockReference) (EthGetAccountAtResult, error)
 	GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error)
 	EstimateGas(args ethereum.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
@@ -143,6 +144,7 @@ var Methods = struct {
 	ETHGetTransactionReceipt RPCMethod
 	BorGetRootHash           RPCMethod
 	ETHCall                  RPCMethod
+	EthGetAccount            RPCMethod
 }{
 	ETHGetTransactionCount:   "eth_getTransactionCount",
 	ETHGetBalance:            "eth_getBalance",
@@ -166,6 +168,7 @@ var Methods = struct {
 	ETHGetTransactionReceipt: "eth_getTransactionReceipt",
 	BorGetRootHash:           "bor_getRootHash",
 	ETHCall:                  "eth_call",
+	EthGetAccount:            "eth_getAccount",
 }
 
 func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response interface{}) callResult {
@@ -200,7 +203,7 @@ func (req *requestGenerator) rpcCall(ctx context.Context, result interface{}, me
 }
 
 const requestTimeout = time.Second * 20
-const connectionTimeout = time.Millisecond * 500
+const connectionTimeout = time.Second * 20
 
 func isConnectionError(err error) bool {
 	var opErr *net.OpError
@@ -235,13 +238,13 @@ func retry(ctx context.Context, op func(context.Context) error, isRecoverableErr
 		return err
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) {
-		if lastErr != nil {
-			return lastErr
-		}
-
-		err = nil
-	}
+	//if errors.Is(err, context.DeadlineExceeded) {
+	//	if lastErr != nil {
+	//		return lastErr
+	//	}
+	//
+	//	err = nil
+	//}
 
 	delayTimer := time.NewTimer(delay)
 	select {
