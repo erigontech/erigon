@@ -34,6 +34,7 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
@@ -1662,12 +1663,24 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
-	branchStart := time.Now()
-	branchData, step, err := hph.ctx.Branch(key)
-	BranchReadDuration.Add(int64(time.Since(branchStart)))
-	BranchReadCount.Add(1)
-	if err != nil {
-		return err
+
+	// Try warmup cache first
+	var branchData []byte
+	var step kv.Step
+	var err error
+	if hph.warmupCache != nil {
+		if entry, ok := hph.warmupCache.GetBranch(key); ok {
+			branchData, step = entry.Data, entry.Step
+		}
+	}
+	if branchData == nil {
+		branchStart := time.Now()
+		branchData, step, err = hph.ctx.Branch(key)
+		BranchReadDuration.Add(int64(time.Since(branchStart)))
+		BranchReadCount.Add(1)
+		if err != nil {
+			return err
+		}
 	}
 	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum

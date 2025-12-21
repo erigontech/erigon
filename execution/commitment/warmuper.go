@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -33,11 +34,18 @@ import (
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
 type TrieContextFactory func() (PatriciaContext, func())
 
-// WarmupCache stores prefetched Account and Storage data from warmup phase.
+// BranchEntry stores branch data along with its step value.
+type BranchEntry struct {
+	Data []byte
+	Step kv.Step
+}
+
+// WarmupCache stores prefetched Account, Storage, and Branch data from warmup phase.
 // Thread-safe for concurrent writes during warmup.
 type WarmupCache struct {
 	accounts sync.Map // key: string(address), value: *Update
 	storages sync.Map // key: string(address), value: *Update
+	branches sync.Map // key: string(prefix), value: *BranchEntry
 }
 
 func NewWarmupCache() *WarmupCache {
@@ -66,6 +74,19 @@ func (c *WarmupCache) GetAccount(addr []byte) (*Update, bool) {
 func (c *WarmupCache) GetStorage(addr []byte) (*Update, bool) {
 	if v, ok := c.storages.Load(string(addr)); ok {
 		return v.(*Update), true
+	}
+	return nil, false
+}
+
+func (c *WarmupCache) SetBranch(prefix []byte, data []byte, step kv.Step) {
+	if data != nil {
+		c.branches.Store(string(prefix), &BranchEntry{Data: data, Step: step})
+	}
+}
+
+func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
+	if v, ok := c.branches.Load(string(prefix)); ok {
+		return v.(*BranchEntry), true
 	}
 	return nil, false
 }
@@ -161,7 +182,8 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
 
-		branchData, _, _ := trieCtx.Branch(prefix)
+		branchData, step, _ := trieCtx.Branch(prefix)
+		w.cache.SetBranch(prefix, branchData, step)
 
 		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 		if len(branchData) < 4 {
