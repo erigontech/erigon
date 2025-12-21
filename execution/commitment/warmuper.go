@@ -159,7 +159,7 @@ func (w *Warmuper) Start() {
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := hexNibblesToCompactBytes(hashedKey[:depth])
+		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
 
 		branchData, _, _ := trieCtx.Branch(prefix)
 

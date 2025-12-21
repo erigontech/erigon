@@ -2730,7 +2730,7 @@ func collectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
 	var prefixes [][]byte
 
 	addPrefix := func(nibbles []byte) {
-		compactPrefix := hexNibblesToCompactBytes(nibbles)
+		compactPrefix := HexNibblesToCompactBytes(nibbles)
 		key := string(compactPrefix)
 		if _, exists := seen[key]; !exists {
 			seen[key] = struct{}{}

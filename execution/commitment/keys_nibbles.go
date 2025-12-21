@@ -83,12 +83,6 @@ func HexNibblesToCompactBytes(key []byte) []byte {
 	return buf
 }
 
-// HexNibblesToCompactBytes is the exported version of hexNibblesToCompactBytes.
-// It converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
-func HexNibblesToCompactBytes(key []byte) []byte {
-	return hexNibblesToCompactBytes(key)
-}
-
 // uncompactNibbles converts a slice of bytes representing nibbles in regular form into 1-nibble-per-byte form.
 func uncompactNibbles(key []byte) []byte {
 	if len(key) == 0 {
