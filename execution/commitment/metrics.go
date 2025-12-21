@@ -24,6 +24,7 @@ type CsvMetrics interface {
 
 type Metrics struct {
 	Accounts        *AccountMetrics
+	Branches        *BranchMetrics
 	updates         atomic.Uint64
 	addressKeys     atomic.Uint64
 	storageKeys     atomic.Uint64
@@ -45,6 +46,7 @@ type Metrics struct {
 type MetricValues struct {
 	mu              *sync.RWMutex
 	Accounts        map[string]*AccountStats
+	Branches        map[string]*BranchStats
 	Updates         uint64
 	AddressKeys     uint64
 	StorageKeys     uint64
@@ -74,6 +76,7 @@ func (m MetricValues) RUnlock() {
 func NewMetrics() *Metrics {
 	metrics := &Metrics{
 		Accounts:                 NewAccounts(),
+		Branches:                 NewBranches(),
 		collectCommitmentMetrics: true,
 	}
 	csvFilePathPrefix := dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
@@ -88,12 +91,14 @@ func (m *Metrics) EnableCsvMetrics(filePathPrefix string) {
 	m.writeCommitmentMetrics = true
 	m.collectCommitmentMetrics = true
 	m.Accounts.writeCommitmentMetrics = true
+	m.Branches.writeCommitmentMetrics = true
 }
 
 func (m *Metrics) AsValues() MetricValues {
 	return MetricValues{
 		mu:              &m.Accounts.m,
 		Accounts:        m.Accounts.AccountStats,
+		Branches:        m.Branches.BranchStats,
 		Updates:         m.updates.Load(),
 		AddressKeys:     m.addressKeys.Load(),
 		StorageKeys:     m.storageKeys.Load(),
@@ -117,6 +122,9 @@ func (m *Metrics) WriteToCSV() {
 		panic(err)
 	}
 	if err := writeMetricsToCSV(m.Accounts, m.metricsFilePrefix+"_accounts.csv"); err != nil {
+		panic(err)
+	}
+	if err := writeMetricsToCSV(m.Branches, m.metricsFilePrefix+"_branches.csv"); err != nil {
 		panic(err)
 	}
 }
@@ -235,6 +243,7 @@ func (m *Metrics) Reset() {
 	}
 
 	m.Accounts.Reset()
+	m.Branches.Reset()
 	m.updates.Store(0)
 	m.addressKeys.Store(0)
 	m.storageKeys.Store(0)
@@ -302,7 +311,7 @@ func (m *Metrics) StorageLoad(plainKey []byte) {
 func (m *Metrics) BranchLoad(plainKey []byte) {
 	if m.collectCommitmentMetrics {
 		m.loadBranch.Add(1)
-		m.Accounts.collect(plainKey, func(mx *AccountStats) {
+		m.Branches.collect(plainKey, func(mx *BranchStats) {
 			mx.LoadBranch++
 		})
 	}
@@ -351,7 +360,6 @@ func NewAccounts() *AccountMetrics {
 
 type AccountStats struct {
 	StorageUpates  uint64
-	LoadBranch     uint64
 	LoadAccount    uint64
 	LoadStorage    uint64
 	Unfolds        uint64
@@ -394,7 +402,6 @@ func accountMetricsHeaders() []string {
 	return []string{
 		"account",
 		"storage updates",
-		"loading branch",
 		"loading account",
 		"loading storage",
 		"total unfolds",
@@ -414,7 +421,6 @@ func (am *AccountMetrics) Values() [][]string {
 		values[vi] = []string{
 			fmt.Sprintf("%x", addr),
 			strconv.FormatUint(stat.StorageUpates, 10),
-			strconv.FormatUint(stat.LoadBranch, 10),
 			strconv.FormatUint(stat.LoadAccount, 10),
 			strconv.FormatUint(stat.LoadStorage, 10),
 			strconv.FormatUint(stat.Unfolds, 10),
@@ -451,8 +457,6 @@ func UnmarshallAccountMetricsCsv(filePath string) ([]*AccountMetrics, error) {
 			col++
 			accStats.StorageUpates = mustParseUintCsvCell(row, col, filePath)
 			col++
-			accStats.LoadBranch = mustParseUintCsvCell(row, col, filePath)
-			col++
 			accStats.LoadAccount = mustParseUintCsvCell(row, col, filePath)
 			col++
 			accStats.LoadStorage = mustParseUintCsvCell(row, col, filePath)
@@ -473,9 +477,113 @@ func UnmarshallAccountMetricsCsv(filePath string) ([]*AccountMetrics, error) {
 }
 
 func (am *AccountMetrics) Reset() {
+	if !am.writeCommitmentMetrics {
+		return
+	}
 	am.m.Lock()
 	defer am.m.Unlock()
 	am.AccountStats = make(map[string]*AccountStats)
+}
+
+type BranchStats struct {
+	LoadBranch uint64
+}
+
+func NewBranches() *BranchMetrics {
+	return &BranchMetrics{BranchStats: make(map[string]*BranchStats)}
+}
+
+type BranchMetrics struct {
+	m sync.RWMutex
+	// will be separate value for each key in parallel processing
+	BranchStats map[string]*BranchStats
+	// metric config related
+	writeCommitmentMetrics bool
+}
+
+func (bm *BranchMetrics) Headers() []string {
+	return branchMetricsHeaders()
+}
+
+func branchMetricsHeaders() []string {
+	return []string{
+		"branchKey",
+		"loads",
+	}
+}
+
+func (bm *BranchMetrics) Values() [][]string {
+	bm.m.RLock()
+	defer bm.m.RUnlock()
+	values := make([][]string, len(bm.BranchStats)+1) // + 1 to add one empty line between "process" calls
+	headersLen := len(bm.Headers())
+	var vi uint64
+	for branchKey, stat := range bm.BranchStats {
+		values[vi] = []string{
+			fmt.Sprintf("%x", branchKey),
+			strconv.FormatUint(stat.LoadBranch, 10),
+		}
+		if len(values[vi]) != headersLen {
+			panic(fmt.Errorf("invalid number of values in branch metrics metrics row: have=%d, want=%d", len(values[vi]), headersLen))
+		}
+		vi++
+	}
+	values[vi] = make([]string, headersLen)
+	return values
+}
+
+func (bm *BranchMetrics) collect(plainKey []byte, fn func(mx *BranchStats)) {
+	if !bm.writeCommitmentMetrics {
+		return
+	}
+	if len(plainKey) == 0 {
+		return
+	}
+	addr := string(plainKey)
+	bm.m.Lock()
+	defer bm.m.Unlock()
+	bs, ok := bm.BranchStats[addr]
+	if !ok {
+		bs = &BranchStats{}
+		bm.BranchStats[addr] = bs
+	}
+	fn(bs)
+}
+
+func (bm *BranchMetrics) Reset() {
+	if !bm.writeCommitmentMetrics {
+		return
+	}
+	bm.m.Lock()
+	defer bm.m.Unlock()
+	bm.BranchStats = make(map[string]*BranchStats)
+}
+
+func UnmarshallBranchMetricsCsv(filePath string) ([]*BranchMetrics, error) {
+	return unmarshallCsvMetrics(filePath, branchMetricsHeaders(), func(records [][]string) ([]*BranchMetrics, error) {
+		var metrics []*BranchMetrics
+		current := &BranchMetrics{BranchStats: make(map[string]*BranchStats)}
+		for i, row := range records {
+			if isRowEmpty(row) {
+				metrics = append(metrics, current)
+				current = &BranchMetrics{BranchStats: make(map[string]*BranchStats)}
+				continue
+			}
+			var col int
+			branchKey := row[col]
+			if _, ok := current.BranchStats[branchKey]; ok {
+				return nil, fmt.Errorf("duplicate branch key in metrics batch: branchKey=%s, batchIdx=%d, file=%s", branchKey, i, filePath)
+			}
+			stats := &BranchStats{}
+			current.BranchStats[branchKey] = stats
+			col++
+			stats.LoadBranch = mustParseUintCsvCell(row, col, filePath)
+			if cols := col + 1; cols != len(row) {
+				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d, file=%s", i, cols, len(row), filePath)
+			}
+		}
+		return metrics, nil
+	})
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
@@ -526,9 +634,17 @@ func UnmarshallMetricValuesCsv(filePathPrefix string) ([]MetricValues, error) {
 	if len(metrics) != len(accMetrics) {
 		return nil, fmt.Errorf("different number of batch metrics: metrics=%d, accMetrics=%d", len(metrics), len(accMetrics))
 	}
+	branchMetrics, err := UnmarshallBranchMetricsCsv(filePathPrefix + "_branches.csv")
+	if err != nil {
+		return nil, err
+	}
+	if len(metrics) != len(branchMetrics) {
+		return nil, fmt.Errorf("different number of batch metrics: metrics=%d, branchMetrics=%d", len(metrics), len(branchMetrics))
+	}
 	metricValues := make([]MetricValues, len(metrics))
 	for i, m := range metrics {
 		m.Accounts = accMetrics[i]
+		m.Branches = branchMetrics[i]
 		metricValues[i] = m.AsValues()
 	}
 	return metricValues, nil
