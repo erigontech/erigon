@@ -26,9 +26,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
@@ -182,8 +182,16 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
 
-		branchData, step, _ := trieCtx.Branch(prefix)
-		w.cache.SetBranch(prefix, branchData, step)
+		// Check cache first
+		var branchData []byte
+		var step kv.Step
+		if entry, ok := w.cache.GetBranch(prefix); ok {
+			branchData, step = entry.Data, entry.Step
+		} else {
+			branchData, step, _ = trieCtx.Branch(prefix)
+			w.cache.SetBranch(prefix, branchData, step)
+		}
+		_ = step // step is stored in cache for later use
 
 		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 		if len(branchData) < 4 {
@@ -191,14 +199,19 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		}
 
 		// Extract and prefetch account/storage addresses from sibling cells on trie path
+		// Skip addresses already in the cache
 		cellAccounts, cellStorages := extractBranchCellAddresses(branchData)
 		for _, addr := range cellAccounts {
-			update, _ := trieCtx.Account(addr)
-			w.cache.SetAccount(addr, update)
+			if _, ok := w.cache.GetAccount(addr); !ok {
+				update, _ := trieCtx.Account(addr)
+				w.cache.SetAccount(addr, update)
+			}
 		}
 		for _, addr := range cellStorages {
-			update, _ := trieCtx.Storage(addr)
-			w.cache.SetStorage(addr, update)
+			if _, ok := w.cache.GetStorage(addr); !ok {
+				update, _ := trieCtx.Storage(addr)
+				w.cache.SetStorage(addr, update)
+			}
 		}
 
 		branchData = branchData[2:] // skip touch map

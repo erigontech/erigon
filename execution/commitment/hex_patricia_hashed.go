@@ -34,13 +34,13 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -2634,7 +2634,7 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	defer func() { logEvery.Stop() }()
 
 	// Create and start the warmuper - warmup runs in parallel with processing
-	warmuper := NewWarmuper(ctx, ctxFactory, maxDepth, numWorkers, logPrefix)
+	warmuper := NewWarmuper(ctx, ctxFactory, maxDepth, 16, logPrefix)
 	warmuper.Start()
 	defer warmuper.Close()
 
