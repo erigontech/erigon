@@ -918,22 +918,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 				return err
 			}
-			log.Warn("[dbg] external commit done", "noCommit", noCommit)
-
-			if err := doms.Flush(ctx, tx); err != nil {
-				return err
-			}
-			doms.ClearRam(true)
-			if !noCommit {
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				if tx, err = db.BeginTemporalRw(ctx); err != nil {
-					return err
-				}
-			}
-		} else {
-			log.Warn("[dbg] external commit done2", "noCommit", noCommit)
 		}
 
 		if err := doms.Flush(ctx, tx); err != nil {
