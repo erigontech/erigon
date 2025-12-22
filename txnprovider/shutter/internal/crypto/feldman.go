@@ -84,7 +84,7 @@ func (p *Polynomial) Degree() uint64 {
 	return uint64(len(*p)) - 1
 }
 
-// Degree returns the degree of the underlying polynomial.
+// Degree returns the degree of the Gammas sequence (number of elements minus one).
 func (g *Gammas) Degree() uint64 {
 	return uint64(len(*g)) - 1
 }

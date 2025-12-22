@@ -112,7 +112,7 @@ func (h *HandShaker) Status() *cltypes.Status {
 	return &status
 }
 
-// Set returns the underlying status (only for giving out responses)
+// IsSet returns whether the status has been set.
 func (h *HandShaker) IsSet() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
