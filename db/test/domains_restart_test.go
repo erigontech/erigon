@@ -130,7 +130,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 
 		err = writer.UpdateAccountData(addr, &accounts.Account{}, acc)
-		//buf := EncodeAccountBytes(1, uint256.NewInt(rnd.Uint64()), nil)
+		//buf := EncodeAccountBytes(1, uint256.NewInt(rnd.Uint64()), nil, 0)
 		//err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
@@ -480,11 +480,11 @@ func TestCommit(t *testing.T) {
 	for i := 1; i < 3; i++ {
 		addr[0] = byte(i)
 
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
 		require.NoError(t, err)
 		loc[0] = byte(i)
 
-		err = domains.DomainPut(kv.StorageDomain, tx, append(common.Copy(addr), loc...), []byte("0401"), txNum, nil)
+		err = domains.DomainPut(kv.StorageDomain, tx, append(common.Copy(addr), loc...), []byte("0401"), txNum, nil, 0)
 		require.NoError(t, err)
 	}
 
