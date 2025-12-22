@@ -1266,9 +1266,12 @@ type keyPair struct {
 	update    *Update
 }
 
-// HashSortWithPrefetch loads all keys first, submits them to the warmuper for parallel warming,
-// then processes each key with the main callback. This works with both ModeDirect and ModeUpdate.
-// The warmuper receives keys incrementally and warms up in parallel with processing.
+// warmupBatchSize is the number of keys to warm and process at a time to control memory usage.
+const warmupBatchSize = 10_000
+
+// HashSortWithPrefetch loads keys in batches, submits them to the warmuper for parallel warming,
+// then processes each batch before moving to the next. This works with both ModeDirect and ModeUpdate.
+// Processing is done in batches of 10k keys to control memory usage.
 // Caller is responsible for calling warmuper.Wait() after processing completes.
 // If warmuper is nil, no warmup is performed.
 func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
@@ -1276,9 +1279,11 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 	case ModeDirect:
 		clear(t.keys)
 
-		// First pass: collect all keys into memory and submit to warmuper
-		var pairs []keyPair
+		// Collect and process keys in batches to control memory
+		pairs := make([]keyPair, 0, warmupBatchSize)
 		var prevKey []byte
+		var processErr error
+
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			// Make copies since ETL may reuse buffers
 			hk := make([]byte, len(k))
@@ -1300,15 +1305,33 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
 			}
+
+			// Process batch when full
+			if len(pairs) >= warmupBatchSize {
+				for _, p := range pairs {
+					select {
+					case <-ctx.Done():
+						processErr = ctx.Err()
+						return processErr
+					default:
+					}
+					if err := fn(p.hashedKey, p.plainKey, nil); err != nil {
+						processErr = err
+						return err
+					}
+				}
+				pairs = pairs[:0] // Reset batch, reuse capacity
+			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
 		}
+		if processErr != nil {
+			return processErr
+		}
 
-		t.initCollector()
-
-		// Process all keys - warmup runs in parallel
+		// Process remaining keys
 		for _, p := range pairs {
 			select {
 			case <-ctx.Done():
@@ -1320,13 +1343,18 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 			}
 		}
 
+		t.initCollector()
+
 	case ModeUpdate:
-		// First pass: collect all keys and submit to warmuper
-		var pairs []keyPair
+		// Collect and process keys in batches to control memory
+		pairs := make([]keyPair, 0, warmupBatchSize)
 		var prevKey []byte
+		var processErr error
+
 		t.tree.Ascend(func(item *KeyUpdate) bool {
 			select {
 			case <-ctx.Done():
+				processErr = ctx.Err()
 				return false
 			default:
 			}
@@ -1348,10 +1376,31 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
 			}
+
+			// Process batch when full
+			if len(pairs) >= warmupBatchSize {
+				for _, p := range pairs {
+					select {
+					case <-ctx.Done():
+						processErr = ctx.Err()
+						return false
+					default:
+					}
+					if err := fn(p.hashedKey, p.plainKey, p.update); err != nil {
+						processErr = err
+						return false
+					}
+				}
+				pairs = pairs[:0] // Reset batch, reuse capacity
+			}
 			return true
 		})
 
-		// Process all keys - warmup runs in parallel
+		if processErr != nil {
+			return processErr
+		}
+
+		// Process remaining keys
 		for _, p := range pairs {
 			select {
 			case <-ctx.Done():
