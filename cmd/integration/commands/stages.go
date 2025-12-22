@@ -931,7 +931,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				}
 			}
 		} else {
-			log.Warn("[dbg] external commit done", "noCommit", noCommit)
+			log.Warn("[dbg] external commit done2", "noCommit", noCommit)
 		}
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
