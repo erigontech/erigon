@@ -73,7 +73,10 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.BlockExecution.SetData(info)
-				if d.syncStats.SyncFinished {
+				d.mu.Lock()
+				syncFinished := d.syncStats.SyncFinished
+				d.mu.Unlock()
+				if syncFinished {
 					return
 				}
 			}
