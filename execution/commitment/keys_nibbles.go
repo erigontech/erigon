@@ -51,7 +51,7 @@ func KeyToNibblizedHash(key []byte) []byte {
 func HexNibblesToCompactBytes(key []byte) []byte {
 	var compactZeroByte byte
 	keyLen := len(key)
-	if hasTerm(key) { // trim terminator if needed
+	if HasTerm(key) { // trim terminator if needed
 		keyLen--
 		compactZeroByte = 0x20
 	}
@@ -104,8 +104,8 @@ func uncompactNibbles(key []byte) []byte {
 	return buf
 }
 
-// hasTerm returns whether a hex nibble key has the terminator flag.
-func hasTerm(s []byte) bool {
+// HasTerm returns whether a hex nibble key has the terminator flag.
+func HasTerm(s []byte) bool {
 	return len(s) > 0 && s[len(s)-1] == terminatorHexByte
 }
 

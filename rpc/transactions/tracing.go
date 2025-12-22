@@ -102,6 +102,7 @@ func TraceTx(
 	chainConfig *chain.Config,
 	stream jsonstream.Stream,
 	callTimeout time.Duration,
+	precompiles vm.PrecompiledContracts,
 ) (gasUsed uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
@@ -133,7 +134,7 @@ func TraceTx(
 		return result, err
 	}
 
-	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
+	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, precompiles, execCb)
 	return gasUsed, err
 }
 
@@ -195,6 +196,7 @@ func ExecuteTraceTx(
 	stream jsonstream.Stream,
 	tracer *tracers.Tracer,
 	streaming bool,
+	precompiles vm.PrecompiledContracts,
 	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
 ) error {
 	// Set the tracer hooks to the intra-block state before execute, so the OnLog hook may be set correctly.
@@ -204,6 +206,10 @@ func ExecuteTraceTx(
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
+	}
+	if precompiles != nil {
+		evm.SetPrecompiles(precompiles)
+
 	}
 
 	result, err := execCb(evm, refunds)
