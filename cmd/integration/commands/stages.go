@@ -912,10 +912,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	for {
-		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-			return err
-		}
-
 		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
 			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 				return err
