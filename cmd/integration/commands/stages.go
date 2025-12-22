@@ -796,8 +796,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	s := stage(sync, nil, db, stages.Execution)
-	s.CurrentSyncCycle.IsInitialCycle = false
-	s.CurrentSyncCycle.IsFirstCycle = false
 	if chainTipMode {
 		s.CurrentSyncCycle.IsFirstCycle = false
 		s.CurrentSyncCycle.IsInitialCycle = false
