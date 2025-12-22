@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"sync/atomic"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -181,6 +179,10 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.trace = trace
 	sdc.patriciaTrie.SetTrace(trace)
+}
+
+func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
+	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
@@ -523,40 +525,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		log.Debug(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
 	}
 	return cs.blockNum, cs.txNum, nil
-}
-
-// Dummy way to rebuild commitment. Dummy because works for small state only.
-// To rebuild commitment correctly for any state size - use RebuildCommitmentFiles.
-func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) ([]byte, error) {
-	it, err := roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-		sdc.TouchKey(kv.AccountsDomain, string(k), nil)
-	}
-
-	it, err = roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-		sdc.TouchKey(kv.StorageDomain, string(k), nil)
-	}
-
-	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, roTx, true, blockNum, txNum, "rebuild commit", nil)
 }
 
 type TrieContext struct {

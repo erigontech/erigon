@@ -94,6 +94,7 @@ type Trie interface {
 	SetTraceDomain(bool)
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
+	EnableCsvMetrics(filePathPrefix string)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -679,7 +680,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 
 func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) error {
 	uncompactedBranchKey := uncompactNibbles(branchKey)
-	if hasTerm(uncompactedBranchKey) {
+	if HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
 	}
 	if len(uncompactedBranchKey) > 128 {

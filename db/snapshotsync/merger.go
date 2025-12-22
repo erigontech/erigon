@@ -84,7 +84,7 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
-func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileInfo, toMerge []*DirtySegment, snapDir string, doIndex bool, indexBuilder snaptype.IndexBuilder) (newDirtySegment *DirtySegment, err error) {
+func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileInfo, toMerge []*DirtySegment, snapDir string, doIndex bool, indexBuilder snaptype.IndexBuilder, onMerge func(mergedFiles []string) error) (newDirtySegment *DirtySegment, err error) {
 	defer func() {
 		if err == nil {
 			if rec := recover(); rec != nil {

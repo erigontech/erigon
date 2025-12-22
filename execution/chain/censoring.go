@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,21 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bitmapdb
+package chain
 
-import (
-	"github.com/RoaringBitmap/roaring/v2/roaring64"
-)
+import "github.com/erigontech/erigon/common"
 
-type BitmapStream struct {
-	bm *roaring64.Bitmap
-	it roaring64.IntPeekable64
+// See https://hackmd.io/@filoozom/rycoQITlWl
+type CensoringConfig struct {
+	From          []common.Address `json:"senders"`
+	To            []common.Address `json:"to"`
+	Is7702Enabled bool             `json:"is7702PatchEnabled"`
 }
-
-func NewBitmapStream(bm *roaring64.Bitmap) *BitmapStream {
-	return &BitmapStream{bm: bm, it: bm.Iterator()}
-}
-func (it *BitmapStream) HasNext() bool                        { return it.it.HasNext() }
-func (it *BitmapStream) Close()                               { ReturnToPool64(it.bm) }
-func (it *BitmapStream) Next() (uint64, error)                { return it.it.Next(), nil }
-func (it *BitmapStream) ToBitmap() (*roaring64.Bitmap, error) { return it.bm, nil }

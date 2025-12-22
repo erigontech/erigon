@@ -114,7 +114,7 @@ jobs:
 
       - name: Upload test results (Lighthouse)
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' && matrix.client == 'lighthouse' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload test results (Prysm)
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' && matrix.client == 'prysm' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
@@ -134,14 +134,14 @@ jobs:
 
       - name: Upload metric plots
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: metric-plots--${{ matrix.client }}-${{ matrix.chain }}
           path: ${{ github.workspace }}/metrics-${{ matrix.chain }}-plots*
 
       - name: Upload FD Leak Analysis
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: fd-leak-analysis-${{ env.CHAIN }}
           path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md

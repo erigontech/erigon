@@ -130,7 +130,7 @@ integration stage_exec
 ## How to re-gen CommitmentDomain
 
 ```sh
-integration commitment_rebuild
+integration commitment rebuild
 ```
 
 ## How to re-generate optional Domain/Index

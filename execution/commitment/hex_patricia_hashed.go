@@ -608,7 +608,7 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if hasTerm(key) {
+	if HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
@@ -635,7 +635,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if hasTerm(key) {
+	if HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
@@ -1530,7 +1530,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
@@ -1819,7 +1819,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	}
 
 	depth := hph.depths[row]
-	updateKey := hexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
+	updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {
@@ -2319,7 +2319,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.trace = true
 
-	if collectCommitmentMetrics {
+	if hph.metrics.collectCommitmentMetrics {
 		hph.metrics.Reset()
 		hph.metrics.updates.Store(updatesCount)
 		defer func() {
@@ -2456,6 +2456,10 @@ func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 }
 
 func (hph *HexPatriciaHashed) SetCapture(capture []string) { hph.capture = capture }
+
+func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
+	hph.metrics.EnableCsvMetrics(filePathPrefix)
+}
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 

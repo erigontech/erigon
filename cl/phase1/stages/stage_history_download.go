@@ -87,7 +87,6 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
-	startTime := time.Now()
 	blockRoot := cfg.startingRoot
 	currentSlot := cfg.startingSlot
 
@@ -102,6 +101,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
+	cfg.downloader.SetBlockChecker(cfg.executionBlocksCollector)
 
 	var initialBeaconBlock *cltypes.SignedBeaconBlock
 
@@ -194,6 +194,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	isBackfilling := atomic.Bool{}
 
 	go func() {
+		startTimeLoop := time.Now()
 		initialProgress := cfg.downloader.Progress()
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
@@ -211,7 +212,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
-				speed := float64(initialProgress-currProgress) / time.Since(startTime).Seconds()
+				speed := math.Abs(float64(currProgress)-float64(initialProgress)) / time.Since(startTimeLoop).Seconds()
+				if speed > 1000.0 { // to avoid spamming logs on fast syncs
+					initialProgress = currProgress
+					startTimeLoop = time.Now()
+					continue
+				}
 
 				if speed == 0 || initialBeaconBlock == nil {
 					continue

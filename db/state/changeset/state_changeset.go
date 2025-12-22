@@ -273,18 +273,20 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	writeDiffsetBuf.Lock()
 	defer writeDiffsetBuf.Unlock()
 	if dbg.TraceUnwinds {
-		diffStats := ""
+		var diffStats strings.Builder
 		if diffSet != nil {
+			first := true
 			for d, diff := range &diffSet.Diffs {
-				if diffStats == "" {
-					diffStats += " "
+				if first {
+					diffStats.WriteString(" ")
+					first = false
 				} else {
-					diffStats += ", "
+					diffStats.WriteString(", ")
 				}
-				diffStats += fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len())
+				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
 			}
 		}
-		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats, dbg.Stack())
+		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
 	}
 	writeDiffsetBuf.b = diffSet.serializeKeys(writeDiffsetBuf.b[:0], blockNumber)
 	keys := writeDiffsetBuf.b
