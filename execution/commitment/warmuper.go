@@ -293,9 +293,7 @@ func (w *Warmuper) Wait() (*WarmupCache, error) {
 	return w.cache, err
 }
 
-// DrainPending waits until all pending work items have been processed.
-// This is useful for batched processing to ensure the warmuper finishes
-// the current batch before starting the next one.
+// DrainPending drains any pending warmup work.
 func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return
