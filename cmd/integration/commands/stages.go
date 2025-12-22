@@ -924,6 +924,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				if err := tx.Commit(); err != nil {
 					return err
 				}
+				log.Warn("[dbg] external commit done")
 				if tx, err = db.BeginTemporalRw(ctx); err != nil {
 					return err
 				}
