@@ -298,8 +298,13 @@ func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return
 	}
-	// Drain work channel
-	for range w.work {
+	// drain the queue
+	for {
+		select {
+		case <-w.work:
+		default:
+			return
+		}
 	}
 }
 
