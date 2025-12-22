@@ -8,24 +8,12 @@
 package bitutil
 
 import (
-	"crypto/subtle"
 	"runtime"
 	"unsafe"
 )
 
 const wordSize = int(unsafe.Sizeof(uintptr(0)))
 const supportsUnaligned = runtime.GOARCH == "386" || runtime.GOARCH == "amd64" || runtime.GOARCH == "ppc64" || runtime.GOARCH == "ppc64le" || runtime.GOARCH == "s390x"
-
-// XORBytes xors the bytes in a and b and writes the result into dst.
-// The number of bytes XORed is min(len(a), len(b)), and that value is returned.
-//
-// dst must have length >= min(len(a), len(b)) or the function will panic.
-// dst may exactly overlap with a or with b, but partial overlaps are not allowed.
-//
-// Deprecated: use crypto/subtle.XORBytes.
-func XORBytes(dst, a, b []byte) int {
-	return subtle.XORBytes(dst, a, b)
-}
 
 // ANDBytes ands the bytes in a and b. The destination is assumed to have enough
 // space. Returns the number of bytes and'd.
