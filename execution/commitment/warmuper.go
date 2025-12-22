@@ -302,7 +302,6 @@ func (w *Warmuper) DrainPending() {
 	}
 	// Drain work channel
 	for range w.work {
-		// No-op, just draining
 	}
 }
 
