@@ -1,19 +1,6 @@
 package order
 
-import (
-	"os"
-	"testing"
-
-	"github.com/erigontech/erigon/common/dbg"
-)
-
-func TestMain(m *testing.M) {
-	prev := dbg.AssertEnabled
-	dbg.AssertEnabled = true
-	code := m.Run()
-	dbg.AssertEnabled = prev
-	os.Exit(code)
-}
+import "testing"
 
 func expectPanic(t *testing.T, fn func()) {
 	t.Helper()
@@ -34,7 +21,7 @@ func TestAssertListAsc_LastPairChecked_NoPanicOnSorted(t *testing.T) {
 		{3},
 	}
 
-	asc.AssertList(keys)
+	asc.assertList(keys)
 }
 
 func TestAssertListAsc_LastPairChecked_PanicsOnUnsortedLastPair(t *testing.T) {
@@ -46,7 +33,7 @@ func TestAssertListAsc_LastPairChecked_PanicsOnUnsortedLastPair(t *testing.T) {
 	}
 
 	expectPanic(t, func() {
-		asc.AssertList(keys)
+		asc.assertList(keys)
 	})
 }
 
@@ -58,7 +45,7 @@ func TestAssertListAsc_TwoElements_PanicsWhenOutOfOrder(t *testing.T) {
 	}
 
 	expectPanic(t, func() {
-		asc.AssertList(keys)
+		asc.assertList(keys)
 	})
 }
 
@@ -70,7 +57,7 @@ func TestAssertListDesc_LastPairChecked_NoPanicOnSorted(t *testing.T) {
 		{1},
 	}
 
-	desc.AssertList(keys)
+	desc.assertList(keys)
 }
 
 func TestAssertListDesc_LastPairChecked_PanicsOnUnsortedLastPair(t *testing.T) {
@@ -82,7 +69,7 @@ func TestAssertListDesc_LastPairChecked_PanicsOnUnsortedLastPair(t *testing.T) {
 	}
 
 	expectPanic(t, func() {
-		desc.AssertList(keys)
+		desc.assertList(keys)
 	})
 }
 
@@ -94,6 +81,6 @@ func TestAssertListDesc_TwoElements_PanicsWhenOutOfOrder(t *testing.T) {
 	}
 
 	expectPanic(t, func() {
-		desc.AssertList(keys)
+		desc.assertList(keys)
 	})
 }
