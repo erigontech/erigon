@@ -301,7 +301,7 @@ func (w *Warmuper) DrainPending() {
 		return
 	}
 	// Drain work channel
-	for _ = range w.work {
+	for range w.work {
 		// No-op, just draining
 	}
 }
