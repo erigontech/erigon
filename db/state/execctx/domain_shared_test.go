@@ -360,10 +360,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	addr := acc(1)
 	for i := uint64(0); i < stepSize; i++ {
 		txNum := i
-		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil); err != nil {
+		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil, 0); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil); err != nil {
+		if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
 			panic(err)
 		}
 	}
@@ -388,18 +388,18 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 
 		txNum = stepSize
-		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(1)...), txNum, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(1)...), txNum, nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(2)...), txNum, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(2)...), txNum, nil, 0); err != nil {
 			panic(err)
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
 			txNum = i
-			if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil); err != nil {
+			if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil, 0); err != nil {
 				panic(err)
 			}
-			if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil); err != nil {
+			if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
 				panic(err)
 			}
 		}
@@ -447,10 +447,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 
 		txNum = stepSize*2 + 1
-		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(4)...), txNum, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(4)...), txNum, nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainPut(kv.StorageDomain, rwTx, append(addr, st(5)...), acc(5), txNum, nil); err != nil {
+		if err := domains.DomainPut(kv.StorageDomain, rwTx, append(addr, st(5)...), acc(5), txNum, nil, 0); err != nil {
 			panic(err)
 		}
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -516,7 +516,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	// --- check 2: storage exists in DB - SharedDomains.HasPrefix should catch this ---
 	{
 		// write to storage
-		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
@@ -582,7 +582,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx2, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx2.Rollback)
-		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx2)
@@ -680,7 +680,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx5, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx5.Rollback)
-		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
 		require.NoError(t, err)
 		// check before flush
 		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx5)
