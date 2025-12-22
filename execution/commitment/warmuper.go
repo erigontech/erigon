@@ -122,7 +122,13 @@ type Warmuper struct {
 	closed  atomic.Bool
 }
 
+const warmupBatchSize = 100
+
 type warmupWorkItem struct {
+	keys []warmupKeyItem
+}
+
+type warmupKeyItem struct {
 	hashedKey  []byte
 	startDepth int
 }
@@ -161,15 +167,19 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
-			for item := range w.work {
+			for batch := range w.work {
 				select {
 				case <-w.ctx.Done():
 					return w.ctx.Err()
 				default:
 				}
 
-				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
-				w.keysProcessed.Add(1)
+				// Process all keys in the batch sequentially on this thread
+				// for better cache locality (keys are sorted)
+				for _, item := range batch.keys {
+					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+				}
+				w.keysProcessed.Add(uint64(len(batch.keys)))
 			}
 			return nil
 		})
@@ -262,15 +272,68 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	}
 }
 
-// WarmKey submits a hashed key for warming. Call Start() first.
+// WarmKey submits a single hashed key for warming. Call Start() first.
 // startDepth indicates the depth from which to start warming (based on divergence from previous key).
 func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
 	select {
-	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
+	case w.work <- warmupWorkItem{keys: []warmupKeyItem{{hashedKey: hashedKey, startDepth: startDepth}}}:
 	case <-w.ctx.Done():
+	}
+}
+
+// WarmKeys submits a batch of hashed keys for warming. Call Start() first.
+// Keys are batched into groups of 300 and processed sequentially on the same thread.
+// The first 300 keys are skipped (not warmed) since they'll be processed before warmup completes.
+func (w *Warmuper) WarmKeys(keys [][]byte) {
+	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
+		return
+	}
+
+	// Skip the first 300 keys - they'll be processed before warmup has a chance to help
+	startIdx := warmupBatchSize
+	if startIdx >= len(keys) {
+		return // Not enough keys to warm
+	}
+
+	// Build batches with startDepth based on divergence from previous key
+	var batch []warmupKeyItem
+	var prevKey []byte
+
+	for i := startIdx; i < len(keys); i++ {
+		hk := keys[i]
+
+		// Calculate startDepth based on common prefix with previous key
+		startDepth := 0
+		if prevKey != nil {
+			minLen := min(len(prevKey), len(hk))
+			for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
+				startDepth++
+			}
+		}
+
+		batch = append(batch, warmupKeyItem{hashedKey: hk, startDepth: startDepth})
+		prevKey = hk
+
+		// Submit batch when full
+		if len(batch) >= warmupBatchSize {
+			select {
+			case w.work <- warmupWorkItem{keys: batch}:
+			case <-w.ctx.Done():
+				return
+			}
+			batch = nil
+		}
+	}
+
+	// Submit remaining keys
+	if len(batch) > 0 {
+		select {
+		case w.work <- warmupWorkItem{keys: batch}:
+		case <-w.ctx.Done():
+		}
 	}
 }
 

@@ -1268,17 +1268,16 @@ type keyPair struct {
 
 // HashSortWithPrefetch loads all keys first, submits them to the warmuper for parallel warming,
 // then processes each key with the main callback. This works with both ModeDirect and ModeUpdate.
-// The warmuper receives keys incrementally and warms up in parallel with processing.
-// Caller is responsible for calling warmuper.Wait() after processing completes.
+// The warmuper batches keys (300 per batch) and skips the first 300 keys since they'll be
+// processed before warmup completes.
 // If warmuper is nil, no warmup is performed.
 func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
-		// First pass: collect all keys into memory and submit to warmuper
+		// First pass: collect all keys into memory
 		var pairs []keyPair
-		var prevKey []byte
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			// Make copies since ETL may reuse buffers
 			hk := make([]byte, len(k))
@@ -1286,24 +1285,19 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 			pk := make([]byte, len(v))
 			copy(pk, v)
 			pairs = append(pairs, keyPair{hashedKey: hk, plainKey: pk})
-
-			// Submit to warmuper with start depth based on divergence from previous key
-			if warmuper != nil {
-				startDepth := 0
-				if prevKey != nil {
-					// Find common prefix length
-					minLen := min(len(prevKey), len(hk))
-					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
-						startDepth++
-					}
-				}
-				warmuper.WarmKey(hk, startDepth)
-				prevKey = hk
-			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
+		}
+
+		// Submit all keys to warmuper in batches (skips first 300, batches rest by 300)
+		if warmuper != nil {
+			hashedKeys := make([][]byte, len(pairs))
+			for i, p := range pairs {
+				hashedKeys[i] = p.hashedKey
+			}
+			warmuper.WarmKeys(hashedKeys)
 		}
 
 		t.initCollector()
@@ -1321,9 +1315,8 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 		}
 
 	case ModeUpdate:
-		// First pass: collect all keys and submit to warmuper
+		// First pass: collect all keys
 		var pairs []keyPair
-		var prevKey []byte
 		t.tree.Ascend(func(item *KeyUpdate) bool {
 			select {
 			case <-ctx.Done():
@@ -1334,22 +1327,17 @@ func (t *Updates) HashSortWithPrefetch(ctx context.Context, warmuper *Warmuper, 
 			hk := make([]byte, len(item.hashedKey))
 			copy(hk, item.hashedKey)
 			pairs = append(pairs, keyPair{hashedKey: hk, plainKey: toBytesZeroCopy(item.plainKey), update: item.update})
-
-			// Submit to warmuper with start depth based on divergence from previous key
-			if warmuper != nil {
-				startDepth := 0
-				if prevKey != nil {
-					// Find common prefix length
-					minLen := min(len(prevKey), len(hk))
-					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
-						startDepth++
-					}
-				}
-				warmuper.WarmKey(hk, startDepth)
-				prevKey = hk
-			}
 			return true
 		})
+
+		// Submit all keys to warmuper in batches (skips first 300, batches rest by 300)
+		if warmuper != nil {
+			hashedKeys := make([][]byte, len(pairs))
+			for i, p := range pairs {
+				hashedKeys[i] = p.hashedKey
+			}
+			warmuper.WarmKeys(hashedKeys)
+		}
 
 		// Process all keys - warmup runs in parallel
 		for _, p := range pairs {
