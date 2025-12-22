@@ -29,7 +29,22 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 )
+
+// noopPatriciaContext is a mock PatriciaContext for testing warmup.
+type noopPatriciaContext struct{}
+
+func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
+func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte, prevStep kv.Step) error {
+	return nil
+}
+func (n *noopPatriciaContext) Account(plainKey []byte) (*Update, error) { return nil, nil }
+func (n *noopPatriciaContext) Storage(plainKey []byte) (*Update, error) { return nil, nil }
+
+func noopCtxFactory() (PatriciaContext, func()) {
+	return &noopPatriciaContext{}, nil
+}
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	tb.Helper()
@@ -378,9 +393,13 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	sz = utDirect.Size()
 	require.EqualValues(t, len(uniqUpds), sz)
 
+	ctx := context.Background()
+	warmuper := NewWarmuper(ctx, noopCtxFactory, 64, 2, "test")
+	warmuper.Start()
+
 	i := 0
 	// keyHasherNoop is used so ordering is going by plainKey
-	err := utUpdate.HashSort(context.Background(), func(hk, pk []byte, upd *Update) error {
+	err := utUpdate.HashSort(ctx, warmuper, func(hk, pk []byte, upd *Update) error {
 		require.Equal(t, sortedUniqUpds[i].key, pk)
 		require.Equal(t, sortedUniqUpds[i].val, upd.Storage[:upd.StorageLen])
 		i++
@@ -389,12 +408,22 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
+	_, err = warmuper.Wait()
+	require.NoError(t, err)
+
+	// Create a new warmuper for the second test
+	warmuper2 := NewWarmuper(ctx, noopCtxFactory, 64, 2, "test")
+	warmuper2.Start()
+
 	i = 0
-	err = utDirect.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
+	err = utDirect.HashSort(ctx, warmuper2, func(hk, pk []byte, _ *Update) error {
 		require.Equal(t, sortedUniqUpds[i].key, pk)
 		i++
 		return nil
 	})
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
+
+	_, err = warmuper2.Wait()
+	require.NoError(t, err)
 }

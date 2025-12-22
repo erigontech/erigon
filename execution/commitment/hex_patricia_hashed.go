@@ -2403,7 +2403,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
-	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -2516,7 +2516,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	defer func() { logEvery.Stop() }()
 
-	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -2653,8 +2653,8 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	// Set warmup cache immediately - it's thread-safe and will be populated during warmup
 	hph.warmupCache = warmuper.Cache()
 
-	// Use HashSortWithPrefetch - submits keys to warmuper while processing runs in parallel
-	err = updates.HashSortWithPrefetch(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	// HashSort with warmuper - submits keys to warmuper while processing runs in parallel
+	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
