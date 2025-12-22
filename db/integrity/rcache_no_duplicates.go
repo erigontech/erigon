@@ -65,7 +65,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 	expectedFirstLogIdx := uint32(0)
 	blockNum := fromBlock
 	var _min, _max uint64
-	_min, _ = txNumsReader.Min(tx, fromBlock)
+	_min = fromTxNum
 	_max, _ = txNumsReader.Max(tx, fromBlock)
 
 	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
