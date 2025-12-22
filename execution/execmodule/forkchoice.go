@@ -654,9 +654,9 @@ func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeade
 	if txnum != 0 {
 		logArgs = append(logArgs, "txnum", txnum)
 	}
-	logArgs = append(logArgs, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)))
+	logArgs = append(logArgs, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)),
+		"execution", blockTimings[engine_helpers.BlockTimingsValidationIndex])
 
-	logArgs = append(logArgs, "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex])
 	if !debug {
 		totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
 		if !e.syncCfg.ParallelStateFlushing {
