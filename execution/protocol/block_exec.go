@@ -90,7 +90,6 @@ func ExecuteBlockEphemerally(
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
-	block.Uncles()
 	ibs := state.New(stateReader)
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
