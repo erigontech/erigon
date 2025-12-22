@@ -330,6 +330,9 @@ func (p *TxPool) start(ctx context.Context) error {
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
+	lastChange := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1]
+	sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns, lastChange.BlockHeight, lastChange.BlockTime)
+
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
 	coreTx, err := coreDB.BeginTemporalRo(ctx)
@@ -339,7 +342,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	defer coreTx.Rollback()
 
-	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
+	block := lastChange.BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
 
 	if err = minedTxns.Valid(); err != nil {
