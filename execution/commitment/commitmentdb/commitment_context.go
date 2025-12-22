@@ -267,7 +267,9 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 }
 
 // Evaluates commitment for gathered updates.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+// If db is non-nil, pre-warms MDBX page cache by reading Branch data in parallel before processing.
+// maxDepth determines how deep to collect prefixes for warmup (e.g., 4 means prefixes up to 4 nibbles).
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress, maxDepth int) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -297,88 +299,41 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	trieContext := sdc.trieContext(tx)
 	sdc.Reset()
 
-	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress)
-	if err != nil {
-		return nil, err
-	}
-	sdc.justRestored.Store(false)
+	var warmupConfig *commitment.WarmupConfig
+	if db != nil {
+		// Create factory for warmup TrieContexts with their own transactions
+		ctxFactory := func() (commitment.PatriciaContext, func()) {
+			roTx, err := db.BeginTemporalRo(ctx)
+			if err != nil {
+				return &errorTrieContext{err: err}, nil
+			}
 
-	if saveState {
-		if err = sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum, rootHash); err != nil {
-			return nil, err
+			warmupCtx := &TrieContext{
+				roTtx:    roTx,
+				getter:   sdc.sharedDomains.AsGetter(roTx),
+				stepSize: sdc.sharedDomains.StepSize(),
+				txNum:    sdc.sharedDomains.TxNum(),
+			}
+			if sdc.stateReader != nil {
+				warmupCtx.stateReader = sdc.stateReader
+			} else {
+				warmupCtx.stateReader = &LatestStateReader{warmupCtx.getter}
+			}
+
+			cleanup := func() {
+				roTx.Rollback()
+			}
+			return warmupCtx, cleanup
+		}
+
+		warmupConfig = &commitment.WarmupConfig{
+			CtxFactory: ctxFactory,
+			MaxDepth:   maxDepth,
+			NumWorkers: 32,
 		}
 	}
 
-	return rootHash, err
-}
-
-// ComputeCommitmentWithWarmup is like ComputeCommitment but pre-warms MDBX page cache
-// by reading Branch data in parallel before processing.
-// Works with both ModeDirect and ModeUpdate.
-// maxDepth determines how deep to collect prefixes (e.g., 4 means prefixes up to 4 nibbles).
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithWarmup(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress, maxDepth int) (rootHash []byte, err error) {
-	numWorkers := 128
-	mxCommitmentRunning.Inc()
-	defer mxCommitmentRunning.Dec()
-	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
-
-	updateCount := sdc.updates.Size()
-	if sdc.trace {
-		start := time.Now()
-		defer func() {
-			log.Trace("ComputeCommitment", "block", blockNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
-		}()
-	}
-	if updateCount == 0 {
-		rootHash, err = sdc.patriciaTrie.RootHash()
-		return rootHash, err
-	}
-
-	sdc.patriciaTrie.SetTrace(sdc.trace)
-	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
-	if sdc.sharedDomains.CommitmentCapture() {
-		if sdc.patriciaTrie.GetCapture(false) == nil {
-			sdc.patriciaTrie.SetCapture([]string{})
-		}
-	}
-
-	trieContext := sdc.trieContext(tx)
-	sdc.Reset()
-
-	// Create factory for warmup TrieContexts with their own transactions
-	ctxFactory := func() (commitment.PatriciaContext, func()) {
-		roTx, err := db.BeginTemporalRo(ctx)
-		if err != nil {
-			return &errorTrieContext{err: err}, nil
-		}
-
-		warmupCtx := &TrieContext{
-			roTtx:    roTx,
-			getter:   sdc.sharedDomains.AsGetter(roTx),
-			stepSize: sdc.sharedDomains.StepSize(),
-			txNum:    sdc.sharedDomains.TxNum(),
-		}
-		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader
-		} else {
-			warmupCtx.stateReader = &LatestStateReader{warmupCtx.getter}
-		}
-
-		cleanup := func() {
-			roTx.Rollback()
-		}
-		return warmupCtx, cleanup
-	}
-
-	// Use HashSortWithPrefetch which works for both ModeDirect and ModeUpdate
-	hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
-	if !ok {
-		// Fall back to regular process for other trie types
-		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress)
-	} else {
-		rootHash, err = hph.ProcessWithWarmup(ctx, sdc.updates, logPrefix, commitProgress, maxDepth, numWorkers, ctxFactory)
-	}
-
+	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress, warmupConfig)
 	if err != nil {
 		return nil, err
 	}

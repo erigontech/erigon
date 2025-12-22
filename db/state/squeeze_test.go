@@ -149,7 +149,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			rh, err := domains.ComputeCommitment(ctx, rwTx, nil, true, blockNum, txNum, "", nil, 0)
 			require.NoError(tb, err)
 			require.NotEmpty(tb, rh)
 		}
@@ -182,7 +182,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 
 	var blockNum uint64
 	// get latest commited root
-	latestRoot, err := domains.ComputeCommitment(context.Background(), rwTx, false, blockNum, 0, "", nil)
+	latestRoot, err := domains.ComputeCommitment(context.Background(), rwTx, nil, false, blockNum, 0, "", nil, 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
@@ -217,7 +217,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	// check if the commitment is the same
-	root, err := domains.ComputeCommitment(context.Background(), rwTx, false, blockNum, 0, "", nil)
+	root, err := domains.ComputeCommitment(context.Background(), rwTx, nil, false, blockNum, 0, "", nil, 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)
@@ -394,7 +394,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
-	_, err = domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
+	_, err = domains.ComputeCommitment(ctx, tx, nil, true, blockNum, txNum, "", nil, 0)
 	require.NoError(t, err)
 
 	err = domains.Flush(context.Background(), tx)
@@ -492,7 +492,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+		rh, err := domains.ComputeCommitment(ctx, rwTx, nil, true, blockNum, txNum, "", nil, 0)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
@@ -539,7 +539,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+		rh, err := domains.ComputeCommitment(ctx, rwTx, nil, true, blockNum, txNum, "", nil, 0)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
@@ -586,7 +586,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+		rh, err := domains.ComputeCommitment(ctx, rwTx, nil, true, blockNum, txNum, "", nil, 0)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)

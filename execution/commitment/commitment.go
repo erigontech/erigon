@@ -105,8 +105,8 @@ type Trie interface {
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
-	// Process updates
-	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error)
+	// Process updates. If warmup is non-nil, pre-warms MDBX page cache in parallel.
+	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup *WarmupConfig) (rootHash []byte, err error)
 }
 
 type CommitProgress struct {

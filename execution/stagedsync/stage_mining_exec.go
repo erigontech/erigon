@@ -250,7 +250,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		return err
 	}
 
-	rh, err := sd.ComputeCommitment(ctx, tx, true, blockHeight, txNum, s.LogPrefix(), nil)
+	rh, err := sd.ComputeCommitment(ctx, tx, nil, true, blockHeight, txNum, s.LogPrefix(), nil, 0)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
 	}

@@ -34,6 +34,14 @@ import (
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
 type TrieContextFactory func() (PatriciaContext, func())
 
+// WarmupConfig contains configuration for pre-warming MDBX page cache
+// during commitment processing.
+type WarmupConfig struct {
+	CtxFactory TrieContextFactory
+	MaxDepth   int
+	NumWorkers int
+}
+
 // BranchEntry stores branch data along with its step value.
 type BranchEntry struct {
 	Data []byte

@@ -373,7 +373,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			var err error
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), uint64(txNum), "", nil)
+			stateRoot, err := domains.ComputeCommitment(ctx, tx, nil, true, b.header.Number.Uint64(), uint64(txNum), "", nil, 0)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}

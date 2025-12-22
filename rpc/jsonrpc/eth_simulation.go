@@ -532,7 +532,7 @@ func (s *simulator) simulateBlock(
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains.AsGetter(tx), txNum+1))
 		}
-		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil)
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, nil, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil, 0)
 		if err != nil {
 			return nil, nil, err
 		}

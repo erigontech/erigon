@@ -2470,7 +2470,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, witnessTrieRootHash, nil
 }
 
-func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup *WarmupConfig) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2493,7 +2493,17 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	defer func() { logEvery.Stop() }()
 
-	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	// Setup warmup if configured
+	var warmuper *Warmuper
+	if warmup != nil {
+		warmuper = NewWarmuper(ctx, warmup.CtxFactory, warmup.MaxDepth, warmup.NumWorkers, logPrefix)
+		warmuper.Start()
+		defer warmuper.Close()
+		hph.warmupCache = warmuper.Cache()
+		defer func() { hph.warmupCache = nil }()
+	}
+
+	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -2604,120 +2614,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			}
 		}
 	}
-
-	return rootHash, nil
-}
-
-// ProcessWithWarmup is like Process but pre-warms MDBX page cache by reading Branch data
-// in parallel before processing. Works with both ModeDirect and ModeUpdate.
-func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, maxDepth int, numWorkers int, ctxFactory TrieContextFactory) (rootHash []byte, err error) {
-	var (
-		m  runtime.MemStats
-		ki uint64
-
-		updatesCount = updates.Size()
-		start        = time.Now()
-		logEvery     = time.NewTicker(20 * time.Second)
-	)
-
-	defer func() { logEvery.Stop() }()
-
-	// Create and start the warmuper - warmup runs in parallel with processing
-	warmuper := NewWarmuper(ctx, ctxFactory, maxDepth, 6, logPrefix)
-	warmuper.Start()
-	defer warmuper.Close()
-
-	// Set warmup cache immediately - it's thread-safe and will be populated during warmup
-	hph.warmupCache = warmuper.Cache()
-
-	// HashSort with warmuper - submits keys to warmuper while processing runs in parallel
-	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		select {
-		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
-					hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
-			if progress != nil {
-				progress <- &CommitProgress{
-					KeyIndex:    ki,
-					UpdateCount: updatesCount,
-					Metrics:     hph.metrics.AsValues(),
-				}
-			}
-		default:
-		}
-
-		if hph.trace || hph.traceDomain || hph.capture != nil {
-			update := stateUpdate
-
-			if update == nil {
-				if int16(len(plainKey)) == hph.accountKeyLen {
-					update, err = hph.ctx.Account(plainKey)
-					if err != nil {
-						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
-					}
-				} else {
-					update, err = hph.ctx.Storage(plainKey)
-					if err != nil {
-						return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
-					}
-				}
-			}
-
-			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
-
-			if hph.trace || hph.traceDomain {
-				fmt.Println(trace)
-			}
-
-			if hph.capture != nil {
-				hph.capture = append(hph.capture, trace)
-			}
-		}
-
-		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
-			return fmt.Errorf("followAndUpdate: %w", err)
-		}
-		ki++
-		if progress != nil && ki == updatesCount {
-			progress <- &CommitProgress{
-				KeyIndex:    ki,
-				UpdateCount: updatesCount,
-				Metrics:     hph.metrics.AsValues(),
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("hash sort with prefetch failed: %w", err)
-	}
-
-	// Stop warmup workers - we don't need to wait for completion
-	warmuper.Close()
-
-	// Folding everything up to the root
-	for hph.activeRows > 0 {
-		foldDone := hph.metrics.StartFolding(nil)
-		if err = hph.fold(); err != nil {
-			return nil, fmt.Errorf("final fold: %w", err)
-		}
-		foldDone()
-	}
-
-	rootHash, err = hph.RootHash()
-	if err != nil {
-		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
-	}
-	if hph.trace {
-		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
-	}
-
-	log.Debug("commitment with warmup finished",
-		"keys", common.PrettyCounter(ki), "spent", time.Since(start))
-
-	// Clear warmup cache after processing is done
-	hph.warmupCache = nil
 
 	return rootHash, nil
 }
