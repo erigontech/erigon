@@ -2333,16 +2333,17 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
-					hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
 			if progress != nil {
 				progress <- &CommitProgress{
 					KeyIndex:    ki,
 					UpdateCount: updatesCount,
 					Metrics:     hph.metrics.AsValues(),
 				}
+			} else {
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
+					append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
+						hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
 			}
 		default:
 		}
