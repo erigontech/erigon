@@ -496,13 +496,5 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
-	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
-}
-
-// ComputeCommitmentWithWarmup is like ComputeCommitment but pre-warms MDBX page cache
-// by reading Branch data in parallel before processing.
-// db is used to create separate read transactions for parallel warmup workers.
-// maxDepth determines how deep to collect prefixes (e.g., 4 means prefixes up to 4 nibbles).
-func (sd *SharedDomains) ComputeCommitmentWithWarmup(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress, maxDepth int) (rootHash []byte, err error) {
-	return sd.sdCtx.ComputeCommitmentWithWarmup(ctx, tx, db, saveStateAfter, blockNum, txNum, logPrefix, commitProgress, maxDepth)
+	return sd.sdCtx.ComputeCommitmentWithWarmup(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
 }

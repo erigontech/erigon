@@ -329,7 +329,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									}
 								}
 							}()
-							commitment.ResetTimings()
 
 							if time.Since(lastExecutedLog) > logInterval/50 {
 								hasLoggedExecution = true
@@ -373,27 +372,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							uncommittedBlocks = 0
 							uncommittedGas = 0
 							uncommittedTransactions = 0
-
-							if pe.inMemExec {
-								commitmentDuration := time.Since(commitStart)
-								totalDuration := applyResult.ExecDuration + commitmentDuration
-								branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur, branchCount, hashCount, accountCount, storageCount, keyHashCount := commitment.GetTimings()
-								log.Debug(fmt.Sprintf("[%s] block timings", pe.logPrefix),
-									"block", applyResult.BlockNum,
-									"total", totalDuration,
-									"execution", applyResult.ExecDuration,
-									"commitment", commitmentDuration,
-									"branchRead", branchReadDur,
-									"branchCnt", branchCount,
-									"accountRead", accountReadDur,
-									"accountCnt", accountCount,
-									"storageRead", storageReadDur,
-									"storageCnt", storageCount,
-									"cellHash", hashingDur,
-									"cellHashCnt", hashCount,
-									"keyHash", keyHashDur,
-									"keyHashCnt", keyHashCount)
-							}
 						}
 
 						if flushPending {

@@ -1034,11 +1034,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 }
 
 func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byte) ([]byte, error) {
-	hashStart := time.Now()
-	defer func() {
-		HashingDuration.Add(int64(time.Since(hashStart)))
-		HashingCount.Add(1)
-	}()
 	var err error
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
@@ -1142,10 +1137,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-			accountStart := time.Now()
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
-			AccountReadDuration.Add(int64(time.Since(accountStart)))
-			AccountReadCount.Add(1)
 			if err != nil {
 				return nil, err
 			}
@@ -1686,10 +1678,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		}
 	}
 	if branchData == nil {
-		branchStart := time.Now()
 		branchData, step, err = hph.ctx.Branch(key)
-		BranchReadDuration.Add(int64(time.Since(branchStart)))
-		BranchReadCount.Add(1)
 		if err != nil {
 			return err
 		}
@@ -2100,10 +2089,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						upd, _ = hph.warmupCache.GetAccount(cell.accountAddr[:cell.accountAddrLen])
 					}
 					if upd == nil {
-						accountStart := time.Now()
 						upd, err = hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
-						AccountReadDuration.Add(int64(time.Since(accountStart)))
-						AccountReadCount.Add(1)
 						if err != nil {
 							return fmt.Errorf("failed to get account: %w", err)
 						}
@@ -2122,10 +2108,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						upd, _ = hph.warmupCache.GetStorage(cell.storageAddr[:cell.storageAddrLen])
 					}
 					if upd == nil {
-						storageStart := time.Now()
 						upd, err = hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
-						StorageReadDuration.Add(int64(time.Since(storageStart)))
-						StorageReadCount.Add(1)
 						if err != nil {
 							return fmt.Errorf("failed to get storage: %w", err)
 						}
@@ -2320,19 +2303,13 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		// Update the cell
 		if int16(len(plainKey)) == hph.accountKeyLen {
 			hph.metrics.AccountLoad(plainKey)
-			accountStart := time.Now()
 			stateUpdate, err = hph.ctx.Account(plainKey)
-			AccountReadDuration.Add(int64(time.Since(accountStart)))
-			AccountReadCount.Add(1)
 			if err != nil {
 				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 			}
 		} else {
 			hph.metrics.StorageLoad(plainKey)
-			storageStart := time.Now()
 			stateUpdate, err = hph.ctx.Storage(plainKey)
-			StorageReadDuration.Add(int64(time.Since(storageStart)))
-			StorageReadCount.Add(1)
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
@@ -2743,57 +2720,6 @@ func (hph *HexPatriciaHashed) ProcessWithWarmup(ctx context.Context, updates *Up
 	hph.warmupCache = nil
 
 	return rootHash, nil
-}
-
-// collectBranchPrefixesFromKeys extracts prefixes along the traversal path for sorted keys.
-// For each key, we warm all prefixes from its divergence point with the previous key
-// down to the leaf. This covers branch nodes that exist in the trie from other keys.
-func collectBranchPrefixesFromKeys(hashedKeys [][]byte, maxDepth int) [][]byte {
-	if len(hashedKeys) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]struct{})
-	var prefixes [][]byte
-
-	addPrefix := func(nibbles []byte) {
-		compactPrefix := HexNibblesToCompactBytes(nibbles)
-		key := string(compactPrefix)
-		if _, exists := seen[key]; !exists {
-			seen[key] = struct{}{}
-			prefixCopy := make([]byte, len(compactPrefix))
-			copy(prefixCopy, compactPrefix)
-			prefixes = append(prefixes, prefixCopy)
-		}
-	}
-
-	// First key: warm entire path from root to leaf
-	first := hashedKeys[0]
-	limit := min(len(first), maxDepth)
-	for depth := 0; depth <= limit; depth++ {
-		addPrefix(first[:depth])
-	}
-
-	// Subsequent keys: warm path from divergence point to leaf
-	for i := 1; i < len(hashedKeys); i++ {
-		prev := hashedKeys[i-1]
-		curr := hashedKeys[i]
-
-		// Find common prefix length (divergence point)
-		cpl := 0
-		minLen := min(len(prev), len(curr))
-		for cpl < minLen && prev[cpl] == curr[cpl] {
-			cpl++
-		}
-
-		// Warm all prefixes from divergence to leaf for the new key
-		limit := min(len(curr), maxDepth)
-		for depth := cpl; depth <= limit; depth++ {
-			addPrefix(curr[:depth])
-		}
-	}
-
-	return prefixes
 }
 
 func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
