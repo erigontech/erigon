@@ -912,7 +912,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	for {
-		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, block, ctx, cfg, logger); err != nil {
+		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+			return err
+		}
+
+		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
 			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 				return err
 			}
@@ -933,7 +937,16 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
+
+		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+			return err
+		}
+		if execProgress >= block {
+			break
+		}
 	}
+
+	return nil
 }
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
