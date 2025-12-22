@@ -796,6 +796,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	s := stage(sync, nil, db, stages.Execution)
+	s.CurrentSyncCycle.IsInitialCycle = false
+	s.CurrentSyncCycle.IsFirstCycle = false
 	if chainTipMode {
 		s.CurrentSyncCycle.IsFirstCycle = false
 		s.CurrentSyncCycle.IsInitialCycle = false
@@ -916,23 +918,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 				return err
 			}
-			if !noCommit {
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
-				doms.ClearRam(true)
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				if tx, err = db.BeginTemporalRw(ctx); err != nil {
-					return err
-				}
-			}
 		}
+
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
 		doms.ClearRam(true)
+		if !noCommit {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+		}
 
 		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 			return err
