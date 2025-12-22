@@ -243,7 +243,7 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 		return err
 	}
 	logger.Info("recomputing commitment root after", "touches", touches, "file", filepath.Base(f.Fullpath()))
-	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, nil /* db */, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil /* commitProgress */, 0 /* maxDepth */)
+	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, nil /* db */, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}
@@ -781,7 +781,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	touchDur := time.Since(touchStart)
 	logger.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
 	recalcStart := time.Now()
-	root, err := sd.ComputeCommitment(ctx, tx, nil /* db */, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */, 0 /* maxDepth */)
+	root, err := sd.ComputeCommitment(ctx, tx, nil /* db */, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}

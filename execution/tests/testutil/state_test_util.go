@@ -290,7 +290,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 
 	var root common.Hash
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, nil, true, blockNum, txNum, "", nil, 0)
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, nil, true, blockNum, txNum, "", nil)
 	if err != nil {
 		return statedb, root, res.GasUsed, fmt.Errorf("ComputeCommitment: %w", err)
 	}
@@ -337,7 +337,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), tx, nil, true, domains.BlockNum(), domains.TxNum(), "flush-commitment", nil, 0)
+	_, err = domains.ComputeCommitment(context.Background(), tx, nil, true, domains.BlockNum(), domains.TxNum(), "flush-commitment", nil)
 	if err != nil {
 		return nil, err
 	}

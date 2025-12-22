@@ -147,7 +147,7 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.TemporalRwTx, accumulator *sha
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
-		_, err := fv.sharedDom.ComputeCommitment(context.Background(), tx, nil, true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment", nil, 0)
+		_, err := fv.sharedDom.ComputeCommitment(context.Background(), tx, nil, true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment", nil)
 		if err != nil {
 			return err
 		}

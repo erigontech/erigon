@@ -874,7 +874,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 	// Use warmup to pre-fetch branch data in parallel before computing commitment
 	// maxDepth=128 covers full path for both account keys (64 nibbles) and storage keys (128 nibbles)
-	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, cfg.db, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil, 128)
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, cfg.db, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {

@@ -154,7 +154,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				se.doms.SetTrace(true, false)
 			}
 			// Use warmup to pre-fetch branch data in parallel (maxDepth=128 covers full key paths)
-			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, se.cfg.db, true, blockNum, inputTxNum-1, se.logPrefix, nil, 128)
+			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, se.cfg.db, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
 			if err != nil {

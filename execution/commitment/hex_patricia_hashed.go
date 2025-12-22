@@ -2470,7 +2470,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, witnessTrieRootHash, nil
 }
 
-func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup *WarmupConfig) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2495,8 +2495,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Setup warmup if configured
 	var warmuper *Warmuper
-	if warmup != nil {
-		warmuper = NewWarmuper(ctx, warmup.CtxFactory, warmup.MaxDepth, warmup.NumWorkers, logPrefix)
+	if warmup.Enabled {
+		warmuper = NewWarmuper(ctx, warmup.CtxFactory, WarmupMaxDepth, warmup.NumWorkers, logPrefix)
 		warmuper.Start()
 		defer warmuper.Close()
 		hph.warmupCache = warmuper.Cache()

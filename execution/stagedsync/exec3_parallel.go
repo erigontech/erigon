@@ -336,8 +336,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								lastExecutedLog = time.Now()
 							}
 
-							// Use warmup to pre-fetch branch data in parallel (maxDepth=128 covers full key paths)
-							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, pe.cfg.db, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress, 128)
+							// Use warmup to pre-fetch branch data in parallel
+							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, pe.cfg.db, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
 							captured := pe.doms.SetTrace(false, false)
 							if err != nil {

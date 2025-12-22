@@ -98,10 +98,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf[:], txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf[:], txNum, nil)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
@@ -112,7 +112,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
 			encodedState, err := cs.Encode()
 			require.NoError(t, err)
-			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil, 0)
+			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil)
 			require.NoError(t, err)
 		}
 	}
@@ -335,10 +335,10 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		var v [8]byte
@@ -603,13 +603,13 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	for key := range data {
 		removedKey = []byte(key)[:length.Addr]
 		txNum = maxTx + 1
-		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
+		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil)
 		require.NoError(t, err)
 		break
 	}
 
 	// 3. calculate commitment with all data +removed key
-	expectedHash, err := domains.ComputeCommitment(context.Background(), rwTx, nil, false, txNum/stepSize, txNum, "", nil, 0)
+	expectedHash, err := domains.ComputeCommitment(context.Background(), rwTx, nil, false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 	domains.Close()
 
@@ -634,10 +634,10 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 
 	// 5. delete same key. commitment should be the same
 	txNum = maxTx + 1
-	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
+	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil)
 	require.NoError(t, err)
 
-	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, nil, false, txNum/stepSize, txNum, "", nil, 0)
+	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, nil, false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 
 	//t.Logf("result hash: %x", resultHash)
@@ -687,14 +687,14 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), rwTx, nil, true, txNum/10, txNum, "", nil, 0)
+			_, err := domains.ComputeCommitment(context.Background(), rwTx, nil, true, txNum/10, txNum, "", nil)
 			require.NoError(t, err)
 		}
 
@@ -809,7 +809,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *execctx.SharedDomains, 
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			stateRootHash, err := domains.ComputeCommitment(context.Background(), tx, nil, true, txNum/commitEvery, txNum, "", nil, 0)
+			stateRootHash, err := domains.ComputeCommitment(context.Background(), tx, nil, true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			_ = stateRootHash
 			//t.Logf("commitment %x txn=%d", stateRootHash, txNum)
@@ -884,7 +884,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			err := domains.DomainDel(kv.AccountsDomain, tx, key, txNum, nil, 0)
+			err := domains.DomainDel(kv.AccountsDomain, tx, key, txNum, nil)
 			require.NoError(t, err)
 
 		case r > 66 && r <= 80:

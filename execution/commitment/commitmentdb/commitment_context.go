@@ -268,8 +268,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 
 // Evaluates commitment for gathered updates.
 // If db is non-nil, pre-warms MDBX page cache by reading Branch data in parallel before processing.
-// maxDepth determines how deep to collect prefixes for warmup (e.g., 4 means prefixes up to 4 nibbles).
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress, maxDepth int) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -299,7 +298,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	trieContext := sdc.trieContext(tx)
 	sdc.Reset()
 
-	var warmupConfig *commitment.WarmupConfig
+	var warmupConfig commitment.WarmupConfig
 	if db != nil {
 		// Create factory for warmup TrieContexts with their own transactions
 		ctxFactory := func() (commitment.PatriciaContext, func()) {
@@ -326,10 +325,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			return warmupCtx, cleanup
 		}
 
-		warmupConfig = &commitment.WarmupConfig{
+		warmupConfig = commitment.WarmupConfig{
+			Enabled:    true,
 			CtxFactory: ctxFactory,
-			MaxDepth:   maxDepth,
-			NumWorkers: 32,
+			NumWorkers: 16,
 		}
 	}
 

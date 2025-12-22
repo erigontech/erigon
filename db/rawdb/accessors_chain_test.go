@@ -820,7 +820,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
 
 		// Compute and store the commitment
-		_, err = sd.ComputeCommitment(ctx, tx, nil, true, blockNum, txNum, "flush-commitment", nil, 0)
+		_, err = sd.ComputeCommitment(ctx, tx, nil, true, blockNum, txNum, "flush-commitment", nil)
 		require.NoError(err)
 
 		require.NoError(sd.Flush(ctx, tx))

@@ -234,7 +234,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return fmt.Errorf("failed to start cpu profile: %s: %w", cpuProfilePath, err)
 	}
 	commitmentStart := time.Now()
-	root, err := sd.ComputeCommitment(ctx, tx, nil /*db*/, false /*saveState*/, block, maxTxNum, "commitment-backtester", nil /*progress*/, 0 /*maxDepth*/)
+	root, err := sd.ComputeCommitment(ctx, tx, nil /*db*/, false /*saveState*/, block, maxTxNum, "commitment-backtester", nil /*progress*/)
 	if err != nil {
 		return err
 	}

@@ -37,10 +37,12 @@ type TrieContextFactory func() (PatriciaContext, func())
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
+	Enabled    bool
 	CtxFactory TrieContextFactory
-	MaxDepth   int
 	NumWorkers int
 }
+
+const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
 
 // BranchEntry stores branch data along with its step value.
 type BranchEntry struct {
