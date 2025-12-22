@@ -285,24 +285,20 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 }
 
 // WarmKeys submits a batch of hashed keys for warming. Call Start() first.
-// Keys are batched into groups of 300 and processed sequentially on the same thread.
-// The first 300 keys are skipped (not warmed) since they'll be processed before warmup completes.
+// Keys are batched into groups of 100 and processed sequentially on the same thread.
 func (w *Warmuper) WarmKeys(keys [][]byte) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
-
-	// Skip the first 300 keys - they'll be processed before warmup has a chance to help
-	startIdx := warmupBatchSize
-	if startIdx >= len(keys) {
-		return // Not enough keys to warm
+	if len(keys) == 0 {
+		return
 	}
 
 	// Build batches with startDepth based on divergence from previous key
 	var batch []warmupKeyItem
 	var prevKey []byte
 
-	for i := startIdx; i < len(keys); i++ {
+	for i := 0; i < len(keys); i++ {
 		hk := keys[i]
 
 		// Calculate startDepth based on common prefix with previous key
