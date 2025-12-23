@@ -150,6 +150,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
+			commitment.ResetTimings()
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
 			}
@@ -161,7 +162,25 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return nil, rwTx, err
 			}
 
-			computeCommitmentDuration += time.Since(start)
+			commitmentDuration := time.Since(start)
+			computeCommitmentDuration += commitmentDuration
+
+			if se.inMemExec {
+				branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur, branchCount, hashCount, accountCount, storageCount, keyHashCount := commitment.GetTimings()
+				log.Debug(fmt.Sprintf("[%s] block timings", se.logPrefix),
+					"block", blockNum,
+					"commitment", commitmentDuration,
+					"branchRead", branchReadDur,
+					"branchCnt", branchCount,
+					"accountRead", accountReadDur,
+					"accountCnt", accountCount,
+					"storageRead", storageReadDur,
+					"storageCnt", storageCount,
+					"cellHash", hashingDur,
+					"cellHashCnt", hashCount,
+					"keyHash", keyHashDur,
+					"keyHashCnt", keyHashCount)
+			}
 			if shouldGenerateChangesets {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
 				if !se.inMemExec {

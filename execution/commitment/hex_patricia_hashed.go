@@ -1034,6 +1034,11 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 }
 
 func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byte) ([]byte, error) {
+	hashStart := time.Now()
+	defer func() {
+		HashingDuration.Add(int64(time.Since(hashStart)))
+		HashingCount.Add(1)
+	}()
 	var err error
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
@@ -1678,7 +1683,10 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		}
 	}
 	if branchData == nil {
+		branchStart := time.Now()
 		branchData, step, err = hph.ctx.Branch(key)
+		BranchReadDuration.Add(int64(time.Since(branchStart)))
+		BranchReadCount.Add(1)
 		if err != nil {
 			return err
 		}
@@ -2089,7 +2097,10 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						upd, _ = hph.warmupCache.GetAccount(cell.accountAddr[:cell.accountAddrLen])
 					}
 					if upd == nil {
+						accountStart := time.Now()
 						upd, err = hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+						AccountReadDuration.Add(int64(time.Since(accountStart)))
+						AccountReadCount.Add(1)
 						if err != nil {
 							return fmt.Errorf("failed to get account: %w", err)
 						}
@@ -2108,7 +2119,10 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						upd, _ = hph.warmupCache.GetStorage(cell.storageAddr[:cell.storageAddrLen])
 					}
 					if upd == nil {
+						storageStart := time.Now()
 						upd, err = hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+						StorageReadDuration.Add(int64(time.Since(storageStart)))
+						StorageReadCount.Add(1)
 						if err != nil {
 							return fmt.Errorf("failed to get storage: %w", err)
 						}
