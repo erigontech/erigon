@@ -394,7 +394,12 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.EqualValues(t, len(uniqUpds), sz)
 
 	ctx := context.Background()
-	warmuper := NewWarmuper(ctx, noopCtxFactory, 64, 2, "test")
+	cfg := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 2,
+	}
+	warmuper := NewWarmuper(ctx, cfg, 64, "test")
 	warmuper.Start()
 
 	i := 0
@@ -412,7 +417,12 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a new warmuper for the second test
-	warmuper2 := NewWarmuper(ctx, noopCtxFactory, 64, 2, "test")
+	cfg2 := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 2,
+	}
+	warmuper2 := NewWarmuper(ctx, cfg2, 64, "test")
 	warmuper2.Start()
 
 	i = 0

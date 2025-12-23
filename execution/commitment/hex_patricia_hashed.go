@@ -2496,7 +2496,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
-		warmuper = NewWarmuper(ctx, warmup.CtxFactory, WarmupMaxDepth, warmup.NumWorkers, logPrefix)
+		warmuper = NewWarmuper(ctx, warmup, WarmupMaxDepth, logPrefix)
 		warmuper.Start()
 		defer warmuper.Close()
 		hph.warmupCache = warmuper.Cache()

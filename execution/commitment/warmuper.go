@@ -138,14 +138,14 @@ type warmupWorkItem struct {
 }
 
 // NewWarmuper creates a new Warmuper instance.
-func NewWarmuper(ctx context.Context, ctxFactory TrieContextFactory, maxDepth, numWorkers int, logPrefix string) *Warmuper {
+func NewWarmuper(ctx context.Context, cfg WarmupConfig, maxDepth int, logPrefix string) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
 	return &Warmuper{
 		ctx:        ctx,
 		cancel:     cancel,
-		ctxFactory: ctxFactory,
+		ctxFactory: cfg.CtxFactory,
 		maxDepth:   maxDepth,
-		numWorkers: numWorkers,
+		numWorkers: cfg.NumWorkers,
 		logPrefix:  logPrefix,
 		cache:      NewWarmupCache(),
 	}
