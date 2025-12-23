@@ -33,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 )
@@ -95,15 +94,36 @@ func TestToECDSAErrors(t *testing.T) {
 }
 
 func BenchmarkKeccak256(b *testing.B) {
-	v := empty.CodeHash[:]
-	d := NewKeccakState()
-	out := make([]byte, 32)
+	b.Run("64bytes", func(b *testing.B) {
+		v := make([]byte, 64)
+		for i := range v {
+			v[i] = 1
+		}
 
-	for b.Loop() {
-		d.Reset()
-		d.Write(v)
-		d.Read(out) //nolint:errcheck
-	}
+		d := NewKeccakState()
+		out := make([]byte, 32)
+
+		for b.Loop() {
+			d.Reset()
+			d.Write(v)
+			d.Read(out) //nolint:errcheck
+		}
+	})
+	b.Run("16kb", func(b *testing.B) {
+		v := make([]byte, 16*1024)
+		for i := range v {
+			v[i] = 1
+		}
+
+		d := NewKeccakState()
+		out := make([]byte, 32)
+
+		for b.Loop() {
+			d.Reset()
+			d.Write(v)
+			d.Read(out) //nolint:errcheck
+		}
+	})
 }
 
 func TestUnmarshalPubkey(t *testing.T) {
