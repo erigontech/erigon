@@ -105,18 +105,9 @@ func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
 
 // Clear removes all entries from the cache.
 func (c *WarmupCache) Clear() {
-	c.accounts.Range(func(key, value any) bool {
-		c.accounts.Delete(key)
-		return true
-	})
-	c.storages.Range(func(key, value any) bool {
-		c.storages.Delete(key)
-		return true
-	})
-	c.branches.Range(func(key, value any) bool {
-		c.branches.Delete(key)
-		return true
-	})
+	c.accounts.Clear()
+	c.storages.Clear()
+	c.branches.Clear()
 }
 
 // WarmupStats contains statistics about the warmup phase.
