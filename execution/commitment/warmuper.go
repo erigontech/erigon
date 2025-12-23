@@ -299,7 +299,10 @@ func (w *Warmuper) Wait() (*WarmupCache, error) {
 		return w.cache, nil
 	}
 
-	close(w.work)
+	// Only close the channel once
+	if !w.closed.Swap(true) {
+		close(w.work)
+	}
 	err := w.g.Wait()
 
 	log.Debug(fmt.Sprintf("[%s][warmup] completed", w.logPrefix),
