@@ -337,6 +337,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			CtxFactory: ctxFactory,
 			NumWorkers: 16,
 			MaxDepth:   commitment.WarmupMaxDepth,
+			LogPrefix:  logPrefix,
 		}
 	}
 

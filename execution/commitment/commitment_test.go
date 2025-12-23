@@ -399,8 +399,9 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 		CtxFactory: noopCtxFactory,
 		NumWorkers: 2,
 		MaxDepth:   64,
+		LogPrefix:  "test",
 	}
-	warmuper := NewWarmuper(ctx, cfg, "test")
+	warmuper := NewWarmuper(ctx, cfg)
 	warmuper.Start()
 
 	i := 0
@@ -423,8 +424,9 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 		CtxFactory: noopCtxFactory,
 		NumWorkers: 2,
 		MaxDepth:   64,
+		LogPrefix:  "test",
 	}
-	warmuper2 := NewWarmuper(ctx, cfg2, "test")
+	warmuper2 := NewWarmuper(ctx, cfg2)
 	warmuper2.Start()
 
 	i = 0

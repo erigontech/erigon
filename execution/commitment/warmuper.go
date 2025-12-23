@@ -41,6 +41,7 @@ type WarmupConfig struct {
 	CtxFactory TrieContextFactory
 	NumWorkers int
 	MaxDepth   int
+	LogPrefix  string
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
@@ -102,6 +103,22 @@ func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
 	return nil, false
 }
 
+// Clear removes all entries from the cache.
+func (c *WarmupCache) Clear() {
+	c.accounts.Range(func(key, value any) bool {
+		c.accounts.Delete(key)
+		return true
+	})
+	c.storages.Range(func(key, value any) bool {
+		c.storages.Delete(key)
+		return true
+	})
+	c.branches.Range(func(key, value any) bool {
+		c.branches.Delete(key)
+		return true
+	})
+}
+
 // WarmupStats contains statistics about the warmup phase.
 type WarmupStats struct {
 	KeysProcessed uint64
@@ -139,7 +156,7 @@ type warmupWorkItem struct {
 }
 
 // NewWarmuper creates a new Warmuper instance.
-func NewWarmuper(ctx context.Context, cfg WarmupConfig, logPrefix string) *Warmuper {
+func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
 	return &Warmuper{
 		ctx:        ctx,
@@ -147,7 +164,7 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig, logPrefix string) *Warmu
 		ctxFactory: cfg.CtxFactory,
 		maxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
-		logPrefix:  logPrefix,
+		logPrefix:  cfg.LogPrefix,
 		cache:      NewWarmupCache(),
 	}
 }

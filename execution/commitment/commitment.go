@@ -1244,10 +1244,8 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			// Make copies since ETL may reuse buffers
-			hk := make([]byte, len(k))
-			copy(hk, k)
-			pk := make([]byte, len(v))
-			copy(pk, v)
+			hk := common.Copy(k)
+			pk := common.Copy(v)
 			pairs = append(pairs, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
 
 			// Submit to warmuper with start depth based on divergence from previous key
