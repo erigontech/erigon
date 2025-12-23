@@ -1046,18 +1046,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			hashedKeyOffset = depth - 64
 		}
 		singleton := depth <= 64
-		koffset := hph.accountKeyLen
-		if depth == 0 && cell.accountAddrLen == 0 {
-			// if account key is empty, then we need to hash storage key from the key beginning
-			koffset = 0
-		}
-		if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset); err != nil {
-			return nil, err
-		}
-		cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 
+		// Check cached stateHash BEFORE hashing key (optimization: skip key hash if using cache)
 		if cell.stateHashLen > 0 {
-			hph.keccak.Reset()
 			if hph.trace {
 				fmt.Printf("REUSED stateHash %x spk %x\n", cell.stateHash[:cell.stateHashLen], cell.storageAddr[:cell.storageAddrLen])
 			}
@@ -1069,6 +1060,15 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			storageRootHashIsSet = true
 			storageRootHash = *(*common.Hash)(cell.stateHash[:cell.stateHashLen])
 		} else {
+			koffset := hph.accountKeyLen
+			if depth == 0 && cell.accountAddrLen == 0 {
+				// if account key is empty, then we need to hash storage key from the key beginning
+				koffset = 0
+			}
+			if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset); err != nil {
+				return nil, err
+			}
+			cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 			if !cell.loaded.storage() {
 				return nil, fmt.Errorf("storage %x was not loaded as expected: cell %v", cell.storageAddr[:cell.storageAddrLen], cell.String())
 				// update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
