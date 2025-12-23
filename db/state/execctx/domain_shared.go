@@ -208,7 +208,7 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	if resetCommitment {
+	if resetCommitment && sd.sdCtx != nil {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()

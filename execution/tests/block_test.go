@@ -22,7 +22,6 @@ package executiontests
 import (
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -48,9 +47,6 @@ func TestLegacyBlockchain(t *testing.T) {
 	bt.skipLoad(`.*\.meta/.*`)
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
-		if !strings.Contains(name, "InvalidBlocks/bcInvalidHeaderTest/wrongNumber.json") {
-			return
-		}
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)

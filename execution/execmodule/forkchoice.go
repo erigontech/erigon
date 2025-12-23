@@ -548,17 +548,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if e.logger != nil {
 			e.logger.Info("head updated", logArgs...)
 		}
+
+		// TODO: (20/12/25) we really want to commit all changes with the shared domains but
+		// to do that we need to remove all of the rawdb methods and call them via
+		// the domains - which will happen after they transiaiotn to an ExecutionContext
+		// for the moment just commit what we have
+		rollbackOnReturn = false
+		if err = tx.Commit(); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
 	}
 
-	// TODO: (20/12/25) we really want to commit all changes with the shared domains but
-	// to do that we need to remove all of the rawdb methods and call them via
-	// the domains - which will happen after they transiaiotn to an ExecutionContext
-	// for the moment just commit what we have
-	if err = tx.Commit(); err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-	}
-
-	rollbackOnReturn = false
 	e.runPostForkchoiceInBackground(sd, finishProgressBefore, isSynced, initialCycle)
 
 	return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
