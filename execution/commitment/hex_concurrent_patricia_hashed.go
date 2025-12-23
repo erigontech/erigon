@@ -62,7 +62,7 @@ func (p *ConcurrentPatriciaHashed) RootTrie() *HexPatriciaHashed {
 }
 
 func (p *ConcurrentPatriciaHashed) foldNibble(nib int) error {
-	c, err := p.mounts[nib].foldMounted(nib)
+	c, err := p.mounts[nib].foldMounted(nib, nil)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 	// if p.root.rootPresent && p.root.root.hashedExtLen == 0 { // if root has no extension, we have to unfold
 	zero := []byte{0}
 	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
-		if err := p.root.unfold(zero, unfolding); err != nil {
+		if err := p.root.unfold(zero, unfolding, nil); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
 	}
@@ -216,7 +216,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
-				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
+				if err := phnib.followAndUpdate(hashedKey, plainKey, nil, nil); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
 				}
 				return nil
@@ -246,7 +246,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	}
 
 	for pph.root.activeRows > 0 {
-		if err := pph.root.fold(); err != nil {
+		if err := pph.root.fold(nil); err != nil {
 			return nil, err
 		}
 	}
