@@ -192,7 +192,7 @@ func ExecV3(ctx context.Context,
 		return err
 	}
 
-	if maxTxNum == 0 {
+	if blockNum>0 && maxTxNum == 0 {
 		// nothing to exec, make sure the stage is in sync with the sd
 		if execStage.BlockNumber < blockNum {
 			return execStage.Update(rwTx, blockNum)
