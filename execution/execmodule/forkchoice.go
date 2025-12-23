@@ -540,7 +540,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				e.avgMgasSec = mgasPerSec
 			}
 			e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
-			logArgs = append(logArgs, "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+			logArgs = append(logArgs, "execution", common.Round(blockTimings[engine_helpers.BlockTimingsValidationIndex], 0), "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
 			if !e.syncCfg.ParallelStateFlushing {
 				logArgs = append(logArgs, "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork])
 			}
@@ -593,13 +593,13 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(sd *execctx.Shar
 			if err := sd.Flush(e.bacgroundCtx, tx); err != nil {
 				return err
 			}
-			timings = append(timings, "flush", time.Since(flushStart))
+			timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
 			sd.ClearRam(true)
 			commitStart := time.Now()
 			if err := tx.Commit(); err != nil {
 				return err
 			}
-			timings = append(timings, "commit", time.Since(commitStart))
+			timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
 			if e.hook != nil {
 				if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
 					return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
