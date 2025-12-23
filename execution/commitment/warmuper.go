@@ -331,9 +331,11 @@ func (w *Warmuper) DrainPending() {
 		select {
 		case <-w.work:
 		default:
+			w.cache.Clear()
 			return
 		}
 	}
+
 }
 
 // Stats returns statistics about the warmup.
