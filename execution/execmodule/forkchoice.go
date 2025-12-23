@@ -484,7 +484,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return true
 	}
 
-	// Make sure that anz reorgs are in before execution
+	// Make sure that any reorgs are in before execution
 	// parallel warmup would fail otherwise!
 	if !commitAndReopenTx() {
 		return
