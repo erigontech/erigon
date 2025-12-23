@@ -331,6 +331,7 @@ func (w *Warmuper) DrainPending() {
 		select {
 		case <-w.work:
 		default:
+			w.Wait() // wait for the remaining work to end
 			w.cache.Clear()
 			return
 		}
