@@ -1660,26 +1660,68 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 	return tr, nil
 }
 
+// getBranchFromCacheOrDB retrieves branch data from warmup cache or database.
+func (hph *HexPatriciaHashed) getBranchFromCacheOrDB(key []byte, warmupCache *WarmupCache) ([]byte, kv.Step, error) {
+	var branchData []byte
+	var step kv.Step
+
+	if warmupCache != nil {
+		if entry, ok := warmupCache.GetBranch(key); ok {
+			return entry.Data, entry.Step, nil
+		}
+	}
+
+	var err error
+	branchData, step, err = hph.ctx.Branch(key)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return branchData, step, nil
+}
+
+// getAccountFromCacheOrDB retrieves account update from warmup cache or database.
+func (hph *HexPatriciaHashed) getAccountFromCacheOrDB(addr []byte, warmupCache *WarmupCache) (*Update, error) {
+	if warmupCache != nil {
+		if upd, ok := warmupCache.GetAccount(addr); ok {
+			return upd, nil
+		}
+	}
+
+	upd, err := hph.ctx.Account(addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account: %w", err)
+	}
+
+	return upd, nil
+}
+
+// getStorageFromCacheOrDB retrieves storage update from warmup cache or database.
+func (hph *HexPatriciaHashed) getStorageFromCacheOrDB(addr []byte, warmupCache *WarmupCache) (*Update, error) {
+	if warmupCache != nil {
+		if upd, ok := warmupCache.GetStorage(addr); ok {
+			return upd, nil
+		}
+	}
+
+	upd, err := hph.ctx.Storage(addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage: %w", err)
+	}
+
+	return upd, nil
+}
+
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool, warmupCache *WarmupCache) error {
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	// Try warmup cache first
-	var branchData []byte
-	var step kv.Step
-	var err error
-	if warmupCache != nil {
-		if entry, ok := warmupCache.GetBranch(key); ok {
-			branchData, step = entry.Data, entry.Step
-		}
+	branchData, step, err := hph.getBranchFromCacheOrDB(key, warmupCache)
+	if err != nil {
+		return err
 	}
-	if branchData == nil {
-		branchData, step, err = hph.ctx.Branch(key)
-		if err != nil {
-			return err
-		}
-	}
+
 	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 
@@ -2079,17 +2121,9 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
 					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-					// Try warmup cache first
-					var upd *Update
-					var err error
-					if warmupCache != nil {
-						upd, _ = warmupCache.GetAccount(cell.accountAddr[:cell.accountAddrLen])
-					}
-					if upd == nil {
-						upd, err = hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
-						if err != nil {
-							return fmt.Errorf("failed to get account: %w", err)
-						}
+					upd, err := hph.getAccountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen], warmupCache)
+					if err != nil {
+						return err
 					}
 					cell.setFromUpdate(upd)
 					// if update is empty, loaded flag was not updated so do it manually
@@ -2098,17 +2132,9 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 				}
 				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
 					hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
-					// Try warmup cache first
-					var upd *Update
-					var err error
-					if warmupCache != nil {
-						upd, _ = warmupCache.GetStorage(cell.storageAddr[:cell.storageAddrLen])
-					}
-					if upd == nil {
-						upd, err = hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
-						if err != nil {
-							return fmt.Errorf("failed to get storage: %w", err)
-						}
+					upd, err := hph.getStorageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen], warmupCache)
+					if err != nil {
+						return err
 					}
 					cell.setFromUpdate(upd)
 					// if update is empty, loaded flag was not updated so do it manually
