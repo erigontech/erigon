@@ -42,10 +42,9 @@ var (
 )
 
 const (
-	ModifiedFlag    uint16 = 1 // Set when the item is different seek what is last committed to the database
-	AbsentFlag      uint16 = 2 // Set when the item is absent in the state
-	DeletedFlag     uint16 = 4 // Set when the item is marked for deletion, even though it might have the value in it
-	UnprocessedFlag uint16 = 8 // Set when there is a modification in the item that invalidates merkle root calculated previously
+	ModifiedFlag uint16 = 1 // Set when the item is different seek what is last committed to the database
+	AbsentFlag   uint16 = 2 // Set when the item is absent in the state
+	DeletedFlag  uint16 = 4 // Set when the item is marked for deletion, even though it might have the value in it
 )
 
 // Sizes of B-tree items for the purposes of keeping track of the size of reads and writes
@@ -362,14 +361,13 @@ func (rh *ReadHeap) Pop() interface{} {
 
 // StateCache is the structure containing B-trees and priority queues for the state cache
 type StateCache struct {
-	readWrites  [5]*btree.BTree   // Mixed reads and writes
-	writes      [5]*btree.BTree   // Only writes for the effective iteration
-	readQueue   [5]ReadHeap       // Priority queue of read elements eligible for eviction (sorted by sequence)
-	limit       datasize.ByteSize // Total size of the readQueue (if new item causes the size to go over the limit, some existing items are evicted)
-	readSize    int
-	writeSize   int
-	sequence    int                // Current sequence assigned to any item that has been "touched" (created, deleted, read). Incremented after every touch
-	unprocQueue [5]UnprocessedHeap // Priority queue of items appeared since last root calculation processing (sorted by the keys - addrHash, incarnation, locHash)
+	readWrites [5]*btree.BTree   // Mixed reads and writes
+	writes     [5]*btree.BTree   // Only writes for the effective iteration
+	readQueue  [5]ReadHeap       // Priority queue of read elements eligible for eviction (sorted by sequence)
+	limit      datasize.ByteSize // Total size of the readQueue (if new item causes the size to go over the limit, some existing items are evicted)
+	readSize   int
+	writeSize  int
+	sequence   int // Current sequence assigned to any item that has been "touched" (created, deleted, read). Incremented after every touch
 }
 
 func id(a interface{}) uint8 {
@@ -402,9 +400,6 @@ func NewStateCache(degree int, limit datasize.ByteSize) *StateCache {
 	for i := 0; i < len(sc.readQueue); i++ {
 		heap.Init(&sc.readQueue[i])
 	}
-	for i := 0; i < len(sc.unprocQueue); i++ {
-		heap.Init(&sc.unprocQueue[i])
-	}
 	return &sc
 }
 
@@ -416,7 +411,6 @@ func (sc *StateCache) Clone() *StateCache {
 		clone.writes[i] = sc.writes[i].Clone()
 		clone.limit = sc.limit
 		heap.Init(&clone.readQueue[i])
-		heap.Init(&clone.unprocQueue[i])
 	}
 	return &clone
 }
