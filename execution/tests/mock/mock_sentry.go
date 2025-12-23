@@ -737,7 +737,6 @@ func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
-	ctx := context.Background()
 	insertedBlocks := map[uint64]struct{}{}
 
 	for i := 0; i < chain.Length(); i++ {
@@ -747,20 +746,20 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	if err := wr.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
+	if err := wr.InsertBlocksAndWait(ms.Ctx, chain.Blocks); err != nil {
 		return err
 	}
 
 	tipHash := chain.TopBlock.Hash()
 
-	streamCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	streamCtx, cancel := context.WithTimeout(ms.Ctx, 30*time.Second)
 	defer cancel()
 	stream, err := ms.stateChangesClient.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
 
-	status, verr, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	status, verr, _, err := wr.UpdateForkChoice(ms.Ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
 	}
@@ -780,6 +779,9 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	for len(insertedBlocks) > 0 {
 		req, err := stream.Recv()
 		if err != nil {
+			if ms.Ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("block insert recv failed: %w, %d remaining", err, len(insertedBlocks))
 		}
 
