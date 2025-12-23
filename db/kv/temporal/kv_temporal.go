@@ -181,7 +181,7 @@ func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) err
 }
 
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error) {
-	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
+	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
