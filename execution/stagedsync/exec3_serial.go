@@ -166,8 +166,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			computeCommitmentDuration += commitmentDuration
 
 			if se.inMemExec {
-				branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur, leafHashDur, extHashDur, rlpDur, keccakDur,
-					branchCount, hashCount, accountCount, storageCount, keyHashCount, leafHashCount, extHashCount, rlpCount, keccakCount := commitment.GetTimings()
+				branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur, leafHashDur, extHashDur,
+					branchCount, hashCount, accountCount, storageCount, keyHashCount, leafHashCount, extHashCount := commitment.GetTimings()
 				log.Debug(fmt.Sprintf("[%s] block timings", se.logPrefix),
 					"block", blockNum,
 					"commitment", commitmentDuration,
@@ -184,11 +184,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 					"leafHash", leafHashDur,
 					"leafHashCnt", leafHashCount,
 					"extHash", extHashDur,
-					"extHashCnt", extHashCount,
-					"rlp", rlpDur,
-					"rlpCnt", rlpCount,
-					"keccak", keccakDur,
-					"keccakCnt", keccakCount)
+					"extHashCnt", extHashCount)
 			}
 			if shouldGenerateChangesets {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)

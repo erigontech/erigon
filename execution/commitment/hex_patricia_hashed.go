@@ -665,7 +665,6 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 }
 
 func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
-	rlpStart := time.Now()
 	// Compute the total length of binary representation
 	var kp, kl int
 	var keyPrefix [1]byte
@@ -711,20 +710,15 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	if err := val.ToDoubleRLP(writer, prefixBuf[:]); err != nil {
 		return nil, err
 	}
-	RlpEncodeDuration.Add(int64(time.Since(rlpStart)))
-	RlpEncodeCount.Add(1)
 
 	if canEmbed {
 		buf = hph.auxBuffer.Bytes()
 	} else {
-		keccakStart := time.Now()
 		var hashBuf [33]byte
 		hashBuf[0] = 0x80 + length.Hash
 		if _, err := hph.keccak.Read(hashBuf[1:]); err != nil {
 			return nil, err
 		}
-		KeccakDuration.Add(int64(time.Since(keccakStart)))
-		KeccakCount.Add(1)
 		buf = append(buf, hashBuf[:]...)
 	}
 	return buf, nil

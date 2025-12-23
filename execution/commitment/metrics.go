@@ -27,8 +27,6 @@ var (
 	KeyHashingDuration  atomic.Int64 // Total time spent in key hashing (keccak) (nanoseconds)
 	LeafHashDuration    atomic.Int64 // Total time spent in leaf hash operations (RLP+keccak) (nanoseconds)
 	ExtHashDuration     atomic.Int64 // Total time spent in extension hash operations (nanoseconds)
-	RlpEncodeDuration   atomic.Int64 // Total time spent in RLP encoding (nanoseconds)
-	KeccakDuration      atomic.Int64 // Total time spent in keccak finalization (nanoseconds)
 	BranchReadCount     atomic.Int64 // Number of Branch() calls
 	HashingCount        atomic.Int64 // Number of hash operations
 	AccountReadCount    atomic.Int64 // Number of Account() calls
@@ -36,8 +34,6 @@ var (
 	KeyHashingCount     atomic.Int64 // Number of key hash operations
 	LeafHashCount       atomic.Int64 // Number of leaf hash operations
 	ExtHashCount        atomic.Int64 // Number of extension hash operations
-	RlpEncodeCount      atomic.Int64 // Number of RLP encode operations
-	KeccakCount         atomic.Int64 // Number of keccak finalization operations
 )
 
 // ResetTimings resets all global timing counters
@@ -49,8 +45,6 @@ func ResetTimings() {
 	KeyHashingDuration.Store(0)
 	LeafHashDuration.Store(0)
 	ExtHashDuration.Store(0)
-	RlpEncodeDuration.Store(0)
-	KeccakDuration.Store(0)
 	BranchReadCount.Store(0)
 	HashingCount.Store(0)
 	AccountReadCount.Store(0)
@@ -58,20 +52,16 @@ func ResetTimings() {
 	KeyHashingCount.Store(0)
 	LeafHashCount.Store(0)
 	ExtHashCount.Store(0)
-	RlpEncodeCount.Store(0)
-	KeccakCount.Store(0)
 }
 
 // GetTimings returns the current timing values
-func GetTimings() (branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur, leafHashDur, extHashDur, rlpDur, keccakDur time.Duration, branchCount, hashCount, accountCount, storageCount, keyHashCount, leafHashCount, extHashCount, rlpCount, keccakCount int64) {
+func GetTimings() (branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur, leafHashDur, extHashDur time.Duration, branchCount, hashCount, accountCount, storageCount, keyHashCount, leafHashCount, extHashCount int64) {
 	return time.Duration(BranchReadDuration.Load()), time.Duration(HashingDuration.Load()),
 		time.Duration(AccountReadDuration.Load()), time.Duration(StorageReadDuration.Load()),
 		time.Duration(KeyHashingDuration.Load()), time.Duration(LeafHashDuration.Load()),
-		time.Duration(ExtHashDuration.Load()), time.Duration(RlpEncodeDuration.Load()),
-		time.Duration(KeccakDuration.Load()),
+		time.Duration(ExtHashDuration.Load()),
 		BranchReadCount.Load(), HashingCount.Load(), AccountReadCount.Load(), StorageReadCount.Load(),
-		KeyHashingCount.Load(), LeafHashCount.Load(), ExtHashCount.Load(),
-		RlpEncodeCount.Load(), KeccakCount.Load()
+		KeyHashingCount.Load(), LeafHashCount.Load(), ExtHashCount.Load()
 }
 
 type CsvMetrics interface {
