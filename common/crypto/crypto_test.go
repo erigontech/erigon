@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 )
@@ -93,10 +94,15 @@ func TestToECDSAErrors(t *testing.T) {
 	}
 }
 
-func BenchmarkSha3(b *testing.B) {
-	a := []byte("hello world")
+func BenchmarkKeccak256(b *testing.B) {
+	v := empty.CodeHash[:]
+	d := NewKeccakState()
+	out := make([]byte, 32)
+
 	for b.Loop() {
-		Keccak256(a)
+		d.Reset()
+		d.Write(v)
+		d.Read(out) //nolint:errcheck
 	}
 }
 
