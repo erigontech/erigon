@@ -475,7 +475,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendError("updateForkChoice: tx commit after hasMore", err)
 			return false
 		}
-		tx, err = e.db.BeginTemporalRw(ctx)
+		tx, err = e.db.BeginTemporalRw(ctx) //nolint:gocritic
 		// note we already have defer tx.Rollback() on stack from earlier
 		if err != nil {
 			sendError("updateForkChoice: begin tx after has more", err)
