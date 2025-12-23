@@ -40,6 +40,7 @@ type WarmupConfig struct {
 	Enabled    bool
 	CtxFactory TrieContextFactory
 	NumWorkers int
+	MaxDepth   int
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
@@ -138,13 +139,13 @@ type warmupWorkItem struct {
 }
 
 // NewWarmuper creates a new Warmuper instance.
-func NewWarmuper(ctx context.Context, cfg WarmupConfig, maxDepth int, logPrefix string) *Warmuper {
+func NewWarmuper(ctx context.Context, cfg WarmupConfig, logPrefix string) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
 	return &Warmuper{
 		ctx:        ctx,
 		cancel:     cancel,
 		ctxFactory: cfg.CtxFactory,
-		maxDepth:   maxDepth,
+		maxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  logPrefix,
 		cache:      NewWarmupCache(),
