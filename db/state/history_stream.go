@@ -727,6 +727,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		ht.histReader = nil
 	}
 	for ht.fileIdx < len(ht.hc.iit.files) {
+		historyItem := ht.hc.files[ht.fileIdx]
 		item := ht.hc.iit.files[ht.fileIdx]
 		if ht.fromTxNum > item.endTxNum {
 			moveToNextFileFn()
@@ -772,13 +773,19 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		ht.histKey = ht.hc.encodeTs(txNum, ht.key)
 		ht.txNum = txNum
 
+		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
+
+		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+			compressedPageValuesCount = ht.hc.h.HistoryValuesOnCompressedPage
+		}
+
 		if ht.histReader == nil {
 			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)
 			getter := ht.hc.statelessGetter(ht.fileIdx)
 			getter.Reset(0)
 			ht.histReader = seg.NewPagedReader(
 				getter,
-				ht.hc.h.HistoryValuesOnCompressedPage,
+				compressedPageValuesCount,
 				true,
 			)
 			offset, ok := idxReader.Lookup(ht.histKey)
@@ -790,7 +797,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			ht.histReader.Reset(offset)
 		}
 
-		if ht.hc.h.HistoryValuesOnCompressedPage <= 1 {
+		if compressedPageValuesCount <= 1 {
 			for ht.histReader.HasNext() {
 				v, _ := ht.histReader.Next(nil)
 				ht.v = bytes.Clone(v)
