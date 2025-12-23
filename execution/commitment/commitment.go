@@ -1225,13 +1225,6 @@ func (t *Updates) Close() {
 	}
 }
 
-// keyPair holds a hashed key and plain key pair for batch processing
-type keyPair struct {
-	hashedKey []byte
-	plainKey  []byte
-	update    *Update
-}
-
 // warmupBatchSize is the number of keys to warm and process at a time to control memory usage.
 const warmupBatchSize = 10_000
 
@@ -1245,7 +1238,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		clear(t.keys)
 
 		// Collect and process keys in batches to control memory
-		pairs := make([]keyPair, 0, warmupBatchSize)
+		pairs := make([]*KeyUpdate, 0, warmupBatchSize)
 		var prevKey []byte
 		var processErr error
 
@@ -1255,7 +1248,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			copy(hk, k)
 			pk := make([]byte, len(v))
 			copy(pk, v)
-			pairs = append(pairs, keyPair{hashedKey: hk, plainKey: pk})
+			pairs = append(pairs, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
@@ -1281,7 +1274,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return processErr
 					default:
 					}
-					if err := fn(p.hashedKey, p.plainKey, nil); err != nil {
+					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 						processErr = err
 						return err
 					}
@@ -1308,7 +1301,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return ctx.Err()
 			default:
 			}
-			if err := fn(p.hashedKey, p.plainKey, nil); err != nil {
+			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 				return err
 			}
 		}
@@ -1317,7 +1310,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 	case ModeUpdate:
 		// Collect and process keys in batches to control memory
-		pairs := make([]keyPair, 0, warmupBatchSize)
+		pairs := make([]*KeyUpdate, 0, warmupBatchSize)
 		var prevKey []byte
 		var processErr error
 
@@ -1331,7 +1324,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			// Make copies
 			hk := make([]byte, len(item.hashedKey))
 			copy(hk, item.hashedKey)
-			pairs = append(pairs, keyPair{hashedKey: hk, plainKey: toBytesZeroCopy(item.plainKey), update: item.update})
+			pairs = append(pairs, &KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
@@ -1360,7 +1353,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return false
 					default:
 					}
-					if err := fn(p.hashedKey, p.plainKey, p.update); err != nil {
+					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
 						processErr = err
 						return false
 					}
@@ -1385,7 +1378,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return ctx.Err()
 			default:
 			}
-			if err := fn(p.hashedKey, p.plainKey, p.update); err != nil {
+			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
 				return err
 			}
 		}
