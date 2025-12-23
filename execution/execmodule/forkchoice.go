@@ -353,6 +353,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
+
 		if err := sd.Flush(ctx, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -467,7 +468,26 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		err = fmt.Errorf("%s: %w", msg, err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+	}
 
+	commitAndReopenTx := func() bool {
+		if err = tx.Commit(); err != nil {
+			sendError("updateForkChoice: tx commit after hasMore", err)
+			return false
+		}
+		tx, err = e.db.BeginTemporalRw(ctx)
+		// note we already have defer tx.Rollback() on stack from earlier
+		if err != nil {
+			sendError("updateForkChoice: begin tx after has more", err)
+			return false
+		}
+		return true
+	}
+
+	// Make sure that anz reorgs are in before execution
+	// parallel warmup would fail otherwise!
+	if !commitAndReopenTx() {
+		return
 	}
 
 	for hasMore := true; hasMore; {
@@ -497,14 +517,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 			sd.ClearRam(true)
-			if err = tx.Commit(); err != nil {
-				sendError("updateForkChoice: tx commit after hasMore", err)
-				return
-			}
-			tx, err = e.db.BeginTemporalRw(ctx)
-			// note we already have defer tx.Rollback() on stack from earlier
-			if err != nil {
-				sendError("updateForkChoice: begin tx after has more", err)
+			if !commitAndReopenTx() {
 				return
 			}
 		}
