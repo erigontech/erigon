@@ -131,7 +131,7 @@ Loop:
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, rwTx, nil, true, blockNum, txNum, "", nil)
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -229,7 +229,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, rwTx, nil, true, blockNum, txNum, "", nil)
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -406,7 +406,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
 	}
 	{ // delete marker is in DB
-		_, err = domains.ComputeCommitment(ctx, rwTx, nil, true, txNum/2, txNum, "", nil)
+		_, err = domains.ComputeCommitment(ctx, rwTx, true, txNum/2, txNum, "", nil)
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
@@ -456,7 +456,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
 	}
 	{ // flush delete/updates to DB
-		_, err = domains.ComputeCommitment(ctx, rwTx, nil, true, txNum/2, txNum, "", nil)
+		_, err = domains.ComputeCommitment(ctx, rwTx, true, txNum/2, txNum, "", nil)
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)

@@ -159,11 +159,18 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
 	trace         bool
 	stateReader   StateReader
+	warmupDB      kv.TemporalRoDB // if set, enables parallel warmup of MDBX page cache during commitment
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
 func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
+}
+
+// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
+// When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
+func (sdc *SharedDomainsCommitmentContext) SetWarmupDB(db kv.TemporalRoDB) {
+	sdc.warmupDB = db
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
@@ -267,8 +274,8 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 }
 
 // Evaluates commitment for gathered updates.
-// If db is non-nil, pre-warms MDBX page cache by reading Branch data in parallel before processing.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, db kv.TemporalRoDB, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+// If warmupDB was set via SetWarmupDB, pre-warms MDBX page cache by reading Branch data in parallel before processing.
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -299,10 +306,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.Reset()
 
 	var warmupConfig commitment.WarmupConfig
-	if db != nil {
+	if sdc.warmupDB != nil {
 		// Create factory for warmup TrieContexts with their own transactions
 		ctxFactory := func() (commitment.PatriciaContext, func()) {
-			roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+			roTx, err := sdc.warmupDB.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return &errorTrieContext{err: err}, nil
 			}
