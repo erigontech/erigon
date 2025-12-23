@@ -453,8 +453,27 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				var prev *types.Receipt
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
-				} else {
-					// TODO get the previous reciept from the DB
+				} else if txTask.TxIndex > 0 {
+					prevTask := *txTask
+					prevTask.HistoryExecution = true
+					prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
+					result := se.worker.RunTxTaskNoLock(&prevTask)
+					if result.Err != nil {
+						return fmt.Errorf("error while finding last receipt: %w", result.Err)
+					}
+					var cumGasUsed uint64
+					var logIndexAfterTx uint32
+					if txTask.TxIndex > 1 {
+						cumGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-1)
+						if err != nil {
+							return err
+						}
+					}
+					prev, err = result.CreateReceipt(txTask.TxIndex-1,
+						cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+					if err != nil {
+						return err
+					}
 				}
 
 				receipt, err := result.CreateNextReceipt(prev)
