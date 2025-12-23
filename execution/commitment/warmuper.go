@@ -190,6 +190,7 @@ func (w *Warmuper) Start() {
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 				w.keysProcessed.Add(1)
 			}
+			fmt.Println("END THREAD")
 			return nil
 		})
 	}
@@ -335,6 +336,9 @@ func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return
 	}
+
+	fmt.Println("START DRAIN")
+
 	// drain the queue
 	for {
 		select {
