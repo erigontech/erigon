@@ -377,7 +377,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							if pe.inMemExec {
 								commitmentDuration := time.Since(commitStart)
 								totalDuration := applyResult.ExecDuration + commitmentDuration
-								branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur, branchCount, hashCount, accountCount, storageCount, keyHashCount := commitment.GetTimings()
+								branchReadDur, hashingDur, accountReadDur, storageReadDur, keyHashDur, leafHashDur, extHashDur,
+									branchCount, hashCount, accountCount, storageCount, keyHashCount, leafHashCount, extHashCount := commitment.GetTimings()
 								log.Debug(fmt.Sprintf("[%s] block timings", pe.logPrefix),
 									"block", applyResult.BlockNum,
 									"total", totalDuration,
@@ -392,7 +393,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									"cellHash", hashingDur,
 									"cellHashCnt", hashCount,
 									"keyHash", keyHashDur,
-									"keyHashCnt", keyHashCount)
+									"keyHashCnt", keyHashCount,
+									"leafHash", leafHashDur,
+									"leafHashCnt", leafHashCount,
+									"extHash", extHashDur,
+									"extHashCnt", extHashCount)
 							}
 						}
 

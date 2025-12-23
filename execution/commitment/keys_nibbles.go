@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	ecrypto "github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
@@ -13,6 +14,7 @@ import (
 // KeyToHexNibbleHash hashes plain key with respect to plain key size (part < 20 bytes for account, part >= 20 bytes for storage)
 // and returns the hashed key in nibblized form suitable for hex trie (each byte represented by 2 nibbles).
 func KeyToHexNibbleHash(key []byte) []byte {
+	hashStart := time.Now()
 	// `nibblized`, `hashed` - are the same array
 	// but `hashed` is 2nd half of `nibblized`
 	// will use 1st half of `nibblized` in the end
@@ -22,11 +24,14 @@ func KeyToHexNibbleHash(key []byte) []byte {
 		hashed = nibblized[64:]
 		copy(hashed[:32], ecrypto.Keccak256(key[:length.Addr]))
 		copy(hashed[32:], ecrypto.Keccak256(key[length.Addr:]))
+		KeyHashingCount.Add(2)
 	} else {
 		nibblized = make([]byte, 64)
 		hashed = nibblized[32:]
 		copy(hashed, ecrypto.Keccak256(key))
+		KeyHashingCount.Add(1)
 	}
+	KeyHashingDuration.Add(int64(time.Since(hashStart)))
 
 	for i, b := range hashed {
 		nibblized[i*2] = (b >> 4) & 0xf
@@ -36,9 +41,12 @@ func KeyToHexNibbleHash(key []byte) []byte {
 }
 
 func KeyToNibblizedHash(key []byte) []byte {
+	hashStart := time.Now()
 	nibblized := make([]byte, 64) // nibblized hash
 	hashed := nibblized[32:]
 	copy(hashed, ecrypto.Keccak256(key))
+	KeyHashingDuration.Add(int64(time.Since(hashStart)))
+	KeyHashingCount.Add(1)
 	for i, b := range hashed {
 		nibblized[i*2] = (b >> 4) & 0xf
 		nibblized[i*2+1] = b & 0xf
@@ -157,6 +165,7 @@ func updatedNibs(num uint16) string {
 // hashes plainKey using keccakState and writes the hashed key nibbles to dest with respect to hashedKeyOffset.
 // Note that this function does not respect plainKey length so hashing it at once without splitting to account/storage part.
 func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) error {
+	hashStart := time.Now()
 	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1] // bounds checks elimination
 	keccak.Reset()
 	if _, err := keccak.Write(plainKey); err != nil {
@@ -165,6 +174,8 @@ func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset i
 	if _, err := keccak.Read(hashBuf); err != nil {
 		return err
 	}
+	KeyHashingDuration.Add(int64(time.Since(hashStart)))
+	KeyHashingCount.Add(1)
 	hashBuf = hashBuf[hashedKeyOffset/2:]
 	var k int
 	if hashedKeyOffset%2 == 1 { // write zero byte as compacted since hashedKeyOffset is odd

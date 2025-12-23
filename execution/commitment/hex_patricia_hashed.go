@@ -724,6 +724,11 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 }
 
 func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSerializableBytes, singleton bool) ([]byte, error) {
+	leafStart := time.Now()
+	defer func() {
+		LeafHashDuration.Add(int64(time.Since(leafStart)))
+		LeafHashCount.Add(1)
+	}()
 	// Write key
 	var compactLen int
 	var ni int
@@ -739,6 +744,11 @@ func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSer
 }
 
 func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSerializable) ([]byte, error) {
+	leafStart := time.Now()
+	defer func() {
+		LeafHashDuration.Add(int64(time.Since(leafStart)))
+		LeafHashCount.Add(1)
+	}()
 	// Write key
 	var compactLen int
 	var ni int
@@ -762,6 +772,11 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 }
 
 func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Hash, error) {
+	extStart := time.Now()
+	defer func() {
+		ExtHashDuration.Add(int64(time.Since(extStart)))
+		ExtHashCount.Add(1)
+	}()
 	var hashBuf common.Hash
 
 	// Compute the total length of binary representation
