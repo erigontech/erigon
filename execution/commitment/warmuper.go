@@ -300,9 +300,7 @@ func (w *Warmuper) Wait() (*WarmupCache, error) {
 	}
 
 	// Only close the channel once
-	if !w.closed.Swap(true) {
-		close(w.work)
-	}
+	close(w.work)
 	err := w.g.Wait()
 
 	log.Debug(fmt.Sprintf("[%s][warmup] completed", w.logPrefix),
@@ -325,7 +323,6 @@ func (w *Warmuper) DrainPending() {
 		select {
 		case <-w.work:
 		default:
-			w.Wait() // wait for the remaining work to end
 			w.cache.Clear()
 			return
 		}
