@@ -478,14 +478,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
-	// Update forks...
-	writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
-	status := executionproto.ExecutionStatus_Success
+
+	var status executionproto.ExecutionStatus 
 
 	if headHash != blockHash {
+		status = executionproto.ExecutionStatus_BadBlock
 		blockHashBlockNum, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 
-		status = executionproto.ExecutionStatus_BadBlock
 		validationError = "headHash and blockHash mismatch"
 		if headNumber != nil && e.logger != nil {
 			headNum := "unknown"
@@ -499,6 +498,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
 		}
 	} else {
+		status = executionproto.ExecutionStatus_Success
+		// Update forks...
+		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)

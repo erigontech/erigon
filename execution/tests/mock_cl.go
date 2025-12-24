@@ -75,18 +75,18 @@ func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *ty
 func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuildingOption) (clPayload *MockClPayload, err error) {
 	clPayload, err = cl.BuildNewPayload(ctx, opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build new payload failed: %w", err)
 	}
 	status, err := cl.InsertNewPayload(ctx, clPayload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("insert new payload failed: %w", err)
 	}
 	if status.Status != enginetypes.ValidStatus {
 		return nil, fmt.Errorf("unexpected status when inserting payload for canonical block: %s", status.Status)
 	}
 	err = cl.UpdateForkChoice(ctx, clPayload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("update fork choice failed: %w", err)
 	}
 	return clPayload, nil
 }
