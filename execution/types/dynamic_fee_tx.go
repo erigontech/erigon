@@ -28,9 +28,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon-lib/common/length"
 )
 
 type DynamicFeeTransaction struct {
@@ -186,8 +187,8 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 // transactions, it returns the type and payload.
 func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -201,8 +202,8 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx *DynamicFeeTransaction) MarshalBinaryForHashing(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(true)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -283,8 +284,8 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -385,7 +386,8 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		checkNonce: true,
 		checkGas:   true,
 
-		Tx: tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:           tx,
 	}
 	if !rules.IsLondon {
 		return nil, errors.New("eip-1559 transactions require London")
@@ -411,7 +413,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
+	hash := PrefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -428,7 +430,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 }
 
 func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		DynamicFeeTxType,
 		[]interface{}{
 			chainID,
@@ -454,7 +456,7 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *DynamicFeeTransaction) cachedSender() (sender common.Address, ok bool) {
+func (tx *DynamicFeeTransaction) CachedSender() (sender common.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false

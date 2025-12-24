@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -62,7 +63,8 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		checkNonce: true,
 		checkGas:   true,
 
-		Tx: stx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:           stx,
 	}
 	if !rules.IsCancun {
 		return nil, errors.New("BlobTx transactions require Cancun")
@@ -84,7 +86,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 	return &msg, err
 }
 
-func (stx *BlobTx) cachedSender() (sender common.Address, ok bool) {
+func (stx *BlobTx) CachedSender() (sender common.Address, ok bool) {
 	s := stx.from.Load()
 	if s == nil {
 		return sender, false
@@ -110,7 +112,7 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(BlobTxType, []interface{}{
+	hash := PrefixedRlpHash(BlobTxType, []interface{}{
 		stx.ChainID,
 		stx.Nonce,
 		stx.TipCap,
@@ -129,7 +131,7 @@ func (stx *BlobTx) Hash() common.Hash {
 }
 
 func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		BlobTxType,
 		[]interface{}{
 			chainID,
@@ -288,8 +290,8 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -312,8 +314,8 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	hashingOnly := false
 
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize(hashingOnly)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -330,8 +332,8 @@ func (stx *BlobTx) MarshalBinaryForHashing(w io.Writer) error {
 	hashingOnly := true
 
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize(hashingOnly)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
