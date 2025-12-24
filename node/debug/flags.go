@@ -442,10 +442,10 @@ func SetCobraFlagsFromConfigFile(cmd *cobra.Command) error {
 	return nil
 }
 
-func readConfigAsMap(filePath string) (map[string]interface{}, error) {
+func readConfigAsMap(filePath string) (map[string]any, error) {
 	fileExtension := filepath.Ext(filePath)
 
-	fileConfig := make(map[string]interface{})
+	fileConfig := make(map[string]any)
 
 	if fileExtension == ".yaml" || fileExtension == ".yml" {
 		yamlFile, err := os.ReadFile(filePath)

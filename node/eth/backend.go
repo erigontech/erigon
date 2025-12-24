@@ -544,7 +544,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logEvery := time.NewTicker(90 * time.Second)
 			defer logEvery.Stop()
 
-			var logItems []interface{}
+			var logItems []any
 
 			for {
 				select {
@@ -592,7 +592,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
-	var rulesConfig interface{}
+	var rulesConfig any
 
 	if chainConfig.Clique != nil {
 		rulesConfig = &config.Clique

@@ -419,7 +419,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var gzPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		w := gzip.NewWriter(io.Discard)
 		return w
 	},
