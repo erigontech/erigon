@@ -253,7 +253,8 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 					log.Debug(fmt.Sprintf("[%s][warmup] failed to get account", w.logPrefix),
 						"addr", common.Bytes2Hex(addr), "error", err)
 				}
-				w.cache.SetAccount(addr, update)
+				_ = update
+				//w.cache.SetAccount(addr, update)
 			}
 		}
 		for _, addr := range cellStorages {
@@ -263,7 +264,8 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 					log.Debug(fmt.Sprintf("[%s][warmup] failed to get storage", w.logPrefix),
 						"addr", common.Bytes2Hex(addr), "error", err)
 				}
-				w.cache.SetStorage(addr, update)
+				//w.cache.SetStorage(addr, update)
+				_ = update
 			}
 		}
 
