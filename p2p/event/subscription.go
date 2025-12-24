@@ -159,12 +159,7 @@ func (s *resubscribeSub) loop() {
 	defer close(s.err)
 	var done bool
 	for !done {
-		sub := s.subscribe()
-		if sub == nil {
-			break
-		}
-		done = s.waitForError(sub)
-		sub.Unsubscribe()
+		done = s.subscribeAndWaitForError()
 	}
 }
 
@@ -200,7 +195,11 @@ func (s *resubscribeSub) subscribe() Subscription {
 	}
 }
 
-func (s *resubscribeSub) waitForError(sub Subscription) bool {
+func (s *resubscribeSub) subscribeAndWaitForError() bool {
+	sub := s.subscribe()
+	if sub == nil {
+		return true
+	}
 	defer sub.Unsubscribe()
 	select {
 	case err := <-sub.Err():
