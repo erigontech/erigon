@@ -201,6 +201,10 @@ func (sd *ExecutionContext) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 }
 
 func (sd *ExecutionContext) Merge(other *ExecutionContext) error {
+	if sd.txNum > other.txNum {
+		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
+	}
+
 	if err := sd.mem.Merge(other.mem); err != nil {
 		return err
 	}
@@ -208,6 +212,8 @@ func (sd *ExecutionContext) Merge(other *ExecutionContext) error {
 	sd.storageDomain.Merge(&other.storageDomain.domain)
 	sd.codeDomain.Merge(&other.codeDomain.domain)
 	sd.commitmentDomain.Merge(&other.commitmentDomain.domain)
+	sd.txNum = other.txNum
+	sd.blockNum.Store(other.blockNum.Load())
 	return nil
 }
 
@@ -306,7 +312,7 @@ func (sd *ExecutionContext) GetCommitmentCtx() *commitment.CommitmentContext {
 func (sd *ExecutionContext) Logger() log.Logger { return sd.logger }
 
 func (sd *ExecutionContext) ClearRam(resetCommitment bool) {
-	if resetCommitment {
+	if resetCommitment && sd.sdCtx != nil {
 		sd.sdCtx.ClearRam()
 	}
 
