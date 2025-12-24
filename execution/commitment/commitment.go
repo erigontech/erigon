@@ -218,9 +218,24 @@ func (be *BranchEncoder) CollectUpdate(
 	cache *WarmupCache,
 ) (lastNibble int, err error) {
 
-	prev, prevStep, err := ctx.Branch(prefix)
-	if err != nil {
-		return 0, err
+	// Try to get from cache first, then fall back to database
+	var prev []byte
+	var prevStep kv.Step
+	if cache != nil {
+		if entry, ok := cache.GetBranch(prefix); ok {
+			prev = entry.Data
+			prevStep = entry.Step
+		} else {
+			prev, prevStep, err = ctx.Branch(prefix)
+			if err != nil {
+				return 0, err
+			}
+		}
+	} else {
+		prev, prevStep, err = ctx.Branch(prefix)
+		if err != nil {
+			return 0, err
+		}
 	}
 	update, lastNibble, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {

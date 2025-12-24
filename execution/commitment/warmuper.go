@@ -92,8 +92,12 @@ func (c *WarmupCache) GetStorage(addr []byte) (*Update, bool) {
 }
 
 func (c *WarmupCache) SetBranch(prefix []byte, data []byte, step kv.Step) {
+	key := string(prefix)
+	if _, evicted := c.evictedBranches.Load(key); evicted {
+		return
+	}
 	if data != nil {
-		c.branches.Store(string(prefix), &BranchEntry{Data: data, Step: step})
+		c.branches.Store(key, &BranchEntry{Data: data, Step: step})
 	}
 }
 
