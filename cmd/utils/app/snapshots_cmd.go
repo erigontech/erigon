@@ -377,10 +377,11 @@ var snapshotCommand = cli.Command{
 				log.Info("[integrity] snapshots are publishable")
 				return nil
 			},
-			Description: "run slow validation of files. use --check to run single",
+			Description: "run slow validation of files. use --check to run multiple/single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("one of: %s", integrity.AllChecks)},
+				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
+				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 			}),
@@ -1016,6 +1017,22 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 	} else {
 		requestedChecks = integrity.AllChecks
+	}
+
+	skipChecks := cliCtx.String("skip-check")
+	if len(skipChecks) > 0 {
+		var finalChecks []integrity.Check
+		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
+			for _, chk := range requestedChecks {
+				if chk == integrity.Check(skipCheck) {
+					logger.Info("[integrity] skipping check", "check", chk)
+					continue
+				}
+				finalChecks = append(finalChecks, chk)
+			}
+		}
+
+		requestedChecks = finalChecks
 	}
 
 	failFast := cliCtx.Bool("failFast")
