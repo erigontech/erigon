@@ -69,14 +69,14 @@ func (p *BestQueue) Swap(i, j int) {
 	p.ms[j].bestIndex = j
 }
 
-func (p *BestQueue) Push(x interface{}) {
+func (p *BestQueue) Push(x any) {
 	n := len(p.ms)
 	item := x.(*metaTxn)
 	item.bestIndex = n
 	p.ms = append(p.ms, item)
 }
 
-func (p *BestQueue) Pop() interface{} {
+func (p *BestQueue) Pop() any {
 	old := p.ms
 	n := len(old)
 	item := old[n-1]
@@ -106,14 +106,14 @@ func (p *WorstQueue) Swap(i, j int) {
 	p.ms[j].worstIndex = j
 }
 
-func (p *WorstQueue) Push(x interface{}) {
+func (p *WorstQueue) Push(x any) {
 	n := len(p.ms)
 	item := x.(*metaTxn)
 	item.worstIndex = n
 	p.ms = append(p.ms, x.(*metaTxn))
 }
 
-func (p *WorstQueue) Pop() interface{} {
+func (p *WorstQueue) Pop() any {
 	old := p.ms
 	n := len(old)
 	item := old[n-1]
