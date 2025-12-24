@@ -678,8 +678,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				if !blockExecutor.execStarted.IsZero() {
-					blockResult.ExecDuration = time.Since(blockExecutor.execStarted)
-					pe.blockExecMetrics.Duration.Add(blockResult.ExecDuration)
+					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
 				blockExecutor.applyResults <- blockResult
@@ -883,25 +882,24 @@ type applyResult interface {
 }
 
 type blockResult struct {
-	BlockNum     uint64
-	BlockTime    uint64
-	BlockHash    common.Hash
-	ParentHash   common.Hash
-	StateRoot    common.Hash
-	Err          error
-	GasUsed      uint64
-	BlobGasUsed  uint64
-	lastTxNum    uint64
-	complete     bool
-	isPartial    bool
-	ApplyCount   int
-	TxIO         *state.VersionedIO
-	Receipts     types.Receipts
-	Stats        map[int]ExecutionStat
-	Deps         *state.DAG
-	AllDeps      map[int]map[int]bool
-	Exhausted    *ErrLoopExhausted
-	ExecDuration time.Duration
+	BlockNum    uint64
+	BlockTime   uint64
+	BlockHash   common.Hash
+	ParentHash  common.Hash
+	StateRoot   common.Hash
+	Err         error
+	GasUsed     uint64
+	BlobGasUsed uint64
+	lastTxNum   uint64
+	complete    bool
+	isPartial   bool
+	ApplyCount  int
+	TxIO        *state.VersionedIO
+	Receipts    types.Receipts
+	Stats       map[int]ExecutionStat
+	Deps        *state.DAG
+	AllDeps     map[int]map[int]bool
+	Exhausted   *ErrLoopExhausted
 }
 
 type txResult struct {
@@ -1573,23 +1571,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		be.result = &blockResult{
-			BlockNum:    be.blockNum,
-			BlockTime:   txTask.BlockTime(),
-			BlockHash:   txTask.BlockHash(),
-			ParentHash:  txTask.ParentHash(),
-			StateRoot:   txTask.BlockRoot(),
-			GasUsed:     be.gasUsed,
-			BlobGasUsed: be.blobGasUsed,
-			lastTxNum:   txTask.Version().TxNum,
-			complete:    true,
-			isPartial:   isPartial,
-			ApplyCount:  be.applyCount,
-			TxIO:        be.blockIO,
-			Receipts:    receipts,
-			Stats:       be.stats,
-			Deps:        &deps,
-			AllDeps:     allDeps,
-			Exhausted:   be.exhausted,
+			be.blockNum,
+			txTask.BlockTime(),
+			txTask.BlockHash(),
+			txTask.ParentHash(),
+			txTask.BlockRoot(),
+			nil,
+			be.gasUsed,
+			be.blobGasUsed,
+			txTask.Version().TxNum,
+			true,
+			isPartial,
+			be.applyCount,
+			be.blockIO,
+			receipts,
+			be.stats,
+			&deps,
+			allDeps,
+			be.exhausted,
 		}
 		return be.result, nil
 	}
@@ -1603,20 +1602,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	txTask := be.tasks[0].Task
 
 	return &blockResult{
-		BlockNum:    be.blockNum,
-		BlockTime:   txTask.BlockTime(),
-		BlockHash:   txTask.BlockHash(),
-		ParentHash:  txTask.ParentHash(),
-		StateRoot:   txTask.BlockRoot(),
-		GasUsed:     be.gasUsed,
-		BlobGasUsed: be.blobGasUsed,
-		lastTxNum:   lastTxNum,
-		complete:    false,
-		isPartial:   len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
-		ApplyCount:  be.applyCount,
-		TxIO:        be.blockIO,
-		Stats:       be.stats,
-		Exhausted:   be.exhausted,
+		be.blockNum,
+		txTask.BlockTime(),
+		txTask.BlockHash(),
+		txTask.ParentHash(),
+		txTask.BlockRoot(),
+		nil,
+		be.gasUsed,
+		be.blobGasUsed,
+		lastTxNum,
+		false,
+		len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
+		be.applyCount,
+		be.blockIO,
+		nil,
+		be.stats,
+		nil,
+		nil,
+		be.exhausted,
 	}, nil
 }
 
