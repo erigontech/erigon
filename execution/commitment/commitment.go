@@ -1271,7 +1271,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return err
 					}
 				}
-				warmuper.DrainPending()
+				if warmuper != nil {
+					warmuper.DrainPending()
+				}
 				batch = batch[:0]
 			}
 			return nil
@@ -1340,7 +1342,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return false
 					}
 				}
-				warmuper.DrainPending()
+				if warmuper != nil {
+					warmuper.DrainPending()
+				}
 				batch = batch[:0]
 			}
 			return true
