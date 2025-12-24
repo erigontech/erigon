@@ -1295,7 +1295,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	var heimdallService *heimdall.Service
 	var heimdallClient heimdall.Client
 	var bridgeClient bridge.Client
-	var rulesConfig interface{}
+	var rulesConfig any
 	if cc.Clique != nil {
 		rulesConfig = chainspec.CliqueSnapshot
 	} else if cc.Aura != nil {

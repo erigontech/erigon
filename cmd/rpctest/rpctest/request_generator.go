@@ -362,7 +362,7 @@ var client = &http.Client{
 	Timeout: 600 * time.Second, // Per-request timeout
 }
 
-func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
+func (g *RequestGenerator) call(target string, method, body string, response any) CallResult {
 	start := time.Now()
 	err := post(client, routes[target], body, response)
 	return CallResult{
@@ -394,11 +394,11 @@ func (g *RequestGenerator) call2(target string, method, body string) CallResult 
 	}
 }
 
-func (g *RequestGenerator) Geth(method, body string, response interface{}) CallResult {
+func (g *RequestGenerator) Geth(method, body string, response any) CallResult {
 	return g.call(Geth, method, body, response)
 }
 
-func (g *RequestGenerator) Erigon(method, body string, response interface{}) CallResult {
+func (g *RequestGenerator) Erigon(method, body string, response any) CallResult {
 	return g.call(Erigon, method, body, response)
 }
 
