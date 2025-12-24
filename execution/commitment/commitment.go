@@ -1266,6 +1266,12 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
+				warmuperCache := warmuper.Cache()
+				if warmuperCache != nil {
+					// print keys lengths
+					fmt.Println(len(hk))
+					fmt.Println(len(pk))
+				}
 				startDepth := 0
 				if prevKey != nil {
 					// Find common prefix length
