@@ -162,13 +162,13 @@ type UnprocessedHeap struct {
 func (uh UnprocessedHeap) Len() int           { return len(uh.items) }
 func (uh UnprocessedHeap) Less(i, j int) bool { return uh.items[i].Less(uh.items[j]) }
 func (uh UnprocessedHeap) Swap(i, j int)      { uh.items[i], uh.items[j] = uh.items[j], uh.items[i] }
-func (uh *UnprocessedHeap) Push(x interface{}) {
+func (uh *UnprocessedHeap) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	uh.items = append(uh.items, x.(CacheItem))
 }
 
-func (uh *UnprocessedHeap) Pop() interface{} {
+func (uh *UnprocessedHeap) Pop() any {
 	cacheItem := uh.items[len(uh.items)-1]
 	uh.items = uh.items[:len(uh.items)-1]
 	return cacheItem
