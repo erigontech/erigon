@@ -213,13 +213,13 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 				log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 					"prefix", common.Bytes2Hex(prefix), "error", err)
 			}
+			w.cache.SetBranch(prefix, branchData, step)
 		}
 
 		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 		if len(branchData) < 4 {
 			break
 		}
-		w.cache.SetBranch(prefix, branchData, step)
 
 		if depth >= len(hashedKey) {
 			break
@@ -237,9 +237,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 					log.Debug(fmt.Sprintf("[%s][warmup] failed to get account", w.logPrefix),
 						"addr", common.Bytes2Hex(addr), "error", err)
 				}
-				if update != nil {
-					w.cache.SetAccount(addr, update)
-				}
+				w.cache.SetAccount(addr, update)
 			}
 		}
 		for _, addr := range cellStorages {
@@ -249,9 +247,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 					log.Debug(fmt.Sprintf("[%s][warmup] failed to get storage", w.logPrefix),
 						"addr", common.Bytes2Hex(addr), "error", err)
 				}
-				if update != nil {
-					w.cache.SetStorage(addr, update)
-				}
+				w.cache.SetStorage(addr, update)
 			}
 		}
 
