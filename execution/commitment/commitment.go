@@ -257,7 +257,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
-	// Evict from cache after successful update
+	// Evict from cache after successful update as it is now cached in the Domain anyways
 	if cache != nil {
 		cache.EvictBranch(prefix)
 	}
