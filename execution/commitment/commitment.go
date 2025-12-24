@@ -1282,7 +1282,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		if err != nil {
 			return err
 		}
-		fmt.Println("len(pairs)", len(pairs))
 		// Process remaining keys
 		for _, p := range pairs {
 			select {

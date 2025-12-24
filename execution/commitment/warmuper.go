@@ -228,7 +228,6 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 				log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 					"prefix", common.Bytes2Hex(prefix), "error", err)
 			}
-			_ = step
 			w.cache.SetBranch(prefix, branchData, step)
 		}
 
@@ -253,7 +252,6 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 					log.Debug(fmt.Sprintf("[%s][warmup] failed to get account", w.logPrefix),
 						"addr", common.Bytes2Hex(addr), "error", err)
 				}
-				_ = update
 				w.cache.SetAccount(addr, update)
 			}
 		}
@@ -265,7 +263,6 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 						"addr", common.Bytes2Hex(addr), "error", err)
 				}
 				w.cache.SetStorage(addr, update)
-				_ = update
 			}
 		}
 
