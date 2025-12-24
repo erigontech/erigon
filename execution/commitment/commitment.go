@@ -1225,6 +1225,8 @@ func (t *Updates) Close() {
 	}
 }
 
+const hashSortBatchSize = 10_000
+
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 // Keys are processed in batches of 10k to control memory usage.
 // If warmuper is non-nil, keys are submitted for parallel warming before processing.
@@ -1234,15 +1236,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 	case ModeDirect:
 		clear(t.keys)
 
-		// Collect and process keys in batches to control memory
-		pairs := make([]*KeyUpdate, 0, 50_000)
+		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			// Make copies since ETL may reuse buffers
 			hk := common.Copy(k)
 			pk := common.Copy(v)
-			pairs = append(pairs, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
+			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
@@ -1257,13 +1258,30 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
 			}
+
+			// Process batch when full
+			if len(batch) >= hashSortBatchSize {
+				for _, p := range batch {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+						return err
+					}
+				}
+				warmuper.DrainPending()
+				batch = batch[:0]
+			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
 		}
-		// Process remaining keys
-		for _, p := range pairs {
+
+		// Process remaining keys in final batch
+		for _, p := range batch {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -1277,8 +1295,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		t.initCollector()
 
 	case ModeUpdate:
-		// Collect and process keys in batches to control memory
-		pairs := make([]*KeyUpdate, 0, 50_000)
+		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
 		var prevKey []byte
 		var processErr error
 
@@ -1289,10 +1306,11 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return false
 			default:
 			}
+
 			// Make copies
 			hk := make([]byte, len(item.hashedKey))
 			copy(hk, item.hashedKey)
-			pairs = append(pairs, &KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
+			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
@@ -1307,14 +1325,33 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
 			}
+
+			// Process batch when full
+			if len(batch) >= hashSortBatchSize {
+				for _, p := range batch {
+					select {
+					case <-ctx.Done():
+						processErr = ctx.Err()
+						return false
+					default:
+					}
+					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+						processErr = err
+						return false
+					}
+				}
+				warmuper.DrainPending()
+				batch = batch[:0]
+			}
 			return true
 		})
 
 		if processErr != nil {
 			return processErr
 		}
-		// Process remaining keys
-		for _, p := range pairs {
+
+		// Process remaining keys in final batch
+		for _, p := range batch {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
