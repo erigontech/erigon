@@ -159,7 +159,8 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
 	trace         bool
 	stateReader   StateReader
-	warmupDB      kv.TemporalRoDB // if set, enables parallel warmup of MDBX page cache during commitment
+	warmupDB      kv.TemporalRoDB         // if set, enables parallel warmup of MDBX page cache during commitment
+	warmupConfig  commitment.WarmupConfig // default warmup config to use when none provided
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -171,6 +172,12 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 // When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
 func (sdc *SharedDomainsCommitmentContext) SetWarmupDB(db kv.TemporalRoDB) {
 	sdc.warmupDB = db
+}
+
+// SetWarmupConfig sets the default warmup configuration to use when ComputeCommitment
+// is called without an explicit config (i.e., when cfg == WarmupConfig{}).
+func (sdc *SharedDomainsCommitmentContext) SetWarmupConfig(cfg commitment.WarmupConfig) {
+	sdc.warmupConfig = cfg
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
@@ -305,10 +312,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	trieContext := sdc.trieContext(tx)
 	sdc.Reset()
 
-	var warmupConfig commitment.WarmupConfig
-	if sdc.warmupDB != nil {
+	warmupConfig := sdc.warmupConfig
+	if warmupConfig.Enabled && sdc.warmupDB != nil {
 		// Create factory for warmup TrieContexts with their own transactions
-		ctxFactory := func() (commitment.PatriciaContext, func()) {
+		warmupConfig.CtxFactory = func() (commitment.PatriciaContext, func()) {
 			roTx, err := sdc.warmupDB.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return &errorTrieContext{err: err}, nil
@@ -330,14 +337,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 				roTx.Rollback()
 			}
 			return warmupCtx, cleanup
-		}
-
-		warmupConfig = commitment.WarmupConfig{
-			Enabled:    true,
-			CtxFactory: ctxFactory,
-			NumWorkers: 16,
-			MaxDepth:   commitment.WarmupMaxDepth,
-			LogPrefix:  logPrefix,
 		}
 	}
 

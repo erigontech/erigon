@@ -505,3 +505,8 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 func (sd *SharedDomains) SetWarmupDB(db kv.TemporalRoDB) {
 	sd.sdCtx.SetWarmupDB(db)
 }
+
+// SetWarmupConfig sets the default warmup configuration to use during commitment.
+func (sd *SharedDomains) SetWarmupConfig(cfg commitment.WarmupConfig) {
+	sd.sdCtx.SetWarmupConfig(cfg)
+}

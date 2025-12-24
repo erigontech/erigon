@@ -37,11 +37,12 @@ type TrieContextFactory func() (PatriciaContext, func())
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
-	Enabled    bool
-	CtxFactory TrieContextFactory
-	NumWorkers int
-	MaxDepth   int
-	LogPrefix  string
+	Enabled      bool
+	DisableCache bool
+	CtxFactory   TrieContextFactory
+	NumWorkers   int
+	MaxDepth     int
+	LogPrefix    string
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
@@ -55,21 +56,23 @@ type BranchEntry struct {
 // WarmupCache stores prefetched Account, Storage, and Branch data from warmup phase.
 // Thread-safe for concurrent writes during warmup.
 type WarmupCache struct {
-	accounts        sync.Map // key: string(address), value: *Update
-	storages        sync.Map // key: string(address), value: *Update
-	branches        sync.Map // key: string(prefix), value: *BranchEntry
-	evictedAccounts sync.Map // key: string(address), value: struct{} - tracks permanently evicted accounts
-	evictedStorages sync.Map // key: string(address), value: struct{} - tracks permanently evicted storages
-	evictedBranches sync.Map // key: string(prefix), value: struct{} - tracks permanently evicted branches
+	accounts    sync.Map // key: string(address), value: *Update
+	storages    sync.Map // key: string(address), value: *Update
+	branches    sync.Map // key: string(prefix), value: *BranchEntry
+	evictedKeys sync.Map // key: string(key), value: struct{} - tracks permanently evicted keys
+	disabled    bool     // when true, all getters return nil/false
 }
 
-func NewWarmupCache() *WarmupCache {
-	return &WarmupCache{}
+func NewWarmupCache(disabled bool) *WarmupCache {
+	return &WarmupCache{disabled: disabled}
 }
 
 func (c *WarmupCache) SetAccount(addr []byte, update *Update) {
+	if c.disabled {
+		return
+	}
 	key := string(addr)
-	if _, evicted := c.evictedAccounts.Load(key); evicted {
+	if _, evicted := c.evictedKeys.Load(key); evicted {
 		return
 	}
 	if update != nil {
@@ -78,8 +81,11 @@ func (c *WarmupCache) SetAccount(addr []byte, update *Update) {
 }
 
 func (c *WarmupCache) SetStorage(addr []byte, update *Update) {
+	if c.disabled {
+		return
+	}
 	key := string(addr)
-	if _, evicted := c.evictedStorages.Load(key); evicted {
+	if _, evicted := c.evictedKeys.Load(key); evicted {
 		return
 	}
 	if update != nil {
@@ -88,8 +94,11 @@ func (c *WarmupCache) SetStorage(addr []byte, update *Update) {
 }
 
 func (c *WarmupCache) GetAccount(addr []byte) (*Update, bool) {
+	if c.disabled {
+		return nil, false
+	}
 	key := string(addr)
-	if _, evicted := c.evictedAccounts.Load(key); evicted {
+	if _, evicted := c.evictedKeys.Load(key); evicted {
 		return nil, false
 	}
 	if v, ok := c.accounts.Load(key); ok {
@@ -99,8 +108,11 @@ func (c *WarmupCache) GetAccount(addr []byte) (*Update, bool) {
 }
 
 func (c *WarmupCache) GetStorage(addr []byte) (*Update, bool) {
+	if c.disabled {
+		return nil, false
+	}
 	key := string(addr)
-	if _, evicted := c.evictedStorages.Load(key); evicted {
+	if _, evicted := c.evictedKeys.Load(key); evicted {
 		return nil, false
 	}
 	if v, ok := c.storages.Load(key); ok {
@@ -110,8 +122,11 @@ func (c *WarmupCache) GetStorage(addr []byte) (*Update, bool) {
 }
 
 func (c *WarmupCache) SetBranch(prefix []byte, data []byte, step kv.Step) {
+	if c.disabled {
+		return
+	}
 	key := string(prefix)
-	if _, evicted := c.evictedBranches.Load(key); evicted {
+	if _, evicted := c.evictedKeys.Load(key); evicted {
 		return
 	}
 	if data != nil {
@@ -120,9 +135,11 @@ func (c *WarmupCache) SetBranch(prefix []byte, data []byte, step kv.Step) {
 }
 
 func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
+	if c.disabled {
+		return nil, false
+	}
 	key := string(prefix)
-	// Check if this branch has been permanently evicted
-	if _, evicted := c.evictedBranches.Load(key); evicted {
+	if _, evicted := c.evictedKeys.Load(key); evicted {
 		return nil, false
 	}
 	if v, ok := c.branches.Load(key); ok {
@@ -135,28 +152,18 @@ func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
 	return nil, false
 }
 
-// EvictBranch permanently removes a branch from the cache and marks it as evicted.
-// Once evicted, the branch cannot be retrieved again, even if re-added.
-func (c *WarmupCache) EvictBranch(prefix []byte) {
-	key := string(prefix)
-	c.branches.Delete(key)
-	c.evictedBranches.Store(key, struct{}{})
-}
-
-// EvictAccount permanently removes an account from the cache and marks it as evicted.
-// Once evicted, the account cannot be retrieved again, even if re-added.
-func (c *WarmupCache) EvictAccount(addr []byte) {
-	key := string(addr)
-	c.accounts.Delete(key)
-	c.evictedAccounts.Store(key, struct{}{})
-}
-
-// EvictStorage permanently removes a storage entry from the cache and marks it as evicted.
-// Once evicted, the storage cannot be retrieved again, even if re-added.
-func (c *WarmupCache) EvictStorage(addr []byte) {
-	key := string(addr)
-	c.storages.Delete(key)
-	c.evictedStorages.Store(key, struct{}{})
+// EvictKey permanently removes a key from the cache and marks it as evicted.
+// Once evicted, the key cannot be retrieved again, even if re-added.
+// This works for accounts, storages, and branches.
+func (c *WarmupCache) EvictKey(key []byte) {
+	if c.disabled {
+		return
+	}
+	k := string(key)
+	c.accounts.Delete(k)
+	c.storages.Delete(k)
+	c.branches.Delete(k)
+	c.evictedKeys.Store(k, struct{}{})
 }
 
 // WarmupStats contains statistics about the warmup phase.
@@ -205,7 +212,7 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		maxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
-		cache:      NewWarmupCache(),
+		cache:      NewWarmupCache(cfg.DisableCache),
 	}
 }
 

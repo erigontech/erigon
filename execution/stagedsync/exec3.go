@@ -278,6 +278,12 @@ func ExecV3(ctx context.Context,
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
 		pe.doms.SetWarmupDB(cfg.db)
+		pe.doms.SetWarmupConfig(commitment.WarmupConfig{
+			Enabled:    true,
+			NumWorkers: 16,
+			MaxDepth:   commitment.WarmupMaxDepth,
+			LogPrefix:  pe.logPrefix,
+		})
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
@@ -308,6 +314,12 @@ func ExecV3(ctx context.Context,
 				lastCommittedBlockNum: blockNum,
 			}}
 		se.doms.SetWarmupDB(cfg.db)
+		se.doms.SetWarmupConfig(commitment.WarmupConfig{
+			Enabled:    true,
+			NumWorkers: 16,
+			MaxDepth:   commitment.WarmupMaxDepth,
+			LogPrefix:  se.logPrefix,
+		})
 
 		defer func() {
 			se.LogComplete(stepsInDb)
@@ -876,6 +888,11 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 	// Use warmup to pre-fetch branch data in parallel before computing commitment
 	doms.SetWarmupDB(cfg.db)
+	doms.SetWarmupConfig(commitment.WarmupConfig{
+		Enabled:    true,
+		NumWorkers: 16,
+		MaxDepth:   commitment.WarmupMaxDepth,
+	})
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)

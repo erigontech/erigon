@@ -259,7 +259,7 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	// Evict from cache after successful update as it is now cached in the Domain anyways
 	if cache != nil {
-		cache.EvictBranch(prefix)
+		cache.EvictKey(prefix)
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
@@ -1268,9 +1268,8 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			if warmuper != nil {
 				warmuperCache := warmuper.Cache()
 				if warmuperCache != nil {
-					// print keys lengths
-					fmt.Println(len(hk))
-					fmt.Println(len(pk))
+					// skip touched plain keys
+					warmuperCache.EvictKey(pk)
 				}
 				startDepth := 0
 				if prevKey != nil {
