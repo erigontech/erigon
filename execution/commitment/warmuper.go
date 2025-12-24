@@ -108,7 +108,11 @@ func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
 		return nil, false
 	}
 	if v, ok := c.branches.Load(key); ok {
-		return v.(*BranchEntry), true
+		tmp := v.(*BranchEntry)
+		return &BranchEntry{
+			Data: common.Copy(tmp.Data),
+			Step: tmp.Step,
+		}, true
 	}
 	return nil, false
 }
@@ -335,45 +339,6 @@ func (w *Warmuper) Wait() (*WarmupCache, error) {
 	)
 
 	return w.cache, err
-}
-
-// Reset closes the current warmuper and reinitializes it with a fresh state.
-// This allows reusing the Warmuper instance without creating a new one.
-func (w *Warmuper) Reset(ctx context.Context) {
-	// Close existing resources
-	if !w.closed.Load() {
-		w.Close()
-	}
-
-	// Wait for workers to finish if they were started
-	if w.started.Load() && w.g != nil {
-		w.g.Wait()
-	}
-
-	// Reuse existing config
-	cfg := WarmupConfig{
-		Enabled:    w.numWorkers > 0,
-		CtxFactory: w.ctxFactory,
-		NumWorkers: w.numWorkers,
-		MaxDepth:   w.maxDepth,
-		LogPrefix:  w.logPrefix,
-	}
-
-	// Create a new warmuper and copy all fields individually to avoid copying locks
-	w2 := NewWarmuper(ctx, cfg)
-
-	// Copy all fields individually (avoid copying atomic values directly)
-	w.ctx = w2.ctx
-	w.cancel = w2.cancel
-	w.ctxFactory = w2.ctxFactory
-	w.maxDepth = w2.maxDepth
-	w.numWorkers = w2.numWorkers
-	w.logPrefix = w2.logPrefix
-	w.work = w2.work
-	w.cache = w2.cache
-	w.g = w2.g
-	w.started.Store(false)
-	w.closed.Store(false)
 }
 
 // Stats returns statistics about the warmup.
