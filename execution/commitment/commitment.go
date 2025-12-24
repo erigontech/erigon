@@ -215,27 +215,11 @@ func (be *BranchEncoder) CollectUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
-	cache *WarmupCache,
 ) (lastNibble int, err error) {
 
-	// Try to get from cache first, then fall back to database
-	var prev []byte
-	var prevStep kv.Step
-	if cache != nil {
-		if entry, ok := cache.GetBranch(prefix); ok {
-			prev = entry.Data
-			prevStep = entry.Step
-		} else {
-			prev, prevStep, err = ctx.Branch(prefix)
-			if err != nil {
-				return 0, err
-			}
-		}
-	} else {
-		prev, prevStep, err = ctx.Branch(prefix)
-		if err != nil {
-			return 0, err
-		}
+	prev, prevStep, err := ctx.Branch(prefix)
+	if err != nil {
+		return 0, err
 	}
 	update, lastNibble, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
@@ -256,10 +240,6 @@ func (be *BranchEncoder) CollectUpdate(
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
-	}
-	// Evict from cache after successful update as it is now cached in the Domain anyways
-	if cache != nil {
-		cache.EvictBranch(prefix)
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
@@ -1266,12 +1246,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
-				warmuperCache := warmuper.Cache()
-				if warmuperCache != nil {
-					// print keys lengths
-					fmt.Println(len(hk))
-					fmt.Println(len(pk))
-				}
 				startDepth := 0
 				if prevKey != nil {
 					// Find common prefix length

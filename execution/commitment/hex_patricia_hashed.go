@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -1660,64 +1659,12 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 	return tr, nil
 }
 
-// getBranchFromCacheOrDB retrieves branch data from warmup cache or database.
-func (hph *HexPatriciaHashed) getBranchFromCacheOrDB(key []byte, warmupCache *WarmupCache) ([]byte, kv.Step, error) {
-	var branchData []byte
-	var step kv.Step
-
-	if warmupCache != nil {
-		if entry, ok := warmupCache.GetBranch(key); ok {
-			return entry.Data, entry.Step, nil
-		}
-	}
-
-	var err error
-	branchData, step, err = hph.ctx.Branch(key)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return branchData, step, nil
-}
-
-// getAccountFromCacheOrDB retrieves account update from warmup cache or database.
-func (hph *HexPatriciaHashed) getAccountFromCacheOrDB(addr []byte, warmupCache *WarmupCache) (*Update, error) {
-	if warmupCache != nil {
-		if upd, ok := warmupCache.GetAccount(addr); ok {
-			return upd, nil
-		}
-	}
-
-	upd, err := hph.ctx.Account(addr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get account: %w", err)
-	}
-
-	return upd, nil
-}
-
-// getStorageFromCacheOrDB retrieves storage update from warmup cache or database.
-func (hph *HexPatriciaHashed) getStorageFromCacheOrDB(addr []byte, warmupCache *WarmupCache) (*Update, error) {
-	if warmupCache != nil {
-		if upd, ok := warmupCache.GetStorage(addr); ok {
-			return upd, nil
-		}
-	}
-
-	upd, err := hph.ctx.Storage(addr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get storage: %w", err)
-	}
-
-	return upd, nil
-}
-
 // unfoldBranchNode returns true if unfolding has been done
-func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool, warmupCache *WarmupCache) error {
+func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, step, err := hph.getBranchFromCacheOrDB(key, warmupCache)
+	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
 		return err
 	}
@@ -1779,7 +1726,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	return nil
 }
 
-func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16, warmupCache *WarmupCache) error {
+func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	if hph.trace {
 		fmt.Printf("unfold %d: activeRows: %d\n", unfolding, hph.activeRows)
 	}
@@ -1818,7 +1765,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16, warmupCa
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
-		return hph.unfoldBranchNode(row, depth, touched && !present, warmupCache)
+		return hph.unfoldBranchNode(row, depth, touched && !present)
 	}
 
 	var nibble uint8
@@ -1977,7 +1924,7 @@ func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate in
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
 // until that current key becomes a prefix of hashedKey that we will process next
 // (in other words until the needFolding function returns 0)
-func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
+func (hph *HexPatriciaHashed) fold() (err error) {
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
 		return errors.New("cannot fold - no active rows")
@@ -2034,7 +1981,7 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 
 		upCell.reset()
 		if hph.branchBefore[row] {
-			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop, warmupCache)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -2064,7 +2011,7 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 
 		if hph.branchBefore[row] { // encode Delete if prefix existed before
 			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
-			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop, warmupCache)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -2121,7 +2068,7 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
 					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-					upd, err := hph.getAccountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen], warmupCache)
+					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 					if err != nil {
 						return err
 					}
@@ -2132,7 +2079,7 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 				}
 				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
 					hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
-					upd, err := hph.getStorageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen], warmupCache)
+					upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 					if err != nil {
 						return err
 					}
@@ -2158,7 +2105,7 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 
 		b := [...]byte{0x80}
 		cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
-		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter, warmupCache)
+		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -2296,14 +2243,14 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
-func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update, warmupCache *WarmupCache) (err error) {
+func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
 	//if hph.trace {
 	// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		foldDone := hph.metrics.StartFolding(plainKey)
-		if err := hph.fold(warmupCache); err != nil {
+		if err := hph.fold(); err != nil {
 			return fmt.Errorf("fold: %w", err)
 		}
 		foldDone()
@@ -2312,7 +2259,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
 		unfoldDone := hph.metrics.StartUnfolding(plainKey)
-		if err := hph.unfold(hashedKey, unfolding, warmupCache); err != nil {
+		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
 		unfoldDone()
@@ -2344,7 +2291,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	return nil
 }
 
-func (hph *HexPatriciaHashed) foldMounted(nib int, warmupCache *WarmupCache) (cell, error) {
+func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, error) {
 	if nib != hph.mountedNib {
 		panic(fmt.Sprintf("foldMounted: nib (%x)!= mountedNib (%x)", nib, hph.mountedNib))
 	}
@@ -2363,7 +2310,7 @@ func (hph *HexPatriciaHashed) foldMounted(nib int, warmupCache *WarmupCache) (ce
 			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], nil
 		}
-		if err := hph.fold(warmupCache); err != nil {
+		if err := hph.fold(); err != nil {
 			return cell{}, fmt.Errorf("final fold: %w", err)
 		}
 	}
@@ -2440,13 +2387,13 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
-			if err := hph.fold(nil); err != nil {
+			if err := hph.fold(); err != nil {
 				return fmt.Errorf("fold: %w", err)
 			}
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			if err := hph.unfold(hashedKey, unfolding, nil); err != nil {
+			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
@@ -2469,7 +2416,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
-		if err := hph.fold(nil); err != nil {
+		if err := hph.fold(); err != nil {
 			return nil, nil, fmt.Errorf("final fold: %w", err)
 		}
 	}
@@ -2518,12 +2465,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Setup warmup if configured
 	var warmuper *Warmuper
-	var warmupCache *WarmupCache
 	if warmup.Enabled {
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.Close()
-		warmupCache = warmuper.Cache()
 	}
 
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -2571,7 +2516,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			}
 		}
 
-		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate, warmupCache); err != nil {
+		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
 			return fmt.Errorf("followAndUpdate: %w", err)
 		}
 		ki++
@@ -2591,7 +2536,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
 		foldDone := hph.metrics.StartFolding(nil)
-		if err = hph.fold(warmupCache); err != nil {
+		if err = hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}
 		foldDone()

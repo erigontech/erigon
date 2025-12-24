@@ -353,23 +353,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
-
 		if err := sd.Flush(ctx, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
 		sd.ClearRam(true)
-
-		if err = tx.Commit(); err != nil {
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-			return
-		}
-		tx, err = e.db.BeginTemporalRw(ctx)
-		// note we already have defer tx.Rollback() on stack from earlier
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-			return
-		}
 
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
@@ -479,6 +467,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		err = fmt.Errorf("%s: %w", msg, err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+
 	}
 
 	for hasMore := true; hasMore; {

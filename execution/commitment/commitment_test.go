@@ -415,7 +415,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
-	_, err = warmuper.Wait()
+	err = warmuper.Wait()
 	require.NoError(t, err)
 
 	// Create a new warmuper for the second test
@@ -438,6 +438,6 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
-	_, err = warmuper2.Wait()
+	err = warmuper2.Wait()
 	require.NoError(t, err)
 }

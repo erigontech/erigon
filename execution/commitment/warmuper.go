@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
@@ -45,119 +43,6 @@ type WarmupConfig struct {
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
-
-// BranchEntry stores branch data along with its step value.
-type BranchEntry struct {
-	Data []byte
-	Step kv.Step
-}
-
-// WarmupCache stores prefetched Account, Storage, and Branch data from warmup phase.
-// Thread-safe for concurrent writes during warmup.
-type WarmupCache struct {
-	accounts        sync.Map // key: string(address), value: *Update
-	storages        sync.Map // key: string(address), value: *Update
-	branches        sync.Map // key: string(prefix), value: *BranchEntry
-	evictedAccounts sync.Map // key: string(address), value: struct{} - tracks permanently evicted accounts
-	evictedStorages sync.Map // key: string(address), value: struct{} - tracks permanently evicted storages
-	evictedBranches sync.Map // key: string(prefix), value: struct{} - tracks permanently evicted branches
-}
-
-func NewWarmupCache() *WarmupCache {
-	return &WarmupCache{}
-}
-
-func (c *WarmupCache) SetAccount(addr []byte, update *Update) {
-	key := string(addr)
-	if _, evicted := c.evictedAccounts.Load(key); evicted {
-		return
-	}
-	if update != nil {
-		c.accounts.Store(key, update)
-	}
-}
-
-func (c *WarmupCache) SetStorage(addr []byte, update *Update) {
-	key := string(addr)
-	if _, evicted := c.evictedStorages.Load(key); evicted {
-		return
-	}
-	if update != nil {
-		c.storages.Store(key, update)
-	}
-}
-
-func (c *WarmupCache) GetAccount(addr []byte) (*Update, bool) {
-	key := string(addr)
-	if _, evicted := c.evictedAccounts.Load(key); evicted {
-		return nil, false
-	}
-	if v, ok := c.accounts.Load(key); ok {
-		return v.(*Update), true
-	}
-	return nil, false
-}
-
-func (c *WarmupCache) GetStorage(addr []byte) (*Update, bool) {
-	key := string(addr)
-	if _, evicted := c.evictedStorages.Load(key); evicted {
-		return nil, false
-	}
-	if v, ok := c.storages.Load(key); ok {
-		return v.(*Update), true
-	}
-	return nil, false
-}
-
-func (c *WarmupCache) SetBranch(prefix []byte, data []byte, step kv.Step) {
-	key := string(prefix)
-	if _, evicted := c.evictedBranches.Load(key); evicted {
-		return
-	}
-	if data != nil {
-		c.branches.Store(key, &BranchEntry{Data: data, Step: step})
-	}
-}
-
-func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
-	key := string(prefix)
-	// Check if this branch has been permanently evicted
-	if _, evicted := c.evictedBranches.Load(key); evicted {
-		return nil, false
-	}
-	if v, ok := c.branches.Load(key); ok {
-		tmp := v.(*BranchEntry)
-		return &BranchEntry{
-			Data: common.Copy(tmp.Data),
-			Step: tmp.Step,
-		}, true
-	}
-	return nil, false
-}
-
-// EvictBranch permanently removes a branch from the cache and marks it as evicted.
-// Once evicted, the branch cannot be retrieved again, even if re-added.
-func (c *WarmupCache) EvictBranch(prefix []byte) {
-	key := string(prefix)
-	c.branches.Delete(key)
-	c.evictedBranches.Store(key, struct{}{})
-}
-
-// EvictAccount permanently removes an account from the cache and marks it as evicted.
-// Once evicted, the account cannot be retrieved again, even if re-added.
-func (c *WarmupCache) EvictAccount(addr []byte) {
-	key := string(addr)
-	c.accounts.Delete(key)
-	c.evictedAccounts.Store(key, struct{}{})
-}
-
-// EvictStorage permanently removes a storage entry from the cache and marks it as evicted.
-// Once evicted, the storage cannot be retrieved again, even if re-added.
-func (c *WarmupCache) EvictStorage(addr []byte) {
-	key := string(addr)
-	c.storages.Delete(key)
-	c.evictedStorages.Store(key, struct{}{})
-}
 
 // WarmupStats contains statistics about the warmup phase.
 type WarmupStats struct {
@@ -176,8 +61,6 @@ type Warmuper struct {
 
 	// Work channel for incoming keys
 	work chan warmupWorkItem
-	// Result cache
-	cache *WarmupCache
 	// Worker group
 	g *errgroup.Group
 
@@ -205,7 +88,6 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		maxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
-		cache:      NewWarmupCache(),
 	}
 }
 
@@ -244,25 +126,17 @@ func (w *Warmuper) Start() {
 	}
 }
 
-// warmupKey performs the actual warmup for a single key.
+// warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
 
-		// Check cache first
-		var branchData []byte
-		var step kv.Step
-		if entry, ok := w.cache.GetBranch(prefix); ok {
-			branchData = entry.Data
-		} else {
-			var err error
-			branchData, step, err = trieCtx.Branch(prefix)
-			if err != nil {
-				log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
-					"prefix", common.Bytes2Hex(prefix), "error", err)
-			}
-			w.cache.SetBranch(prefix, branchData, step)
+		// Read branch data to warm the MDBX page cache
+		branchData, _, err := trieCtx.Branch(prefix)
+		if err != nil {
+			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
+				"prefix", common.Bytes2Hex(prefix), "error", err)
 		}
 
 		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
@@ -275,30 +149,20 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		}
 		nextNibble := int(hashedKey[depth])
 
-		// Extract and prefetch account/storage addresses
-		// Path nibble's cell will have stateHash cleared - always extract it
-		// Memoized siblings are skipped
+		// Extract and prefetch account/storage addresses to warm page cache
 		cellAccounts, cellStorages := extractBranchCellAddresses(branchData, nextNibble)
 		for _, addr := range cellAccounts {
-			if _, ok := w.cache.GetAccount(addr); !ok {
-				update, err := trieCtx.Account(addr)
-				if err != nil {
-					log.Debug(fmt.Sprintf("[%s][warmup] failed to get account", w.logPrefix),
-						"addr", common.Bytes2Hex(addr), "error", err)
-				}
-				_ = update
-				//w.cache.SetAccount(addr, update)
+			_, err := trieCtx.Account(addr)
+			if err != nil {
+				log.Debug(fmt.Sprintf("[%s][warmup] failed to get account", w.logPrefix),
+					"addr", common.Bytes2Hex(addr), "error", err)
 			}
 		}
 		for _, addr := range cellStorages {
-			if _, ok := w.cache.GetStorage(addr); !ok {
-				update, err := trieCtx.Storage(addr)
-				if err != nil {
-					log.Debug(fmt.Sprintf("[%s][warmup] failed to get storage", w.logPrefix),
-						"addr", common.Bytes2Hex(addr), "error", err)
-				}
-				_ = update
-				//w.cache.SetStorage(addr, update)
+			_, err := trieCtx.Storage(addr)
+			if err != nil {
+				log.Debug(fmt.Sprintf("[%s][warmup] failed to get storage", w.logPrefix),
+					"addr", common.Bytes2Hex(addr), "error", err)
 			}
 		}
 
@@ -357,10 +221,10 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	}
 }
 
-// Wait waits for all warmup work to complete. Returns the warmup cache.
-func (w *Warmuper) Wait() (*WarmupCache, error) {
+// Wait waits for all warmup work to complete.
+func (w *Warmuper) Wait() error {
 	if !w.started.Load() || w.numWorkers <= 0 {
-		return w.cache, nil
+		return nil
 	}
 
 	// Only close the channel once
@@ -374,7 +238,7 @@ func (w *Warmuper) Wait() (*WarmupCache, error) {
 		"spent", time.Since(w.startTime),
 	)
 
-	return w.cache, err
+	return err
 }
 
 // Stats returns statistics about the warmup.
@@ -389,10 +253,25 @@ func (w *Warmuper) Stats() WarmupStats {
 	}
 }
 
-// Cache returns the warmup cache. The cache is thread-safe and can be accessed
-// while warmup is still in progress.
-func (w *Warmuper) Cache() *WarmupCache {
-	return w.cache
+// DrainPending drains all pending work items from the work channel without processing them.
+func (w *Warmuper) DrainPending() {
+	if !w.started.Load() || w.numWorkers <= 0 {
+		return
+	}
+	for {
+		select {
+		case <-w.work:
+		default:
+			return
+		}
+	}
+}
+
+// WaitAndClose waits for all warmup work to complete and then closes the warmuper.
+func (w *Warmuper) WaitAndClose() error {
+	err := w.Wait()
+	w.Close()
+	return err
 }
 
 // Close cancels all warmup work and releases resources.
