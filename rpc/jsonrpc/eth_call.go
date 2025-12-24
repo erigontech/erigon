@@ -232,7 +232,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 		posterCost, _ := state.L1PricingState().PosterDataCost(msg, l1pricing.BatchPosterAddress, brotliCompressionLevel)
 		// Use estimate mode because this is used to raise the gas cap, so we don't want to underestimate.
-		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.MessageGasEstimationMode, posterCost)
+		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.NewMessageGasEstimationContext(), posterCost)
 		api.GasCap += postingGas
 	}
 
@@ -243,7 +243,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// Retrieve the block to act as the gas ceiling
 		hi = header.GasLimit
 	}
-	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) {
+	var arbosVersion uint64
+	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(blockNum.Uint64(), header.Time, arbosVersion) {
 		// Cap the maximum gas allowance according to EIP-7825 if Osaka
 		hi = params.MaxTxnGasLimit
 	}
@@ -865,9 +866,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		args.From = &common.Address{}
 	}
 
+	//var arbosFormatVersion uint64
+	//if chainConfig.IsArbitrum() {
+	//	arbosFormatVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	//}
+
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
+	// TODO arbitrum
+	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig)) // blockNumber, header.Time, arbosFormatVersion))
 	excl := make(map[common.Address]struct{})
 	// Add 'from', 'to', precompiles to the exclusion list
 	excl[*args.From] = struct{}{}

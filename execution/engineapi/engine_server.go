@@ -555,14 +555,15 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		}
 	}
 
+	bn := data.ExecutionPayload.BlockNumber
 	ts := data.ExecutionPayload.Timestamp
 	var arbosVersion uint64
 	if (!s.config.IsCancun(ts, arbosVersion) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts, arbosVersion) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(ts, arbosVersion) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(ts, arbosVersion) && version < clparams.ElectraVersion) ||
-		(!s.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
-		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) {
+		(!s.config.IsOsaka(bn, ts, arbosVersion) && version >= clparams.FuluVersion) ||
+		(s.config.IsOsaka(bn, ts, arbosVersion) && version < clparams.FuluVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 

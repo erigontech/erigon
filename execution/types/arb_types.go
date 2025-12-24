@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/holiman/uint256"
@@ -146,7 +147,8 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce: !skipAccountChecks[tx.Type()],
 
 		// TxRunMode: MessageRunMode, // must be set separately?
-		Tx: tx,
+		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	// if baseFee != nil {
 	// 	msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -162,7 +164,7 @@ func (tx *ArbitrumUnsignedTx) WithSignature(signer Signer, sig []byte) (Transact
 
 func (tx *ArbitrumUnsignedTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
+	return PrefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
 		tx.ChainId,
 		tx.From,
 		tx.Nonce,
@@ -311,8 +313,8 @@ func (tx *ArbitrumUnsignedTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -403,8 +405,8 @@ func (tx *ArbitrumUnsignedTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumUnsignedTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumUnsignedTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -421,7 +423,7 @@ func (tx *ArbitrumUnsignedTx) Sender(signer Signer) (common.Address, error) {
 	panic("implement me")
 }
 
-func (tx *ArbitrumUnsignedTx) cachedSender() (common.Address, bool) {
+func (tx *ArbitrumUnsignedTx) CachedSender() (common.Address, bool) {
 	return tx.From, true
 }
 
@@ -538,7 +540,8 @@ func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
 
-		Tx: tx,
+		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -553,7 +556,7 @@ func (tx *ArbitrumContractTx) WithSignature(signer Signer, sig []byte) (Transact
 
 func (tx *ArbitrumContractTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumContractTxType, []interface{}{
+	return PrefixedRlpHash(ArbitrumContractTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
 		tx.From,
@@ -707,8 +710,8 @@ func (tx *ArbitrumContractTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -803,8 +806,8 @@ func (tx *ArbitrumContractTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumContractTx) MarshalBinary(w io.Writer) error {
 	payloadSize, gasLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumContractTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -820,7 +823,7 @@ func (tx *ArbitrumContractTx) Sender(signer Signer) (common.Address, error) {
 	panic("implement me")
 }
 
-func (tx *ArbitrumContractTx) cachedSender() (common.Address, bool) {
+func (tx *ArbitrumContractTx) CachedSender() (common.Address, bool) {
 	return tx.From, true
 }
 
@@ -963,7 +966,8 @@ func (t *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rul
 		amount:     *t.GetValue(),
 		checkNonce: !skipAccountChecks[t.Type()],
 
-		Tx: t,
+		Tx:           t,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -978,7 +982,7 @@ func (t *ArbitrumRetryTx) WithSignature(signer Signer, sig []byte) (Transaction,
 
 func (t *ArbitrumRetryTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumRetryTxType, []interface{}{
+	return PrefixedRlpHash(ArbitrumRetryTxType, []interface{}{
 		t.ChainId,
 		t.Nonce,
 		t.From,
@@ -1183,8 +1187,8 @@ func (t *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -1306,8 +1310,8 @@ func (t *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 
 func (t *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := t.payloadSize(false)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumRetryTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -1321,8 +1325,8 @@ func (t *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
 
 func (t *ArbitrumRetryTx) MarshalBinaryForHashing(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := t.payloadSize(true)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumRetryTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -1339,7 +1343,7 @@ func (t *ArbitrumRetryTx) Sender(signer Signer) (common.Address, error) {
 	panic("implement me")
 }
 
-func (t *ArbitrumRetryTx) cachedSender() (common.Address, bool) {
+func (t *ArbitrumRetryTx) CachedSender() (common.Address, bool) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -1673,6 +1677,7 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 
 		EffectiveGas: tx.EffectiveGasUsed,
 		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -1703,7 +1708,7 @@ func (tx *ArbitrumSubmitRetryableTx) WithSignature(signer Signer, sig []byte) (T
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Hash() common.Hash {
-	return prefixedRlpHash(ArbitrumSubmitRetryableTxType, []interface{}{
+	return PrefixedRlpHash(ArbitrumSubmitRetryableTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
 		tx.From,
@@ -1743,8 +1748,8 @@ func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -1884,8 +1889,8 @@ var TxHashhh = common.HexToHash("0xae75e367d4b38d413a9cc3c0ff825453913e95db0f408
 func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 	hashingOnly := false
 	payloadSize, _ := tx.payloadSize(hashingOnly)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumSubmitRetryableTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -1901,8 +1906,8 @@ func (tx *ArbitrumSubmitRetryableTx) MarshalBinaryForHashing(w io.Writer) error 
 	hashingOnly := true
 
 	payloadSize, _ := tx.payloadSize(hashingOnly)
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumSubmitRetryableTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -1918,7 +1923,7 @@ func (tx *ArbitrumSubmitRetryableTx) Sender(signer Signer) (common.Address, erro
 	panic("cannot sign ArbitrumSubmitRetryableTx")
 }
 
-func (tx *ArbitrumSubmitRetryableTx) cachedSender() (common.Address, bool) {
+func (tx *ArbitrumSubmitRetryableTx) CachedSender() (common.Address, bool) {
 	return tx.From, true
 }
 
@@ -2023,7 +2028,8 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
 
-		Tx: tx,
+		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(math.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
@@ -2066,7 +2072,7 @@ func (tx *ArbitrumDepositTx) WithSignature(signer Signer, sig []byte) (Transacti
 
 func (tx *ArbitrumDepositTx) Hash() common.Hash {
 	//TODO implement me
-	return prefixedRlpHash(ArbitrumDepositTxType, []interface{}{
+	return PrefixedRlpHash(ArbitrumDepositTxType, []interface{}{
 		tx.ChainId,
 		tx.L1RequestId,
 		tx.From,
@@ -2086,8 +2092,8 @@ func (tx *ArbitrumDepositTx) EncodeRLP(w io.Writer) error {
 
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
@@ -2234,8 +2240,8 @@ func (tx *ArbitrumDepositTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumDepositTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -2248,7 +2254,7 @@ func (tx *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *ArbitrumDepositTx) Sender(signer Signer) (common.Address, error) { panic("implement me") }
-func (tx *ArbitrumDepositTx) cachedSender() (common.Address, bool)         { return tx.From, true }
+func (tx *ArbitrumDepositTx) CachedSender() (common.Address, bool)         { return tx.From, true }
 func (tx *ArbitrumDepositTx) GetSender() (common.Address, bool)            { return tx.From, true }
 func (tx *ArbitrumDepositTx) SetSender(address common.Address)             { tx.From = address }
 func (tx *ArbitrumDepositTx) IsContractDeploy() bool                       { return false }
@@ -2294,7 +2300,7 @@ func (tx *ArbitrumInternalTx) GetValue() *uint256.Int                       { re
 func (tx *ArbitrumInternalTx) GetTo() *common.Address                       { return &ArbosAddress }
 func (tx *ArbitrumInternalTx) GetAccessList() AccessList                    { return nil }
 func (tx *ArbitrumInternalTx) GetAuthorizations() []Authorization           { return nil }
-func (tx *ArbitrumInternalTx) cachedSender() (common.Address, bool)         { return ArbosAddress, true }
+func (tx *ArbitrumInternalTx) CachedSender() (common.Address, bool)         { return ArbosAddress, true }
 func (tx *ArbitrumInternalTx) GetSender() (common.Address, bool)            { return ArbosAddress, true }
 func (tx *ArbitrumInternalTx) IsContractDeploy() bool                       { return false }
 func (tx *ArbitrumInternalTx) Unwrap() Transaction                          { return tx }
@@ -2312,18 +2318,19 @@ func (tx *ArbitrumInternalTx) WithSignature(signer Signer, sig []byte) (Transact
 }
 func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := &Message{
-		gasPrice:   *tx.GetPrice(),
-		tipCap:     *tx.GetTipCap(),
-		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGasLimit(),
-		nonce:      tx.GetNonce(),
-		accessList: tx.GetAccessList(),
-		from:       ArbosAddress,
-		to:         tx.GetTo(),
-		data:       tx.GetData(),
-		amount:     *tx.GetValue(),
-		checkNonce: !skipAccountChecks[tx.Type()],
-		Tx:         tx,
+		gasPrice:     *tx.GetPrice(),
+		tipCap:       *tx.GetTipCap(),
+		feeCap:       *tx.GetFeeCap(),
+		gasLimit:     tx.GetGasLimit(),
+		nonce:        tx.GetNonce(),
+		accessList:   tx.GetAccessList(),
+		from:         ArbosAddress,
+		to:           tx.GetTo(),
+		data:         tx.GetData(),
+		amount:       *tx.GetValue(),
+		checkNonce:   !skipAccountChecks[tx.Type()],
+		Tx:           tx,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 
 	if baseFee != nil {
@@ -2350,7 +2357,7 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 }
 
 func (tx *ArbitrumInternalTx) Hash() common.Hash {
-	return prefixedRlpHash(ArbitrumInternalTxType, []interface{}{
+	return PrefixedRlpHash(ArbitrumInternalTxType, []interface{}{
 		tx.ChainId,
 		tx.Data,
 	})
@@ -2395,8 +2402,8 @@ func (tx *ArbitrumInternalTx) EncodeRLP(w io.Writer) error {
 	payloadSize := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -2434,8 +2441,8 @@ func (tx *ArbitrumInternalTx) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *ArbitrumInternalTx) MarshalBinary(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = ArbitrumInternalTxType
 	if _, err := w.Write(b[:1]); err != nil {

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -64,6 +65,27 @@ const (
 	ArbitrumInternalTxType        byte = 0x6A
 	ArbitrumLegacyTxType          byte = 0x78
 )
+
+type constructTxnFunc = func() Transaction
+
+var externalTxnTypes map[byte]constructTxnFunc
+
+func RegisterTransaction(txnType byte, creator constructTxnFunc) {
+	if externalTxnTypes == nil {
+		externalTxnTypes = make(map[byte]constructTxnFunc)
+	}
+	externalTxnTypes[txnType] = creator
+}
+
+func CreateTransactioByType(txnType byte) Transaction {
+	if externalTxnTypes == nil {
+		externalTxnTypes = make(map[byte]constructTxnFunc)
+	}
+	if ctor, ok := externalTxnTypes[txnType]; ok {
+		return ctor()
+	}
+	return nil
+}
 
 // Transaction is an Ethereum transaction.
 type Transaction interface {
@@ -99,7 +121,7 @@ type Transaction interface {
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
 	Sender(Signer) (common.Address, error)
-	cachedSender() (common.Address, bool)
+	CachedSender() (common.Address, bool)
 	GetSender() (common.Address, bool)
 	SetSender(common.Address)
 	IsContractDeploy() bool
@@ -311,13 +333,13 @@ func TypedTransactionMarshalledAsRlpString(data []byte) bool {
 	return len(data) > 0 && 0x80 <= data[0] && data[0] < 0xc0
 }
 
-func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
-	if isProtectedV(v) && !maybeProtected {
+func SanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
+	if IsProtectedV(v) && !maybeProtected {
 		return ErrUnexpectedProtection
 	}
 
 	var plainV byte
-	if isProtectedV(v) {
+	if IsProtectedV(v) {
 		chainID := DeriveChainId(v).Uint64()
 		plainV = byte(v.Uint64() - 35 - 2*chainID)
 	} else if maybeProtected {
@@ -337,7 +359,7 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	return nil
 }
 
-func isProtectedV(V *uint256.Int) bool {
+func IsProtectedV(V *uint256.Int) bool {
 	if V.BitLen() <= 8 {
 		v := V.Uint64()
 		return v != 27 && v != 28 && v != 1 && v != 0
@@ -423,6 +445,7 @@ type Message struct {
 	SkipAccountChecks bool // same as checkNonce
 	SkipL1Charging    bool
 	TxRunMode         MessageRunMode // deprecated (shoudl be)
+	TxRunContext      *MessageRunContext
 	Tx                Transaction
 	EffectiveGas      uint64 // amount of gas effectively used by transaction (used in ArbitrumSubmitRetryableTx)
 }
@@ -431,20 +454,6 @@ type Message struct {
 func (m *Message) SetGasPrice(f *uint256.Int) { m.gasPrice.Set(f) }
 func (m *Message) SetFeeCap(f *uint256.Int)   { m.feeCap.Set(f) }
 func (m *Message) SetTip(f *uint256.Int)      { m.tipCap.Set(f) }
-
-type MessageRunMode uint8
-
-const (
-	MessageCommitMode MessageRunMode = iota
-	MessageGasEstimationMode
-	MessageEthcallMode
-	MessageReplayMode
-)
-
-// these message modes are executed onchain so cannot make any gas shortcuts
-func (m MessageRunMode) ExecutedOnChain() bool { // can use isFree for that??
-	return m == MessageCommitMode || m == MessageReplayMode
-}
 
 // eof arbitrum
 
@@ -463,6 +472,8 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		checkNonce: checkNonce,
 		checkGas:   checkGas,
 		isFree:     isFree,
+
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
@@ -508,6 +519,16 @@ func (m *Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
+
+func (msg *Message) SetTo(addr *common.Address)             { msg.to = addr }
+func (msg *Message) SetFrom(addr *common.Address)           { msg.from = *addr }
+func (msg *Message) SetNonce(val uint64)                    { msg.nonce = val }
+func (msg *Message) SetAmount(f *uint256.Int)               { msg.amount.Set(f) }
+func (msg *Message) SetGasLimit(val uint64)                 { msg.gasLimit = val }
+func (msg *Message) SetData(data []byte)                    { msg.data = data }
+func (msg *Message) SetAccessList(accessList AccessList)    { msg.accessList = accessList }
+func (msg *Message) SetSkipAccountCheck(skipCheck bool)     { msg.SkipAccountChecks = skipCheck }
+func (msg *Message) SetBlobHashes(blobHashes []common.Hash) { msg.blobHashes = blobHashes }
 
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	gas := globalGasCap
