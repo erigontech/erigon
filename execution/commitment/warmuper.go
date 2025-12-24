@@ -228,7 +228,8 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 				log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 					"prefix", common.Bytes2Hex(prefix), "error", err)
 			}
-			w.cache.SetBranch(prefix, branchData, step)
+			_ = step
+			//w.cache.SetBranch(prefix, branchData, step)
 		}
 
 		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
