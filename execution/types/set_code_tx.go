@@ -26,7 +26,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -103,8 +102,8 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	}
 	hashingOnly := false
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize(hashingOnly)
-	b := NewEncodingBuf()
-	defer PooledBuf.Put(b)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = SetCodeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -122,8 +121,8 @@ func (tx *SetCodeTransaction) MarshalBinaryForHashing(w io.Writer) error {
 	}
 	hashingOnly := true
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize(hashingOnly)
-	b := NewEncodingBuf()
-	defer PooledBuf.Put(b)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = SetCodeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -149,8 +148,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce: true,
 		checkGas:   true,
 
-		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
-		Tx:           tx,
+		Tx: tx,
 	}
 	if !rules.IsPrague {
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")
@@ -194,7 +192,7 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := PrefixedRlpHash(SetCodeTxType, []interface{}{
+	hash := prefixedRlpHash(SetCodeTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -212,7 +210,7 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 }
 
 func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return PrefixedRlpHash(
+	return prefixedRlpHash(
 		SetCodeTxType,
 		[]interface{}{
 			chainID,
@@ -234,8 +232,8 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize(false)
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := NewEncodingBuf()
-	defer PooledBuf.Put(b)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err

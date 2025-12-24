@@ -46,11 +46,10 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsNapoli:           c.IsNapoli(bc.BlockNumber),
 		IsBhilai:           c.IsBhilai(bc.BlockNumber),
 		IsPrague:           c.IsPrague(bc.Time, bc.ArbOSVersion) || c.IsBhilai(bc.BlockNumber),
-		IsOsaka:            c.IsOsaka(bc.BlockNumber, bc.Time, bc.ArbOSVersion),
+		IsOsaka:            c.IsOsaka(bc.Time),
 		IsAura:             c.Aura != nil,
 		ArbOSVersion:       bc.ArbOSVersion,
 		IsArbitrum:         c.IsArbitrum(),
 		IsStylus:           c.IsArbitrum() && bc.ArbOSVersion >= osver.ArbosVersion_Stylus,
-		IsDia:              c.IsArbitrum() && bc.ArbOSVersion >= osver.ArbosVersion_Dia,
 	}
 }

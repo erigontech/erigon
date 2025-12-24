@@ -157,7 +157,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
 	}
-	ret, _, _, err := vmenv.Call(
+	ret, _, err := vmenv.Call(
 		sender,
 		common.BytesToAddress([]byte("contract")),
 		input,
@@ -208,14 +208,13 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
-	code, address, leftOverGas, usedMultiGas, err := vmenv.Create(
+	code, address, leftOverGas, err := vmenv.Create(
 		sender,
 		input,
 		cfg.GasLimit,
 		cfg.Value,
 		false,
 	)
-	_ = usedMultiGas
 	return code, address, leftOverGas, err
 }
 
@@ -242,7 +241,7 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 	}
 
 	// Call the code with the given configuration.
-	ret, leftOverGas, _, err := vmenv.Call(
+	ret, leftOverGas, err := vmenv.Call(
 		sender,
 		address,
 		input,

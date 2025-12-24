@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/arb"
-	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
@@ -80,7 +79,7 @@ func (tx *AccountAbstractionTransaction) Sender(signer Signer) (common.Address, 
 	return *tx.SenderAddress, nil
 }
 
-func (tx *AccountAbstractionTransaction) CachedSender() (common.Address, bool) {
+func (tx *AccountAbstractionTransaction) cachedSender() (common.Address, bool) {
 	return *tx.SenderAddress, true
 }
 
@@ -172,8 +171,6 @@ func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, r
 		to:         nil,
 		gasPrice:   *tx.FeeCap,
 		blobHashes: []common.Hash{},
-
-		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}, nil
 }
 
@@ -185,7 +182,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := PrefixedRlpHash(AccountAbstractionTxType, []interface{}{
+	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
 		tx.ChainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress, tx.SenderValidationData,
@@ -205,7 +202,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 }
 
 func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
-	hash := PrefixedRlpHash(AccountAbstractionTxType, []interface{}{
+	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
 		chainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress, tx.SenderValidationData,
@@ -298,8 +295,8 @@ func (tx *AccountAbstractionTransaction) EncodingSize() int {
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := NewEncodingBuf()
-	defer PooledBuf.Put(b)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err
@@ -528,8 +525,8 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := NewEncodingBuf()
-	defer PooledBuf.Put(b)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccountAbstractionTxType
 	if _, err := w.Write(b[:1]); err != nil {

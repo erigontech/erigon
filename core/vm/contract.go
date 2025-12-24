@@ -25,7 +25,6 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -71,13 +70,6 @@ type Contract struct {
 
 	// Arbitrum
 	delegateOrCallcode bool
-	// is the execution frame represented by this object a contract deployment
-	IsDeployment bool
-	IsSystemCall bool
-
-	// Arbitrum: total used multi-dimensional gas
-	UsedMultiGas     multigas.MultiGas
-	RetainedMultiGas multigas.MultiGas
 }
 
 // arbitrum
@@ -120,9 +112,6 @@ func NewContract(caller ContractRef, addr common.Address, value *uint256.Int, ga
 		// This pointer will be off the state transition
 		Gas:       gas,
 		jumpdests: jumpDest,
-
-		UsedMultiGas:     multigas.ZeroGas(),
-		RetainedMultiGas: multigas.ZeroGas(),
 	}
 }
 
@@ -133,12 +122,10 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
 	if overflow || udest >= uint64(len(c.Code)) {
-		fmt.Printf("invalid jump dest: %s (code size: %d)\n", dest.Hex(), len(c.Code))
 		return false, false
 	}
 	// Only JUMPDESTs allowed for destinations
 	if OpCode(c.Code[udest]) != JUMPDEST {
-		fmt.Printf("invalid jump dest opcode: %s at %d\n", OpCode(c.Code[udest]).String(), udest)
 		return false, false
 	}
 	return c.isCode(udest), true
@@ -147,10 +134,6 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
-	// Do we already have an analysis laying around?
-	//if c.analysis != nil {
-	//	return c.analysis.codeSegment(udest)
-	//}
 	// Do we have a contract hash already?
 	// If we do have a hash, that means it's a 'regular' contract. For regular
 	// contracts ( not temporary initcode), we store the analysis in a map
@@ -251,7 +234,8 @@ func (c *Contract) Value() *uint256.Int {
 	return c.value
 }
 
-// SetCallCode sets the code of the contract and address of the backing data object
+// SetCallCode sets the code of the contract and address of the backing data
+// object
 func (c *Contract) SetCallCode(addr *common.Address, hash common.Hash, code []byte) {
 	c.Code = code
 	c.CodeHash = hash
@@ -268,25 +252,4 @@ func (c *Contract) SetCodeOptionalHash(addr *common.Address, codeAndHash *codeAn
 
 func (c *Contract) JumpDest() *JumpDestCache {
 	return c.jumpdests
-}
-
-// UseMultiGas attempts the use gas, subtracts it, increments usedMultiGas, and returns true on success
-func (c *Contract) UseMultiGas(multiGas multigas.MultiGas, logger *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
-	if !c.UseGas(multiGas.SingleGas(), logger, reason) {
-		return false
-	}
-	c.UsedMultiGas.SaturatingAddInto(multiGas)
-	return true
-}
-
-func (c *Contract) GetTotalUsedMultiGas() multigas.MultiGas {
-	var total multigas.MultiGas
-	var underflow bool
-	if total, underflow = c.UsedMultiGas.SafeSub(c.RetainedMultiGas); underflow {
-		// NOTE: This should never happen, but if it does, log it and continue
-		log.Trace("used contract gas underflow", "used", c.UsedMultiGas, "retained", c.RetainedMultiGas)
-		// But since not all places are instrumented yet, clamp to zero for safety
-		return c.UsedMultiGas.SaturatingSub(c.RetainedMultiGas)
-	}
-	return total
 }

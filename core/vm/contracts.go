@@ -31,7 +31,6 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-	"github.com/erigontech/erigon/arb/multigas"
 	patched_big "github.com/ethereum/go-bigmodexpfix/src/math/big"
 	"github.com/holiman/uint256"
 
@@ -60,20 +59,15 @@ type PrecompiledContract interface {
 }
 
 func Precompiles(chainRules *chain.Rules) map[common.Address]PrecompiledContract {
-	if chainRules.IsArbitrum {
-		if chainRules.IsDia {
-			return PrecompiledContractsStartingFromArbOS50
-		}
-		if chainRules.IsStylus {
-			return PrecompiledContractsStartingFromArbOS30
-		}
-		return PrecompiledContractsBeforeArbOS30
-	}
 	switch {
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
 	case chainRules.IsBhilai:
 		return PrecompiledContractsBhilai
+	case chainRules.IsStylus:
+		return PrecompiledContractsArbOS30
+	case chainRules.IsArbitrum:
+		return PrecompiledContractsArbitrum
 	case chainRules.IsPrague:
 		return PrecompiledContractsPrague
 	case chainRules.IsNapoli:
@@ -272,17 +266,12 @@ func init() {
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []common.Address {
-	if rules.IsArbitrum {
-		if rules.IsDia {
-			return PrecompiledAddressesStartingFromArbOS50
-		}
-		if rules.IsStylus {
-			return PrecompiledAddressesStartingFromArbOS30
-		}
-		return PrecompiledAddressesBeforeArbOS30
-	}
-
 	switch {
+	case rules.IsStylus:
+		return PrecompiledAddressesArbOS30
+	case rules.IsArbitrum:
+		return PrecompiledAddressesArbitrum
+
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka
 	case rules.IsBhilai:
@@ -309,26 +298,26 @@ func ActivePrecompiles(rules *chain.Rules) []common.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, logger *tracing.Hooks, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, usedMultiGas multigas.MultiGas, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks, advancedInfoForArbos *AdvancedPrecompileCall,
+) (ret []byte, remainingGas uint64, err error) {
+	// Arbitrum
 	advanced, isAdvanced := p.(AdvancedPrecompile)
 	if isAdvanced {
-		return advanced.RunAdvanced(input, suppliedGas, advancedInfo)
+		return advanced.RunAdvanced(input, suppliedGas, advancedInfoForArbos)
 	}
-	precompileArbosAware, isPrecompileArbosAware := p.(ArbosAwarePrecompile)
-	if isPrecompileArbosAware && advancedInfo != nil {
-		precompileArbosAware.SetArbosVersion(advancedInfo.Evm.Context.ArbOSVersion)
-	}
+
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
-		return nil, 0, multigas.ComputationGas(suppliedGas), ErrOutOfGas
+		return nil, 0, ErrOutOfGas
 	}
-	if logger != nil && logger.OnGasChange != nil {
-		logger.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+
+	if tracer != nil && tracer.OnGasChange != nil {
+		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
 	}
 
 	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	return output, suppliedGas, multigas.ComputationGas(gasCost), err
+	return output, suppliedGas, err
 }
 
 // ECRECOVER implemented as a native contract.
@@ -435,50 +424,6 @@ type bigModExp struct {
 	eip2565 bool
 	osaka   bool // EIP-7823 & 7883
 }
-
-//var (
-//	big1      = big.NewInt(1)
-//	big3      = big.NewInt(3)
-//	big7      = big.NewInt(7)
-//	big20     = big.NewInt(20)
-//	big32     = big.NewInt(32)
-//	big64     = big.NewInt(64)
-//	big96     = big.NewInt(96)
-//	big480    = big.NewInt(480)
-//	big1024   = big.NewInt(1024)
-//	big3072   = big.NewInt(3072)
-//	big199680 = big.NewInt(199680)
-//)
-//
-//// modExpMultComplexityEip198 implements modExp multiplication complexity formula, as defined in EIP-198
-////
-//// def mult_complexity(x):
-////
-////	if x <= 64: return x ** 2
-////	elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
-////	else: return x ** 2 // 16 + 480 * x - 199680
-////
-//// where is x is max(base_length, modulus_length)
-//// TODO do we need it?
-//func modExpMultComplexityEip198(x *big.Int) *big.Int {
-//	switch {
-//	case x.Cmp(big64) <= 0:
-//		x.Mul(x, x) // x ** 2
-//	case x.Cmp(big1024) <= 0:
-//		// (x ** 2 // 4 ) + ( 96 * x - 3072)
-//		x = new(big.Int).Add(
-//			new(big.Int).Rsh(new(big.Int).Mul(x, x), 2),
-//			new(big.Int).Sub(new(big.Int).Mul(big96, x), big3072),
-//		)
-//	default:
-//		// (x ** 2 // 16) + (480 * x - 199680)
-//		x = new(big.Int).Add(
-//			new(big.Int).Rsh(new(big.Int).Mul(x, x), 4),
-//			new(big.Int).Sub(new(big.Int).Mul(big480, x), big199680),
-//		)
-//	}
-//	return x
-//}
 
 // modExpMultComplexityEip2565 implements modExp multiplication complexity formula, as defined in EIP-2565
 //
@@ -621,82 +566,6 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	gas := gasLo / finalDivisor
 	return max(gas, minGas)
 }
-
-//// RequiredGas returns the gas required to execute the pre-compiled contract.
-//func (c *bigModExp) RequiredGas(input []byte) uint64 {
-//	var (
-//		baseLen = new(big.Int).SetBytes(getData(input, 0, 32))
-//		expLen  = new(big.Int).SetBytes(getData(input, 32, 32))
-//		modLen  = new(big.Int).SetBytes(getData(input, 64, 32))
-//	)
-//	if len(input) > 96 {
-//		input = input[96:]
-//	} else {
-//		input = input[:0]
-//	}
-//	// Retrieve the head 32 bytes of exp for the adjusted exponent length
-//	var expHead *big.Int
-//	if big.NewInt(int64(len(input))).Cmp(baseLen) <= 0 {
-//		expHead = new(big.Int)
-//	} else {
-//		if expLen.Cmp(big32) > 0 {
-//			expHead = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), 32))
-//		} else {
-//			expHead = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), expLen.Uint64()))
-//		}
-//	}
-//	// Calculate the adjusted exponent length
-//	var msb int
-//	if bitlen := expHead.BitLen(); bitlen > 0 {
-//		msb = bitlen - 1
-//	}
-//	adjExpLen := new(big.Int)
-//	if expLen.Cmp(big32) > 0 {
-//		adjExpLen.Sub(expLen, big32)
-//		if c.osaka { // EIP-7883
-//			adjExpLen.Lsh(adjExpLen, 4) // ×16
-//		} else {
-//			adjExpLen.Lsh(adjExpLen, 3) // ×8
-//		}
-//	}
-//	adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
-//	adjExpLen = math.BigMax(adjExpLen, big1)
-//
-//	// Calculate the gas cost of the operation
-//	gas := new(big.Int).Set(math.BigMax(modLen, baseLen)) // max_length
-//	if c.osaka {
-//		// EIP-7883: ModExp Gas Cost Increase
-//		gas = modExpMultComplexityEip7883(gas /*max_length */)
-//		gas.Mul(gas, adjExpLen)
-//		if gas.BitLen() > 64 {
-//			return math.MaxUint64
-//		}
-//
-//		return max(500, gas.Uint64())
-//	} else if c.eip2565 {
-//		// EIP-2565 has three changes compared to EIP-198:
-//
-//		// 1. Different multiplication complexity
-//		gas = modExpMultComplexityEip2565(gas)
-//
-//		gas.Mul(gas, adjExpLen)
-//		// 2. Different divisor (`GQUADDIVISOR`) (3)
-//		gas.Div(gas, big3)
-//		if gas.BitLen() > 64 {
-//			return math.MaxUint64
-//		}
-//		// 3. Minimum price of 200 gas
-//		return max(200, gas.Uint64())
-//	}
-//	gas = modExpMultComplexityEip198(gas)
-//	gas.Mul(gas, adjExpLen)
-//	gas.Div(gas, big20)
-//
-//	if gas.BitLen() > 64 {
-//		return math.MaxUint64
-//	}
-//	return gas.Uint64()
-//}
 
 var (
 	errModExpBaseLengthTooLarge     = errors.New("base length is too large")

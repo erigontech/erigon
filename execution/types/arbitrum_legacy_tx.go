@@ -291,7 +291,7 @@ func (tx *ArbitrumLegacyTxData) UnmarshalJSON(input []byte) error {
 	// Validate signature if present
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
-		if err := SanityCheckSignature(&tx.V, &tx.R, &tx.S, true); err != nil {
+		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, true); err != nil {
 			return err
 		}
 	}

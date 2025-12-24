@@ -26,7 +26,6 @@ type WasmPrefix = [WasmPrefixLen]byte
 type WasmKey = [WasmKeyLen]byte
 
 const (
-	TargetWasm  WasmTarget = "wasm"
 	TargetWavm  WasmTarget = "wavm"
 	TargetArm64 WasmTarget = "arm64"
 	TargetAmd64 WasmTarget = "amd64"
@@ -97,14 +96,12 @@ func IsSupportedWasmTarget(target WasmTarget) bool {
 
 func WriteActivation(db kv.Putter, moduleHash common.Hash, asmMap map[WasmTarget][]byte) {
 	for target, asm := range asmMap {
-		if target != TargetWasm {
-			WriteActivatedAsm(db, target, moduleHash, asm)
-		}
+		writeActivatedAsm(db, target, moduleHash, asm)
 	}
 }
 
 // Stores the activated asm for a given moduleHash and target
-func WriteActivatedAsm(db kv.Putter, target WasmTarget, moduleHash common.Hash, asm []byte) {
+func writeActivatedAsm(db kv.Putter, target WasmTarget, moduleHash common.Hash, asm []byte) {
 	prefix, err := activatedAsmKeyPrefix(target)
 	if err != nil {
 		log.Crit("Failed to store activated wasm asm", "err", err)
@@ -117,9 +114,6 @@ func WriteActivatedAsm(db kv.Putter, target WasmTarget, moduleHash common.Hash, 
 
 // Retrieves the activated asm for a given moduleHash and target
 func ReadActivatedAsm(db kv.Getter, target WasmTarget, moduleHash common.Hash) []byte {
-	if target == TargetWasm {
-		return nil // wasm is not stored in the database
-	}
 	prefix, err := activatedAsmKeyPrefix(target)
 	if err != nil {
 		log.Crit("Failed to read activated wasm asm", "err", err)
