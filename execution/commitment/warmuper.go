@@ -58,6 +58,8 @@ type WarmupCache struct {
 	accounts        sync.Map // key: string(address), value: *Update
 	storages        sync.Map // key: string(address), value: *Update
 	branches        sync.Map // key: string(prefix), value: *BranchEntry
+	evictedAccounts sync.Map // key: string(address), value: struct{} - tracks permanently evicted accounts
+	evictedStorages sync.Map // key: string(address), value: struct{} - tracks permanently evicted storages
 	evictedBranches sync.Map // key: string(prefix), value: struct{} - tracks permanently evicted branches
 }
 
@@ -66,26 +68,42 @@ func NewWarmupCache() *WarmupCache {
 }
 
 func (c *WarmupCache) SetAccount(addr []byte, update *Update) {
+	key := string(addr)
+	if _, evicted := c.evictedAccounts.Load(key); evicted {
+		return
+	}
 	if update != nil {
-		c.accounts.Store(string(addr), update)
+		c.accounts.Store(key, update)
 	}
 }
 
 func (c *WarmupCache) SetStorage(addr []byte, update *Update) {
+	key := string(addr)
+	if _, evicted := c.evictedStorages.Load(key); evicted {
+		return
+	}
 	if update != nil {
-		c.storages.Store(string(addr), update)
+		c.storages.Store(key, update)
 	}
 }
 
 func (c *WarmupCache) GetAccount(addr []byte) (*Update, bool) {
-	if v, ok := c.accounts.Load(string(addr)); ok {
+	key := string(addr)
+	if _, evicted := c.evictedAccounts.Load(key); evicted {
+		return nil, false
+	}
+	if v, ok := c.accounts.Load(key); ok {
 		return v.(*Update), true
 	}
 	return nil, false
 }
 
 func (c *WarmupCache) GetStorage(addr []byte) (*Update, bool) {
-	if v, ok := c.storages.Load(string(addr)); ok {
+	key := string(addr)
+	if _, evicted := c.evictedStorages.Load(key); evicted {
+		return nil, false
+	}
+	if v, ok := c.storages.Load(key); ok {
 		return v.(*Update), true
 	}
 	return nil, false
@@ -123,6 +141,22 @@ func (c *WarmupCache) EvictBranch(prefix []byte) {
 	key := string(prefix)
 	c.branches.Delete(key)
 	c.evictedBranches.Store(key, struct{}{})
+}
+
+// EvictAccount permanently removes an account from the cache and marks it as evicted.
+// Once evicted, the account cannot be retrieved again, even if re-added.
+func (c *WarmupCache) EvictAccount(addr []byte) {
+	key := string(addr)
+	c.accounts.Delete(key)
+	c.evictedAccounts.Store(key, struct{}{})
+}
+
+// EvictStorage permanently removes a storage entry from the cache and marks it as evicted.
+// Once evicted, the storage cannot be retrieved again, even if re-added.
+func (c *WarmupCache) EvictStorage(addr []byte) {
+	key := string(addr)
+	c.storages.Delete(key)
+	c.evictedStorages.Store(key, struct{}{})
 }
 
 // WarmupStats contains statistics about the warmup phase.

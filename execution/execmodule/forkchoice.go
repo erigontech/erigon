@@ -360,6 +360,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		sd.ClearRam(true)
 
+		if err = tx.Commit(); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+		tx, err = e.db.BeginTemporalRw(ctx)
+		// note we already have defer tx.Rollback() on stack from earlier
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
@@ -470,26 +481,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
 
-	commitAndReopenTx := func() bool {
-		if err = tx.Commit(); err != nil {
-			sendError("updateForkChoice: tx commit after hasMore", err)
-			return false
-		}
-		tx, err = e.db.BeginTemporalRw(ctx) //nolint:gocritic
-		// note we already have defer tx.Rollback() on stack from earlier
-		if err != nil {
-			sendError("updateForkChoice: begin tx after has more", err)
-			return false
-		}
-		return true
-	}
-
-	// Make sure that any reorgs are in before execution.
-	// parallel warmup would fail otherwise!
-	if !commitAndReopenTx() {
-		return
-	}
-
 	for hasMore := true; hasMore; {
 		hasMore, err = e.executionPipeline.Run(e.db, sd, tx, initialCycle, firstCycle)
 		if err != nil {
@@ -517,7 +508,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 			sd.ClearRam(true)
-			if !commitAndReopenTx() {
+			if err = tx.Commit(); err != nil {
+				sendError("updateForkChoice: tx commit after hasMore", err)
+				return
+			}
+			tx, err = e.db.BeginTemporalRw(ctx)
+			// note we already have defer tx.Rollback() on stack from earlier
+			if err != nil {
+				sendError("updateForkChoice: begin tx after has more", err)
 				return
 			}
 		}
