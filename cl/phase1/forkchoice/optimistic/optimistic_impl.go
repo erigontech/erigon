@@ -100,7 +100,7 @@ func (impl *optimisticStoreImpl) ValidateBlock(block *cltypes.BeaconBlock) error
 	// for _, root := range toRemoves {
 	// 	delete(impl.optimisticRoots, root)
 	// }
-	impl.optimisticRoots.Range(func(root, node interface{}) bool {
+	impl.optimisticRoots.Range(func(root, node any) bool {
 		if node.(*opNode).execBlockNum < blockNum {
 			toRemoves = append(toRemoves, root.(common.Hash))
 		}

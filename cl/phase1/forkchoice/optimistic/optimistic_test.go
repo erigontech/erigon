@@ -81,7 +81,7 @@ func (t *optimisticTestSuite) TearDownTest() {
 
 func checkSyncMapLength(m *sync.Map, length int) bool {
 	l := 0
-	m.Range(func(_, _ interface{}) bool {
+	m.Range(func(_, _ any) bool {
 		l++
 		return true
 	})
