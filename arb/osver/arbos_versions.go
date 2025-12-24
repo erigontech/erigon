@@ -16,38 +16,31 @@
 
 package osver
 
-const (
-	ArbosVersion_0  = uint64(0)
-	ArbosVersion_1  = uint64(1)
-	ArbosVersion_2  = uint64(2)
-	ArbosVersion_3  = uint64(3)
-	ArbosVersion_4  = uint64(4)
-	ArbosVersion_5  = uint64(5)
-	ArbosVersion_6  = uint64(6)
-	ArbosVersion_7  = uint64(7)
-	ArbosVersion_8  = uint64(8)
-	ArbosVersion_9  = uint64(9)
-	ArbosVersion_10 = uint64(10)
-	ArbosVersion_11 = uint64(11)
-	ArbosVersion_20 = uint64(20)
-	ArbosVersion_30 = uint64(30)
-	ArbosVersion_31 = uint64(31)
-	ArbosVersion_32 = uint64(32)
-	ArbosVersion_40 = uint64(40)
-	ArbosVersion_41 = uint64(41)
-	ArbosVersion_50 = uint64(50)
-	ArbosVersion_51 = uint64(51)
-)
+const ArbosVersion_0 = uint64(0)
+const ArbosVersion_1 = uint64(1)
+const ArbosVersion_2 = uint64(2)
+const ArbosVersion_3 = uint64(3)
+const ArbosVersion_4 = uint64(4)
+const ArbosVersion_5 = uint64(5)
+const ArbosVersion_6 = uint64(6)
+const ArbosVersion_7 = uint64(7)
+const ArbosVersion_8 = uint64(8)
+const ArbosVersion_9 = uint64(9)
+const ArbosVersion_10 = uint64(10)
+const ArbosVersion_11 = uint64(11)
+const ArbosVersion_20 = uint64(20)
+const ArbosVersion_30 = uint64(30)
+const ArbosVersion_31 = uint64(31)
+const ArbosVersion_32 = uint64(32)
+const ArbosVersion_40 = uint64(40)
+const ArbosVersion_41 = uint64(41)
 
 const ArbosVersion_FixRedeemGas = ArbosVersion_11
 const ArbosVersion_Stylus = ArbosVersion_30
 const ArbosVersion_StylusFixes = ArbosVersion_31
 const ArbosVersion_StylusChargingFixes = ArbosVersion_32
-const MaxArbosVersionSupported = ArbosVersion_51
-const MaxDebugArbosVersionSupported = ArbosVersion_51
-const ArbosVersion_Dia = ArbosVersion_50
-
-const ArbosVersion_MultiConstraintFix = ArbosVersion_51
+const MaxArbosVersionSupported = ArbosVersion_32
+const MaxDebugArbosVersionSupported = ArbosVersion_32
 
 func IsStylus(arbosVersion uint64) bool {
 	return arbosVersion >= ArbosVersion_Stylus

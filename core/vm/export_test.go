@@ -17,6 +17,5 @@
 package vm
 
 func MemoryGasCost(mem *Memory, newMemSize uint64) (uint64, error) {
-	mg, err := memoryGasCost(mem, newMemSize)
-	return mg.SingleGas(), err
+	return memoryGasCost(mem, newMemSize)
 }

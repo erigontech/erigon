@@ -4,16 +4,13 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/arb/multigas"
 )
 
 var (
-	PrecompiledContractsBeforeArbOS30       = make(map[common.Address]PrecompiledContract)
-	PrecompiledAddressesBeforeArbOS30       []common.Address
-	PrecompiledContractsStartingFromArbOS30 = make(map[common.Address]PrecompiledContract)
-	PrecompiledAddressesStartingFromArbOS30 []common.Address
-	PrecompiledContractsStartingFromArbOS50 = make(map[common.Address]PrecompiledContract)
-	PrecompiledAddressesStartingFromArbOS50 []common.Address
+	PrecompiledContractsArbitrum = make(map[common.Address]PrecompiledContract)
+	PrecompiledAddressesArbitrum []common.Address
+	PrecompiledContractsArbOS30  = make(map[common.Address]PrecompiledContract)
+	PrecompiledAddressesArbOS30  []common.Address
 )
 
 var PrecompiledContractsP256Verify = map[common.Address]PrecompiledContract{
@@ -30,12 +27,6 @@ type AdvancedPrecompileCall struct {
 }
 
 type AdvancedPrecompile interface {
-	RunAdvanced(input []byte, suppliedGas uint64, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, usedMultiGas multigas.MultiGas, err error)
-	PrecompiledContract
-}
-
-// TODO move into arbitrum package
-type ArbosAwarePrecompile interface {
-	SetArbosVersion(arbosVersion uint64)
+	RunAdvanced(input []byte, suppliedGas uint64, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, err error)
 	PrecompiledContract
 }

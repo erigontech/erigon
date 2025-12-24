@@ -137,11 +137,3 @@ func ReturnNormalStack(s *Stack) {
 	s.data = s.data[:0]
 	stackPool.Put(s)
 }
-
-func (st *Stack) String() string {
-	var s string
-	for _, di := range st.data {
-		s += di.Hex() + ", "
-	}
-	return s
-}

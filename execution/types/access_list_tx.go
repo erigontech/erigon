@@ -28,10 +28,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 // AccessTuple is the element type of an access list.
@@ -215,8 +214,8 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
-	b := NewEncodingBuf()
-	defer PooledBuf.Put(b)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -230,8 +229,8 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 
 func (tx *AccessListTx) MarshalBinaryForHashing(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(true)
-	b := NewEncodingBuf()
-	defer PooledBuf.Put(b)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -322,8 +321,8 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := NewEncodingBuf()
-	defer PooledBuf.Put(b)
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -466,8 +465,7 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 		checkNonce: true,
 		checkGas:   true,
 
-		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
-		Tx:           tx,
+		Tx: tx,
 	}
 
 	if !rules.IsBerlin {
@@ -497,7 +495,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := PrefixedRlpHash(AccessListTxType, []interface{}{
+	hash := prefixedRlpHash(AccessListTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
@@ -513,7 +511,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 }
 
 func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
-	return PrefixedRlpHash(
+	return prefixedRlpHash(
 		AccessListTxType,
 		[]interface{}{
 			chainID,
@@ -537,7 +535,7 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) CachedSender() (sender common.Address, ok bool) {
+func (tx *AccessListTx) cachedSender() (sender common.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false

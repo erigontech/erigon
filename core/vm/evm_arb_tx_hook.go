@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -39,10 +38,10 @@ type TxProcessingHook interface {
 	MsgIsNonMutating() bool
 
 	// used within STF
-	StartTxHook() (bool, multigas.MultiGas, error, []byte) // return 4-tuple rather than *struct to avoid an import cycle
+	StartTxHook() (bool, uint64, error, []byte) // return 4-tuple rather than *struct to avoid an import cycle
 	ScheduledTxes() types.Transactions
 	EndTxHook(totalGasUsed uint64, evmSuccess bool)
-	GasChargingHook(gasRemaining *uint64, intrinsicGas uint64) (common.Address, multigas.MultiGas, error)
+	GasChargingHook(gasRemaining *uint64) (common.Address, error)
 	ForceRefundGas() uint64
 	NonrefundableGas() uint64
 	DropTip() bool
@@ -67,12 +66,12 @@ func (p DefaultTxProcessor) IsArbitrum() bool { return false }
 
 func (p DefaultTxProcessor) SetMessage(*types.Message, evmtypes.IntraBlockState) {}
 
-func (p DefaultTxProcessor) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
-	return false, multigas.ZeroGas(), nil, nil
+func (p DefaultTxProcessor) StartTxHook() (bool, uint64, error, []byte) {
+	return false, 0, nil, nil
 }
 
-func (p DefaultTxProcessor) GasChargingHook(gasRemaining *uint64, intrinsing uint64) (common.Address, multigas.MultiGas, error) {
-	return p.evm.Context.Coinbase, multigas.ZeroGas(), nil
+func (p DefaultTxProcessor) GasChargingHook(gasRemaining *uint64) (common.Address, error) {
+	return p.evm.Context.Coinbase, nil
 }
 
 func (p DefaultTxProcessor) PushContract(contract *Contract) {}
