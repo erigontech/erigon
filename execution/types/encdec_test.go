@@ -404,7 +404,7 @@ func isEqualBytes(a, b []byte) bool {
 	return true
 }
 
-func check(t *testing.T, f string, want, got interface{}) {
+func check(t *testing.T, f string, want, got any) {
 	t.Helper()
 
 	if !reflect.DeepEqual(want, got) {

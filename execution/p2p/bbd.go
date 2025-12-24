@@ -296,7 +296,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			)
 		}
 
-		progressLogArgs := []interface{}{
+		progressLogArgs := []any{
 			"num", parentNum,
 			"hash", parentHash,
 			"amount", amount,
@@ -415,7 +415,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 	batchSize := (len(headers) + len(availablePeers) - 1) / len(availablePeers)
 	batchesCount := (len(headers) + batchSize - 1) / batchSize
-	progressLogArgs := []interface{}{
+	progressLogArgs := []any{
 		"fromNum", headers[0].Number.Uint64(),
 		"fromHash", headers[0].Hash(),
 		"toNum", headers[len(headers)-1].Number.Uint64(),

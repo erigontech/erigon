@@ -877,8 +877,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 	}
 }
 
-type applyResult interface {
-}
+type applyResult any
 
 type blockResult struct {
 	BlockNum    uint64
