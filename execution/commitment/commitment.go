@@ -245,10 +245,6 @@ func (be *BranchEncoder) CollectUpdate(
 	if len(prev) > 0 {
 		if bytes.Equal(prev, update) {
 			//fmt.Printf("skip collectBranchUpdate [%x]\n", prefix)
-			// Evict from cache even if skipped
-			if cache != nil {
-				cache.EvictBranch(prefix)
-			}
 			return lastNibble, nil // do not write the same data for prefix
 		}
 		update, err = be.merger.Merge(prev, update)
@@ -1284,27 +1280,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				}
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
-			}
-
-			// Process batch when full
-			if len(pairs) >= warmupBatchSize {
-				for _, p := range pairs {
-					select {
-					case <-ctx.Done():
-						processErr = ctx.Err()
-						return processErr
-					default:
-					}
-					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
-						processErr = err
-						return err
-					}
-				}
-				// // Drain warmuper before the next processing.
-				// if warmuper != nil {
-				// 	warmuper.DrainPending()
-				// }
-				pairs = nil // Reset batch
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})

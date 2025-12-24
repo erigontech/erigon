@@ -118,6 +118,7 @@ func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
 func (c *WarmupCache) EvictBranch(prefix []byte) {
 	key := string(prefix)
 	c.branches.Delete(key)
+	fmt.Println("eviction")
 	c.evictedBranches.Store(key, struct{}{})
 }
 
