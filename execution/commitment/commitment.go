@@ -1226,7 +1226,7 @@ func (t *Updates) Close() {
 }
 
 // warmupBatchSize is the number of keys to warm and process at a time to control memory usage.
-const warmupBatchSize = 10_000
+const warmupBatchSize = 1_000_000
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 // Keys are processed in batches of 10k to control memory usage.
@@ -1276,7 +1276,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return err
 					}
 				}
-				// Drain warmuper before the next processing.
+				// // Drain warmuper before the next processing.
 				// if warmuper != nil {
 				// 	warmuper.DrainPending()
 				// }
@@ -1340,9 +1340,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			// Process batch when full
 			if len(pairs) >= warmupBatchSize {
 				// Drain warmuper before processing to ensure warmup is complete for this batch
-				if warmuper != nil {
-					warmuper.DrainPending()
-				}
+
 				for _, p := range pairs {
 					select {
 					case <-ctx.Done():
@@ -1355,6 +1353,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return false
 					}
 				}
+				// if warmuper != nil {
+				// 	warmuper.DrainPending()
+				// }
 				pairs = pairs[:0] // Reset batch, reuse capacity
 			}
 			return true
@@ -1362,11 +1363,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 		if processErr != nil {
 			return processErr
-		}
-
-		// Drain warmuper before processing remaining keys
-		if warmuper != nil && len(pairs) > 0 {
-			warmuper.DrainPending()
 		}
 		// Process remaining keys
 		for _, p := range pairs {
