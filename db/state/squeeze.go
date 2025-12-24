@@ -552,6 +552,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
 		return latestRoot, nil
 	}
+
+	start = time.Now()
 	logger.Info("[squeeze] starting")
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
@@ -574,6 +576,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		logger.Warn("[squeeze] failed to build missed accessors", "err", err)
 		return nil, err
 	}
+	logger.Info("[squeeze] done", "duration", time.Since(start), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 	return latestRoot, nil
 }
