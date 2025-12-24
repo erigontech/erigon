@@ -215,6 +215,7 @@ func (be *BranchEncoder) CollectUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
+	cache *WarmupCache,
 ) (lastNibble int, err error) {
 
 	prev, prevStep, err := ctx.Branch(prefix)
@@ -229,6 +230,10 @@ func (be *BranchEncoder) CollectUpdate(
 	if len(prev) > 0 {
 		if bytes.Equal(prev, update) {
 			//fmt.Printf("skip collectBranchUpdate [%x]\n", prefix)
+			// Evict from cache even if skipped
+			if cache != nil {
+				cache.EvictBranch(prefix)
+			}
 			return lastNibble, nil // do not write the same data for prefix
 		}
 		update, err = be.merger.Merge(prev, update)
@@ -240,6 +245,10 @@ func (be *BranchEncoder) CollectUpdate(
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
+	}
+	// Evict from cache after successful update
+	if cache != nil {
+		cache.EvictBranch(prefix)
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
@@ -1226,7 +1235,7 @@ func (t *Updates) Close() {
 }
 
 // warmupBatchSize is the number of keys to warm and process at a time to control memory usage.
-const warmupBatchSize = 1_000_000
+const warmupBatchSize = 10_000_000
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 // Keys are processed in batches of 10k to control memory usage.

@@ -2034,7 +2034,7 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 
 		upCell.reset()
 		if hph.branchBefore[row] {
-			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop, warmupCache)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -2064,7 +2064,7 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 
 		if hph.branchBefore[row] { // encode Delete if prefix existed before
 			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
-			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop, warmupCache)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -2158,7 +2158,7 @@ func (hph *HexPatriciaHashed) fold(warmupCache *WarmupCache) (err error) {
 
 		b := [...]byte{0x80}
 		cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
-		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
+		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter, warmupCache)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}

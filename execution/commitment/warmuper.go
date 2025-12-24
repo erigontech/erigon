@@ -55,9 +55,10 @@ type BranchEntry struct {
 // WarmupCache stores prefetched Account, Storage, and Branch data from warmup phase.
 // Thread-safe for concurrent writes during warmup.
 type WarmupCache struct {
-	accounts sync.Map // key: string(address), value: *Update
-	storages sync.Map // key: string(address), value: *Update
-	branches sync.Map // key: string(prefix), value: *BranchEntry
+	accounts        sync.Map // key: string(address), value: *Update
+	storages        sync.Map // key: string(address), value: *Update
+	branches        sync.Map // key: string(prefix), value: *BranchEntry
+	evictedBranches sync.Map // key: string(prefix), value: struct{} - tracks permanently evicted branches
 }
 
 func NewWarmupCache() *WarmupCache {
@@ -97,10 +98,23 @@ func (c *WarmupCache) SetBranch(prefix []byte, data []byte, step kv.Step) {
 }
 
 func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
-	if v, ok := c.branches.Load(string(prefix)); ok {
+	key := string(prefix)
+	// Check if this branch has been permanently evicted
+	if _, evicted := c.evictedBranches.Load(key); evicted {
+		return nil, false
+	}
+	if v, ok := c.branches.Load(key); ok {
 		return v.(*BranchEntry), true
 	}
 	return nil, false
+}
+
+// EvictBranch permanently removes a branch from the cache and marks it as evicted.
+// Once evicted, the branch cannot be retrieved again, even if re-added.
+func (c *WarmupCache) EvictBranch(prefix []byte) {
+	key := string(prefix)
+	c.branches.Delete(key)
+	c.evictedBranches.Store(key, struct{}{})
 }
 
 // Clear removes all entries from the cache.
@@ -108,6 +122,7 @@ func (c *WarmupCache) Clear() {
 	c.accounts.Clear()
 	c.storages.Clear()
 	c.branches.Clear()
+	c.evictedBranches.Clear()
 }
 
 // WarmupStats contains statistics about the warmup phase.
