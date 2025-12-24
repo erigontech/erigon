@@ -1023,12 +1023,16 @@ func doIntegrity(cliCtx *cli.Context) error {
 	if len(skipChecks) > 0 {
 		var finalChecks []integrity.Check
 		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
+			found := false
 			for _, chk := range requestedChecks {
 				if chk == integrity.Check(skipCheck) {
+					found = true
 					logger.Info("[integrity] skipping check", "check", chk)
-					continue
+					break
 				}
-				finalChecks = append(finalChecks, chk)
+			}
+			if !found {
+				finalChecks = append(finalChecks, integrity.Check(skipCheck))
 			}
 		}
 
