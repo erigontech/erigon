@@ -270,6 +270,14 @@ Loop:
 
 		// Register pending block
 		pendingMu.Lock()
+		// Skip blocks with no transactions
+		if len(body.Transactions) == 0 {
+			// Write empty senders for blocks with no transactions
+			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil); err != nil {
+				return err
+			}
+			continue
+		}
 		pendingBlocks[blockIndex] = &pendingBlock{
 			senders: make([]byte, len(body.Transactions)*length.Addr),
 			txCount: len(body.Transactions),
