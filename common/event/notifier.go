@@ -46,7 +46,9 @@ func (en *Notifier) Reset() {
 // SetAndBroadcast sets the "signaled" state and notifies all waiters.
 func (en *Notifier) SetAndBroadcast() {
 	en.hasEvent.Store(true)
+	en.mutex.Lock()
 	en.cond.Broadcast()
+	en.mutex.Unlock()
 }
 
 // Wait for the "signaled" state.
@@ -76,7 +78,9 @@ func (en *Notifier) Wait(ctx context.Context) error {
 	// if the parent context is done, force the waiting goroutine to exit
 	// this might lead to spurious wake-ups for other waiters,
 	// but it is ok due to the waiting loop conditions
+	en.mutex.Lock()
 	en.cond.Broadcast()
+	en.mutex.Unlock()
 
 	wg.Wait()
 	return ctx.Err()
