@@ -118,16 +118,7 @@ func (c *WarmupCache) GetBranch(prefix []byte) (*BranchEntry, bool) {
 func (c *WarmupCache) EvictBranch(prefix []byte) {
 	key := string(prefix)
 	c.branches.Delete(key)
-	fmt.Println("eviction")
 	c.evictedBranches.Store(key, struct{}{})
-}
-
-// Clear removes all entries from the cache.
-func (c *WarmupCache) Clear() {
-	c.accounts.Clear()
-	c.storages.Clear()
-	c.branches.Clear()
-	c.evictedBranches.Clear()
 }
 
 // WarmupStats contains statistics about the warmup phase.

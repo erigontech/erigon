@@ -1245,9 +1245,6 @@ func (t *Updates) Close() {
 	}
 }
 
-// warmupBatchSize is the number of keys to warm and process at a time to control memory usage.
-const warmupBatchSize = 10_000_000
-
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 // Keys are processed in batches of 10k to control memory usage.
 // If warmuper is non-nil, keys are submitted for parallel warming before processing.
@@ -1258,9 +1255,8 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		clear(t.keys)
 
 		// Collect and process keys in batches to control memory
-		pairs := make([]*KeyUpdate, 0, warmupBatchSize)
+		pairs := make([]*KeyUpdate, 0, 50_000)
 		var prevKey []byte
-		var processErr error
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			// Make copies since ETL may reuse buffers
@@ -1286,10 +1282,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		if err != nil {
 			return err
 		}
-		if processErr != nil {
-			return processErr
-		}
-
+		fmt.Println("len(pairs)", len(pairs))
 		// Process remaining keys
 		for _, p := range pairs {
 			select {
@@ -1306,7 +1299,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 	case ModeUpdate:
 		// Collect and process keys in batches to control memory
-		pairs := make([]*KeyUpdate, 0, warmupBatchSize)
+		pairs := make([]*KeyUpdate, 0, 50_000)
 		var prevKey []byte
 		var processErr error
 
@@ -1334,28 +1327,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				}
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
-			}
-
-			// Process batch when full
-			if len(pairs) >= warmupBatchSize {
-				// Drain warmuper before processing to ensure warmup is complete for this batch
-
-				for _, p := range pairs {
-					select {
-					case <-ctx.Done():
-						processErr = ctx.Err()
-						return false
-					default:
-					}
-					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
-						processErr = err
-						return false
-					}
-				}
-				// if warmuper != nil {
-				// 	warmuper.DrainPending()
-				// }
-				pairs = pairs[:0] // Reset batch, reuse capacity
 			}
 			return true
 		})
