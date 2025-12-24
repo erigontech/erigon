@@ -35,8 +35,8 @@ type BorConfig struct {
 	ValidatorContract     string            `json:"validatorContract"`     // Validator set contract
 	StateReceiverContract string            `json:"stateReceiverContract"` // State receiver contract
 
-	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
-	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
+	OverrideStateSyncRecords map[string]int `json:"overrideStateSyncRecords"` // override state records count
+	BlockAlloc               map[string]any `json:"blockAlloc"`
 
 	JaipurBlock                *big.Int                  `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on Jaipur)
 	DelhiBlock                 *big.Int                  `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on Delhi)
