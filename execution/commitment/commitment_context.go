@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"sync/atomic"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -172,9 +170,15 @@ func (sdc *CommitmentContext) SetTrace(trace bool) {
 	sdc.patriciaTrie.SetTrace(trace)
 }
 
-func NewCommitmentContext(mode Mode, trieVariant TrieVariant, tmpDir string) *CommitmentContext {
-	ctx := &CommitmentContext{}
-	ctx.patriciaTrie, ctx.updates = InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
+func (sdc *CommitmentContext) EnableCsvMetrics(filePathPrefix string) {
+	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
+}
+
+func NewCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *CommitmentContext {
+	ctx := &CommitmentContext{
+		sharedDomains: sd,
+	}
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	return ctx
 }
 
@@ -382,19 +386,7 @@ func (sdc *CommitmentContext) SeekCommitment(ctx context.Context, getter kv.Temp
 	if blockNum == 0 && txNum == 0 {
 		return 0, 0, true, nil
 	}
-	//
-	//newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
-	//if err != nil {
-	//	return 0, 0, false, err
-	//}
-	//if bytes.Equal(newRh, empty.RootHash.Bytes()) {
-	//	sdc.sharedDomains.SetBlockNum(0)
-	//	sdc.sharedDomains.SetTxNum(0)
-	//	return 0, 0, false, err
-	//}
-	//if sdc.trace {
-	//	fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
-	//}
+
 	if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
 		return 0, 0, false, err
 	}
@@ -500,40 +492,6 @@ func (sdc *CommitmentContext) restorePatriciaState(value []byte) (uint64, uint64
 		log.Debug(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
 	}
 	return cs.blockNum, cs.txNum, nil
-}
-
-// Dummy way to rebuild commitment. Dummy because works for small state only.
-// To rebuild commitment correctly for any state size - use RebuildCommitmentFiles.
-func (sdc *CommitmentContext) rebuildCommitment(ctx context.Context, roTx kv.TemporalRwTx, blockNum, txNum uint64) ([]byte, error) {
-	it, err := roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-		sdc.updates.TouchPlainKey(string(k), nil, sdc.updates.touchAccount)
-	}
-
-	it, err = roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-		sdc.updates.TouchPlainKey(string(k), nil, sdc.updates.touchAccount)
-	}
-
-	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, roTx, roTx, true, blockNum, txNum, "rebuild commit", nil)
 }
 
 type TrieContext struct {

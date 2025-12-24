@@ -22,7 +22,7 @@ import "github.com/holiman/uint256"
 // it maintains element.bestIndex field
 type bestSlice struct {
 	ms             []*metaTxn
-	pendingBaseFee uint64
+	pendingBaseFee uint256.Int
 }
 
 func (s *bestSlice) Len() int {
@@ -35,7 +35,7 @@ func (s *bestSlice) Swap(i, j int) {
 }
 
 func (s *bestSlice) Less(i, j int) bool {
-	return s.ms[i].better(s.ms[j], *uint256.NewInt(s.pendingBaseFee))
+	return s.ms[i].better(s.ms[j], s.pendingBaseFee)
 }
 
 func (s *bestSlice) UnsafeRemove(i *metaTxn) {
@@ -52,7 +52,7 @@ func (s *bestSlice) UnsafeAdd(i *metaTxn) {
 
 type BestQueue struct {
 	ms             []*metaTxn
-	pendingBaseFee uint64
+	pendingBaseFee uint256.Int
 }
 
 func (p *BestQueue) Len() int {
@@ -60,7 +60,7 @@ func (p *BestQueue) Len() int {
 }
 
 func (p *BestQueue) Less(i, j int) bool {
-	return p.ms[i].better(p.ms[j], *uint256.NewInt(p.pendingBaseFee))
+	return p.ms[i].better(p.ms[j], p.pendingBaseFee)
 }
 
 func (p *BestQueue) Swap(i, j int) {
@@ -89,7 +89,7 @@ func (p *BestQueue) Pop() interface{} {
 
 type WorstQueue struct {
 	ms             []*metaTxn
-	pendingBaseFee uint64
+	pendingBaseFee uint256.Int
 }
 
 func (p *WorstQueue) Len() int {
@@ -97,7 +97,7 @@ func (p *WorstQueue) Len() int {
 }
 
 func (p *WorstQueue) Less(i, j int) bool {
-	return p.ms[i].worse(p.ms[j], *uint256.NewInt(p.pendingBaseFee))
+	return p.ms[i].worse(p.ms[j], p.pendingBaseFee)
 }
 
 func (p *WorstQueue) Swap(i, j int) {

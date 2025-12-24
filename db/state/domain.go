@@ -1969,3 +1969,50 @@ func versionTooLowPanic(filename string, version version.Versions) {
 		version.Current,
 	))
 }
+
+// [startTxNum, endTxNum)]
+func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
+	// need to do this first as TraceKey doesn't work if internal seg readers are seeked into different locations
+	v2, ok, err := dt.GetAsOf(key, endTxNum, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		v2 = nil
+	}
+
+	ht, err := dt.ht.DebugHistoryTraceKey(ctx, key, startTxNum, endTxNum, roTx)
+	if err != nil {
+		return nil, err
+	}
+
+	prevTxNum := int64(-1)
+	fht := stream.FilterDuo(ht, func(txNum uint64, v []byte) bool {
+		if prevTxNum == -1 {
+			prevTxNum = int64(txNum)
+			return false
+		}
+		return true
+	})
+
+	tfht := stream.TransformDuo(fht, func(txNum uint64, v []byte) (uint64, []byte, error) {
+		defer func() {
+			prevTxNum = int64(txNum)
+		}()
+
+		return uint64(prevTxNum), v, nil
+	})
+
+	// using maxuint64, so that this values goes last in asc order
+	// then when we actually use this value, we adjust the txNum
+	ds := stream.NewSingleDuo(uint64(math.MaxUint64), v2)
+	dst := stream.Union2(tfht, ds, order.Asc, kv.Unlim)
+
+	return stream.TransformDuo(dst, func(txNum uint64, v []byte) (uint64, []byte, error) {
+		if txNum == math.MaxUint64 {
+			// prevTxNum has the last txNum in the stream
+			txNum = uint64(prevTxNum)
+		}
+		return txNum, v, nil
+	}), nil
+}

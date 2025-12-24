@@ -522,9 +522,9 @@ func (s *Sync) PrintTimings() []interface{} {
 			break
 		}
 		if s.timings[i].isUnwind {
-			logCtx = append(logCtx, "Unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, "unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else if s.timings[i].isPrune {
-			logCtx = append(logCtx, "Prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, "prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else {
 			logCtx = append(logCtx, string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		}

@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -74,6 +75,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -90,6 +92,10 @@ import (
 )
 
 const MockInsertAsInitialCycle = false
+
+type StateChangesClient interface {
+	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
+}
 
 // MockSentry is a Network Interface mock. So, unit-tests can test many Erigon's components - but without net-interaction
 type MockSentry struct {
@@ -121,7 +127,8 @@ type MockSentry struct {
 	retirementDone       chan struct{}
 	retirementWg         sync.WaitGroup
 
-	Notifications *shards.Notifications
+	Notifications      *shards.Notifications
+	stateChangesClient StateChangesClient
 
 	// TxPool
 	TxPool           *txpool.TxPool
@@ -304,7 +311,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		panic(err)
 	}
 
-	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
@@ -312,19 +319,20 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
-		tb:             tb,
-		Log:            logger,
-		Dirs:           dirs,
-		Engine:         engine,
-		ChainConfig:    gspec.Config,
-		Key:            key,
-		Notifications:  shards.NewNotifications(erigonGrpcServeer),
-		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
-		BlockSnapshots: allSnapshots,
-		BlockReader:    br,
-		ReceiptsReader: receipts.NewGenerator(br, engine, 5*time.Second),
-		HistoryV3:      true,
-		cfg:            cfg,
+		tb:                 tb,
+		Log:                logger,
+		Dirs:               dirs,
+		Engine:             engine,
+		ChainConfig:        gspec.Config,
+		Key:                key,
+		Notifications:      shards.NewNotifications(erigonGrpcServer),
+		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
+		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		BlockSnapshots:     allSnapshots,
+		BlockReader:        br,
+		ReceiptsReader:     receipts.NewGenerator(br, engine, 5*time.Second),
+		HistoryV3:          true,
+		cfg:                cfg,
 	}
 	mock.retirementStart, _ = mock.Notifications.Events.AddRetirementStartSubscription()
 	mock.retirementDone, _ = mock.Notifications.Events.AddRetirementDoneSubscription()
@@ -363,7 +371,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
-		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
+		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
 		mock.TxPool, mock.TxPoolGrpcServer, err = txpool.Assemble(
 			ctx,
 			poolCfg,
@@ -374,7 +382,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			func() {}, /* builderNotifyNewTxns */
 			logger,
 			nil,
-			txpool.WithP2PFetcherWg(&mock.ReceiveWg),
+			//txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
@@ -548,7 +556,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, tracer)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
-	mock.Eth1ExecutionService = execmodule.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.RecentLogs, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
+	hook := stageloop.NewHook(mock.Ctx, mock.DB, mock.Notifications, mock.posStagedSync, mock.BlockReader, mock.ChainConfig, logger, nil, nil, nil)
+
+	mock.Eth1ExecutionService = execmodule.NewEthereumExecutionModule(ctx, mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, hook, mock.Notifications.Accumulator, mock.Notifications.RecentReceipts, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -653,6 +663,12 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.AllProtocolChanges
+
+	// disable post-cancun forks
+	chainConfig.PragueTime = nil
+	chainConfig.OsakaTime = nil
+	chainConfig.AmsterdamTime = nil
+
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -720,19 +736,29 @@ func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
-	ctx := context.Background()
+	insertedBlocks := map[uint64]struct{}{}
+
 	for i := 0; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(false); err != nil {
 			return err
 		}
+		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
-	if err := wr.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
+
+	if err := wr.InsertBlocksAndWait(ms.Ctx, chain.Blocks); err != nil {
 		return err
 	}
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, verr, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	streamCtx, cancel := context.WithTimeout(ms.Ctx, 30*time.Second)
+	defer cancel()
+	stream, err := ms.stateChangesClient.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
+	if err != nil {
+		return err
+	}
+
+	status, verr, _, err := wr.UpdateForkChoice(ms.Ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
 	}
@@ -742,6 +768,31 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 			return fmt.Errorf("insertion failed for block %d, code: %s err: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String(), *verr)
 		}
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
+	}
+
+	// UpdateForkChoice calls commit asyncronously so we need to
+	// wait for confimation that the headers are processed before
+	// returning to the caller
+	lastSeenBlock := chain.Headers[0].Number.Uint64()
+
+	for len(insertedBlocks) > 0 {
+		req, err := stream.Recv()
+		if err != nil {
+			if ms.Ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("block insert recv failed: %w, %d remaining", err, len(insertedBlocks))
+		}
+
+		for _, change := range req.ChangeBatch {
+			if change.Direction == remoteproto.Direction_UNWIND {
+				insertedBlocks = nil
+			}
+			for lastSeenBlock <= change.BlockHeight {
+				delete(insertedBlocks, lastSeenBlock)
+				lastSeenBlock++
+			}
+		}
 	}
 
 	return nil

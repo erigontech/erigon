@@ -149,7 +149,7 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *AtomicTorrentFS) (ok bool, err error) {
 	select {
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return false, context.Cause(ctx)
 	default:
 	}
 	fName, err = ensureCantLeaveDir(fName, root)
@@ -166,13 +166,6 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 	}
 
 	fPath := filepath.Join(root, fName)
-	exists, err = dir2.FileExist(fPath)
-	if err != nil {
-		return false, err
-	}
-	if !exists {
-		return false, nil
-	}
 
 	// TODO: Consider using the auto-piece sizing?
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}

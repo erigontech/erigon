@@ -3,7 +3,6 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -18,9 +17,6 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	defer func() {
 		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
 	}()
-
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
 
 	txNumsReader := blockReader.TxnumReader(ctx)
 
@@ -63,7 +59,7 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.T
 	prevLogIdxAfterTx := uint32(0)
 	blockNum := fromBlock
 	var _min, _max uint64
-	_min, _ = txNumsReader.Min(tx, fromBlock)
+	_min = fromTxNum
 	_max, _ = txNumsReader.Max(tx, fromBlock)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 		cumUsedGas, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -399,7 +400,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		copy(trResult.Address[:], toVal[:])
 		trace.Result = trResult
 	} else {
-		trace.Result = &TraceResult{}
+		trace.Result = &TraceResult{GasUsed: (*hexutil.Big)(big.NewInt(0))}
 		trace.Type = CALL
 	}
 	if deep {
@@ -1114,7 +1115,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	ot.compat = api.compatibility
-	if traceTypeTrace || traceTypeVmTrace {
+	if traceTypeTrace || traceTypeVmTrace || traceTypeStateDiff {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
 	}

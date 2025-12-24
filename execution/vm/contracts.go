@@ -36,6 +36,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/blake2b"
 	libbn254 "github.com/erigontech/erigon/common/crypto/bn254"
@@ -333,7 +334,7 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	v := input[63] - 27
 
 	// tighter sig s values input homestead only apply to txn sigs
-	if !allZero(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
+	if bitutil.TestBytes(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
@@ -577,9 +578,9 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		modLen  = binary.BigEndian.Uint64(header[96-8 : 96])
 
 		// 32 - 8 bytes are truncated in the Uint64 conversion above
-		baseLenHighBitsAreZero = allZero(header[0 : 32-8])
-		expLenHighBitsAreZero  = allZero(header[32 : 64-8])
-		modLenHighBitsAreZero  = allZero(header[64 : 96-8])
+		baseLenHighBitsAreZero = !bitutil.TestBytes(header[0 : 32-8])
+		expLenHighBitsAreZero  = !bitutil.TestBytes(header[32 : 64-8])
+		modLenHighBitsAreZero  = !bitutil.TestBytes(header[64 : 96-8])
 	)
 	if c.osaka {
 		// EIP-7823: Set upper bounds for MODEXP

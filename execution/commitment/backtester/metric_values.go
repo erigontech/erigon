@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,21 +14,37 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bitmapdb
+package backtester
 
-import (
-	"github.com/RoaringBitmap/roaring/v2/roaring64"
-)
+import "github.com/erigontech/erigon/execution/commitment"
 
-type BitmapStream struct {
-	bm *roaring64.Bitmap
-	it roaring64.IntPeekable64
+type MetricValues struct {
+	commitment.MetricValues
+	BatchId uint64
 }
 
-func NewBitmapStream(bm *roaring64.Bitmap) *BitmapStream {
-	return &BitmapStream{bm: bm, it: bm.Iterator()}
+type slowestBatchesHeap []MetricValues
+
+func (h *slowestBatchesHeap) Len() int {
+	return len(*h)
 }
-func (it *BitmapStream) HasNext() bool                        { return it.it.HasNext() }
-func (it *BitmapStream) Close()                               { ReturnToPool64(it.bm) }
-func (it *BitmapStream) Next() (uint64, error)                { return it.it.Next(), nil }
-func (it *BitmapStream) ToBitmap() (*roaring64.Bitmap, error) { return it.bm, nil }
+
+func (h *slowestBatchesHeap) Less(i, j int) bool {
+	return (*h)[i].SpentProcessing < (*h)[j].SpentProcessing
+}
+
+func (h *slowestBatchesHeap) Swap(i, j int) {
+	(*h)[i], (*h)[j] = (*h)[j], (*h)[i]
+}
+
+func (h *slowestBatchesHeap) Push(x any) {
+	*h = append(*h, x.(MetricValues))
+}
+
+func (h *slowestBatchesHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}

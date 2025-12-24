@@ -395,6 +395,13 @@ type ReadResult struct {
 	value       interface{}
 }
 
+func (res *ReadResult) DepString() string {
+	if res.depIdx == UnknownDep {
+		return "unknown"
+	}
+	return fmt.Sprintf("%d.%d", res.depIdx, res.incarnation)
+}
+
 func (res *ReadResult) DepIdx() int {
 	return res.depIdx
 }

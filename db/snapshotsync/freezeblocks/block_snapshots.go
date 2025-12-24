@@ -320,13 +320,17 @@ func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnap
 		return false, nil
 	}
 	merged = true
-	onMerge := func(r snapshotsync.Range) error {
+	onMerge := func(mergedFileNames []string) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
 
 		if seedNewSnapshots != nil {
-			downloadRequest := []services.DownloadRequest{{Path: "", TorrentHash: ""}}
+			downloadRequest := make([]services.DownloadRequest, 0, len(mergedFileNames))
+			for _, filePath := range mergedFileNames {
+				downloadRequest = append(downloadRequest, services.DownloadRequest{Path: filePath, TorrentHash: ""})
+			}
+
 			if err := seedNewSnapshots(downloadRequest); err != nil {
 				return err
 			}

@@ -321,9 +321,6 @@ type execContext interface {
 	GetCommitmentCtx() *commitment.CommitmentContext
 	Logger() log.Logger
 	DiscardWrites(d kv.Domain)
-
-	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
-	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 }
 
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files

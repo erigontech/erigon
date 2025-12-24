@@ -1109,25 +1109,26 @@ func (c *cell) IsEmpty() bool {
 }
 
 func (c *cell) String() string {
-	s := "("
+	var s strings.Builder
+	s.WriteString("(")
 	if c.hashLen > 0 {
-		s += fmt.Sprintf("hash(len=%d)=%x, ", c.hashLen, c.hash)
+		s.WriteString(fmt.Sprintf("hash(len=%d)=%x, ", c.hashLen, c.hash))
 	}
 	if c.hashedExtLen > 0 {
-		s += fmt.Sprintf("hashedExtension(len=%d)=%x, ", c.hashedExtLen, c.hashedExtension[:c.hashedExtLen])
+		s.WriteString(fmt.Sprintf("hashedExtension(len=%d)=%x, ", c.hashedExtLen, c.hashedExtension[:c.hashedExtLen]))
 	}
 	if c.extLen > 0 {
-		s += fmt.Sprintf("extension(len=%d)=%x, ", c.extLen, c.extension[:c.extLen])
+		s.WriteString(fmt.Sprintf("extension(len=%d)=%x, ", c.extLen, c.extension[:c.extLen]))
 	}
 	if c.accountAddrLen > 0 {
-		s += fmt.Sprintf("accountAddr=%x, ", c.accountAddr)
+		s.WriteString(fmt.Sprintf("accountAddr=%x, ", c.accountAddr))
 	}
 	if c.storageAddrLen > 0 {
-		s += fmt.Sprintf("storageAddr=%x, ", c.storageAddr)
+		s.WriteString(fmt.Sprintf("storageAddr=%x, ", c.storageAddr))
 	}
 
-	s += ")"
-	return s
+	s.WriteString(")")
+	return s.String()
 }
 
 func (hph *HexPatriciaHashed) PrintGrid() {
@@ -1347,29 +1348,29 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				// the traversal can be stopped at this level
 				pathDivergenceFound = true
 				// special handling only if consuming the diverging hashed extension doesn't lead to account or storage
-				if pathDivergenceFound && fullPathLength != 64 && fullPathLength != 128 {
-					fullDivergingPath := make([]byte, fullPathLength)
-					for i := 0; i < int(keyPos+1); i++ {
-						fullDivergingPath[i] = hashedKey[i]
-					}
-					for i := 0; i < len(hashedExtKey); i++ {
-						fullDivergingPath[int(keyPos)+1+i] = hashedExtKey[i]
-					}
-					// // Code left commented out in case it might be needed in the future
-					// rowData, err := readBranchData(hph, fullDivergingPath)
-					// if err != nil {
-					// 	return nil, fmt.Errorf("failed to read branchdata: %w", err)
-					// }
-					// terminalNode, err := terminalRowToNode(hph, rowData, hph.depths[row])
-					// if err != nil {
-					// 	return nil, fmt.Errorf("failed to parse terminal node: %w", err)
-					// }
-					// nextNode = &trie.ShortNode{Key: hashedExtKey, Val: terminalNode}
+				// Code left commented out in case it might be needed in the future:
+				// if pathDivergenceFound && fullPathLength != 64 && fullPathLength != 128 {
+				// 	fullDivergingPath := make([]byte, fullPathLength)
+				// 	for i := 0; i < int(keyPos+1); i++ {
+				// 		fullDivergingPath[i] = hashedKey[i]
+				// 	}
+				// 	for i := 0; i < len(hashedExtKey); i++ {
+				// 		fullDivergingPath[int(keyPos)+1+i] = hashedExtKey[i]
+				// 	}
+				// 	rowData, err := readBranchData(hph, fullDivergingPath)
+				// 	if err != nil {
+				// 		return nil, fmt.Errorf("failed to read branchdata: %w", err)
+				// 	}
+				// 	terminalNode, err := terminalRowToNode(hph, rowData, hph.depths[row])
+				// 	if err != nil {
+				// 		return nil, fmt.Errorf("failed to parse terminal node: %w", err)
+				// 	}
+				// 	nextNode = &trie.ShortNode{Key: hashedExtKey, Val: terminalNode}
+				// }
 
-					// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
-					// Currently necessary, because the commented out code above which reads branch data and converts it
-					nextNode = &trie.ShortNode{Key: hashedExtKey}
-				}
+				// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
+				// Currently necessary, because the commented out code above which reads branch data and converts it
+				nextNode = &trie.ShortNode{Key: hashedExtKey}
 			} else {
 				keyPos += extKeyLength // jump ahead
 
@@ -1529,7 +1530,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
@@ -1818,7 +1819,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	}
 
 	depth := hph.depths[row]
-	updateKey := hexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
+	updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {
@@ -2318,7 +2319,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.trace = true
 
-	if collectCommitmentMetrics {
+	if hph.metrics.collectCommitmentMetrics {
 		hph.metrics.Reset()
 		hph.metrics.updates.Store(updatesCount)
 		defer func() {
@@ -2332,16 +2333,17 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
-					hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
 			if progress != nil {
 				progress <- &CommitProgress{
 					KeyIndex:    ki,
 					UpdateCount: updatesCount,
 					Metrics:     hph.metrics.AsValues(),
 				}
+			} else {
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
+					append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
+						hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
 			}
 		default:
 		}
@@ -2455,6 +2457,10 @@ func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 }
 
 func (hph *HexPatriciaHashed) SetCapture(capture []string) { hph.capture = capture }
+
+func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
+	hph.metrics.EnableCsvMetrics(filePathPrefix)
+}
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 

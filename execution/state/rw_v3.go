@@ -379,7 +379,7 @@ func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
 	w.txNum = txNum
 	w.rs.domains.SetTxNum(txNum)
 }
-func (w *BufferedWriter) SetTx(tx kv.Tx) {}
+func (w *BufferedWriter) SetTx(tx kv.TemporalTx) {}
 
 func (w *BufferedWriter) WriteSet() StateUpdates {
 	return w.writeSet
@@ -551,7 +551,8 @@ func NewWriter(ec *ExecutionContext, tx kv.TemporalTx, accumulator *shards.Accum
 	}
 }
 
-func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
+func (w *Writer) SetTxNum(v uint64)              { w.txNum = v }
+func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
@@ -668,8 +669,9 @@ func NewStateReader(ec *ExecutionContext, tx kv.TemporalTx) *ReaderV3 {
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()      {}
-func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
+func (r *ReaderV3) DiscardReadList()                   {}
+func (r *ReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
+func (r *ReaderV3) SetGetter(getter kv.TemporalGetter) { r.getter = getter }
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.trace = trace
@@ -677,6 +679,14 @@ func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 		tracePrefix += " "
 	}
 	r.tracePrefix = tracePrefix
+}
+
+func (r *ReaderV3) Trace() bool {
+	return r.trace
+}
+
+func (r *ReaderV3) TracePrefix() string {
+	return r.tracePrefix
 }
 
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
@@ -725,13 +735,13 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 
 	if !ok {
 		if r.trace {
-			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, address, r.txNum)
+			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, value, r.txNum)
 		}
 		return nil, nil
 	}
 
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, value, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
 	return acc, nil
 }
@@ -774,9 +784,9 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 
 	if r.trace {
 		if !ok {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d\n", r.tracePrefix, address, key, r.txNum)
+			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d\n", r.tracePrefix, addressValue, keyValue, r.txNum)
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d\n", r.tracePrefix, address, key, &res, r.txNum)
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d\n", r.tracePrefix, addressValue, keyValue, &res, r.txNum)
 		}
 	}
 
@@ -801,7 +811,7 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 
 	if r.trace {
 		lenc, cs := printCode(code)
-		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d\n", r.tracePrefix, address, lenc, cs, r.txNum)
+		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d\n", r.tracePrefix, addressValue, lenc, cs, r.txNum)
 	}
 	return code, nil
 }
@@ -825,7 +835,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 
 	size := len(code)
 	if r.trace {
-		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, address, size, r.txNum)
+		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, addressValue, size, r.txNum)
 	}
 	return size, nil
 }
@@ -835,16 +845,54 @@ func (r *ReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, err
 }
 
 type bufferedReader struct {
-	reader        *ReaderV3
+	reader        StateReader
 	bufferedState *StateV3Buffered
 }
 
-func NewBufferedReader(bufferedState *StateV3Buffered, reader *ReaderV3) StateReader {
-	return &bufferedReader{reader: reader, bufferedState: bufferedState}
+type latestBufferedReader struct {
+	bufferedReader
+}
+
+func (r *latestBufferedReader) SetGetter(getter kv.TemporalGetter) {
+	r.reader.(interface{ SetGetter(kv.TemporalGetter) }).SetGetter(getter)
+}
+
+type historicBufferedReader struct {
+	bufferedReader
+}
+
+func (r *historicBufferedReader) SetTx(tx kv.TemporalTx) {
+	r.reader.(interface{ SetTx(kv.TemporalTx) }).SetTx(tx)
+}
+
+func NewBufferedReader(bufferedState *StateV3Buffered, reader StateReader) StateReader {
+	type latest interface {
+		SetGetter(kv.TemporalGetter)
+	}
+
+	type historic interface {
+		SetTx(kv.TemporalTx)
+	}
+	switch reader.(type) {
+	case latest:
+		return &latestBufferedReader{bufferedReader{reader: reader, bufferedState: bufferedState}}
+	case historic:
+		return &historicBufferedReader{bufferedReader{reader: reader, bufferedState: bufferedState}}
+	default:
+		return &bufferedReader{reader: reader, bufferedState: bufferedState}
+	}
 }
 
 func (r *bufferedReader) SetTrace(trace bool, tracePrefix string) {
 	r.reader.SetTrace(trace, tracePrefix)
+}
+
+func (r *bufferedReader) Trace() bool {
+	return r.reader.Trace()
+}
+
+func (r *bufferedReader) TracePrefix() string {
+	return r.reader.TracePrefix()
 }
 
 func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -858,13 +906,13 @@ func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Ac
 
 	if data != nil {
 		if data == &deleted {
-			if r.reader.trace {
-				fmt.Printf("%sReadAccountData (buf)[%x] => [empty]\n", r.reader.tracePrefix, address)
+			if r.reader.Trace() {
+				fmt.Printf("%sReadAccountData (buf)[%x] => [empty]\n", r.reader.TracePrefix(), address)
 			}
 			return nil, nil
 		}
-		if r.reader.trace {
-			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.tracePrefix, address, data.Nonce, &data.Balance, data.CodeHash)
+		if r.reader.Trace() {
+			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.TracePrefix(), address, data.Nonce, &data.Balance, data.CodeHash)
 		}
 
 		result := *data
@@ -900,8 +948,8 @@ func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accoun
 
 	if ok {
 		if so.data == &deleted {
-			if r.reader.trace {
-				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [empty]\n", r.reader.tracePrefix, address, key)
+			if r.reader.Trace() {
+				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [empty]\n", r.reader.TracePrefix(), address, key)
 			}
 			r.bufferedState.accountsMutex.RUnlock()
 			return uint256.Int{}, false, nil
@@ -911,8 +959,8 @@ func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accoun
 			item, ok := so.storage.Get(storageItem{key: key})
 
 			if ok {
-				if r.reader.trace {
-					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x]\n", r.reader.tracePrefix, address, key, &item.value)
+				if r.reader.Trace() {
+					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x]\n", r.reader.TracePrefix(), address, key, &item.value)
 				}
 				r.bufferedState.accountsMutex.RUnlock()
 				return item.value, true, nil
@@ -1008,13 +1056,4 @@ func (r *bufferedReader) ReadAccountIncarnation(address accounts.Address) (uint6
 	}
 
 	return r.reader.ReadAccountIncarnation(address)
-}
-
-func (r *bufferedReader) SetExecutionContext(ec *ExecutionContext, tx kv.TemporalTx) {
-	r.reader.ec = ec
-	r.reader.tx = tx
-}
-
-func (r *bufferedReader) DiscardReadList() {
-	r.reader.DiscardReadList()
 }

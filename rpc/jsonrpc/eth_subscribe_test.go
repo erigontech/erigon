@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -101,4 +102,62 @@ func TestEthSubscribe(t *testing.T) {
 		header := <-newHeads
 		require.Equal(i, header.Number.Uint64())
 	}
+}
+
+func TestEthSubscribeReceipts(t *testing.T) {
+	m, require := mock.Mock(t), require.New(t)
+
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	})
+	require.NoError(err)
+
+	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          1,
+		BlockHeadersPacket: chain.Headers,
+	})
+	require.NoError(err)
+
+	m.ReceiveWg.Add(1)
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+		require.NoError(err)
+	}
+	m.ReceiveWg.Wait()
+
+	ctx := context.Background()
+	logger := log.New()
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
+	backendClient := direct.NewEthBackendClientDirect(backendServer)
+	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
+
+	subscriptionReadyWg := sync.WaitGroup{}
+	subscriptionReadyWg.Add(1)
+	onNewSnapshot := func() {
+		subscriptionReadyWg.Done()
+	}
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log)
+	subscriptionReadyWg.Wait()
+
+	_, id := ff.SubscribeReceipts(16, filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{},
+	})
+	defer ff.UnsubscribeReceipts(id)
+
+	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
+
+	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
+	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
+			return err
+		}
+		return sd.Flush(m.Ctx, tx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Successfully created receipt subscription with ID: %v", id)
 }

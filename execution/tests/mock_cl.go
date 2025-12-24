@@ -18,9 +18,9 @@ package executiontests
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
@@ -72,21 +73,21 @@ func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *ty
 }
 
 // BuildCanonicalBlock builds a new block and sets it as canonical.
-func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuildingOption) (*MockClPayload, error) {
-	clPayload, err := cl.BuildNewPayload(ctx, opts...)
+func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuildingOption) (clPayload *MockClPayload, err error) {
+	clPayload, err = cl.BuildNewPayload(ctx, opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build new payload failed: %w", err)
 	}
 	status, err := cl.InsertNewPayload(ctx, clPayload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("insert new payload failed: %w", err)
 	}
 	if status.Status != enginetypes.ValidStatus {
 		return nil, fmt.Errorf("unexpected status when inserting payload for canonical block: %s", status.Status)
 	}
 	err = cl.UpdateForkChoice(ctx, clPayload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("update fork choice failed: %w", err)
 	}
 	return clPayload, nil
 }
@@ -124,13 +125,14 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	}
 	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
 	// start the block building process
-	fcuRes, err := retryEngineSyncing(ctx, func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-		r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
-		if err != nil {
-			return nil, "", err
-		}
-		return r, r.PayloadStatus.Status, err
-	})
+	fcuRes, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
+			r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
+			if err != nil {
+				return nil, "", err
+			}
+			return r, r.PayloadStatus.Status, err
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +140,15 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 	// get the newly built block
-	newPayload, err := cl.engineApiClient.GetPayloadV4(ctx, *fcuRes.PayloadId)
+	newPayload, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
+		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
+			r, err := cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
+			if err != nil {
+				return nil, "", err
+			}
+			return r, "", err
+		})
+
 	if err != nil {
 		return nil, err
 	}
@@ -149,13 +159,14 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
-	return retryEngineSyncing(ctx, func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-		r, err := cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
-		if err != nil {
-			return nil, "", err
-		}
-		return r, r.Status, err
-	})
+	return retryEngine(ctx, []enginetypes.EngineStatus{}, nil,
+		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
+			r, err := cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
+			if err != nil {
+				return nil, "", err
+			}
+			return r, r.Status, err
+		})
 }
 
 // UpdateForkChoice updates the fork choice to the given block. Genesis is always set as safe and finalised.
@@ -166,13 +177,14 @@ func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error 
 		SafeBlockHash:      cl.genesis,
 		FinalizedBlockHash: cl.genesis,
 	}
-	fcuRes, err := retryEngineSyncing(ctx, func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-		r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
-		if err != nil {
-			return nil, "", err
-		}
-		return r, r.PayloadStatus.Status, err
-	})
+	fcuRes, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
+			r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
+			if err != nil {
+				return nil, "", err
+			}
+			return r, r.PayloadStatus.Status, err
+		})
 	if err != nil {
 		return err
 	}
@@ -218,14 +230,24 @@ type blockBuildingOptions struct {
 	waitUntilTimestamp bool
 }
 
-func retryEngineSyncing[T any](ctx context.Context, f func() (*T, enginetypes.EngineStatus, error)) (*T, error) {
+func retryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
+	f func() (*T, enginetypes.EngineStatus, error)) (*T, error) {
 	operation := func() (*T, error) {
 		res, status, err := f()
 		if err != nil {
+			for _, retryErr := range retryErrors {
+				if strings.Contains(err.Error(), retryErr.Error()) {
+					return nil, err
+				}
+			}
+
 			return nil, backoff.Permanent(err) // do not retry
 		}
-		if status == enginetypes.SyncingStatus {
-			return nil, errors.New("engine is syncing") // retry
+
+		for _, retryStatus := range retryStatuses {
+			if status == retryStatus {
+				return nil, fmt.Errorf("engine needs rerty: %s", retryStatus) // retry
+			}
 		}
 		return res, nil
 	}
