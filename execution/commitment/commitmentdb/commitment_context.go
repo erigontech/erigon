@@ -160,6 +160,7 @@ type SharedDomainsCommitmentContext struct {
 	trace         bool
 	stateReader   StateReader
 	warmupDB      kv.TemporalRoDB // if set, enables parallel warmup of MDBX page cache during commitment
+	blockLimit    uint64          // max blocks to execute; if <= 32, enables warmup cache
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -171,6 +172,12 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 // When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
 func (sdc *SharedDomainsCommitmentContext) SetWarmupDB(db kv.TemporalRoDB) {
 	sdc.warmupDB = db
+}
+
+// SetBlockLimit sets the maximum number of blocks to execute in this batch.
+// When blockLimit <= 32, enables warmup cache for better performance on small batches.
+func (sdc *SharedDomainsCommitmentContext) SetBlockLimit(limit uint64) {
+	sdc.blockLimit = limit
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
@@ -333,11 +340,12 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 
 		warmupConfig = commitment.WarmupConfig{
-			Enabled:    true,
-			CtxFactory: ctxFactory,
-			NumWorkers: 16,
-			MaxDepth:   commitment.WarmupMaxDepth,
-			LogPrefix:  logPrefix,
+			Enabled:           true,
+			EnableWarmupCache: sdc.blockLimit > 0 && sdc.blockLimit <= 32, // Enable cache for small batches
+			CtxFactory:        ctxFactory,
+			NumWorkers:        16,
+			MaxDepth:          commitment.WarmupMaxDepth,
+			LogPrefix:         logPrefix,
 		}
 	}
 

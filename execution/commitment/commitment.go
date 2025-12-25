@@ -1240,6 +1240,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if warmuper != nil && warmuper.Cache() != nil {
+				warmuper.Cache().EvictKey(v)
+			}
 			// Make copies since ETL may reuse buffers
 			hk := common.Copy(k)
 			pk := common.Copy(v)
@@ -1441,6 +1444,22 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+}
+
+// Copy creates a deep copy of the Update.
+func (u *Update) Copy() *Update {
+	if u == nil {
+		return nil
+	}
+	c := &Update{
+		CodeHash:   u.CodeHash,
+		Storage:    u.Storage,
+		StorageLen: u.StorageLen,
+		Flags:      u.Flags,
+		Nonce:      u.Nonce,
+	}
+	c.Balance.Set(&u.Balance)
+	return c
 }
 
 func (u *Update) Merge(b *Update) {
