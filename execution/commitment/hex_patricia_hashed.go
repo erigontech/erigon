@@ -2647,7 +2647,7 @@ func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, er
 			return update, nil
 		}
 	}
-	return hph.accountFromCacheOrDB(plainKey)
+	return hph.ctx.Account(plainKey)
 }
 
 // storageFromCacheOrDB reads storage data from cache if available, otherwise from DB.
@@ -2657,7 +2657,7 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 			return update, nil
 		}
 	}
-	return hph.storageFromCacheOrDB(plainKey)
+	return hph.ctx.Storage(plainKey)
 }
 
 type stateRootFlag int8
