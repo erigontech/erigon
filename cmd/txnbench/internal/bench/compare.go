@@ -3,6 +3,7 @@ package bench
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 type agg struct {
@@ -92,19 +93,20 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 		})
 	}
 
-	out := "LATENCY COMPARISON (averaged over clusters)\n"
-	out += "cluster_range\tblocks\told_cold_ms\tnew_cold_ms\tdelta_cold\told_warm_ms\tnew_warm_ms\tdelta_warm\n"
+	var out strings.Builder
+	out.WriteString("LATENCY COMPARISON (averaged over clusters)\n")
+	out.WriteString("cluster_range\tblocks\told_cold_ms\tnew_cold_ms\tdelta_cold\told_warm_ms\tnew_warm_ms\tdelta_warm\n")
 
 	for i, c := range results {
-		out += fmt.Sprintf(
+		out.WriteString(fmt.Sprintf(
 			"%2d: %d–%d\t%d\t%.3f\t%.3f\t%+.1f%%\t%.3f\t%.3f\t%+.1f%%\n",
 			i+1, c.start, c.end, c.count,
 			c.oldCold, c.newCold, c.deltaCold,
 			c.oldWarm, c.newWarm, c.deltaWarm,
-		)
+		))
 	}
 
-	return out
+	return out.String()
 }
 
 func aggregateByBlock(out BenchOutput) map[uint64]agg {
