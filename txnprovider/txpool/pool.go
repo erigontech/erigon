@@ -2494,7 +2494,7 @@ func (p *TxPool) logStats() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	ctx := []interface{}{
+	ctx := []any{
 		"pending", p.pending.Len(),
 		"baseFee", p.baseFee.Len(),
 		"queued", p.queued.Len(),
