@@ -35,12 +35,12 @@ type TrieContextFactory func() (PatriciaContext, func())
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
-	Enabled          bool
+	Enabled           bool
 	EnableWarmupCache bool // If true, cache warmed data for use during trie processing
-	CtxFactory       TrieContextFactory
-	NumWorkers       int
-	MaxDepth         int
-	LogPrefix        string
+	CtxFactory        TrieContextFactory
+	NumWorkers        int
+	MaxDepth          int
+	LogPrefix         string
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)

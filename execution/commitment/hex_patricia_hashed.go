@@ -96,7 +96,8 @@ type HexPatriciaHashed struct {
 	accValBuf rlp.RlpEncodedBytes
 
 	// Warmup cache for serving reads from pre-warmed data
-	cache *WarmupCache
+	cache             *WarmupCache
+	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
 
 	//processing metrics
 	metrics       *Metrics
@@ -1989,7 +1990,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
-			hph.cache.EvictKey(updateKey)
+			if hph.cache != nil {
+				hph.cache.EvictKey(updateKey)
+			}
 		}
 		hph.activeRows--
 		if upDepth > 0 {
@@ -2020,7 +2023,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
-			hph.cache.EvictKey(updateKey)
+			if hph.cache != nil {
+				hph.cache.EvictKey(updateKey)
+			}
 		}
 		hph.activeRows--
 		hph.currentKeyLen = max(upDepth-1, 0)
@@ -2115,7 +2120,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
-		hph.cache.EvictKey(updateKey)
+		if hph.cache != nil {
+			hph.cache.EvictKey(updateKey)
+		}
 
 		for i := lastNibble; i < 17; i++ {
 			if _, err := hph.keccak2.Write(b[:]); err != nil {
@@ -2474,6 +2481,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
+		warmup.EnableWarmupCache = hph.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.Close()
@@ -2600,8 +2608,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
-func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)              { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)        { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) SetEnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
 	if truncate {

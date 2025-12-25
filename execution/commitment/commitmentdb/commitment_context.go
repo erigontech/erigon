@@ -195,6 +195,11 @@ func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.patriciaTrie.SetTrace(trace)
 }
 
+// SetEnableWarmupCache enables/disables warmup cache during commitment processing.
+func (sdc *SharedDomainsCommitmentContext) SetEnableWarmupCache(enable bool) {
+	sdc.patriciaTrie.SetEnableWarmupCache(enable)
+}
+
 func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
