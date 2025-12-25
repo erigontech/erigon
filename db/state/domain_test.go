@@ -1155,7 +1155,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1.1-accounts.0-1.v"))
 
-	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.CompressorCfg.ValuesOnCompressedPage), 1875) // because 16 values at one page
+	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.CompressorCfg.ValuesOnCompressedPage), 469) // because 646 values at one page
 	require.Equal(t, int(3*maxTx), c.historyComp.Count()/2)
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
