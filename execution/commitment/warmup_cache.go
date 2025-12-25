@@ -23,51 +23,27 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-const shardAmount = 32
-
-// WarmupCache stores pre-fetched data from the warmup phase to avoid
-// repeated DB reads during trie processing. The cache is designed for
-// minimal lock contention using sharded maps.
-type WarmupCache struct {
-	// Sharded maps to reduce lock contention - 16 shards based on first byte of key
-	branchShards  [shardAmount]branchShard
-	accountShards [shardAmount]updateShard
-	storageShards [shardAmount]updateShard
-
-	// Permanently evicted keys - uses sync.Map for lock-free reads
-	// Keys stored here will never be served from cache regardless of type
-	evictedKeys sync.Map // map[string]struct{}
-
-	enabled atomic.Bool
-}
-
-type branchShard struct {
-	mu   sync.RWMutex
-	data map[string]branchEntry
-}
-
 type branchEntry struct {
 	data []byte
 	step kv.Step
 }
 
-type updateShard struct {
-	mu   sync.RWMutex
-	data map[string]*Update
+// WarmupCache stores pre-fetched data from the warmup phase to avoid
+// repeated DB reads during trie processing.
+type WarmupCache struct {
+	branches sync.Map // map[string]branchEntry
+	accounts sync.Map // map[string]*Update
+	storage  sync.Map // map[string]*Update
+
+	// Permanently evicted keys - keys stored here will never be served from cache
+	evictedKeys sync.Map // map[string]struct{}
+
+	enabled atomic.Bool
 }
 
 // NewWarmupCache creates a new warmup cache instance.
 func NewWarmupCache() *WarmupCache {
 	c := &WarmupCache{}
-	for i := range c.branchShards {
-		c.branchShards[i].data = make(map[string]branchEntry)
-	}
-	for i := range c.accountShards {
-		c.accountShards[i].data = make(map[string]*Update)
-	}
-	for i := range c.storageShards {
-		c.storageShards[i].data = make(map[string]*Update)
-	}
 	c.enabled.Store(true)
 	return c
 }
@@ -95,29 +71,16 @@ func (c *WarmupCache) IsEvicted(key []byte) bool {
 	return evicted
 }
 
-// shardIndex returns the shard index for a given key.
-func shardIndex(key []byte) int {
-	if len(key) == 0 {
-		return 0
-	}
-	return int(key[len(key)-1] % shardAmount)
-}
-
 // PutBranch stores branch data in the cache.
 func (c *WarmupCache) PutBranch(prefix []byte, data []byte, step kv.Step) {
 	if !c.enabled.Load() {
 		return
 	}
-	idx := shardIndex(prefix)
-	shard := &c.branchShards[idx]
-
 	// Make a copy of the data to avoid issues with buffer reuse
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
-	shard.mu.Lock()
-	shard.data[string(prefix)] = branchEntry{data: dataCopy, step: step}
-	shard.mu.Unlock()
+	c.branches.Store(string(prefix), branchEntry{data: dataCopy, step: step})
 }
 
 // GetBranch retrieves branch data from the cache.
@@ -126,18 +89,11 @@ func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
 	if !c.enabled.Load() {
 		return nil, 0, false
 	}
-	// Check if key is evicted
 	if c.IsEvicted(prefix) {
 		return nil, 0, false
 	}
-	idx := shardIndex(prefix)
-	shard := &c.branchShards[idx]
-
-	shard.mu.RLock()
-	entry, found := shard.data[string(prefix)]
-	shard.mu.RUnlock()
-
-	if found {
+	if v, found := c.branches.Load(string(prefix)); found {
+		entry := v.(branchEntry)
 		return entry.data, entry.step, true
 	}
 	return nil, 0, false
@@ -148,18 +104,13 @@ func (c *WarmupCache) PutAccount(plainKey []byte, update *Update) {
 	if !c.enabled.Load() {
 		return
 	}
-	idx := shardIndex(plainKey)
-	shard := &c.accountShards[idx]
-
 	// Make a copy of the update
 	var updateCopy *Update
 	if update != nil {
 		updateCopy = update.Copy()
 	}
 
-	shard.mu.Lock()
-	shard.data[string(plainKey)] = updateCopy
-	shard.mu.Unlock()
+	c.accounts.Store(string(plainKey), updateCopy)
 }
 
 // GetAccount retrieves account data from the cache.
@@ -168,19 +119,11 @@ func (c *WarmupCache) GetAccount(plainKey []byte) (*Update, bool) {
 	if !c.enabled.Load() {
 		return nil, false
 	}
-	// Check if key is evicted
 	if c.IsEvicted(plainKey) {
 		return nil, false
 	}
-	idx := shardIndex(plainKey)
-	shard := &c.accountShards[idx]
-
-	shard.mu.RLock()
-	update, found := shard.data[string(plainKey)]
-	shard.mu.RUnlock()
-
-	if found {
-		return update, true
+	if v, found := c.accounts.Load(string(plainKey)); found {
+		return v.(*Update), true
 	}
 	return nil, false
 }
@@ -190,18 +133,13 @@ func (c *WarmupCache) PutStorage(plainKey []byte, update *Update) {
 	if !c.enabled.Load() {
 		return
 	}
-	idx := shardIndex(plainKey)
-	shard := &c.storageShards[idx]
-
 	// Make a copy of the update
 	var updateCopy *Update
 	if update != nil {
 		updateCopy = update.Copy()
 	}
 
-	shard.mu.Lock()
-	shard.data[string(plainKey)] = updateCopy
-	shard.mu.Unlock()
+	c.storage.Store(string(plainKey), updateCopy)
 }
 
 // GetStorage retrieves storage data from the cache.
@@ -210,38 +148,19 @@ func (c *WarmupCache) GetStorage(plainKey []byte) (*Update, bool) {
 	if !c.enabled.Load() {
 		return nil, false
 	}
-	// Check if key is evicted
 	if c.IsEvicted(plainKey) {
 		return nil, false
 	}
-	idx := shardIndex(plainKey)
-	shard := &c.storageShards[idx]
-
-	shard.mu.RLock()
-	update, found := shard.data[string(plainKey)]
-	shard.mu.RUnlock()
-
-	if found {
-		return update, true
+	if v, found := c.storage.Load(string(plainKey)); found {
+		return v.(*Update), true
 	}
 	return nil, false
 }
 
 // Clear clears all cached data.
 func (c *WarmupCache) Clear() {
-	for i := range c.branchShards {
-		c.branchShards[i].mu.Lock()
-		c.branchShards[i].data = make(map[string]branchEntry)
-		c.branchShards[i].mu.Unlock()
-	}
-	for i := range c.accountShards {
-		c.accountShards[i].mu.Lock()
-		c.accountShards[i].data = make(map[string]*Update)
-		c.accountShards[i].mu.Unlock()
-	}
-	for i := range c.storageShards {
-		c.storageShards[i].mu.Lock()
-		c.storageShards[i].data = make(map[string]*Update)
-		c.storageShards[i].mu.Unlock()
-	}
+	c.branches = sync.Map{}
+	c.accounts = sync.Map{}
+	c.storage = sync.Map{}
+	c.evictedKeys = sync.Map{}
 }
