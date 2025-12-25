@@ -251,8 +251,9 @@ func ExecV3(ctx context.Context,
 	var lastCommittedBlockNum uint64
 
 	doms.SetWarmupDB(cfg.db)
-	// Enable warmup cache for small batches
-	doms.SetEnableWarmupCache(startBlockNum+32 >= maxBlockNum)
+	// Do it only for chain-tip blocks!
+	fmt.Println("enable", maxBlockNum == startBlockNum+1)
+	doms.SetEnableWarmupCache(maxBlockNum == startBlockNum+1)
 
 	if parallel {
 		if !inMemExec { //nolint:staticcheck
