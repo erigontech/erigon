@@ -38,8 +38,8 @@ type Spanner interface {
 }
 
 type ABI interface {
-	Pack(name string, args ...interface{}) ([]byte, error)
-	UnpackIntoInterface(v interface{}, name string, data []byte) error
+	Pack(name string, args ...any) ([]byte, error)
+	UnpackIntoInterface(v any, name string, data []byte) error
 }
 
 type ChainSpanner struct {
