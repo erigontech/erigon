@@ -193,6 +193,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		select {
 		case <-logEvery.C:
 			if se.inMemExec || se.isMining {
+				se.logger.Info("skipping ", "inmem", se.inMemExec, "min", se.isMining)
 				break
 			}
 

@@ -906,5 +906,6 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		"inMem", te.inMemExec,
 	}...)
 
+	fmt.Println("my logger is", p.logger)
 	p.logger.Info(fmt.Sprintf("[%s]%s%s", p.logPrefix, suffix, mode), vals...)
 }
