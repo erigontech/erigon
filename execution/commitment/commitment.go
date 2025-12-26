@@ -1265,15 +1265,15 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			// Process batch when full
 			if len(batch) >= hashSortBatchSize {
 				sta := time.Now()
-				for i, p := range batch {
-					if i%1000 == 0 {
+				for _, p := range batch {
+					//if i%1000 == 0 {
 
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						default:
-						}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
 					}
+					//}
 					//fmt.Println("1items pending to be warmed", "nitems", warmuper.NItems())
 					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 						return err
