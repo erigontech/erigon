@@ -1292,7 +1292,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return ctx.Err()
 			default:
 			}
-			fmt.Println("2items pending to be warmed", "nitems", warmuper.NItems())
+			fmt.Println("2items pending to be warmed", "nitems", warmuper.NItems(), "batchsize", len(batch))
 			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 				return err
 			}
