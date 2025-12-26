@@ -67,7 +67,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", se.inMemExec)
 	}
 
-	for ; blockNum <= maxBlockNum; blockNum++ {
+	for ; blockNum <= min(blockNum+blockLimit, maxBlockNum); blockNum++ {
 		log.Info("blockNum", "bn", blockNum)
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum, initialCycle)
 		changeSet := &changeset.StateChangeSet{}
