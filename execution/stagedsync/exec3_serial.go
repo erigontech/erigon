@@ -211,6 +211,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			// this will only happen for the first executed block
 			havePartialBlock = false
+			se.logger.Info("needcalcroot", "isbf", isBatchFull, "hpb", havePartialBlock, "cp", canPrune)
 
 			if !needCalcRoot {
 				break
