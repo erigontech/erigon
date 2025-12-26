@@ -1376,6 +1376,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 	default:
 		return nil
 	}
+	panic("stop here")
 	return nil
 }
 
