@@ -934,6 +934,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
+		logger.Info("Progress", "exec", execProgress)
 		if execProgress >= block {
 			break
 		}
