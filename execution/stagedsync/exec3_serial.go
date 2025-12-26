@@ -190,7 +190,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		select {
 		case <-logEvery.C:
-			if se.inMemExec || se.isMining {
+			if se.isMining {
+				break
+			}
+			if se.inMemExec {
+				se.LogExecution()
 				break
 			}
 
