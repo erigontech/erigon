@@ -39,6 +39,19 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
+
+	// Check if the requested block is in the future
+	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber >= rpc.EarliestBlockNumber {
+		latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		requestedBlock := blockNrOrHash.BlockNumber.Uint64()
+		if latestBlock < requestedBlock {
+			return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, requestedBlock)
+		}
+	}
+
 	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
