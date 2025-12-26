@@ -179,7 +179,7 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(SetCodeTxType, []interface{}{
+	hash := prefixedRlpHash(SetCodeTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -199,7 +199,7 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		SetCodeTxType,
-		[]interface{}{
+		[]any{
 			chainID,
 			tx.Nonce,
 			tx.TipCap,
