@@ -307,9 +307,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	var warmupConfig commitment.WarmupConfig
 	if sdc.warmupDB != nil {
+		db := sdc.warmupDB // avoid races like this
 		// Create factory for warmup TrieContexts with their own transactions
 		ctxFactory := func() (commitment.PatriciaContext, func()) {
-			roTx, err := sdc.warmupDB.BeginTemporalRo(ctx) //nolint:gocritic
+			roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return &errorTrieContext{err: err}, nil
 			}
