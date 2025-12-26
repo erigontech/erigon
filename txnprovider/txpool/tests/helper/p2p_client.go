@@ -102,6 +102,8 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	
+	genesisHash := [32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis))
 
 	_, err = sentryClient.SetStatus(context.TODO(), &sentryproto.StatusData{
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
@@ -174,12 +176,13 @@ func (p *p2pClient) notifyWhenReady() (<-chan struct{}, error) {
 			if err != nil {
 				continue
 			}
-			defer r.Body.Close()
 
 			if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+				r.Body.Close()
 				continue
 			}
-
+			r.Body.Close()			
+			
 			if len(resp.Result) > numConn {
 				ready <- struct{}{}
 				return
