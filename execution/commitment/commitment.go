@@ -1232,7 +1232,6 @@ const hashSortBatchSize = 10_000
 // If warmuper is non-nil, keys are submitted for parallel warming before processing.
 // Caller is responsible for calling warmuper.Wait() after processing completes.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
-	fmt.Println("warmup is", "warmup", warmuper)
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
@@ -1269,6 +1268,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return ctx.Err()
 					default:
 					}
+					fmt.Println("items pending to be warmed", "nitems", warmuper.NItems())
 					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 						return err
 					}

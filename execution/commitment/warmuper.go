@@ -244,6 +244,10 @@ func (w *Warmuper) Wait() error {
 	return err
 }
 
+func (w *Warmuper) NItems() int {
+	return len(w.work)
+}
+
 // Stats returns statistics about the warmup.
 func (w *Warmuper) Stats() WarmupStats {
 	duration := time.Duration(0)
