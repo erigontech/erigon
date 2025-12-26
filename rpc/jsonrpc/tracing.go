@@ -397,7 +397,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 
 	if config != nil && config.BlockOverrides != nil {
-		if config.BlockOverrides.BaseFeePerGas != nil {
+		if config.BlockOverrides.BaseFeePerGas != nil && baseFee != nil {
 			overflow := baseFee.SetFromBig(config.BlockOverrides.BaseFeePerGas.ToInt())
 			if overflow {
 				return errors.New("BlockOverrides.BaseFee uint256 overflow")
@@ -418,27 +418,22 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return fmt.Errorf("convert args to msg: %v", err)
 	}
 
+	var precompiles vm.PrecompiledContracts
+
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
-	if config != nil && config.StateOverrides != nil {
-		if err := config.StateOverrides.Override(ibs, nil, blockCtx.Rules(chainConfig)); err != nil {
-			return fmt.Errorf("override state: %v", err)
-		}
-	}
-
-	if config != nil && config.BlockOverrides != nil {
-
-		err := config.BlockOverrides.Override(&blockCtx)
-		if err != nil {
-			return err
+	if config != nil {
+		if config.BlockOverrides != nil {
+			err := config.BlockOverrides.Override(&blockCtx)
+			if err != nil {
+				return err
+			}
 		}
 
-		rules := blockCtx.Rules(chainConfig)
-		// Determine the active precompiled contracts for this block.
-		activePrecompiles := vm.ActivePrecompiledContracts(rules)
 		// Override the state before block execution.
-
 		if config.StateOverrides != nil {
-			if err := config.StateOverrides.Override(ibs, activePrecompiles, rules); err != nil {
+			rules := blockCtx.Rules(chainConfig)
+			precompiles = vm.ActivePrecompiledContracts(rules)
+			if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
 				return err
 			}
 		}
@@ -446,7 +441,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 
 	txCtx := protocol.NewEVMTxContext(msg)
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, hash, 0, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
+	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, hash, 0, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 	return err
 }
 
