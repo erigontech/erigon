@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -1263,17 +1264,19 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 			// Process batch when full
 			if len(batch) >= hashSortBatchSize {
+				sta := time.Now()
 				for _, p := range batch {
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
 					default:
 					}
-					fmt.Println("1items pending to be warmed", "nitems", warmuper.NItems())
+					//fmt.Println("1items pending to be warmed", "nitems", warmuper.NItems())
 					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 						return err
 					}
 				}
+				fmt.Println("batch processed", "nitems", len(batch), "took", time.Since(sta))
 				if warmuper != nil {
 					warmuper.DrainPending()
 				}
@@ -1292,7 +1295,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return ctx.Err()
 			default:
 			}
-			fmt.Println("2items pending to be warmed", "nitems", warmuper.NItems(), "batchsize", len(batch))
+			//fmt.Println("2items pending to be warmed", "nitems", warmuper.NItems(), "batchsize", len(batch))
 			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 				return err
 			}
@@ -1376,7 +1379,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 	default:
 		return nil
 	}
-	panic("stop here")
 	return nil
 }
 
