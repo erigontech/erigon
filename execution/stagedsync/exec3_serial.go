@@ -68,7 +68,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
-		log.Info("blockNum", blockNum)
+		log.Info("blockNum", "bn", blockNum)
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum, initialCycle)
 		changeSet := &changeset.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
