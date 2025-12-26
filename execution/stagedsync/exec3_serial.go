@@ -193,10 +193,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if se.isMining {
 				break
 			}
-			if se.inMemExec {
-				se.LogExecution()
-				break
-			}
 
 			se.LogExecution()
 
