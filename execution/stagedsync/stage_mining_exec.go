@@ -101,10 +101,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	current := cfg.miningState.MiningBlock
 	preparedTxns := current.PreparedTxns
 
-	var (
-		stateReader state.StateReader
-	)
-	stateReader = state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
@@ -142,13 +139,9 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		}
 		NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
 	} else {
-
 		yielded := mapset.NewSet[[32]byte]()
-		var simStateReader state.StateReader
-		var simStateWriter state.StateWriter
-
-		simStateWriter = state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
-		simStateReader = state.NewReaderV3(simSd.AsGetter(tx))
+		simStateWriter := state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
+		simStateReader := state.NewReaderV3(simSd.AsGetter(tx))
 
 		executionAt, err := s.ExecutionAt(tx)
 		if err != nil {
@@ -277,7 +270,11 @@ func getNextTransactions(
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
-		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
+		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
+		if cfg.miningState.MiningConfig.MaxBlobsPerBlock != nil {
+			maxBlobs = min(maxBlobs, *cfg.miningState.MiningConfig.MaxBlobsPerBlock)
+		}
+		remainingBlobGas = maxBlobs*params.GasPerBlob - *header.BlobGasUsed
 	}
 
 	provideOpts := []txnprovider.ProvideOption{
