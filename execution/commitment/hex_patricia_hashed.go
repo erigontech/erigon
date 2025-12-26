@@ -509,7 +509,7 @@ func extractBranchCellAddresses(branchData []byte, pathNibble int) (accountAddrs
 		// Cell on update path will have stateHash cleared - always extract its addresses.
 		// Sibling cells with stateHash (bit 4) are memoized - skip them.
 		isOnPath := nibble == pathNibble
-		hasMemoizedHash := fieldBits&16 != 0
+		hasMemoizedHash := fieldBits&16 != 0 // essentially unmemoized siblings contents will be reloaded in order to compute the state hash
 		shouldExtract := isOnPath || !hasMemoizedHash
 
 		// Parse each field

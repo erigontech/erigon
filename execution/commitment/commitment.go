@@ -1137,7 +1137,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			hashedKey := t.hasher(keyBytes)
 
 			var err error
-			if !t.sortPerNibble {
+			if !t.sortPerNibble { // sortPerNibble=false for serial commitment (so etl is used); otherwise true
 				err = t.etl.Collect(hashedKey, keyBytes)
 			} else {
 				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
@@ -1232,6 +1232,7 @@ const hashSortBatchSize = 10_000
 // If warmuper is non-nil, keys are submitted for parallel warming before processing.
 // Caller is responsible for calling warmuper.Wait() after processing completes.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	fmt.Println("warmup is", "warmup", warmuper)
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
@@ -1248,6 +1249,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
 				startDepth := 0
+				// prevKey is already warmed
 				if prevKey != nil {
 					// Find common prefix length
 					minLen := min(len(prevKey), len(hk))

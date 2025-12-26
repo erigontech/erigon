@@ -101,6 +101,8 @@ func (w *Warmuper) Start() {
 	}
 
 	w.startTime = time.Now()
+	// TODO: how do you decide the right size of this hannel or. number of workers?
+	// must depend on how quickly you can warm cold pages into mem
 	w.work = make(chan warmupWorkItem, 50_000)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
@@ -172,6 +174,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		childBit := uint16(1) << nextNibble
 
 		if bitmap&childBit == 0 {
+			// TODO: not sure when this can happen
 			break
 		}
 
