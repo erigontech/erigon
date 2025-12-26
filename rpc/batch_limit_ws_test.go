@@ -43,7 +43,7 @@ func TestBatchLimit_WebSocket_Exceeded(t *testing.T) {
 	for i := 0; i < batchSize; i++ {
 		batch = append(batch, BatchElem{
 			Method: "test_echo",
-			Args:   []interface{}{"hello"},
+			Args:   []any{"hello"},
 			Result: new(echoResult),
 		})
 	}
