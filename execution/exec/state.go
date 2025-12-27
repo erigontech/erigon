@@ -338,15 +338,6 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 }
 
 func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
-	if txTask.IsHistoric() && !rw.historyMode {
-		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
-		// from the beginning until committed txNum and only then disable history mode.
-		// Needed to correctly evaluate spent gas and other things.
-		rw.SetReader(state.NewHistoryReaderV3())
-	} else if !txTask.IsHistoric() && rw.historyMode {
-		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx))))
-	}
-
 	if rw.background && rw.chainTx == nil {
 		chainTx, err := rw.chainDb.BeginTemporalRo(rw.ctx) //nolint
 
