@@ -167,7 +167,7 @@ Examples:
 }
 
 func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, logger interface {
-	Info(msg string, ctx ...interface{})
+	Info(msg string, ctx ...any)
 }) error {
 	compactKey := commitment.HexNibblesToCompactBytes(prefix)
 	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
