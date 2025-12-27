@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
@@ -110,7 +109,7 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 	if len(toMerge) == 0 {
 		return
 	}
-	if newDirtySegment, err = m.merge(ctx, v, toMerge, sn, snapDir, nil); err != nil {
+	if newDirtySegment, err = m.merge(ctx, v, toMerge, sn, snapDir); err != nil {
 		err = fmt.Errorf("mergeByAppendSegments: %w", err)
 		return
 	}
@@ -148,9 +147,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 		return nil
 	}
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
 	in := make(map[snaptype.Enum][]*DirtySegment)
 	out := make(map[snaptype.Enum][]*DirtySegment)
 	mergedFileNames := make([]string, 0, 16)
@@ -169,7 +165,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 		}
 
 		for _, t := range snapTypes {
-			newDirtySegment, err := m.mergeSubSegment(ctx, v, t.FileInfo(snapDir, r.From(), r.To()), toMerge[t.Enum()], snapDir, doIndex, snapshots.IndexBuilder(t), onMerge)
+			newDirtySegment, err := m.mergeSubSegment(ctx, v, t.FileInfo(snapDir, r.From(), r.To()), toMerge[t.Enum()], snapDir, doIndex, snapshots.IndexBuilder(t))
 			if err != nil {
 				return err
 			}
@@ -257,7 +253,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 	}
 }
 
-func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string, logEvery *time.Ticker) (*DirtySegment, error) {
+func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string) (*DirtySegment, error) {
 	var word = make([]byte, 0, 4096)
 	var expectedTotal int
 	cList := make([]*seg.Decompressor, len(toMerge))
