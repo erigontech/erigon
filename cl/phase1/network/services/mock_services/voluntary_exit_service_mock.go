@@ -15,7 +15,7 @@ import (
 
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	services "github.com/erigontech/erigon/cl/phase1/network/services"
-	sentinelproto "github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -44,18 +44,18 @@ func (m *MockVoluntaryExitService) EXPECT() *MockVoluntaryExitServiceMockRecorde
 }
 
 // DecodeGossipMessage mocks base method.
-func (m *MockVoluntaryExitService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*services.SignedVoluntaryExitForGossip, error) {
+func (m *MockVoluntaryExitService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*services.SignedVoluntaryExitForGossip, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DecodeGossipMessage", data, version)
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", pid, data, version)
 	ret0, _ := ret[0].(*services.SignedVoluntaryExitForGossip)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
-func (mr *MockVoluntaryExitServiceMockRecorder) DecodeGossipMessage(data, version any) *MockVoluntaryExitServiceDecodeGossipMessageCall {
+func (mr *MockVoluntaryExitServiceMockRecorder) DecodeGossipMessage(pid, data, version any) *MockVoluntaryExitServiceDecodeGossipMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockVoluntaryExitService)(nil).DecodeGossipMessage), data, version)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockVoluntaryExitService)(nil).DecodeGossipMessage), pid, data, version)
 	return &MockVoluntaryExitServiceDecodeGossipMessageCall{Call: call}
 }
 
@@ -71,51 +71,51 @@ func (c *MockVoluntaryExitServiceDecodeGossipMessageCall) Return(arg0 *services.
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockVoluntaryExitServiceDecodeGossipMessageCall) Do(f func(*sentinelproto.GossipData, clparams.StateVersion) (*services.SignedVoluntaryExitForGossip, error)) *MockVoluntaryExitServiceDecodeGossipMessageCall {
+func (c *MockVoluntaryExitServiceDecodeGossipMessageCall) Do(f func(peer.ID, []byte, clparams.StateVersion) (*services.SignedVoluntaryExitForGossip, error)) *MockVoluntaryExitServiceDecodeGossipMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockVoluntaryExitServiceDecodeGossipMessageCall) DoAndReturn(f func(*sentinelproto.GossipData, clparams.StateVersion) (*services.SignedVoluntaryExitForGossip, error)) *MockVoluntaryExitServiceDecodeGossipMessageCall {
+func (c *MockVoluntaryExitServiceDecodeGossipMessageCall) DoAndReturn(f func(peer.ID, []byte, clparams.StateVersion) (*services.SignedVoluntaryExitForGossip, error)) *MockVoluntaryExitServiceDecodeGossipMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
-// IsMyGossipMessage mocks base method.
-func (m *MockVoluntaryExitService) IsMyGossipMessage(name string) bool {
+// Names mocks base method.
+func (m *MockVoluntaryExitService) Names() []string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsMyGossipMessage", name)
-	ret0, _ := ret[0].(bool)
+	ret := m.ctrl.Call(m, "Names")
+	ret0, _ := ret[0].([]string)
 	return ret0
 }
 
-// IsMyGossipMessage indicates an expected call of IsMyGossipMessage.
-func (mr *MockVoluntaryExitServiceMockRecorder) IsMyGossipMessage(name any) *MockVoluntaryExitServiceIsMyGossipMessageCall {
+// Names indicates an expected call of Names.
+func (mr *MockVoluntaryExitServiceMockRecorder) Names() *MockVoluntaryExitServiceNamesCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMyGossipMessage", reflect.TypeOf((*MockVoluntaryExitService)(nil).IsMyGossipMessage), name)
-	return &MockVoluntaryExitServiceIsMyGossipMessageCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Names", reflect.TypeOf((*MockVoluntaryExitService)(nil).Names))
+	return &MockVoluntaryExitServiceNamesCall{Call: call}
 }
 
-// MockVoluntaryExitServiceIsMyGossipMessageCall wrap *gomock.Call
-type MockVoluntaryExitServiceIsMyGossipMessageCall struct {
+// MockVoluntaryExitServiceNamesCall wrap *gomock.Call
+type MockVoluntaryExitServiceNamesCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockVoluntaryExitServiceIsMyGossipMessageCall) Return(arg0 bool) *MockVoluntaryExitServiceIsMyGossipMessageCall {
+func (c *MockVoluntaryExitServiceNamesCall) Return(arg0 []string) *MockVoluntaryExitServiceNamesCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockVoluntaryExitServiceIsMyGossipMessageCall) Do(f func(string) bool) *MockVoluntaryExitServiceIsMyGossipMessageCall {
+func (c *MockVoluntaryExitServiceNamesCall) Do(f func() []string) *MockVoluntaryExitServiceNamesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockVoluntaryExitServiceIsMyGossipMessageCall) DoAndReturn(f func(string) bool) *MockVoluntaryExitServiceIsMyGossipMessageCall {
+func (c *MockVoluntaryExitServiceNamesCall) DoAndReturn(f func() []string) *MockVoluntaryExitServiceNamesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
