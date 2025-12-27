@@ -154,10 +154,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	if err != nil {
 		return nil, err
 	}
-	txNumForStorage, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
-	if err != nil {
-		return nil, err
-	}
+	txNumForStorage := txNum
 
 	var nextKey []byte
 	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals

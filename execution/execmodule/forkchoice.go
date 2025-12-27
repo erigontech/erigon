@@ -615,7 +615,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 	}
 	go func() {
 		defer e.doingPostForkchoice.Store(false)
-		var timings []interface{}
+		var timings []any
 		// Wait for semaphore to be available
 		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
 			return
@@ -650,7 +650,7 @@ func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeade
 	dbg.ReadMemStats(&m)
 	blockTimings := e.forkValidator.GetTimings(blockHash)
 
-	logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64()}
+	logArgs := []any{"hash", blockHash, "number", fcuHeader.Number.Uint64()}
 	if txnum != 0 {
 		logArgs = append(logArgs, "txnum", txnum)
 	}

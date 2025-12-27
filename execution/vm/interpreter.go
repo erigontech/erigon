@@ -81,7 +81,7 @@ type CallContext struct {
 }
 
 var contextPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &CallContext{
 			Stack: Stack{data: make([]uint256.Int, 0, 16)},
 		}

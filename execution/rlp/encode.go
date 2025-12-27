@@ -68,7 +68,7 @@ type Encoder interface {
 // buffered.
 //
 // Please see package-level documentation of encoding rules.
-func Encode(w io.Writer, val interface{}) error {
+func Encode(w io.Writer, val any) error {
 	if outer, ok := w.(*encBuffer); ok {
 		// Encode was called by some type's EncodeRLP.
 		// Avoid copying by writing to the outer encBuffer directly.
@@ -97,7 +97,7 @@ func Write(w io.Writer, val []byte) error {
 
 // EncodeToBytes returns the RLP encoding of val.
 // Please see package-level documentation for the encoding rules.
-func EncodeToBytes(val interface{}) ([]byte, error) {
+func EncodeToBytes(val any) ([]byte, error) {
 	eb := encBufferPool.Get().(*encBuffer)
 	defer encBufferPool.Put(eb)
 	eb.reset()
@@ -112,7 +112,7 @@ func EncodeToBytes(val interface{}) ([]byte, error) {
 // data.
 //
 // Please see the documentation of Encode for the encoding rules.
-func EncodeToReader(val interface{}) (size int, r io.Reader, err error) {
+func EncodeToReader(val any) (size int, r io.Reader, err error) {
 	eb := encBufferPool.Get().(*encBuffer)
 	eb.reset()
 	if err := eb.encode(val); err != nil {

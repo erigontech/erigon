@@ -33,7 +33,7 @@ import (
 
 // encodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
 var encodeBufferPool = sync.Pool{
-	New: func() interface{} { return new(bytes.Buffer) },
+	New: func() any { return new(bytes.Buffer) },
 }
 
 type DerivableList interface {
@@ -174,7 +174,7 @@ func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
 	return h
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
+func rlpHash(x any) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
 	sha.Read(h[:])     //nolint:errcheck
@@ -184,7 +184,7 @@ func rlpHash(x interface{}) (h common.Hash) {
 
 // prefixedRlpHash writes the prefix into the hasher before rlp-encoding the
 // given interface. It's used for typed transactions.
-func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
+func prefixedRlpHash(prefix byte, x any) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	//nolint:errcheck
 	sha.Write([]byte{prefix})
