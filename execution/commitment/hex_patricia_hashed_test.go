@@ -67,7 +67,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	firstRootHash, err := hph.Process(ctx, upds, "", nil)
+	firstRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	t.Logf("rootHash %x\n", firstRootHash)
@@ -84,7 +84,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	secondRootHash, err := hph.Process(ctx, upds, "", nil)
+	secondRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEqual(t, firstRootHash, secondRootHash)
 	t.Logf("rootHash %x\n", secondRootHash)
@@ -100,7 +100,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, plainKeys, updates)
 
-	thirdRootHash, err := hph.Process(ctx, upds, "", nil)
+	thirdRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	t.Logf("rootHash %x\n", thirdRootHash)
 	require.NoError(t, err)
 	require.NotEqual(t, secondRootHash, thirdRootHash)
@@ -129,7 +129,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer upds.Close()
 
-	hashBeforeEmptyUpdate, err := hph.Process(ctx, upds, "", nil)
+	hashBeforeEmptyUpdate, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 
@@ -144,7 +144,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, plainKeys, updates)
 
-	hashAfterEmptyUpdate, err := hph.Process(ctx, upds, "", nil)
+	hashAfterEmptyUpdate, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	fmt.Println("2. Empty updates applied without state reset")
@@ -181,7 +181,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil)
+			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -197,7 +197,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		rh, err := trieTwo.Process(ctx, updsTwo, "", nil)
+		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -222,7 +222,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil)
+			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -238,7 +238,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
-		rh, err := trieTwo.Process(ctx, updsTwo, "", nil)
+		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -270,7 +270,7 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer toProcess.Close()
 
-	_, err = hph.Process(ctx, toProcess, "", nil)
+	_, err = hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	ms.SetConcurrentCommitment(true)
@@ -290,7 +290,7 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	toProcess2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer toProcess2.Close()
 
-	_, err = paratrie.Process(ctx, toProcess2, "", nil)
+	_, err = paratrie.Process(ctx, toProcess2, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	canParallel, err = paratrie.CanDoConcurrentNext()
@@ -354,7 +354,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil)
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 				require.NoError(t, err)
 
 				t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -370,7 +370,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:3], updates[:3])
 
-			startRoot, err := trieBatchR.Process(ctx, updsOne, "", nil)
+			startRoot, err := trieBatchR.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			fmt.Printf("\nBatch will start with %x\n", startRoot)
@@ -382,7 +382,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[3:], updates[3:])
 
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil)
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -411,7 +411,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil)
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 				require.NoError(t, err)
 
 				t.Logf("3) sequential root @%d hash %x\n", i, sequentialRoot)
@@ -429,7 +429,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil)
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -462,7 +462,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil)
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 				require.NoError(t, err)
 
 				t.Logf("3) sequential root @%d hash %x\n", i, sequentialRoot)
@@ -480,7 +480,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil)
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -572,7 +572,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-		sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil)
+		sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
 		t.Logf("sequential root @%d hash %x\n", len(plainKeys), sequentialRoot)
@@ -600,7 +600,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-		rh, err := trieBatch.Process(ctx, updsTwo, "", nil)
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -663,7 +663,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 
 				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil)
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 				require.NoError(t, err)
 
 				t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -679,7 +679,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 
 			updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil)
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -746,7 +746,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil)
+			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -762,7 +762,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
-		rh, err := trieBatch.Process(ctx, updsTwo, "", nil)
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -831,7 +831,7 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 		require.NoError(t, err)
 
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-		rootHash, err := hph.Process(ctx, upds, "", nil)
+		rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Equal(t, testData.expectedRoot, fmt.Sprintf("%x", rootHash))
 		upds.Close()
@@ -873,7 +873,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	t.Parallel()
 
-	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, nil)
+	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, WarmupConfig{})
 	var s state
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))
@@ -947,7 +947,7 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	defer upds.Close()
 
 	// process updates
-	rhBefore, err := before.Process(ctx, upds, "", nil)
+	rhBefore, err := before.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	state, err := before.EncodeCurrentState(nil)
@@ -973,12 +973,12 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates)
 
-	rh2Before, err := before.Process(ctx, upds, "", nil)
+	rh2Before, err := before.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates) // they're resetted after Process
 
-	rh2After, err := after.Process(ctx, upds, "", nil)
+	rh2After, err := after.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.Equal(t, rh2Before, rh2After)
 }
@@ -1009,7 +1009,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	updOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer updOne.Close()
 
-	withoutRestore, err := trieOne.Process(ctx, updOne, "", nil)
+	withoutRestore, err := trieOne.Process(ctx, updOne, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	t.Logf("root before restore %x\n", withoutRestore)
 
@@ -1059,7 +1059,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, updOne, plainKeys, updates)
 
-	withoutRestore, err = trieOne.Process(ctx, updOne, "", nil)
+	withoutRestore, err = trieOne.Process(ctx, updOne, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	t.Logf("batch without restore (%d) root %x\n", len(updates), withoutRestore)
@@ -1067,7 +1067,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	updTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer updTwo.Close()
 
-	afterRestore, err := trieTwo.Process(ctx, updTwo, "", nil)
+	afterRestore, err := trieTwo.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	t.Logf("batch after restore (%d) root %x\n", len(updates), afterRestore)
 
@@ -1108,7 +1108,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	updTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer updTwo.Close()
 
-	beforeRestore, err := trieTwo.Process(ctx, updTwo, "", nil)
+	beforeRestore, err := trieTwo.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	buf, err := trieTwo.EncodeCurrentState(nil)
@@ -1141,12 +1141,12 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	WrapKeyUpdatesInto(t, updTwo, plainKeys, updates)
 
 	// process updates
-	AfterRestore, err := trieOne.Process(ctx, updTwo, "", nil)
+	AfterRestore, err := trieOne.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	WrapKeyUpdatesInto(t, updTwo, plainKeys, updates)
 	// process updates again but keep in mind that two tries sharing same ms, so result should be equal (second time we just go over same data)
-	withoutRestore, err := trieTwo.Process(ctx, updTwo, "", nil)
+	withoutRestore, err := trieTwo.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	require.Equal(t, withoutRestore, AfterRestore)
@@ -1193,7 +1193,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil)
+			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("trieSequential root @%d hash %x\n", i, sequentialRoot)
@@ -1220,7 +1220,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
-		rh, err := trieBatch.Process(ctx, updsTwo, "", nil)
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("trieBatch of %d root hash %x\n", len(updates), rh)
 
@@ -1293,7 +1293,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := sequential.Process(ctx, updsOne, "", nil)
+			sequentialRoot, err := sequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -1321,14 +1321,14 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
-		rh, err := batch.Process(ctx, updsTwo, "", nil)
+		rh, err := batch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
 		require.Equal(t, rh, somewhereRoot)
 
 		WrapKeyUpdatesInto(t, updsTwo, plainKeys[somewhere+1:], updates[somewhere+1:])
 
-		rh, err = batch.Process(ctx, updsTwo, "", nil)
+		rh, err = batch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("(second half) batch of %d root hash %x\n", len(updates)-somewhere, rh)
 
@@ -1443,7 +1443,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
 		sequential.SetTrace(false)
-		sequentialRoot, err := sequential.Process(ctx, updsOne, "", nil)
+		sequentialRoot, err := sequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		//sequential.SetTrace(false)
 
@@ -1456,7 +1456,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		err = stateSeq.applyPlainUpdates(plainKeys[somewhere+1:], updates[somewhere+1:])
 		require.NoError(t, err)
 
-		sequentialRoot, err = sequential.Process(ctx, updsOne, "", nil)
+		sequentialRoot, err = sequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
 		t.Logf("sequential root @%d hash %x\n", len(plainKeys), sequentialRoot)
@@ -1481,7 +1481,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
 		trieBatch.SetTrace(false)
-		rh, err := trieBatch.Process(ctx, updsTwo, "", nil)
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
 		require.Equal(t, somewhereRoot, rh)
@@ -1489,7 +1489,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		// trieBatch.SetParticularTrace(true, 0x9)
 		WrapKeyUpdatesInto(t, updsTwo, plainKeys[somewhere+1:], updates[somewhere+1:])
 
-		rh, err = trieBatch.Process(ctx, updsTwo, "", nil)
+		rh, err = trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
 		t.Logf("(second half) batch of %d root hash %x\n", len(updates)-somewhere, rh)
@@ -1823,7 +1823,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil)
+			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -1839,7 +1839,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		rh, err := trieTwo.Process(ctx, updsTwo, "", nil)
+		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -1935,7 +1935,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		defer toProcess.Close()
 
 		hph.trace = true
-		root, err := hph.Process(ctx, toProcess, "", nil)
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
 		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)

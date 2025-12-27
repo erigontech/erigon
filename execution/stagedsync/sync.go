@@ -510,8 +510,8 @@ func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
 	return nil
 }
 
-func (s *Sync) PrintTimings() []interface{} {
-	var logCtx []interface{}
+func (s *Sync) PrintTimings() []any {
+	var logCtx []any
 	count := 0
 	for i := range s.timings {
 		if s.timings[i].took < 100*time.Millisecond {

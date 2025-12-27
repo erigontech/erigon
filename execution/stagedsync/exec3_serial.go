@@ -153,6 +153,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
 			}
+			// Warmup is enabled via SetWarmupDB at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
@@ -189,7 +190,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		select {
 		case <-logEvery.C:
-			if se.inMemExec || se.isMining {
+			if se.isMining {
 				break
 			}
 
@@ -452,27 +453,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				var prev *types.Receipt
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
-				} else if txTask.TxIndex > 0 {
-					prevTask := *txTask
-					prevTask.HistoryExecution = true
-					prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
-					result := se.worker.RunTxTaskNoLock(&prevTask)
-					if result.Err != nil {
-						return fmt.Errorf("error while finding last receipt: %w", result.Err)
-					}
-					var cumGasUsed uint64
-					var logIndexAfterTx uint32
-					if txTask.TxIndex > 1 {
-						cumGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-1)
-						if err != nil {
-							return err
-						}
-					}
-					prev, err = result.CreateReceipt(txTask.TxIndex-1,
-						cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
-					if err != nil {
-						return err
-					}
+				} else {
+					// TODO get the previous reciept from the DB
 				}
 
 				receipt, err := result.CreateNextReceipt(prev)

@@ -268,17 +268,17 @@ Loop:
 			panic(blockIndex) //uint-underflow
 		}
 
+		// Register pending block
+		pendingMu.Lock()
 		// Skip blocks with no transactions
 		if len(body.Transactions) == 0 {
 			// Write empty senders for blocks with no transactions
 			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil); err != nil {
 				return err
 			}
+			pendingMu.Unlock()
 			continue
 		}
-
-		// Register pending block
-		pendingMu.Lock()
 		pendingBlocks[blockIndex] = &pendingBlock{
 			senders: make([]byte, len(body.Transactions)*length.Addr),
 			txCount: len(body.Transactions),
@@ -345,8 +345,8 @@ Loop:
 	} else {
 		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
 			Quit: quitCh,
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"block", binary.BigEndian.Uint64(k)}
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []any) {
+				return []any{"block", binary.BigEndian.Uint64(k)}
 			},
 		}); err != nil {
 			return err
