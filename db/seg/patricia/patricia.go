@@ -352,18 +352,8 @@ type Match struct {
 
 type Matches []Match
 
-func (m Matches) Len() int {
-	return len(m)
-}
-
-func (m Matches) Less(i, j int) bool {
-	return m[i].Start < m[j].Start
-}
-
-func (m *Matches) Swap(i, j int) {
-	(*m)[i], (*m)[j] = (*m)[j], (*m)[i]
-}
-
+// MatchFinder is the original implementation kept for validation purposes.
+// It's used in fuzz tests to compare results with MatchFinder2.
 type MatchFinder struct {
 	pt      *PatriciaTree
 	s       pathWalker
@@ -699,7 +689,6 @@ func (mf2 *MatchFinder2) FindLongestMatches(data []byte) []Match {
 	if len(mf2.matches) < 2 {
 		return mf2.matches
 	}
-	//sort.Sort(&mf2.matches)
 	slices.SortFunc(mf2.matches, func(i, j Match) int { return cmp.Compare(i.Start, j.Start) })
 
 	lastEnd := mf2.matches[0].End
