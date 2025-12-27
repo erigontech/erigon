@@ -332,15 +332,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneBlockDistance := f.Uint64(PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value, PruneBlocksDistanceFlag.Usage)
 	pruneDistance := f.Uint64(PruneDistanceFlag.Name, PruneDistanceFlag.Value, PruneDistanceFlag.Usage)
 
-	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
-	if pruneBlockDistance != nil {
-		blockDistance = *pruneBlockDistance
-	}
-	if pruneDistance != nil {
-		distance = *pruneDistance
-	}
-
-	mode, err := prune.FromCli(*pruneMode, distance, blockDistance)
+	mode, err := prune.FromCli(*pruneMode, *pruneDistance, *pruneBlockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
