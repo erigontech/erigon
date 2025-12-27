@@ -112,7 +112,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		cl.logger.Debug("[mock-cl] waiting until", "time", timestamp, "duration", waitDuration)
 		err := common.Sleep(ctx, waitDuration)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("build new payload: wait error: %w", err)
 		}
 	}
 	parentBeaconBlockRoot := common.BigToHash(cl.state.ParentClBlockRoot)
@@ -134,7 +134,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 			return r, r.PayloadStatus.Status, err
 		})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build new payload: fcu error: %w", err)
 	}
 	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
 		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
@@ -150,7 +150,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build new payload: get payload error: %w", err)
 	}
 	return &MockClPayload{newPayload, payloadAttributes.ParentBeaconBlockRoot}, nil
 }
