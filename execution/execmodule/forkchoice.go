@@ -359,6 +359,16 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		sd.ClearRam(true)
 
+		if err := tx.Commit(); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+		tx, err = e.db.BeginTemporalRw(ctx)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
