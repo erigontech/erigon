@@ -153,7 +153,7 @@ func (h Hash) Generate(rand *rand.Rand, size int) reflect.Value {
 }
 
 // Scan implements Scanner for database/sql.
-func (h *Hash) Scan(src interface{}) error {
+func (h *Hash) Scan(src any) error {
 	srcB, ok := src.([]byte)
 	if !ok {
 		return fmt.Errorf("can't scan %T into Hash", src)
@@ -174,7 +174,7 @@ func (h Hash) Value() (driver.Value, error) {
 func (Hash) ImplementsGraphQLType(name string) bool { return name == "Bytes32" }
 
 // UnmarshalGraphQL unmarshals the provided GraphQL query data.
-func (h *Hash) UnmarshalGraphQL(input interface{}) error {
+func (h *Hash) UnmarshalGraphQL(input any) error {
 	var err error
 	switch input := input.(type) {
 	case string:
