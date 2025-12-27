@@ -766,7 +766,7 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 }
 
 func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, _ bool, fn func(key []byte, txnum []byte) error) error {
-	_, err := iit.prune(ctx, rwTx, txFrom, txTo, limit, logEvery, fn)
+	_, err := iit.oldPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, fn)
 	if err != nil {
 		return err
 	}
@@ -933,10 +933,8 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 
 	timeOut := 999 * time.Hour
-	pruning := false
 	if limit < 1000 { //TODO: change after tests
 		timeOut = 400 * time.Millisecond
-		pruning = true
 	}
 
 	var lastPrunedVal []byte
@@ -944,11 +942,9 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	ii := iit.ii
 
 	defer func() {
-		if pruning {
-			err = SavePruneValProgress(rwTx, ii.ValuesTable, lastPrunedVal)
-			if err != nil {
-				ii.logger.Error("prune val progress", "name", iit.name, "err", err)
-			}
+		err = SavePruneValProgress(rwTx, ii.ValuesTable, lastPrunedVal)
+		if err != nil {
+			ii.logger.Error("prune val progress", "name", iit.name, "err", err)
 		}
 	}()
 
@@ -1029,11 +1025,11 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	valLen := 0
 	var iiVal, txNumBytes []byte
-	if pruning {
-		fVal, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
-		if err != nil {
-			return nil, err
-		}
+	fVal, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
+	if err != nil {
+		return nil, err
+	}
+	if fVal != nil {
 		iiVal, txNumBytes, err = idxDelCursor.Seek(fVal)
 	} else {
 		iiVal, txNumBytes, err = idxDelCursor.First()
@@ -1045,6 +1041,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 		}
 		if time.Since(start) > timeOut {
+			ii.logger.Info("prune val timed out", "name", ii.FilenameBase)
 			lastPrunedVal = iiVal
 			isNotDone = true
 			break
@@ -1129,7 +1126,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		lastPrunedVal = nil
 	}
 
-	iit.ii.logger.Info("ii pruning res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds())
+	iit.ii.logger.Info("ii pruning res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds(), "prune ended", lastPrunedVal == nil)
 
 	return stat, err
 }
