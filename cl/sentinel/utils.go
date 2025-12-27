@@ -28,7 +28,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/pion/randutil"
 	"github.com/prysmaticlabs/go-bitfield"
 
 	"github.com/erigontech/erigon/cl/gossip"
@@ -110,8 +109,6 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 	}
 	return multiAddrs
 }
-
-var shuffleSource = randutil.NewMathRandomGenerator()
 
 func (s *Sentinel) oneSlotDuration() time.Duration {
 	return time.Duration(s.cfg.BeaconConfig.SecondsPerSlot) * time.Second
