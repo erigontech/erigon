@@ -1296,18 +1296,11 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, r services.FullBlockR
 		if header == nil {
 			continue
 		}
-		v, err := rlp.EncodeToBytes(header)
-		if err != nil {
-			return err
-		}
 		h := ChainSegmentHeader{
-			HeaderRaw: v,
-			Header:    header,
-			Hash:      header.Hash(),
-			Number:    header.Number.Uint64(),
+			Hash:   header.Hash(),
+			Number: header.Number.Uint64(),
 		}
-		link := hd.addHeaderAsLink(h, true /* persisted */)
-		link.verified = true
+		hd.addHeaderAsLink(h, true /* persisted */)
 	}
 	if hd.highestInDb < n {
 		hd.highestInDb = n
