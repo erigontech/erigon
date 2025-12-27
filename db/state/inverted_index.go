@@ -784,6 +784,9 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txT
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
 		}
 	}
+	if txTo == math.MaxUint64 {
+		return iit.oldPrune(ctx, tx, txFrom, txTo, limit, logEvery, fn)
+	}
 	return iit.prune(ctx, tx, txFrom, txTo, limit, logEvery, fn)
 }
 
@@ -801,7 +804,7 @@ func (iit *InvertedIndexRoTx) OldPrune(ctx context.Context, tx kv.RwTx, txFrom, 
 
 func (iit *InvertedIndexRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
-
+	start := time.Now()
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
@@ -913,7 +916,7 @@ func (iit *InvertedIndexRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom
 		}
 	}
 
-	iit.ii.logger.Info("ii pruning res", "name", iit.name, "pruned", stat.PruneCountTx)
+	iit.ii.logger.Info("ii unwind res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", "spent ms", time.Since(start).Milliseconds())
 
 	return stat, err
 }
@@ -1035,6 +1038,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	} else {
 		iiVal, txNumBytes, err = idxDelCursor.First()
 	}
+	isNotDone := false
 
 	for ; iiVal != nil; iiVal, txNumBytes, err = idxDelCursor.NextNoDup() {
 		if err != nil {
@@ -1042,6 +1046,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 		if time.Since(start) > timeOut {
 			lastPrunedVal = iiVal
+			isNotDone = true
 			break
 		}
 		txNum := binary.BigEndian.Uint64(txNumBytes)
@@ -1118,6 +1123,10 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+	}
+
+	if isNotDone {
+		lastPrunedVal = nil
 	}
 
 	iit.ii.logger.Info("ii pruning res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds())
