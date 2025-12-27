@@ -282,13 +282,13 @@ func fnvHash32(mix []uint32, data []uint32) {
 }
 
 var bytes64Pool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, hashBytes)
 		return &buf
 	},
 }
 var bytes40Pool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, 40)
 		return &buf
 	},

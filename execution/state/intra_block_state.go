@@ -112,7 +112,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 }
 
 var revisionsPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &revisions{0, make([]revision, 0, 2048)}
 	},
 }

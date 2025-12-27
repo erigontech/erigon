@@ -1769,7 +1769,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		mxPrunableDComm.Set(delta)
 	}
 	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
-	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
+	return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
 }
 
 type DomainPruneStat struct {
