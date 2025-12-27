@@ -107,7 +107,7 @@ func SecondsToHHMMString(seconds uint64) string {
 	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
 
-func ParseData(data []byte, v interface{}) {
+func ParseData(data []byte, v any) {
 	if len(data) == 0 {
 		return
 	}
