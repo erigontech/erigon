@@ -40,11 +40,17 @@ func NewNotifier() *Notifier {
 
 // Reset to the "non-signaled" state.
 func (en *Notifier) Reset() {
+	en.mutex.Lock()
+	defer en.mutex.Unlock()
+
 	en.hasEvent.Store(false)
 }
 
 // SetAndBroadcast sets the "signaled" state and notifies all waiters.
 func (en *Notifier) SetAndBroadcast() {
+	en.mutex.Lock()
+	defer en.mutex.Unlock()
+
 	en.hasEvent.Store(true)
 	en.cond.Broadcast()
 }
