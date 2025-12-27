@@ -1392,6 +1392,8 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 		efGetter := ht.iit.dataReader(item.src.decompressor)
 		efGetter.Reset(0)
 
+		var histKeyBuf []byte
+
 		for efGetter.HasNext() {
 			key, _ := efGetter.Next(nil)
 			val, _ := efGetter.Next(nil) // encoded EF sequence
@@ -1422,14 +1424,15 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 					compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 				}
 
-				vGetter := seg.NewPagedReader(
-					ht.statelessGetter(viFile.i),
-					compressedPageValuesCount,
-					true,
-				)
+				vReader := ht.statelessGetter(viFile.i)
+				vReader.Reset(vOffset)
 
-				vGetter.Reset(vOffset)
-				val, _ := vGetter.Next(nil)
+				val, _ := vReader.Next(nil)
+
+				if compressedPageValuesCount > 0 {
+					histKeyBuf = historyKey(txNum, key, histKeyBuf)
+					val, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
+				}
 
 				fmt.Fprintf(dumpTo, "key: %x, txn: %d, val: %x\n", key, txNum, val)
 			}
