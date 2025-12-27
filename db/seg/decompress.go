@@ -623,38 +623,43 @@ func (g *Getter) Count() int          { return g.d.Count() }
 func (g *Getter) FileName() string    { return g.fName }
 func (g *Getter) GetMetadata() []byte { return g.d.GetMetadata() }
 
-func (g *Getter) nextPos(clean bool) (pos uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("nextPos fails: file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
+func (g *Getter) nextPos(clean bool) uint64 {
 	if clean && g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
-	table, dataLen, data := g.posDict, len(g.data), g.data
+	table := g.posDict
 	if table.bitLen == 0 {
 		return table.pos[0]
 	}
-	for l := byte(0); l == 0; {
-		code := uint16(data[g.dataP]) >> g.dataBit
-		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < dataLen {
-			code |= uint16(data[g.dataP+1]) << (8 - g.dataBit)
+	data := g.data
+	dataP := g.dataP
+	dataBit := g.dataBit
+	dataLen := uint64(len(data))
+	// Precompute mask for the first table (hot path optimization)
+	mask := uint16(1)<<table.bitLen - 1
+	for {
+		// Read up to 16 bits starting at dataP, shifted by dataBit
+		code := uint16(data[dataP]) >> dataBit
+		if 8-dataBit < table.bitLen && dataP+1 < dataLen {
+			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
-		code &= (uint16(1) << table.bitLen) - 1
-		l = table.lens[code]
+		code &= mask
+		l := int(table.lens[code])
 		if l == 0 {
 			table = table.ptrs[code]
-			g.dataBit += 9
+			dataBit += 9
+			dataP += uint64(dataBit >> 3)
+			dataBit &= 7
+			mask = uint16(1)<<table.bitLen - 1
 		} else {
-			g.dataBit += int(l)
-			pos = table.pos[code]
+			dataBit += l
+			dataP += uint64(dataBit >> 3)
+			g.dataP = dataP
+			g.dataBit = dataBit & 7
+			return table.pos[code]
 		}
-		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit %= 8
 	}
-	return pos
 }
 
 func (g *Getter) nextPattern() []byte {
