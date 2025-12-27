@@ -715,7 +715,12 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+	val, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
+	if err != nil {
+		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+		return true
+	}
+	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum() || val != nil
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
@@ -924,7 +929,25 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		limit = math.MaxUint64
 	}
 
+	timeOut := 999 * time.Hour
+	pruning := false
+	if limit < 1000 { //TODO: change after tests
+		timeOut = 400 * time.Millisecond
+		pruning = true
+	}
+
+	var lastPrunedVal []byte
+
 	ii := iit.ii
+
+	defer func() {
+		if pruning {
+			err = SavePruneValProgress(rwTx, ii.ValuesTable, lastPrunedVal)
+			if err != nil {
+				ii.logger.Error("prune val progress", "name", iit.name, "err", err)
+			}
+		}
+	}()
 
 	//defer func() {
 	//	ii.logger.Error("[snapshots] prune index",
@@ -949,26 +972,77 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	var txKey [8]byte
 
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
+	if fn != nil {
+		for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
+			if err != nil {
+				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
+			}
+			txNum := binary.BigEndian.Uint64(txnb)
+			if txNum >= txTo {
+				break
+			} else if limit == 0 {
+				txTo = txNum
+				break
+			}
+			limit--
+		}
+	}
+
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	pairs := uint64(0)
+	// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
+	for txnb, iiVal, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, iiVal, err = keysCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 		}
-		txNum := binary.BigEndian.Uint64(txnb)
-		if txNum >= txTo {
-			break
-		} else if limit == 0 {
-			txTo = txNum
+		if binary.BigEndian.Uint64(txnb) >= txTo {
 			break
 		}
-		limit--
+		stat.PruneCountTx++
+		if fn != nil {
+			for ; txnb != nil; txnb, iiVal, err = keysCursor.NextDup() {
+				if err != nil {
+					return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
+				}
+				if err = fn(iiVal, txnb); err != nil {
+					return nil, fmt.Errorf("fn error: %w", err)
+				}
+				stat.PruneCountValues++
+				pairs++
+			}
+
+		}
+		dups, err := keysCursor.CountDuplicates()
+		if err != nil {
+			return nil, err
+		}
+		pairs += dups
+		if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+			return nil, err
+		}
 	}
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	valLen := 0
-	for iiVal, txNumBytes, err := idxDelCursor.First(); iiVal != nil; iiVal, txNumBytes, err = idxDelCursor.NextNoDup() {
+	var iiVal, txNumBytes []byte
+	if pruning {
+		fVal, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
+		if err != nil {
+			return nil, err
+		}
+		iiVal, txNumBytes, err = idxDelCursor.Seek(fVal)
+	} else {
+		iiVal, txNumBytes, err = idxDelCursor.First()
+	}
+
+	for ; iiVal != nil; iiVal, txNumBytes, err = idxDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
+		}
+		if time.Since(start) > timeOut {
+			lastPrunedVal = iiVal
+			break
 		}
 		txNum := binary.BigEndian.Uint64(txNumBytes)
 		lastDupTxNumB, err := idxDelCursor.LastDup()
@@ -1046,34 +1120,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
-	for txnb, iiVal, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, iiVal, err = keysCursor.NextNoDup() {
-		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
-		}
-		if binary.BigEndian.Uint64(txnb) >= txTo {
-			break
-		}
-		stat.PruneCountTx++
-		if fn != nil {
-			for ; txnb != nil; txnb, iiVal, err = keysCursor.NextDup() {
-				if err != nil {
-					return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
-				}
-				if err = fn(iiVal, txnb); err != nil {
-					return nil, fmt.Errorf("fn error: %w", err)
-				}
-				stat.PruneCountValues++
-			}
-
-		}
-		if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
-			return nil, err
-		}
-	}
-
-	iit.ii.logger.Info("ii pruning res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "spent ms", time.Since(start).Milliseconds())
+	iit.ii.logger.Info("ii pruning res", "name", iit.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds())
 
 	return stat, err
 }

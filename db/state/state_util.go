@@ -74,3 +74,22 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step kv.Step, err erro
 	}
 	return kv.Step(binary.BigEndian.Uint64(v)), nil
 }
+
+func SavePruneValProgress(db kv.Putter, prunedTblName string, prunedVal []byte) error {
+	empty := make([]byte, 1)
+	if prunedVal != nil {
+		empty[0] = 1
+	}
+	return db.Put(kv.TblPruningValsProg, []byte(prunedTblName), append(empty, prunedVal...))
+}
+
+func GetPruneValProgress(db kv.Getter, tbl []byte) (pruned []byte, err error) {
+	v, err := db.GetOne(kv.TblPruningValsProg, []byte(tbl))
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	return v, nil
+}
