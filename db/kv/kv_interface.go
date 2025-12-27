@@ -452,7 +452,7 @@ type TemporalDebugTx interface {
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
 
-	NewMemBatch(ioMetrics interface{}) TemporalMemBatch
+	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
 type TemporalDebugDB interface {

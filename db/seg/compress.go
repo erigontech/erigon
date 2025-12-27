@@ -400,11 +400,11 @@ func (db *DictionaryBuilder) Swap(i, j int) {
 }
 func (db *DictionaryBuilder) Sort() { slices.SortFunc(db.items, dictionaryBuilderCmp) }
 
-func (db *DictionaryBuilder) Push(x interface{}) {
+func (db *DictionaryBuilder) Push(x any) {
 	db.items = append(db.items, x.(*Pattern))
 }
 
-func (db *DictionaryBuilder) Pop() interface{} {
+func (db *DictionaryBuilder) Pop() any {
 	old := db.items
 	n := len(old)
 	x := old[n-1]
@@ -574,11 +574,11 @@ func (ph *PatternHeap) Swap(i, j int) {
 	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
 }
 
-func (ph *PatternHeap) Push(x interface{}) {
+func (ph *PatternHeap) Push(x any) {
 	*ph = append(*ph, x.(*PatternHuff))
 }
 
-func (ph *PatternHeap) Pop() interface{} {
+func (ph *PatternHeap) Pop() any {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
@@ -685,11 +685,11 @@ func (ph *PositionHeap) Swap(i, j int) {
 	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
 }
 
-func (ph *PositionHeap) Push(x interface{}) {
+func (ph *PositionHeap) Push(x any) {
 	*ph = append(*ph, x.(*PositionHuff))
 }
 
-func (ph *PositionHeap) Pop() interface{} {
+func (ph *PositionHeap) Pop() any {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
