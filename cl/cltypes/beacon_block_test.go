@@ -119,8 +119,8 @@ func TestBeaconBlockJson(t *testing.T) {
 	block.Block.Body.Version = clparams.DenebVersion
 	err := json.Unmarshal(beaconBodyJSON, block)
 	require.NoError(t, err)
-	map1 := make(map[string]interface{})
-	map2 := make(map[string]interface{})
+	map1 := make(map[string]any)
+	map2 := make(map[string]any)
 	err = json.Unmarshal(beaconBodyJSON, &map1)
 	require.NoError(t, err)
 	out, err := json.Marshal(block)
