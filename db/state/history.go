@@ -1062,6 +1062,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		pruned++
 		return nil
 	}
+	ht.h.logger.Info("history pruning res:", "name", ht.h.FilenameBase, "txFrom", txFrom, "txTo", txTo, "limit", limit, "pruned", pruned)
 	mxPruneSizeHistory.AddInt(pruned)
 
 	if !forced && ht.h.SnapshotsDisabled {
