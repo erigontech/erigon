@@ -389,6 +389,11 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 		contract := callContext.Contract
 		pc := frame.pc
 
+		// Reset variables for this iteration
+		err = nil
+		res = nil
+		logged = false
+
 		steps++
 		if steps%5000 == 0 && in.evm.Cancelled() {
 			// Return with current frame's gas
@@ -396,7 +401,7 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 		}
 
 		if dbg.TraceDyanmicGas || debug || trace {
-			logged, pcCopy, gasCopy = false, pc, callContext.gas
+			pcCopy, gasCopy = pc, callContext.gas
 			blockNum, txIndex, txIncarnation = in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation()
 		}
 
@@ -408,78 +413,93 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {
 			err = &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+			res, err = in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+			// Fall through to frame completion logic
 		} else if sLen > operation.maxStack {
 			err = &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
-			return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+			res, err = in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+			// Fall through to frame completion logic
 		}
 
-		if !callContext.useGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+		if err == nil && !callContext.useGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 			err = ErrOutOfGas
-			return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+			res, err = in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+			// Fall through to frame completion logic
 		}
 
 		// Handle dynamic gas
 		var memorySize uint64
-		if operation.dynamicGas != nil {
+		if err == nil && operation.dynamicGas != nil {
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
 					err = ErrGasUintOverflow
-					return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+					res, err = in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+					// Fall through to frame completion logic
 				}
-				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					err = ErrGasUintOverflow
-					return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+				if err == nil {
+					if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+						err = ErrGasUintOverflow
+						res, err = in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+						// Fall through to frame completion logic
+					}
 				}
 			}
 
-			var dynamicCost uint64
-			dynamicCost, err = operation.dynamicGas(in.evm, callContext, callContext.gas, memorySize)
-			if err != nil {
-				err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
-				return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
-			}
-			cost += dynamicCost
-			callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp()
+			if err == nil {
+				var dynamicCost uint64
+				dynamicCost, err = operation.dynamicGas(in.evm, callContext, callContext.gas, memorySize)
+				if err != nil {
+					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
+					res, err = in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+					// Fall through to frame completion logic
+				} else {
+					cost += dynamicCost
+					callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp()
 
-			if dbg.TraceDyanmicGas && dynamicCost > 0 {
-				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
-			}
+					if dbg.TraceDyanmicGas && dynamicCost > 0 {
+						fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
+					}
 
-			if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
-				err = ErrOutOfGas
-				return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
-			}
-		}
-
-		// Tracer hooks
-		if in.cfg.Tracer != nil {
-			if in.cfg.Tracer.OnGasChange != nil {
-				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-			}
-			if in.cfg.Tracer.OnOpcode != nil {
-				in.cfg.Tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
-				logged = true
+					if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+						err = ErrOutOfGas
+						res, err = in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+						// Fall through to frame completion logic
+					}
+				}
 			}
 		}
 
-		if memorySize > 0 {
-			callContext.Memory.Resize(memorySize)
-		}
-
-		if trace {
-			var opstr string
-			if operation.string != nil {
-				opstr = operation.string(pc, callContext)
-			} else {
-				opstr = op.String()
+		// Skip tracer hooks and execution if there was a pre-execution error
+		if err == nil {
+			// Tracer hooks
+			if in.cfg.Tracer != nil {
+				if in.cfg.Tracer.OnGasChange != nil {
+					in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+				}
+				if in.cfg.Tracer.OnOpcode != nil {
+					in.cfg.Tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+					logged = true
+				}
 			}
-			fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, pc, traceGas(op, callGas, cost), opstr)
-		}
 
-		// Execute the operation
-		pc, res, err = operation.execute(pc, in, callContext)
+			if memorySize > 0 {
+				callContext.Memory.Resize(memorySize)
+			}
+
+			if trace {
+				var opstr string
+				if operation.string != nil {
+					opstr = operation.string(pc, callContext)
+				} else {
+					opstr = op.String()
+				}
+				fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, pc, traceGas(op, callGas, cost), opstr)
+			}
+
+			// Execute the operation
+			pc, res, err = operation.execute(pc, in, callContext)
+		}
 
 		// Handle CALL/CALLCODE/DELEGATECALL/STATICCALL suspension
 		if errors.Is(err, errSuspendForCall) {
@@ -521,8 +541,18 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 
 			// Handle precompiles synchronously
 			if prepared.IsPrecompile {
+				// Call tracer OnEnter for precompile
+				if in.cfg.Tracer != nil {
+					in.evm.captureBegin(in.depth, pending.CallType, pending.Caller, pending.Addr, true, pending.Input, pending.Gas, pending.Value, nil)
+				}
+
 				ret, returnGas, callErr := RunPrecompiledContract(prepared.Precompile, prepared.Input, prepared.Gas, in.cfg.Tracer)
 				returnGas = in.evm.FinishCall(prepared.Snapshot, returnGas, callErr)
+
+				// Call tracer OnExit for precompile
+				if in.cfg.Tracer != nil {
+					in.evm.captureEnd(in.depth, pending.CallType, pending.Gas, returnGas, ret, callErr)
+				}
 
 				// Push result to parent stack
 				var result uint256.Int
@@ -551,10 +581,19 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			childFrame.readOnly = prepared.ReadOnly || in.readOnly
 			childFrame.snapshot = prepared.Snapshot
 			childFrame.isCreate = false
+			childFrame.startGas = prepared.Gas
+			childFrame.caller = pending.Caller
+			childFrame.target = pending.Addr
+			childFrame.value = pending.Value
 
 			// Set readOnly mode if needed
 			if childFrame.readOnly && !in.readOnly {
 				in.readOnly = true
+			}
+
+			// Call tracer OnEnter for the new frame
+			if in.cfg.Tracer != nil {
+				in.evm.captureBegin(in.depth, pending.CallType, pending.Caller, pending.Addr, false, pending.Input, prepared.Gas, pending.Value, prepared.Contract.Code)
 			}
 
 			in.callStack.Push(childFrame)
@@ -620,6 +659,15 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			childFrame.snapshot = prepared.Snapshot
 			childFrame.createAddr = createAddr
 			childFrame.isCreate = true
+			childFrame.startGas = prepared.Gas
+			childFrame.caller = pending.Caller
+			childFrame.target = createAddr
+			childFrame.value = pending.Value
+
+			// Call tracer OnEnter for the new create frame
+			if in.cfg.Tracer != nil {
+				in.evm.captureBegin(in.depth, pending.CallType, pending.Caller, createAddr, false, pending.Input, prepared.Gas, pending.Value, nil)
+			}
 
 			in.callStack.Push(childFrame)
 			in.depth++
@@ -635,6 +683,8 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			// Pop current frame
 			completedFrame := in.callStack.Pop()
 			in.depth--
+			// After decrementing, in.depth is now the PARENT's depth, which is what we
+			// should pass to captureEnd (same depth that was passed to captureBegin)
 
 			// If this was the last frame, we're done
 			if in.callStack.IsEmpty() {
@@ -657,6 +707,11 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 					Addr:     completedFrame.createAddr,
 				}
 				finalRet, finalGas, finalErr := in.evm.FinishCreate(prepCreate, res, completedFrame.callContext.gas, err)
+
+				// Call tracer OnExit for CREATE/CREATE2 completion (use parent's depth, same as captureBegin)
+				if in.cfg.Tracer != nil {
+					in.evm.captureEnd(in.depth, completedFrame.callType, completedFrame.startGas, finalGas, finalRet, finalErr)
+				}
 
 				// Push result to parent stack
 				var stackResult uint256.Int
@@ -689,6 +744,11 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				returnGas := completedFrame.callContext.gas
 				if completedFrame.snapshot >= 0 {
 					returnGas = in.evm.FinishCall(completedFrame.snapshot, returnGas, err)
+				}
+
+				// Call tracer OnExit for CALL completion (use parent's depth, same as captureBegin)
+				if in.cfg.Tracer != nil {
+					in.evm.captureEnd(in.depth, completedFrame.callType, completedFrame.startGas, returnGas, res, err)
 				}
 
 				// Push success/failure to parent stack
@@ -736,8 +796,9 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 	return nil, 0, nil
 }
 
-// handleFrameError handles errors in the current frame, potentially propagating up the stack.
-func (in *EVMInterpreter) handleFrameError(frame *CallFrame, res []byte, err error, debug, logged bool, pcCopy uint64, op OpCode, gasCopy, cost uint64) ([]byte, uint64, error) {
+// handleFrameError handles errors in the current frame by calling tracer hooks
+// and returning the error for the main loop to handle through normal frame completion.
+func (in *EVMInterpreter) handleFrameError(frame *CallFrame, res []byte, err error, debug, logged bool, pcCopy uint64, op OpCode, gasCopy, cost uint64) ([]byte, error) {
 	callContext := frame.callContext
 
 	// Tracer error hooks
@@ -750,32 +811,9 @@ func (in *EVMInterpreter) handleFrameError(frame *CallFrame, res []byte, err err
 		}
 	}
 
-	// Pop all frames and return
-	for !in.callStack.IsEmpty() {
-		f := in.callStack.Pop()
-		in.depth--
-
-		// Handle state reversion for frames with snapshots
-		if f.snapshot >= 0 {
-			if f.isCreate {
-				in.evm.intraBlockState.RevertToSnapshot(f.snapshot, err)
-			} else {
-				in.evm.FinishCall(f.snapshot, f.callContext.gas, err)
-			}
-		}
-
-		retGas := f.callContext.gas
-		if f == frame {
-			// This is the frame that errored
-			f.callContext.put()
-			putFrame(f)
-			return res, retGas, err
-		}
-		f.callContext.put()
-		putFrame(f)
-	}
-
-	return res, callContext.gas, err
+	// Return the error to let the main loop handle it through normal frame completion
+	// This ensures tracer OnExit hooks are called properly for each frame
+	return res, err
 }
 
 // Depth returns the current call stack depth.

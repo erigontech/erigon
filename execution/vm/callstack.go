@@ -46,6 +46,12 @@ type CallFrame struct {
 	// For CREATE/CREATE2 - the address being created
 	createAddr accounts.Address
 	isCreate   bool // True if this frame is executing CREATE/CREATE2 init code
+
+	// Tracer support
+	startGas uint64           // Initial gas for this frame (for tracer OnExit calculation)
+	caller   accounts.Address // Caller address for tracer
+	target   accounts.Address // Target/to address for tracer
+	value    uint256.Int      // Value transferred for tracer
 }
 
 // Reset clears the frame for reuse from the pool
@@ -60,6 +66,10 @@ func (f *CallFrame) Reset() {
 	f.retSize = 0
 	f.createAddr = accounts.Address{}
 	f.isCreate = false
+	f.startGas = 0
+	f.caller = accounts.Address{}
+	f.target = accounts.Address{}
+	f.value = uint256.Int{}
 }
 
 // framePool provides CallFrame reuse to reduce allocations
