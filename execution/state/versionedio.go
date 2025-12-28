@@ -168,7 +168,7 @@ type VersionedWrite struct {
 }
 
 func (vr VersionedWrite) String() string {
-	return fmt.Sprintf("%x %s: %s (%v)", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val), vr.Path.String())
+	return fmt.Sprintf("%x %s: %s (%d.%d)", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val), vr.Version.TxIndex, vr.Version.Incarnation)
 }
 
 func valueString(path AccountPath, value any) string {
