@@ -525,14 +525,14 @@ func (evm *EVM) maxCodeSize() int {
 // PreparedCall contains all information needed to execute a prepared call.
 // This is used by the iterative interpreter to set up call frames.
 type PreparedCall struct {
-	Contract   Contract         // The contract to execute
-	Gas        uint64           // Gas available for the call
-	Input      []byte           // Call input data
-	ReadOnly   bool             // Whether this is a read-only call
-	Snapshot   int              // State snapshot ID
-	Addr       accounts.Address // Target address (for state revert)
-	IsPrecompile bool           // Whether target is a precompile
-	Precompile PrecompiledContract // The precompile if IsPrecompile is true
+	Contract     Contract            // The contract to execute
+	Gas          uint64              // Gas available for the call
+	Input        []byte              // Call input data
+	ReadOnly     bool                // Whether this is a read-only call
+	Snapshot     int                 // State snapshot ID
+	Addr         accounts.Address    // Target address (for state revert)
+	IsPrecompile bool                // Whether target is a precompile
+	Precompile   PrecompiledContract // The precompile if IsPrecompile is true
 }
 
 // PrepareCall sets up a call without executing it.
