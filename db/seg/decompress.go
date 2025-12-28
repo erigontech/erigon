@@ -699,7 +699,6 @@ func (g *Getter) nextPattern() []byte {
 // checkDistance checks if d is a valid distance for the given power.
 // Valid distances are non-zero multiples of (1 << power) that are less than 512.
 // For power=0, there are no valid distances (original code had empty slice).
-// This replaces the previous O(n) slices.Contains lookup with O(1) bit math.
 func checkDistance(power int, d int) bool {
 	if power == 0 {
 		return false
