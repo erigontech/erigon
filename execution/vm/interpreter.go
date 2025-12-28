@@ -207,6 +207,10 @@ type VM struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
+
+	// pendingCall is set by call opcodes to signal a nested call should be made.
+	// The main loop reads this to create a new call frame instead of recursing.
+	pendingCall *PendingCall
 }
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {
@@ -464,6 +468,52 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 
 		// execute the operation
 		pc, res, err = operation.execute(pc, in, callContext)
+
+		// Handle call suspension for iterative execution
+		if errors.Is(err, errSuspendForCall) {
+			pending := in.pendingCall
+			in.pendingCall = nil
+
+			var ret []byte
+			var returnGas uint64
+			var callErr error
+
+			// Execute the actual call using EVM methods (preserves all setup logic)
+			switch pending.CallType {
+			case CALL:
+				ret, returnGas, callErr = in.evm.Call(pending.Caller, pending.Addr, pending.Input, pending.Gas, pending.Value, false)
+			case CALLCODE:
+				ret, returnGas, callErr = in.evm.CallCode(pending.Caller, pending.Addr, pending.Input, pending.Gas, pending.Value)
+			case DELEGATECALL:
+				ret, returnGas, callErr = in.evm.DelegateCall(pending.Caller, pending.CallerAddr, pending.Addr, pending.Input, pending.Value, pending.Gas)
+			case STATICCALL:
+				ret, returnGas, callErr = in.evm.StaticCall(pending.Caller, pending.Addr, pending.Input, pending.Gas)
+			}
+
+			// Push success/failure indicator to stack
+			var result uint256.Int
+			if callErr == nil {
+				result.SetOne()
+			}
+			callContext.Stack.push(result)
+
+			// Copy return data to memory if successful or reverted
+			if callErr == nil || callErr == ErrExecutionReverted {
+				ret = common.Copy(ret)
+				callContext.Memory.Set(pending.RetOffset, pending.RetSize, ret)
+			}
+
+			// Refund unused gas
+			callContext.refundGas(returnGas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+
+			// Store return data for RETURNDATASIZE/RETURNDATACOPY
+			in.returnData = ret
+
+			// Clear error and continue
+			err = nil
+			pc++
+			continue
+		}
 
 		if err != nil {
 			break

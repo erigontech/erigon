@@ -1069,13 +1069,13 @@ func opCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64,
 	stack := &scope.Stack
 	// Pop gas. The actual gas in interpreter.evm.callGasTemp.
 	// We can use this as a temporary value
-	temp := stack.pop()
+	_ = stack.pop() // gas placeholder, not used directly
 	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
-	// Get the arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	// Get the arguments from the memory - make a copy for safety
+	args := scope.Memory.GetCopy(inOffset.Uint64(), inSize.Uint64())
 
 	if !value.IsZero() {
 		if interpreter.readOnly {
@@ -1084,23 +1084,22 @@ func opCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64,
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := interpreter.evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
-
-	if err != nil {
-		temp.Clear()
-	} else {
-		temp.SetOne()
+	// Store pending call info for iterative execution
+	interpreter.pendingCall = &PendingCall{
+		CallType:   CALL,
+		Caller:     scope.Contract.Address(),
+		CallerAddr: scope.Contract.Address(),
+		Addr:       toAddr,
+		Input:      args,
+		Gas:        gas,
+		Value:      value,
+		RetOffset:  retOffset.Uint64(),
+		RetSize:    retSize.Uint64(),
+		IsReadOnly: false,
+		IsCreate:   false,
 	}
-	stack.push(temp)
-	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
-		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
-	}
 
-	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
-
-	interpreter.returnData = ret
-	return pc, ret, nil
+	return pc, nil, errSuspendForCall
 }
 
 func stCall(_ uint64, scope *CallContext) string {
@@ -1116,35 +1115,34 @@ func stCall(_ uint64, scope *CallContext) string {
 func opCallCode(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	stack := &scope.Stack
-	// We use it as a temporary value
-	temp := stack.pop()
+	_ = stack.pop() // gas placeholder
 	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
-	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	// Get arguments from the memory - make a copy
+	args := scope.Memory.GetCopy(inOffset.Uint64(), inSize.Uint64())
 
 	if !value.IsZero() {
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := interpreter.evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
-	if err != nil {
-		temp.Clear()
-	} else {
-		temp.SetOne()
-	}
-	stack.push(temp)
-	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
-		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+	// Store pending call info for iterative execution
+	interpreter.pendingCall = &PendingCall{
+		CallType:   CALLCODE,
+		Caller:     scope.Contract.Address(),
+		CallerAddr: scope.Contract.Address(),
+		Addr:       toAddr,
+		Input:      args,
+		Gas:        gas,
+		Value:      value,
+		RetOffset:  retOffset.Uint64(),
+		RetSize:    retSize.Uint64(),
+		IsReadOnly: false,
+		IsCreate:   false,
 	}
 
-	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
-
-	interpreter.returnData = ret
-	return pc, ret, nil
+	return pc, nil, errSuspendForCall
 }
 
 func stCallCode(_ uint64, scope *CallContext) string {
@@ -1160,31 +1158,31 @@ func stCallCode(_ uint64, scope *CallContext) string {
 func opDelegateCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	stack := &scope.Stack
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
-	// We use it as a temporary value
-	temp := stack.pop()
+	_ = stack.pop() // gas placeholder
 	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
-	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	// Get arguments from the memory - make a copy
+	args := scope.Memory.GetCopy(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := interpreter.evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
-	if err != nil {
-		temp.Clear()
-	} else {
-		temp.SetOne()
+	// Store pending call info for iterative execution
+	// For DELEGATECALL: preserve caller chain
+	interpreter.pendingCall = &PendingCall{
+		CallType:   DELEGATECALL,
+		Caller:     scope.Contract.addr,   // Current contract's address
+		CallerAddr: scope.Contract.caller, // Original caller
+		Addr:       toAddr,
+		Input:      args,
+		Gas:        gas,
+		Value:      scope.Contract.value, // Preserve original value
+		RetOffset:  retOffset.Uint64(),
+		RetSize:    retSize.Uint64(),
+		IsReadOnly: false,
+		IsCreate:   false,
 	}
-	stack.push(temp)
-	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
-		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
-	}
 
-	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
-
-	interpreter.returnData = ret
-	return pc, ret, nil
+	return pc, nil, errSuspendForCall
 }
 
 func stDelegateCall(_ uint64, scope *CallContext) string {
@@ -1200,30 +1198,30 @@ func stDelegateCall(_ uint64, scope *CallContext) string {
 func opStaticCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	stack := &scope.Stack
-	// We use it as a temporary value
-	temp := stack.pop()
+	_ = stack.pop() // gas placeholder
 	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
-	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	// Get arguments from the memory - make a copy
+	args := scope.Memory.GetCopy(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := interpreter.evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
-	if err != nil {
-		temp.Clear()
-	} else {
-		temp.SetOne()
+	// Store pending call info for iterative execution
+	interpreter.pendingCall = &PendingCall{
+		CallType:   STATICCALL,
+		Caller:     scope.Contract.Address(),
+		CallerAddr: scope.Contract.Address(),
+		Addr:       toAddr,
+		Input:      args,
+		Gas:        gas,
+		Value:      uint256.Int{}, // No value for STATICCALL
+		RetOffset:  retOffset.Uint64(),
+		RetSize:    retSize.Uint64(),
+		IsReadOnly: true,
+		IsCreate:   false,
 	}
-	stack.push(temp)
-	if err == nil || err == ErrExecutionReverted {
-		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
-	}
 
-	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
-
-	interpreter.returnData = ret
-	return pc, ret, nil
+	return pc, nil, errSuspendForCall
 }
 
 func stStaticCall(_ uint64, scope *CallContext) string {
