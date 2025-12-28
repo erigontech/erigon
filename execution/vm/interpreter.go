@@ -372,7 +372,7 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 		txIndex, txIncarnation int
 
 		// Debug gas tracing
-		debugGas = true // Set to true to enable gas debugging
+		debugGas = false // Set to true to enable gas debugging
 	)
 
 	traceGas := func(op OpCode, callGas, cost uint64) uint64 {
@@ -548,6 +548,10 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				callContext.Stack.push(uint256.Int{})
 				// Refund the gas that was allocated for this call
 				callContext.refundGas(pending.Gas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+				// Call tracer OnExit (PrepareCall already called captureBegin)
+				if in.cfg.Tracer != nil {
+					in.evm.captureEnd(in.depth, pending.CallType, pending.Gas, pending.Gas, nil, prepErr)
+				}
 				in.returnData = nil
 				frame.pc = pc + 1
 				continue
@@ -561,6 +565,10 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				}
 				callContext.Stack.push(*uint256.NewInt(1))
 				callContext.refundGas(pending.Gas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+				// Call tracer OnExit (PrepareCall already called captureBegin)
+				if in.cfg.Tracer != nil {
+					in.evm.captureEnd(in.depth, pending.CallType, pending.Gas, pending.Gas, nil, nil)
+				}
 				in.returnData = nil
 				frame.pc = pc + 1
 				continue
@@ -662,9 +670,15 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				// Create setup failed - push 0 to stack
 				callContext.Stack.push(uint256.Int{})
 				// Most errors refund gas, but ErrContractAddressCollision consumes all
+				var leftOverGas uint64
 				if prepErr != ErrContractAddressCollision {
 					// Refund the gas that was allocated for this create
+					leftOverGas = pending.Gas
 					callContext.refundGas(pending.Gas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+				}
+				// Call tracer OnExit (PrepareCreate already called captureBegin)
+				if in.cfg.Tracer != nil {
+					in.evm.captureEnd(in.depth, pending.CallType, pending.Gas, leftOverGas, nil, prepErr)
 				}
 				in.returnData = nil
 				frame.pc = pc + 1
@@ -686,6 +700,10 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				}
 				// Refund the gas that was allocated for this create
 				callContext.refundGas(pending.Gas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+				// Call tracer OnExit (PrepareCreate already called captureBegin)
+				if in.cfg.Tracer != nil {
+					in.evm.captureEnd(in.depth, pending.CallType, pending.Gas, pending.Gas, nil, nil)
+				}
 				in.returnData = nil
 				frame.pc = pc + 1
 				continue
@@ -730,6 +748,9 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			// If this was the last frame, we're done
 			if in.callStack.IsEmpty() {
 				retGas := completedFrame.callContext.gas
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] Final frame complete: retGas=%d err=%v\n", retGas, err)
+				}
 				completedFrame.callContext.put()
 				putFrame(completedFrame)
 				return res, retGas, err
@@ -835,12 +856,9 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			}
 
 			// Restore readOnly state for parent
-			if parentFrame.readOnly {
-				in.readOnly = true
-			} else if !completedFrame.readOnly {
-				// Only clear readOnly if child didn't set it
-				in.readOnly = parentFrame.readOnly
-			}
+			// Note: We always set readOnly to parent's value. The readOnly flag "sticks"
+			// when entering a STATICCALL (set to true) but must be restored when returning.
+			in.readOnly = parentFrame.readOnly
 
 			// Cleanup completed frame
 			completedFrame.callContext.put()
