@@ -211,6 +211,10 @@ type VM struct {
 	// pendingCall is set by call opcodes to signal a nested call should be made.
 	// The main loop reads this to create a new call frame instead of recursing.
 	pendingCall *PendingCall
+
+	// callStack is the explicit frame stack for iterative EVM execution.
+	// It replaces the implicit Go call stack used in recursive execution.
+	callStack *CallStack
 }
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {
@@ -293,8 +297,9 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 
 	return &EVMInterpreter{
 		VM: &VM{
-			evm: evm,
-			cfg: cfg,
+			evm:       evm,
+			cfg:       cfg,
+			callStack: NewCallStack(),
 		},
 		jt: jt,
 	}
@@ -306,7 +311,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, err error) {
+func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readOnly bool) ([]byte, uint64, error) {
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, nil
@@ -316,59 +321,58 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 	// as every returning call will return new data anyway.
 	in.returnData = nil
 
+	// Set up the initial frame
+	callContext := getCallContext(contract, input, gas)
+
+	// Make sure the readOnly is only set if we aren't in readOnly yet.
+	// This makes also sure that the readOnly flag isn't removed for child calls.
+	if readOnly && !in.readOnly {
+		in.readOnly = true
+	}
+
+	// Create the initial frame
+	initialFrame := getFrame()
+	initialFrame.callContext = callContext
+	initialFrame.pc = 0
+	initialFrame.callType = CALL // Entry point is like a CALL
+	initialFrame.readOnly = readOnly
+	initialFrame.snapshot = -1 // No snapshot for entry frame (managed by caller)
+	initialFrame.isCreate = false
+
+	// Push initial frame to stack
+	in.callStack.Push(initialFrame)
+	in.depth++
+
+	// Main iterative execution loop
+	ret, retGas, err := in.runLoop()
+
+	// Cleanup
+	in.callStack.Clear()
+	in.depth = 0
+	in.readOnly = false
+
+	return ret, retGas, err
+}
+
+// runLoop is the iterative execution loop that processes frames from the call stack.
+func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 	var (
-		op          OpCode // current opcode
-		callContext = getCallContext(contract, input, gas)
-		// For optimisation reason we're using uint64 as the program counter.
-		// It's theoretically possible to go above 2^64. The YP defines the PC
-		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
-		cost uint64
-		// copies used by tracer
-		pcCopy                 uint64 // needed for the deferred Tracer
-		gasCopy                uint64 // for Tracer to log gas remaining before execution
-		callGas                uint64
-		logged                 bool   // deferred Tracer should ignore already logged steps
-		res                    []byte // result of the opcode execution function
-		debug                  = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
-		trace                  = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
+		op      OpCode
+		cost    uint64
+		pcCopy  uint64
+		gasCopy uint64
+		callGas uint64
+		logged  bool
+		res     []byte
+		err     error
+		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
+		trace   = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
+
 		blockNum               uint64
 		txIndex, txIncarnation int
 	)
 
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	restoreReadonly := readOnly && !in.readOnly
-	if restoreReadonly {
-		in.readOnly = true
-	}
-	// Increment the call depth which is restricted to 1024
-	in.depth++
-	defer func() {
-		// first: capture data/memory/state/depth/etc... then clenup them
-		if debug && err != nil {
-			if !logged && in.cfg.Tracer.OnOpcode != nil {
-				in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
-			}
-			if logged && in.cfg.Tracer.OnFault != nil {
-				in.cfg.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
-			}
-		}
-		// this function must execute _after_: the `CaptureState` needs the stacks before
-		callContext.put()
-		if restoreReadonly {
-			in.readOnly = false
-		}
-		in.depth--
-	}()
-
-	// The Interpreter main run loop (contextual). This loop runs until either an
-	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
-	// the execution of one of the operations or until the done flag is set by the
-	// parent context.
-	steps := 0
-
-	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
+	traceGas := func(op OpCode, callGas, cost uint64) uint64 {
 		switch op {
 		case CALL, CALLCODE, DELEGATECALL, STATICCALL:
 			return callGas
@@ -377,68 +381,79 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 		}
 	}
 
-	for {
+	steps := 0
+
+	for !in.callStack.IsEmpty() {
+		frame := in.callStack.Peek()
+		callContext := frame.callContext
+		contract := callContext.Contract
+		pc := frame.pc
+
 		steps++
 		if steps%5000 == 0 && in.evm.Cancelled() {
-			break
+			// Return with current frame's gas
+			return nil, callContext.gas, nil
 		}
+
 		if dbg.TraceDyanmicGas || debug || trace {
-			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
 			blockNum, txIndex, txIncarnation = in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation()
 		}
-		// Get the operation from the jump table and validate the stack to ensure there are
-		// enough stack items available to perform the operation.
+
+		// Get the operation from the jump table
 		op = contract.GetOp(pc)
 		operation := in.jt[op]
-		cost = operation.constantGas // For tracing
+		cost = operation.constantGas
+
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.gas, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+			err = &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+			return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
 		} else if sLen > operation.maxStack {
-			return nil, callContext.gas, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
-		}
-		if !callContext.useGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
-			return nil, callContext.gas, ErrOutOfGas
+			err = &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
 		}
 
-		// All ops with a dynamic memory usage also has a dynamic gas cost.
+		if !callContext.useGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+			err = ErrOutOfGas
+			return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
+		}
+
+		// Handle dynamic gas
 		var memorySize uint64
 		if operation.dynamicGas != nil {
-			// calculate the new memory size and expand the memory to fit
-			// the operation
-			// Memory check needs to be done prior to evaluating the dynamic gas portion,
-			// to detect calculation overflows
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
-					return nil, callContext.gas, ErrGasUintOverflow
+					err = ErrGasUintOverflow
+					return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
 				}
-				// memory is expanded in words of 32 bytes. Gas
-				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.gas, ErrGasUintOverflow
+					err = ErrGasUintOverflow
+					return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
 				}
 			}
-			// Consume the gas and return an error if not enough gas is available.
-			// cost is explicitly set so that the capture state defer method can get the proper cost
+
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, callContext, callContext.gas, memorySize)
 			if err != nil {
-				return nil, callContext.gas, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
 			}
-			cost += dynamicCost // for tracing
+			cost += dynamicCost
 			callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp()
+
 			if dbg.TraceDyanmicGas && dynamicCost > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
 
 			if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
-				return nil, callContext.gas, ErrOutOfGas
+				err = ErrOutOfGas
+				return in.handleFrameError(frame, nil, err, debug, logged, pcCopy, op, gasCopy, cost)
 			}
 		}
 
-		// Do gas tracing before memory expansion
+		// Tracer hooks
 		if in.cfg.Tracer != nil {
 			if in.cfg.Tracer.OnGasChange != nil {
 				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
@@ -453,8 +468,6 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 			callContext.Memory.Resize(memorySize)
 		}
 
-		// TODO - move this to a trace & set in the worker
-
 		if trace {
 			var opstr string
 			if operation.string != nil {
@@ -462,67 +475,304 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 			} else {
 				opstr = op.String()
 			}
-
 			fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, pc, traceGas(op, callGas, cost), opstr)
 		}
 
-		// execute the operation
+		// Execute the operation
 		pc, res, err = operation.execute(pc, in, callContext)
 
-		// Handle call suspension for iterative execution
+		// Handle CALL/CALLCODE/DELEGATECALL/STATICCALL suspension
 		if errors.Is(err, errSuspendForCall) {
 			pending := in.pendingCall
 			in.pendingCall = nil
 
-			var ret []byte
-			var returnGas uint64
-			var callErr error
+			// Save current frame state
+			frame.pc = pc
+			frame.retOffset = pending.RetOffset
+			frame.retSize = pending.RetSize
 
-			// Execute the actual call using EVM methods (preserves all setup logic)
-			switch pending.CallType {
-			case CALL:
-				ret, returnGas, callErr = in.evm.Call(pending.Caller, pending.Addr, pending.Input, pending.Gas, pending.Value, false)
-			case CALLCODE:
-				ret, returnGas, callErr = in.evm.CallCode(pending.Caller, pending.Addr, pending.Input, pending.Gas, pending.Value)
-			case DELEGATECALL:
-				ret, returnGas, callErr = in.evm.DelegateCall(pending.Caller, pending.CallerAddr, pending.Addr, pending.Input, pending.Value, pending.Gas)
-			case STATICCALL:
-				ret, returnGas, callErr = in.evm.StaticCall(pending.Caller, pending.Addr, pending.Input, pending.Gas)
+			// Prepare the child call
+			prepared, prepErr := in.evm.PrepareCall(
+				pending.CallType,
+				pending.Caller,
+				pending.CallerAddr,
+				pending.Addr,
+				pending.Input,
+				pending.Gas,
+				pending.Value,
+				false, // bailout
+			)
+
+			if prepErr != nil {
+				// Call setup failed - push 0 to stack and continue
+				callContext.Stack.push(uint256.Int{})
+				in.returnData = nil
+				frame.pc = pc + 1
+				continue
 			}
 
-			// Push success/failure indicator to stack
-			var result uint256.Int
-			if callErr == nil {
-				result.SetOne()
-			}
-			callContext.Stack.push(result)
-
-			// Copy return data to memory if successful or reverted
-			if callErr == nil || callErr == ErrExecutionReverted {
-				ret = common.Copy(ret)
-				callContext.Memory.Set(pending.RetOffset, pending.RetSize, ret)
+			if prepared == nil {
+				// No code to execute (empty account or NoRecursion)
+				callContext.Stack.push(*uint256.NewInt(1))
+				in.returnData = nil
+				frame.pc = pc + 1
+				continue
 			}
 
-			// Refund unused gas
-			callContext.refundGas(returnGas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+			// Handle precompiles synchronously
+			if prepared.IsPrecompile {
+				ret, returnGas, callErr := RunPrecompiledContract(prepared.Precompile, prepared.Input, prepared.Gas, in.cfg.Tracer)
+				returnGas = in.evm.FinishCall(prepared.Snapshot, returnGas, callErr)
 
-			// Store return data for RETURNDATASIZE/RETURNDATACOPY
-			in.returnData = ret
+				// Push result to parent stack
+				var result uint256.Int
+				if callErr == nil {
+					result.SetOne()
+				}
+				callContext.Stack.push(result)
 
-			// Clear error and continue
-			err = nil
-			pc++
+				// Copy return data to memory
+				if callErr == nil || callErr == ErrExecutionReverted {
+					ret = common.Copy(ret)
+					callContext.Memory.Set(pending.RetOffset, pending.RetSize, ret)
+				}
+
+				callContext.refundGas(returnGas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+				in.returnData = ret
+				frame.pc = pc + 1
+				continue
+			}
+
+			// Create new frame for the call
+			childFrame := getFrame()
+			childFrame.callContext = getCallContext(prepared.Contract, prepared.Input, prepared.Gas)
+			childFrame.pc = 0
+			childFrame.callType = pending.CallType
+			childFrame.readOnly = prepared.ReadOnly || in.readOnly
+			childFrame.snapshot = prepared.Snapshot
+			childFrame.isCreate = false
+
+			// Set readOnly mode if needed
+			if childFrame.readOnly && !in.readOnly {
+				in.readOnly = true
+			}
+
+			in.callStack.Push(childFrame)
+			in.depth++
 			continue
 		}
 
-		if err != nil {
-			break
+		// Handle CREATE/CREATE2 suspension
+		if errors.Is(err, errSuspendForCreate) {
+			pending := in.pendingCall
+			in.pendingCall = nil
+
+			// Save current frame state
+			frame.pc = pc
+
+			// Prepare the create
+			var salt *uint256.Int
+			if pending.IsCreate2 {
+				salt = &pending.Salt
+			}
+			prepared, createAddr, prepErr := in.evm.PrepareCreate(
+				pending.Caller,
+				pending.Input,
+				pending.Gas,
+				pending.Value,
+				salt,
+				pending.IsCreate2,
+			)
+
+			if prepErr != nil {
+				// Create setup failed - push 0 to stack
+				callContext.Stack.push(uint256.Int{})
+				if prepErr == ErrExecutionReverted {
+					in.returnData = nil
+				} else {
+					in.returnData = nil
+				}
+				frame.pc = pc + 1
+				continue
+			}
+
+			if prepared == nil {
+				// NoRecursion case or empty - push address to stack if createAddr is valid
+				if createAddr != (accounts.Address{}) {
+					var addrVal = createAddr.Value()
+					var addrInt uint256.Int
+					addrInt.SetBytes(addrVal[:])
+					callContext.Stack.push(addrInt)
+				} else {
+					callContext.Stack.push(uint256.Int{})
+				}
+				in.returnData = nil
+				frame.pc = pc + 1
+				continue
+			}
+
+			// Create new frame for the create init code execution
+			childFrame := getFrame()
+			childFrame.callContext = getCallContext(prepared.Contract, nil, prepared.Gas)
+			childFrame.pc = 0
+			childFrame.callType = pending.CallType
+			childFrame.readOnly = false
+			childFrame.snapshot = prepared.Snapshot
+			childFrame.createAddr = createAddr
+			childFrame.isCreate = true
+
+			in.callStack.Push(childFrame)
+			in.depth++
+			continue
 		}
-		pc++
+
+		// Handle normal termination (STOP, RETURN, REVERT, error)
+		if err != nil || errors.Is(err, errStopToken) {
+			if errors.Is(err, errStopToken) {
+				err = nil
+			}
+
+			// Pop current frame
+			completedFrame := in.callStack.Pop()
+			in.depth--
+
+			// If this was the last frame, we're done
+			if in.callStack.IsEmpty() {
+				retGas := completedFrame.callContext.gas
+				completedFrame.callContext.put()
+				putFrame(completedFrame)
+				return res, retGas, err
+			}
+
+			// Return to parent frame
+			parentFrame := in.callStack.Peek()
+			parentCallContext := parentFrame.callContext
+
+			// Handle CREATE/CREATE2 completion
+			if completedFrame.isCreate {
+				// Finish the create (code storage, EIP checks, etc.)
+				// We need to reconstruct the PreparedCreate info
+				prepCreate := &PreparedCreate{
+					Snapshot: completedFrame.snapshot,
+					Addr:     completedFrame.createAddr,
+				}
+				finalRet, finalGas, finalErr := in.evm.FinishCreate(prepCreate, res, completedFrame.callContext.gas, err)
+
+				// Push result to parent stack
+				var stackResult uint256.Int
+				if finalErr != nil {
+					// Error - special handling for ErrCodeStoreOutOfGas on Frontier
+					if in.evm.ChainRules().IsHomestead || finalErr != ErrCodeStoreOutOfGas {
+						stackResult.Clear()
+					} else {
+						// Frontier: ErrCodeStoreOutOfGas is success
+						addrVal := completedFrame.createAddr.Value()
+						stackResult.SetBytes(addrVal[:])
+					}
+				} else {
+					addrVal := completedFrame.createAddr.Value()
+					stackResult.SetBytes(addrVal[:])
+				}
+				parentCallContext.Stack.push(stackResult)
+
+				// Refund gas
+				parentCallContext.refundGas(finalGas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+
+				// Set return data
+				if finalErr == ErrExecutionReverted {
+					in.returnData = finalRet
+				} else {
+					in.returnData = nil
+				}
+			} else {
+				// Handle CALL completion
+				returnGas := completedFrame.callContext.gas
+				if completedFrame.snapshot >= 0 {
+					returnGas = in.evm.FinishCall(completedFrame.snapshot, returnGas, err)
+				}
+
+				// Push success/failure to parent stack
+				var result uint256.Int
+				if err == nil {
+					result.SetOne()
+				}
+				parentCallContext.Stack.push(result)
+
+				// Copy return data to memory
+				if err == nil || err == ErrExecutionReverted {
+					ret := common.Copy(res)
+					parentCallContext.Memory.Set(parentFrame.retOffset, parentFrame.retSize, ret)
+					in.returnData = ret
+				} else {
+					in.returnData = nil
+				}
+
+				// Refund gas
+				parentCallContext.refundGas(returnGas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+			}
+
+			// Restore readOnly state for parent
+			if parentFrame.readOnly {
+				in.readOnly = true
+			} else if !completedFrame.readOnly {
+				// Only clear readOnly if child didn't set it
+				in.readOnly = parentFrame.readOnly
+			}
+
+			// Cleanup completed frame
+			completedFrame.callContext.put()
+			putFrame(completedFrame)
+
+			// Advance parent PC
+			parentFrame.pc++
+			continue
+		}
+
+		// Normal instruction - advance PC
+		frame.pc = pc + 1
 	}
 
-	if errors.Is(err, errStopToken) {
-		err = nil // clear stop token error
+	// Should not reach here
+	return nil, 0, nil
+}
+
+// handleFrameError handles errors in the current frame, potentially propagating up the stack.
+func (in *EVMInterpreter) handleFrameError(frame *CallFrame, res []byte, err error, debug, logged bool, pcCopy uint64, op OpCode, gasCopy, cost uint64) ([]byte, uint64, error) {
+	callContext := frame.callContext
+
+	// Tracer error hooks
+	if debug && err != nil {
+		if !logged && in.cfg.Tracer.OnOpcode != nil {
+			in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+		}
+		if logged && in.cfg.Tracer.OnFault != nil {
+			in.cfg.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
+		}
+	}
+
+	// Pop all frames and return
+	for !in.callStack.IsEmpty() {
+		f := in.callStack.Pop()
+		in.depth--
+
+		// Handle state reversion for frames with snapshots
+		if f.snapshot >= 0 {
+			if f.isCreate {
+				in.evm.intraBlockState.RevertToSnapshot(f.snapshot, err)
+			} else {
+				in.evm.FinishCall(f.snapshot, f.callContext.gas, err)
+			}
+		}
+
+		retGas := f.callContext.gas
+		if f == frame {
+			// This is the frame that errored
+			f.callContext.put()
+			putFrame(f)
+			return res, retGas, err
+		}
+		f.callContext.put()
+		putFrame(f)
 	}
 
 	return res, callContext.gas, err

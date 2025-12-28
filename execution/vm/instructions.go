@@ -966,41 +966,28 @@ func opCreate(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 	var (
 		value  = scope.Stack.pop()
 		offset = scope.Stack.pop()
-		size   = scope.Stack.peek()
+		size   = scope.Stack.pop()
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 		gas    = scope.gas
 	)
 	if interpreter.evm.ChainRules().IsTangerineWhistle {
 		gas -= gas / 64
 	}
-	// reuse size int for stackvalue
-	stackvalue := size
 
 	scope.useGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
-	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract.Address(), input, gas, value, false)
-
-	// Push item on the stack based on the returned error. If the ruleset is
-	// homestead we must check for CodeStoreOutOfGasError (homestead only
-	// rule) and treat as an error, if the ruleset is frontier we must
-	// ignore this error and pretend the operation was successful.
-	if interpreter.evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas {
-		stackvalue.Clear()
-	} else if suberr != nil && suberr != ErrCodeStoreOutOfGas {
-		stackvalue.Clear()
-	} else {
-		addrVal := addr.Value()
-		stackvalue.SetBytes(addrVal[:])
+	// Store pending create info for iterative execution
+	interpreter.pendingCall = &PendingCall{
+		CallType:  CREATE,
+		Caller:    scope.Contract.Address(),
+		Input:     input,
+		Gas:       gas,
+		Value:     value,
+		IsCreate:  true,
+		IsCreate2: false,
 	}
 
-	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
-
-	if suberr == ErrExecutionReverted {
-		interpreter.returnData = res // set REVERT data to return data buffer
-		return pc, res, nil
-	}
-	interpreter.returnData = nil // clear dirty return data buffer
-	return pc, nil, nil
+	return pc, nil, errSuspendForCreate
 }
 
 func stCreate(_ uint64, scope *CallContext) string {
@@ -1030,27 +1017,20 @@ func opCreate2(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint
 	// Apply EIP150
 	gas -= gas / 64
 	scope.useGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
-	// reuse size int for stackvalue
-	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
 
-	// Push item on the stack based on the returned error.
-	if suberr != nil {
-		stackValue.Clear()
-	} else {
-		addrVal := addr.Value()
-		stackValue.SetBytes(addrVal[:])
+	// Store pending create info for iterative execution
+	interpreter.pendingCall = &PendingCall{
+		CallType:  CREATE2,
+		Caller:    scope.Contract.Address(),
+		Input:     input,
+		Gas:       gas,
+		Value:     endowment,
+		Salt:      salt,
+		IsCreate:  true,
+		IsCreate2: true,
 	}
 
-	scope.Stack.push(stackValue)
-	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
-
-	if suberr == ErrExecutionReverted {
-		interpreter.returnData = res // set REVERT data to return data buffer
-		return pc, res, nil
-	}
-	interpreter.returnData = nil // clear dirty return data buffer
-	return pc, nil, nil
+	return pc, nil, errSuspendForCreate
 }
 
 func stCreate2(_ uint64, scope *CallContext) string {

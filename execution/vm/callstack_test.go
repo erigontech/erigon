@@ -171,14 +171,10 @@ func TestCallFrame_Reset(t *testing.T) {
 	frame.op = CALL
 	frame.callType = DELEGATECALL
 	frame.readOnly = true
-	frame.depth = 10
 	frame.snapshot = 5
 	frame.retOffset = 100
 	frame.retSize = 200
-	frame.pendingRet = []byte{1, 2, 3}
-	frame.pendingGas = 1000
-	frame.pendingErr = ErrOutOfGas
-	frame.hasPendingCall = true
+	frame.isCreate = true
 
 	// Reset should clear all fields
 	frame.Reset()
@@ -195,9 +191,6 @@ func TestCallFrame_Reset(t *testing.T) {
 	if frame.readOnly {
 		t.Error("Reset should clear readOnly")
 	}
-	if frame.depth != 0 {
-		t.Error("Reset should clear depth")
-	}
 	if frame.snapshot != 0 {
 		t.Error("Reset should clear snapshot")
 	}
@@ -207,17 +200,8 @@ func TestCallFrame_Reset(t *testing.T) {
 	if frame.retSize != 0 {
 		t.Error("Reset should clear retSize")
 	}
-	if frame.pendingRet != nil {
-		t.Error("Reset should clear pendingRet")
-	}
-	if frame.pendingGas != 0 {
-		t.Error("Reset should clear pendingGas")
-	}
-	if frame.pendingErr != nil {
-		t.Error("Reset should clear pendingErr")
-	}
-	if frame.hasPendingCall {
-		t.Error("Reset should clear hasPendingCall")
+	if frame.isCreate {
+		t.Error("Reset should clear isCreate")
 	}
 
 	putFrame(frame)

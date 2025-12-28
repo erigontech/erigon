@@ -35,7 +35,6 @@ type CallFrame struct {
 	// Call metadata
 	callType OpCode // CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2
 	readOnly bool   // Whether this frame is in readOnly mode
-	depth    int    // Call depth for this frame
 
 	// State management
 	snapshot int // State snapshot ID for reversion
@@ -46,14 +45,7 @@ type CallFrame struct {
 
 	// For CREATE/CREATE2 - the address being created
 	createAddr accounts.Address
-
-	// Return values from child call (set when child completes)
-	pendingRet []byte // Return data from child
-	pendingGas uint64 // Leftover gas from child
-	pendingErr error  // Error from child (nil = success)
-
-	// Indicates we're waiting for a child call to complete
-	hasPendingCall bool
+	isCreate   bool // True if this frame is executing CREATE/CREATE2 init code
 }
 
 // Reset clears the frame for reuse from the pool
@@ -63,15 +55,11 @@ func (f *CallFrame) Reset() {
 	f.op = 0
 	f.callType = 0
 	f.readOnly = false
-	f.depth = 0
 	f.snapshot = 0
 	f.retOffset = 0
 	f.retSize = 0
 	f.createAddr = accounts.Address{}
-	f.pendingRet = nil
-	f.pendingGas = 0
-	f.pendingErr = nil
-	f.hasPendingCall = false
+	f.isCreate = false
 }
 
 // framePool provides CallFrame reuse to reduce allocations
