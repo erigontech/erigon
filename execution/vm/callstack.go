@@ -95,19 +95,19 @@ func putFrame(f *CallFrame) {
 // PendingCall contains information needed to set up a child call frame.
 // This is populated by call opcodes and consumed by the main loop.
 type PendingCall struct {
-	CallType     OpCode           // CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2
-	Caller       accounts.Address // Who is making the call
-	CallerAddr   accounts.Address // For DELEGATECALL: the original caller address
-	Addr         accounts.Address // Target address
-	Input        []byte           // Call input data
-	Gas          uint64           // Gas to provide to the call
-	Value        uint256.Int      // Value to transfer (CALL, CALLCODE, CREATE, CREATE2)
-	Salt         uint256.Int      // Salt for CREATE2
-	RetOffset    uint64           // Memory offset for return data (calls only)
-	RetSize      uint64           // Size of return buffer (calls only)
-	IsReadOnly   bool             // Whether the call should be read-only
-	IsCreate     bool             // True for CREATE/CREATE2
-	IsCreate2    bool             // True specifically for CREATE2
+	CallType   OpCode           // CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2
+	Caller     accounts.Address // Who is making the call
+	CallerAddr accounts.Address // For DELEGATECALL: the original caller address
+	Addr       accounts.Address // Target address
+	Input      []byte           // Call input data
+	Gas        uint64           // Gas to provide to the call
+	Value      uint256.Int      // Value to transfer (CALL, CALLCODE, CREATE, CREATE2)
+	Salt       uint256.Int      // Salt for CREATE2
+	RetOffset  uint64           // Memory offset for return data (calls only)
+	RetSize    uint64           // Size of return buffer (calls only)
+	IsReadOnly bool             // Whether the call should be read-only
+	IsCreate   bool             // True for CREATE/CREATE2
+	IsCreate2  bool             // True specifically for CREATE2
 }
 
 // CallStack manages explicit call frames for iterative EVM execution.
