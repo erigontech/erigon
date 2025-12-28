@@ -370,6 +370,9 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 
 		blockNum               uint64
 		txIndex, txIncarnation int
+
+		// Debug gas tracing
+		debugGas = true // Set to true to enable gas debugging
 	)
 
 	traceGas := func(op OpCode, callGas, cost uint64) uint64 {
@@ -393,6 +396,11 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 		err = nil
 		res = nil
 		logged = false
+
+		// Per-instruction gas debug (very verbose)
+		// if debugGas {
+		// 	fmt.Printf("[GAS DEBUG] depth=%d pc=%d gas=%d\n", in.depth, pc, callContext.gas)
+		// }
 
 		steps++
 		if steps%5000 == 0 && in.evm.Cancelled() {
@@ -506,6 +514,11 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			pending := in.pendingCall
 			in.pendingCall = nil
 
+			if debugGas {
+				fmt.Printf("[GAS DEBUG] CALL suspend: depth=%d op=%s parentGas=%d callGas=%d\n",
+					in.depth, pending.CallType, callContext.gas, pending.Gas)
+			}
+
 			// Save current frame state
 			frame.pc = pc
 			frame.retOffset = pending.RetOffset
@@ -523,9 +536,18 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				false, // bailout
 			)
 
+			if debugGas {
+				fmt.Printf("[GAS DEBUG] PrepareCall returned: prepared=%v prepErr=%v\n", prepared != nil, prepErr)
+			}
+
 			if prepErr != nil {
-				// Call setup failed - push 0 to stack and continue
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] PrepareCall error: %v - pushing 0 to stack, refunding gas=%d\n", prepErr, pending.Gas)
+				}
+				// Call setup failed - push 0 to stack and refund gas
 				callContext.Stack.push(uint256.Int{})
+				// Refund the gas that was allocated for this call
+				callContext.refundGas(pending.Gas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
 				in.returnData = nil
 				frame.pc = pc + 1
 				continue
@@ -533,7 +555,12 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 
 			if prepared == nil {
 				// No code to execute (empty account or NoRecursion)
+				// Refund the gas that was allocated for this call
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] PrepareCall returned nil (no code), refunding gas=%d\n", pending.Gas)
+				}
 				callContext.Stack.push(*uint256.NewInt(1))
+				callContext.refundGas(pending.Gas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
 				in.returnData = nil
 				frame.pc = pc + 1
 				continue
@@ -606,6 +633,11 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			pending := in.pendingCall
 			in.pendingCall = nil
 
+			if debugGas {
+				fmt.Printf("[GAS DEBUG] CREATE suspend: depth=%d op=%s parentGas=%d createGas=%d\n",
+					in.depth, pending.CallType, callContext.gas, pending.Gas)
+			}
+
 			// Save current frame state
 			frame.pc = pc
 
@@ -624,19 +656,26 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			)
 
 			if prepErr != nil {
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] PrepareCreate error: %v\n", prepErr)
+				}
 				// Create setup failed - push 0 to stack
 				callContext.Stack.push(uint256.Int{})
-				if prepErr == ErrExecutionReverted {
-					in.returnData = nil
-				} else {
-					in.returnData = nil
+				// Most errors refund gas, but ErrContractAddressCollision consumes all
+				if prepErr != ErrContractAddressCollision {
+					// Refund the gas that was allocated for this create
+					callContext.refundGas(pending.Gas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
 				}
+				in.returnData = nil
 				frame.pc = pc + 1
 				continue
 			}
 
 			if prepared == nil {
-				// NoRecursion case or empty - push address to stack if createAddr is valid
+				// NoRecursion case - push address to stack and refund gas
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] PrepareCreate returned nil (NoRecursion), refunding gas=%d\n", pending.Gas)
+				}
 				if createAddr != (accounts.Address{}) {
 					var addrVal = createAddr.Value()
 					var addrInt uint256.Int
@@ -645,6 +684,8 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				} else {
 					callContext.Stack.push(uint256.Int{})
 				}
+				// Refund the gas that was allocated for this create
+				callContext.refundGas(pending.Gas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
 				in.returnData = nil
 				frame.pc = pc + 1
 				continue
@@ -700,6 +741,11 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 
 			// Handle CREATE/CREATE2 completion
 			if completedFrame.isCreate {
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] CREATE complete: depth=%d childGasLeft=%d startGas=%d err=%v\n",
+						in.depth, completedFrame.callContext.gas, completedFrame.startGas, err)
+				}
+
 				// Finish the create (code storage, EIP checks, etc.)
 				// We need to reconstruct the PreparedCreate info
 				prepCreate := &PreparedCreate{
@@ -731,6 +777,10 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				parentCallContext.Stack.push(stackResult)
 
 				// Refund gas
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] CREATE refund: parentGasBefore=%d refund=%d\n",
+						parentCallContext.gas, finalGas)
+				}
 				parentCallContext.refundGas(finalGas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 				// Set return data
@@ -741,6 +791,11 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				}
 			} else {
 				// Handle CALL completion
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] CALL complete: depth=%d childGasLeft=%d startGas=%d err=%v\n",
+						in.depth, completedFrame.callContext.gas, completedFrame.startGas, err)
+				}
+
 				returnGas := completedFrame.callContext.gas
 				if completedFrame.snapshot >= 0 {
 					returnGas = in.evm.FinishCall(completedFrame.snapshot, returnGas, err)
@@ -768,7 +823,15 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 				}
 
 				// Refund gas
+				if debugGas {
+					fmt.Printf("[GAS DEBUG] CALL refund: parentGasBefore=%d refund=%d parentGasAfter=%d\n",
+						parentCallContext.gas, returnGas, parentCallContext.gas+returnGas)
+				}
 				parentCallContext.refundGas(returnGas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
+			}
+
+			if debugGas {
+				fmt.Printf("[GAS DEBUG] After frame completion: parentGas=%d\n", parentCallContext.gas)
 			}
 
 			// Restore readOnly state for parent
