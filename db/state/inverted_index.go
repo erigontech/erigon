@@ -1007,7 +1007,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 					return nil, fmt.Errorf("fn error: %w", err)
 				}
 				stat.PruneCountValues++
-				pairs++
 			}
 
 		}
@@ -1023,7 +1022,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	valLen := 0
+	valLen := uint64(0)
 	var iiVal, txNumBytes []byte
 	fVal, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
 	if err != nil {
@@ -1040,6 +1039,11 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
 		}
+		dups, err := idxDelCursor.CountDuplicates() //TODO: delete when analytics would be ready
+		if err != nil {
+			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
+		}
+		valLen += dups
 		if time.Since(start) > timeOut {
 			ii.logger.Info("prune val timed out", "name", ii.FilenameBase)
 			lastPrunedVal = iiVal
@@ -1067,10 +1071,11 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 		if dupsDelete && fn == nil {
-			dups, err := idxDelCursor.CountDuplicates()
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
-			}
+			//TODO: uncomment when analytics would be ready
+			//dups, err := idxDelCursor.CountDuplicates()
+			//if err != nil {
+			//	return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
+			//}
 			err = idxDelCursor.DeleteCurrentDuplicates()
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
@@ -1078,7 +1083,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			mxPruneSizeIndex.AddUint64(dups)
 			mxDupsPruneSizeIndex.AddUint64(dups)
 			stat.PruneCountValues += dups
-			valLen += int(dups)
+			stat.DupsDeleted += dups
 		} else {
 			for ; txNumBytes != nil; _, txNumBytes, err = idxDelCursor.NextDup() {
 				if err != nil {
@@ -1103,7 +1108,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 				}
 				mxPruneSizeIndex.Inc()
 				stat.PruneCountValues++
-				valLen++
 			}
 			//fmt.Printf("stat %+v Val %d %d\n", stat, stat.PruneCountTx, stat.MaxTxNum)
 		}
