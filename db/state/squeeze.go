@@ -556,6 +556,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
