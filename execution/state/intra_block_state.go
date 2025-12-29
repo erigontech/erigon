@@ -901,7 +901,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
-	if bversion.TxIndex >= readVersion.TxIndex {
+	if bversion.TxIndex > readVersion.TxIndex || (bversion.TxIndex == readVersion.TxIndex && bversion.Incarnation >= readVersion.Incarnation) {
 		if balance.Cmp(&account.Balance) != 0 {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -921,7 +921,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
-	if nversion.TxIndex >= readVersion.TxIndex {
+	if nversion.TxIndex > readVersion.TxIndex || (nversion.TxIndex == readVersion.TxIndex && nversion.Incarnation >= readVersion.Incarnation) {
 		if nonce > account.Nonce {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -942,7 +942,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		return nil, UnknownSource, UnknownVersion, err
 	}
 
-	if cversion.TxIndex >= readVersion.TxIndex {
+	if cversion.TxIndex > readVersion.TxIndex || (cversion.TxIndex == readVersion.TxIndex && cversion.Incarnation >= readVersion.Incarnation) {
 		if codeHash != account.CodeHash {
 			if account == readAccount {
 				account = &accounts.Account{}
