@@ -1202,6 +1202,10 @@ func (s *Ethereum) APIs() []rpc.API {
 	return s.apiList
 }
 
+func (s *Ethereum) StateDiffClient() *direct.StateDiffClientDirect {
+	return s.stateDiffClient
+}
+
 func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	s.lock.RLock()
 	etherbase := s.etherbase
