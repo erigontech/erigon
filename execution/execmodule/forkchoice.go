@@ -490,10 +490,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		validationError = "headHash and blockHash mismatch"
 		if headNumber != nil && e.logger != nil {
-			headNum := "unknown"
-			if headNumber != nil {
-				headNum = strconv.FormatUint(*headNumber, 10)
-			}
+			headNum := strconv.FormatUint(*headNumber, 10)
 			hashBlockNum := "unknown"
 			if blockHashBlockNum != nil {
 				hashBlockNum = strconv.FormatUint(*blockHashBlockNum, 10)
