@@ -567,8 +567,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return nil, err
 	}
 	actx.Close()
-	if err = a.OpenFolder(); err != nil {
-		logger.Warn("[squeeze] failed to open folder after sqeeze", "err", err)
+	if err = a.ReloadFiles(); err != nil {
+		logger.Warn("[squeeze] failed to reload folder after sqeeze", "err", err)
 	}
 
 	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
