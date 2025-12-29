@@ -19,7 +19,6 @@ package backtester
 import (
 	"bufio"
 	"container/heap"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -33,22 +32,20 @@ import (
 	"github.com/go-echarts/go-echarts/v2/opts"
 	"github.com/go-echarts/go-echarts/v2/types"
 
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func renderOverviewPage(top *slowestBatchesHeap, chartsPageFilePaths []string, outputDir string) (string, error) {
+func renderOverviewPage(agg crossPageAggMetrics, chartsPageFilePaths []string, outputDir string) (string, error) {
 	return renderChartsPageToFile(
-		generateOverviewPage(top, chartsPageFilePaths),
+		generateOverviewPage(agg, chartsPageFilePaths),
 		path.Join(outputDir, "overview.html"),
 	)
 }
 
-func generateOverviewPage(top *slowestBatchesHeap, chartsPageFilePaths []string) *components.Page {
-	mv := make([]MetricValues, top.Len())
+func generateOverviewPage(agg crossPageAggMetrics, chartsPageFilePaths []string) *components.Page {
+	mv := make([]MetricValues, agg.top.Len())
 	for i := len(mv) - 1; i >= 0; i-- {
-		mv[i] = heap.Pop(top).(MetricValues)
+		mv[i] = heap.Pop(agg.top).(MetricValues)
 	}
 	page := components.NewPage()
 	page.SetPageTitle("commitment backtest results overview")
@@ -64,6 +61,14 @@ func generateOverviewPage(top *slowestBatchesHeap, chartsPageFilePaths []string)
 	top10Slowest.suGinis.SetGlobalOptions(widthOpts("45vw"))
 	page.AddCharts(top10Slowest.updates, top10Slowest.suGinis)
 	// place 1 per row
+	branchJumpdestHeatmap := generateBranchJumpdestHeatmap(agg.branchJumpdestCounts)
+	branchJumpdestHeatmap.SetGlobalOptions(widthOpts("90vw"))
+	page.AddCharts(branchJumpdestHeatmap)
+	// place 1 per row
+	branchKeyLenCountsBarChart := generateBranchKeyLenCountsBarChart(agg.branchKeyLenCounts)
+	branchKeyLenCountsBarChart.SetGlobalOptions(widthOpts("90vw"))
+	page.AddCharts(branchKeyLenCountsBarChart)
+	// footer catalogue
 	catalogue := generateChartPagesCatalogue(chartsPageFilePaths)
 	page.AddCharts(catalogue)
 	return page
@@ -103,14 +108,14 @@ func generateTopNSlowestCharts(mv []MetricValues, chartsPageFilePaths []string) 
 		accSus := make([]uint64, 0, len(mv[i].Accounts))
 		accUnfoldTimes := make([]uint64, 0, len(mv[i].Accounts))
 		accFoldTimes := make([]uint64, 0, len(mv[i].Accounts))
-		forEachAccStat(mv[i].Accounts, func(stat *commitment.AccountStats) {
+		for _, stat := range mv[i].Accounts {
 			accMaxSu = max(accMaxSu, stat.StorageUpates)
 			accSus = append(accSus, stat.StorageUpates)
 			accMaxUnfoldTime = max(accMaxUnfoldTime, uint64(stat.SpentUnfolding.Milliseconds()))
 			accUnfoldTimes = append(accUnfoldTimes, uint64(stat.SpentUnfolding.Milliseconds()))
 			accMaxFoldTime = max(accMaxFoldTime, uint64(stat.SpentFolding.Milliseconds()))
 			accFoldTimes = append(accFoldTimes, uint64(stat.SpentFolding.Milliseconds()))
-		})
+		}
 		maxSuPerAcc[i] = opts.BarData{Name: name, Value: accMaxSu}
 		suGinis[i] = opts.LineData{Name: name, Value: giniCoefficient(accSus)}
 		maxUnfoldTimesPerAcc[i] = opts.BarData{Name: name, Value: accMaxUnfoldTime}
@@ -230,9 +235,76 @@ func generateLocateChartPageFileJsFunc(chartsPageFilePaths []string) types.FuncS
 	))
 }
 
+func generateBranchJumpdestHeatmap(branchJumpdestCounts *[128][16]uint64) *charts.HeatMap {
+	xAxisCategoryData := make([]int, 128)
+	data := make([]opts.HeatMapData, 0, 128*16)
+	var maxCount float32
+	for x := range branchJumpdestCounts {
+		branchDepth := x + 1
+		for y := range branchJumpdestCounts[x] {
+			data = append(data, opts.HeatMapData{
+				Value: [3]uint64{uint64(branchDepth), uint64(y), branchJumpdestCounts[x][y]},
+			})
+			maxCount = max(maxCount, float32(branchJumpdestCounts[x][y]))
+		}
+		xAxisCategoryData[x] = branchDepth
+	}
+	yAxisCategoryData := make([]string, 0, 16)
+	for b := '0'; b <= '9'; b++ {
+		yAxisCategoryData = append(yAxisCategoryData, fmt.Sprintf("%c", b))
+	}
+	for b := 'a'; b < 'g'; b++ {
+		yAxisCategoryData = append(yAxisCategoryData, fmt.Sprintf("%c", b))
+	}
+	chart := charts.NewHeatMap()
+	chart.SetGlobalOptions(
+		titleOpts("branch loads jumpdest"),
+		charts.WithXAxisOpts(opts.XAxis{
+			Type:      "category",
+			SplitArea: &opts.SplitArea{Show: opts.Bool(true)},
+		}),
+		charts.WithYAxisOpts(opts.YAxis{
+			Type:      "category",
+			Data:      yAxisCategoryData,
+			SplitArea: &opts.SplitArea{Show: opts.Bool(true)},
+		}),
+		charts.WithVisualMapOpts(opts.VisualMap{
+			Calculable: opts.Bool(true),
+			Top:        "middle",
+			Min:        0,
+			Max:        maxCount,
+			InRange: &opts.VisualMapInRange{
+				Color: []string{"#50a3ba", "#eac736", "#d94e5d"},
+			},
+		}),
+		charts.WithLegendOpts(opts.Legend{
+			Show: opts.Bool(false),
+		}),
+	)
+	chart.SetXAxis(xAxisCategoryData).AddSeries("jumpdest", data)
+	return chart
+}
+
+func generateBranchKeyLenCountsBarChart(branchKeyLenCounts *[128]uint64) *charts.Bar {
+	xAxisCategoryData := make([]int, 128)
+	data := make([]opts.BarData, len(branchKeyLenCounts))
+	for i := range branchKeyLenCounts {
+		xAxisCategoryData[i] = i + 1
+		data[i] = opts.BarData{Value: branchKeyLenCounts[i]}
+	}
+	chart := charts.NewBar()
+	chart.SetGlobalOptions(
+		titleOpts("branch key len counts"),
+		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(false)}),
+		charts.WithXAxisOpts(opts.XAxis{Type: "category"}),
+	)
+	chart.SetXAxis(xAxisCategoryData).AddSeries("counts", data)
+	return chart
+}
+
 func generateChartPagesCatalogue(chartsPageFilePaths []string) *charts.Bar {
 	// we use a vertical bar chart as a catalogue index with hyperlinks
-	barWidth := 40
+	barWidth := 25
 	chart := charts.NewBar()
 	chart.SetGlobalOptions(
 		titleOpts("detailed charts catalogue (clickable)"),
@@ -241,7 +313,7 @@ func generateChartPagesCatalogue(chartsPageFilePaths []string) *charts.Bar {
 		}),
 		charts.WithInitializationOpts(opts.Initialization{
 			Width:  "500px",
-			Height: fmt.Sprintf("%dpx", 100+len(chartsPageFilePaths)*(barWidth+10)),
+			Height: fmt.Sprintf("%dpx", 130+len(chartsPageFilePaths)*(barWidth+5)),
 		}),
 		charts.WithYAxisOpts(opts.YAxis{
 			AxisLabel: &opts.AxisLabel{
@@ -356,9 +428,9 @@ func generateUnfoldTimeGinisChart(mv []MetricValues) *charts.Line {
 	for i := range mv {
 		batchIds[i] = mv[i].BatchId
 		unfoldTimes := make([]uint64, 0, len(mv[i].Accounts))
-		forEachAccStat(mv[i].Accounts, func(stat *commitment.AccountStats) {
+		for _, stat := range mv[i].Accounts {
 			unfoldTimes = append(unfoldTimes, uint64(stat.SpentUnfolding.Milliseconds()))
-		})
+		}
 		unfoldTimeGinis[i] = opts.LineData{Value: giniCoefficient(unfoldTimes)}
 	}
 	chart := charts.NewLine()
@@ -378,9 +450,9 @@ func generateFoldTimeGinisChart(mv []MetricValues) *charts.Line {
 	for i := range mv {
 		batchIds[i] = mv[i].BatchId
 		foldTimes := make([]uint64, 0, len(mv[i].Accounts))
-		forEachAccStat(mv[i].Accounts, func(stat *commitment.AccountStats) {
+		for _, stat := range mv[i].Accounts {
 			foldTimes = append(foldTimes, uint64(stat.SpentFolding.Milliseconds()))
-		})
+		}
 		foldTimeGinis[i] = opts.LineData{Value: giniCoefficient(foldTimes)}
 	}
 	chart := charts.NewLine()
@@ -425,9 +497,9 @@ func generateStorageUpdateGinisChart(mv []MetricValues) *charts.Line {
 	for i := range mv {
 		batchIds[i] = mv[i].BatchId
 		sus := make([]uint64, 0, len(mv[i].Accounts))
-		forEachAccStat(mv[i].Accounts, func(stat *commitment.AccountStats) {
+		for _, stat := range mv[i].Accounts {
 			sus = append(sus, stat.StorageUpates)
-		})
+		}
 		suGinis[i] = opts.LineData{Value: giniCoefficient(sus)}
 	}
 	chart := charts.NewLine()
@@ -505,17 +577,6 @@ func giniCoefficient(values []uint64) float64 {
 		return 0
 	}
 	return (2*weightedSum)/(float64(n)*sum) - (float64(n)+1)/float64(n)
-}
-
-func forEachAccStat(as map[string]*commitment.AccountStats, f func(stat *commitment.AccountStats)) {
-	for addr, stat := range as {
-		// note currently filtering on LoadBranch==0 as well because all rows with it are for branch keys
-		// and not for accounts, and hence all their StorageUpdates are 0s messing up the real gini coefficients
-		// in future may want to move the branch related metrics to a separate csv and MetricValues.Branches
-		if len(addr) == hex.EncodedLen(length.Addr) && stat.LoadBranch == 0 {
-			f(stat)
-		}
-	}
 }
 
 func renderChartsPageToFile(page *components.Page, filePath string) (string, error) {

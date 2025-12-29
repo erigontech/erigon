@@ -72,7 +72,7 @@ type TemporalMemBatch struct {
 	metrics *changeset.DomainMetrics
 }
 
-func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage: btree2.NewMap[string, dataWithStep](128),
 		metrics: ioMetrics.(*changeset.DomainMetrics),

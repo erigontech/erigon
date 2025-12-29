@@ -240,7 +240,7 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 		return ""
 	}
 
-	marshalled := make([]map[string]interface{}, 0, len(receipts))
+	marshalled := make([]map[string]any, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
 		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))
@@ -255,7 +255,7 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 	return string(result)
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
+func rlpHash(x any) (h common.Hash) {
 	hw := sha3.NewLegacyKeccak256()
 	rlp.Encode(hw, x) //nolint:errcheck
 	hw.Sum(h[:0])

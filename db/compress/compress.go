@@ -21,7 +21,7 @@ var (
 	// Encoder side: saw high mem use when using pool of encoders. And probably we don't need high-throughput on writes (they are usually in background). So, keep 1 encoder - it inside using GOMAXPROCS concurrency limit (see zstd.WithDecoderConcurrency).
 	zstdEnc, _  = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
 	zstdDecPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
 			return dec
 		},

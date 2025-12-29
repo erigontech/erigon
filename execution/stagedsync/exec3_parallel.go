@@ -339,6 +339,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								lastExecutedLog = time.Now()
 							}
 
+							// Warmup is enabled via SetWarmupDB at executor init
 							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
 							captured := pe.doms.SetTrace(false, false)
@@ -889,8 +890,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 	}
 }
 
-type applyResult interface {
-}
+type applyResult any
 
 type blockResult struct {
 	BlockNum    uint64

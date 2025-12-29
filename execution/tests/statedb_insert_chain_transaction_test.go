@@ -949,7 +949,7 @@ func getBlockDeployTestContractTx(transactOpts *bind.TransactOpts, contractAddre
 	}
 }
 
-func getBlockTestContractTx(transactOpts *bind.TransactOpts, contractCall interface{}, newBalance ...*big.Int) blockTx {
+func getBlockTestContractTx(transactOpts *bind.TransactOpts, contractCall any, newBalance ...*big.Int) blockTx {
 	return func(_ *blockgen.BlockGen, backend bind.ContractBackend) (types.Transaction, bool) {
 		var (
 			tx  types.Transaction

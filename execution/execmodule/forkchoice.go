@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"strconv"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
@@ -424,6 +426,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				Status:          executionproto.ExecutionStatus_Success,
 				ValidationError: validationError,
 			}, false)
+			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
 		if err := e.forkValidator.MergeExtendingFork(ctx, sd, tx, e.accumulator, e.recentReceipts); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
@@ -479,7 +482,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
 
-	var status executionproto.ExecutionStatus 
+	var status executionproto.ExecutionStatus
 
 	if headHash != blockHash {
 		status = executionproto.ExecutionStatus_BadBlock
@@ -520,37 +523,19 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
-		blockTimings := e.forkValidator.GetTimings(blockHash)
 		txnum, err := rawdbv3.TxNums.Max(tx, fcuHeader.Number.Uint64())
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
-		logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64(), "txnum", txnum, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0))}
-		if mergeExtendingFork {
-			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
-			if !e.syncCfg.ParallelStateFlushing {
-				totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
-			}
-			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
-			mgasPerSec := gasUsedMgas / totalTime.Seconds()
-			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
-
-			const blockRange = 300 // ~1 hour
-			const alpha = 2.0 / (blockRange + 1)
-
-			if e.avgMgasSec == 0 {
-				e.avgMgasSec = mgasPerSec
-			}
-			e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
-			logArgs = append(logArgs, "execution", common.Round(blockTimings[engine_helpers.BlockTimingsValidationIndex], 0), "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
-			if !e.syncCfg.ParallelStateFlushing {
-				logArgs = append(logArgs, "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork])
-			}
+		// force fsync after notifications are sent
+		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+			return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
+		}); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		if e.logger != nil {
-			e.logger.Info("head updated", logArgs...)
-		}
+
+		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
 
 		// TODO: (20/12/25) we really want to commit all changes with the shared domains but
 		// to do that we need to remove all of the rawdb methods and call them via
@@ -645,4 +630,51 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(sd *execctx.Shar
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 		}
 	}()
+}
+
+func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, debug bool) {
+	if e.logger == nil {
+		return
+	}
+
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	blockTimings := e.forkValidator.GetTimings(blockHash)
+
+	logArgs := []any{"hash", blockHash, "number", fcuHeader.Number.Uint64()}
+	if txnum != 0 {
+		logArgs = append(logArgs, "txnum", txnum)
+	}
+	logArgs = append(logArgs, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)),
+		"execution", common.Round(blockTimings[engine_helpers.BlockTimingsValidationIndex], 0))
+
+	if !debug {
+		totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
+		if !e.syncCfg.ParallelStateFlushing {
+			totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
+		}
+		gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
+		mgasPerSec := gasUsedMgas / totalTime.Seconds()
+		metrics.ChainTipMgasPerSec.Add(mgasPerSec)
+
+		const blockRange = 30 // ~1 hour
+		const alpha = 2.0 / (blockRange + 1)
+
+		if e.avgMgasSec == 0 || e.avgMgasSec == math.Inf(1) {
+			e.avgMgasSec = mgasPerSec
+		}
+		e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
+		// if mgasPerSec or avgMgasPerSec are 0, Inf or -Inf, do not log it but dont return either
+		if mgasPerSec > 0 && mgasPerSec != math.Inf(1) && e.avgMgasSec > 0 && e.avgMgasSec != math.Inf(1) {
+			logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "avg mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+		}
+	}
+
+	logArgs = append(logArgs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+	dbgLevel := log.LvlInfo
+	if debug {
+		dbgLevel = log.LvlDebug
+	}
+	e.logger.Log(dbgLevel, msg, logArgs...)
 }
