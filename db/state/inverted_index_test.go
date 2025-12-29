@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -108,13 +109,13 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		require.Equal(t, count, pruneIters*int(pruneLimit))
 
 		// this one should not prune anything due to forced=false but no files built
-		stat, err := ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil)
+		stat, err := ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 		require.NoError(t, err)
 		require.Zero(t, stat.PruneCountTx)
 		require.Zero(t, stat.PruneCountValues)
 
 		// this one should not prune anything as well due to given range [0,1) even it is forced
-		stat, err = ic.Prune(context.Background(), tx, 0, 1, pruneLimit, logEvery, true, nil)
+		stat, err = ic.Prune(context.Background(), tx, 0, 1, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
 		require.NoError(t, err)
 		require.Zero(t, stat.PruneCountTx)
 		require.Zero(t, stat.PruneCountValues)
@@ -132,7 +133,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
-		stat, err := ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil)
+		stat, err := ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 		require.NoError(t, err)
 		require.Zero(t, stat.PruneCountTx)
 		require.Zero(t, stat.PruneCountValues)
@@ -142,13 +143,13 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
-		stat, err = ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil)
+		stat, err = ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 		require.NoError(t, err)
 		require.Equal(t, 9, int(stat.PruneCountTx))
 		require.Equal(t, 9, int(stat.PruneCountValues))
 
 		// prune only what left in step 0. Even if requested more. don't allow print more than what we have in visible files
-		stat, err = ic.Prune(context.Background(), tx, 0, 20, pruneLimit, logEvery, false, nil)
+		stat, err = ic.Prune(context.Background(), tx, 0, 20, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 		require.NoError(t, err)
 		require.Equal(t, 6, int(stat.PruneCountTx))
 		require.Equal(t, 6, int(stat.PruneCountValues))
@@ -160,7 +161,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 
 		// this should prune exactly pruneLimit*pruneIter transactions
 		for i := 0; i < pruneIters; i++ {
-			stat, err := ic.Prune(context.Background(), tx, 0, 1000, pruneLimit, logEvery, true, nil)
+			stat, err := ic.Prune(context.Background(), tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			t.Logf("[%d] stats: %v", i, stat)
 		}
@@ -338,7 +339,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
-		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, nil)
+		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, nil, nil, prune.DefaultStorageMode)
 		require.NoError(t, err)
 		return nil
 	})
@@ -518,7 +519,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil)
+			_, err = ic.Prune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(tb, err)
 			var found bool
 			var startTxNum, endTxNum uint64
@@ -577,7 +578,7 @@ func TestInvIndexRanges(t *testing.T) {
 			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil)
+			_, err = ic.Prune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 		}()
 	}

@@ -300,6 +300,18 @@ type RwCursorDupSort interface {
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
 }
 
+type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)
+	RwCursor
+	DeleteCurrentDuplicates() error     // DeleteCurrentDuplicates - deletes all values of the current key
+	DeleteExact(k1, k2 []byte) error    // DeleteExact - delete 1 value from given key
+	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
+	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
+	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
+	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
+
+	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
+}
+
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
 
 type StatelessRwTx interface {
