@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -52,49 +51,22 @@ type patternTable struct {
 }
 
 func newPatternTable(bitLen int) *patternTable {
-	pt := &patternTable{
-		bitLen: bitLen,
+	return &patternTable{
+		bitLen:   bitLen,
+		patterns: make([]*codeword, 1<<bitLen),
 	}
-	if bitLen <= condensePatternTableBitThreshold {
-		pt.patterns = make([]*codeword, 1<<pt.bitLen)
-	}
-	return pt
 }
 
 func (pt *patternTable) insertWord(cw *codeword) {
-	if pt.bitLen <= condensePatternTableBitThreshold {
-		codeStep := uint16(1) << uint16(cw.len)
-		codeFrom, codeTo := cw.code, cw.code+codeStep
-		if pt.bitLen != int(cw.len) && cw.len > 0 {
-			codeTo = codeFrom | (uint16(1) << pt.bitLen)
-		}
-
-		for c := codeFrom; c < codeTo; c += codeStep {
-			pt.patterns[c] = cw
-		}
-		return
+	codeStep := uint16(1) << uint16(cw.len)
+	codeFrom, codeTo := cw.code, cw.code+codeStep
+	if pt.bitLen != int(cw.len) && cw.len > 0 {
+		codeTo = codeFrom | (uint16(1) << pt.bitLen)
 	}
 
-	pt.patterns = append(pt.patterns, cw)
-}
-
-func (pt *patternTable) condensedTableSearch(code uint16) *codeword {
-	if pt.bitLen <= condensePatternTableBitThreshold {
-		return pt.patterns[code]
+	for c := codeFrom; c < codeTo; c += codeStep {
+		pt.patterns[c] = cw
 	}
-	for _, cur := range pt.patterns {
-		if cur.code == code {
-			return cur
-		}
-		d := code - cur.code
-		if d&1 != 0 {
-			continue
-		}
-		if checkDistance(int(cur.len), int(d)) {
-			return cur
-		}
-	}
-	return nil
 }
 
 type posTable struct {
@@ -154,35 +126,6 @@ const (
 
 	compressedMinSize = 32
 )
-
-// Tables with bitlen greater than threshold will be condensed.
-// Condensing reduces size of decompression table but leads to slower reads.
-// To disable condesning at all set to 9 (we don't use tables larger than 2^9)
-// To enable condensing for tables of size larger 64 = 6
-// for all tables                                    = 0
-// There is no sense to condense tables of size [1 - 64] in terms of performance
-//
-// Should be set before calling NewDecompression.
-var condensePatternTableBitThreshold = 9
-
-func init() {
-	v, _ := os.LookupEnv("DECOMPRESS_CONDENSITY")
-	if v != "" {
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			panic(err)
-		}
-		if i < 3 || i > 9 {
-			panic("DECOMPRESS_CONDENSITY: only numbers in range 3-9 are acceptable ")
-		}
-		condensePatternTableBitThreshold = i
-		fmt.Printf("set DECOMPRESS_CONDENSITY to %d\n", i)
-	}
-}
-
-func SetDecompressionTableCondensity(fromBitSize int) {
-	condensePatternTableBitThreshold = fromBitSize
-}
 
 func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	return NewDecompressorWithMetadata(compressedFilePath, false)
@@ -679,7 +622,7 @@ func (g *Getter) nextPattern() []byte {
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 
-		cw := table.condensedTableSearch(code)
+		cw := table.patterns[code]
 		if cw.len == 0 {
 			table = cw.ptr
 			dataBit += 9
@@ -694,18 +637,6 @@ func (g *Getter) nextPattern() []byte {
 			return cw.pattern
 		}
 	}
-}
-
-// checkDistance checks if d is a valid distance for the given power.
-// Valid distances are non-zero multiples of (1 << power) that are less than 512.
-// For power=0, there are no valid distances (original code had empty slice).
-func checkDistance(power int, d int) bool {
-	if power == 0 {
-		return false
-	}
-	// d must be a positive multiple of (1 << power) and less than 512
-	step := 1 << power
-	return d >= step && d < 512 && (d&(step-1)) == 0
 }
 
 func (g *Getter) Size() int {
