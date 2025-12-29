@@ -29,7 +29,8 @@ import (
 // It captures all state needed to pause execution for a nested call and resume afterward.
 type CallFrame struct {
 	// Execution state
-	callContext *CallContext // Stack, Memory, gas, Contract
+	callContext *CallContext // Stack, Memory, gas
+	contract    Contract     // Contract being executed (stored directly for fast access)
 	pc          uint64       // Program counter
 	op          OpCode       // Current opcode being executed
 
@@ -58,6 +59,7 @@ type CallFrame struct {
 // Reset clears the frame for reuse from the pool
 func (f *CallFrame) Reset() {
 	f.callContext = nil
+	f.contract = Contract{}
 	f.pc = 0
 	f.op = 0
 	f.callType = 0

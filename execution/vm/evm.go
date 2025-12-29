@@ -724,13 +724,38 @@ func (evm *EVM) FinishCall(snapshot int, gas uint64, err error) uint64 {
 // PreparedCreate contains all information needed to execute a prepared CREATE/CREATE2.
 // This is used by the iterative interpreter to set up create frames.
 type PreparedCreate struct {
-	Contract    Contract         // The contract to execute (init code)
-	Gas         uint64           // Gas available for the create
-	Snapshot    int              // State snapshot ID
-	Addr        accounts.Address // Contract address being created
-	IsCreate2   bool             // True for CREATE2
-	Code        []byte           // Init code
-	CodeHash    accounts.CodeHash
+	Contract  Contract         // The contract to execute (init code)
+	Gas       uint64           // Gas available for the create
+	Snapshot  int              // State snapshot ID
+	Addr      accounts.Address // Contract address being created
+	IsCreate2 bool             // True for CREATE2
+}
+
+// Reset clears the PreparedCreate for reuse
+func (p *PreparedCreate) Reset() {
+	p.Contract = Contract{}
+	p.Gas = 0
+	p.Snapshot = 0
+	p.Addr = accounts.Address{}
+	p.IsCreate2 = false
+}
+
+// preparedCreatePool provides PreparedCreate reuse to reduce allocations
+var preparedCreatePool = sync.Pool{
+	New: func() any {
+		return &PreparedCreate{}
+	},
+}
+
+// getPreparedCreate retrieves a PreparedCreate from the pool
+func getPreparedCreate() *PreparedCreate {
+	return preparedCreatePool.Get().(*PreparedCreate)
+}
+
+// putPreparedCreate returns a PreparedCreate to the pool after resetting it
+func putPreparedCreate(p *PreparedCreate) {
+	p.Reset()
+	preparedCreatePool.Put(p)
 }
 
 // PrepareCreate sets up a CREATE/CREATE2 without executing it.
@@ -832,24 +857,24 @@ func (evm *EVM) PrepareCreate(caller accounts.Address, code []byte, gas uint64, 
 	}
 
 	// Build the contract
-	contract := Contract{
+	// Note: Use codeAndHash.hash (the field) not codeAndHash.Hash() (the method)
+	// For CREATE, the hash is not needed and would be zero. For CREATE2, it was
+	// already computed above when calculating the address.
+	prepared := getPreparedCreate()
+	prepared.Contract = Contract{
 		caller:    caller,
 		addr:      address,
 		value:     value,
 		jumpdests: evm.config.JumpDestCache,
 		Code:      code,
-		CodeHash:  codeAndHash.Hash(),
+		CodeHash:  codeAndHash.hash,
 	}
+	prepared.Gas = gas
+	prepared.Snapshot = snapshot
+	prepared.Addr = address
+	prepared.IsCreate2 = isCreate2
 
-	return &PreparedCreate{
-		Contract:  contract,
-		Gas:       gas,
-		Snapshot:  snapshot,
-		Addr:      address,
-		IsCreate2: isCreate2,
-		Code:      code,
-		CodeHash:  codeAndHash.Hash(),
-	}, address, nil
+	return prepared, address, nil
 }
 
 // FinishCreate handles the completion of a CREATE/CREATE2, storing code and reverting on error.
