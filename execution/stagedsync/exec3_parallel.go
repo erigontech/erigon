@@ -376,10 +376,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							uncommittedGas = 0
 							uncommittedTransactions = 0
 						}
-
-						if flushPending {
-							return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
-						}
 					}
 
 					blockUpdateCount = 0
@@ -398,6 +394,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
 						changeSet = &changeset.StateChangeSet{}
 						pe.domains().SetChangesetAccumulator(changeSet)
+					}
+					if flushPending {
+						return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
 					}
 				}
 
