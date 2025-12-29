@@ -723,10 +723,7 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			childFrame.target = createAddr
 			childFrame.value = pending.Value
 
-			// Call tracer OnEnter for the new create frame
-			if in.cfg.Tracer != nil {
-				in.evm.captureBegin(in.depth, pending.CallType, pending.Caller, createAddr, false, pending.Input, prepared.Gas, pending.Value, nil)
-			}
+			// Note: captureBegin was already called by PrepareCreate, so we don't call it again here
 
 			in.callStack.Push(childFrame)
 			in.depth++
@@ -735,6 +732,16 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 
 		// Handle normal termination (STOP, RETURN, REVERT, error)
 		if err != nil || errors.Is(err, errStopToken) {
+			// Call tracer hooks for errors (matches main branch defer behavior)
+			if debug && err != nil && !errors.Is(err, errStopToken) {
+				if !logged && in.cfg.Tracer.OnOpcode != nil {
+					in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+				}
+				if logged && in.cfg.Tracer.OnFault != nil {
+					in.cfg.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
+				}
+			}
+
 			if errors.Is(err, errStopToken) {
 				err = nil
 			}

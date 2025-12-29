@@ -955,7 +955,8 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, startGas uint64, leftOverGas u
 	}
 
 	if tracer.OnExit != nil {
-		tracer.OnExit(depth, ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
+		vmErr := VMErrorFromErr(err)
+		tracer.OnExit(depth, ret, startGas-leftOverGas, vmErr, reverted)
 	}
 }
 
