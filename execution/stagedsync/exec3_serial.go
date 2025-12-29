@@ -125,6 +125,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				Hooks:            se.hooks,
 				Logger:           se.logger,
 			}
+			se.logger.Info("Preparing tx task", "block", blockNum, "txNum", txTask.TxNum, "txIndex", txTask.TxIndex, "historical", txTask.HistoryExecution, "initialTxNum", initialTxNum, "lastFrozenTxNum", lastFrozenTxNum, "inputTxNum", inputTxNum)
 
 			if txTask.TxNum > 0 && txTask.TxNum <= initialTxNum {
 				havePartialBlock = true
