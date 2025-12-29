@@ -109,6 +109,41 @@ type PendingCall struct {
 	IsCreate2  bool             // True specifically for CREATE2
 }
 
+// Reset clears the PendingCall for reuse
+func (p *PendingCall) Reset() {
+	p.CallType = 0
+	p.Caller = accounts.Address{}
+	p.CallerAddr = accounts.Address{}
+	p.Addr = accounts.Address{}
+	p.Input = nil
+	p.Gas = 0
+	p.Value = uint256.Int{}
+	p.Salt = uint256.Int{}
+	p.RetOffset = 0
+	p.RetSize = 0
+	p.IsReadOnly = false
+	p.IsCreate = false
+	p.IsCreate2 = false
+}
+
+// pendingCallPool provides PendingCall reuse to reduce allocations
+var pendingCallPool = sync.Pool{
+	New: func() any {
+		return &PendingCall{}
+	},
+}
+
+// getPendingCall retrieves a PendingCall from the pool
+func getPendingCall() *PendingCall {
+	return pendingCallPool.Get().(*PendingCall)
+}
+
+// putPendingCall returns a PendingCall to the pool after resetting it
+func putPendingCall(p *PendingCall) {
+	p.Reset()
+	pendingCallPool.Put(p)
+}
+
 // CallStack manages explicit call frames for iterative EVM execution.
 // It replaces the implicit Go call stack used in recursive execution.
 type CallStack struct {

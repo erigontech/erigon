@@ -22,6 +22,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -535,6 +536,36 @@ type PreparedCall struct {
 	Precompile   PrecompiledContract // The precompile if IsPrecompile is true
 }
 
+// Reset clears the PreparedCall for reuse
+func (p *PreparedCall) Reset() {
+	p.Contract = Contract{}
+	p.Gas = 0
+	p.Input = nil
+	p.ReadOnly = false
+	p.Snapshot = 0
+	p.Addr = accounts.Address{}
+	p.IsPrecompile = false
+	p.Precompile = nil
+}
+
+// preparedCallPool provides PreparedCall reuse to reduce allocations
+var preparedCallPool = sync.Pool{
+	New: func() any {
+		return &PreparedCall{}
+	},
+}
+
+// getPreparedCall retrieves a PreparedCall from the pool
+func getPreparedCall() *PreparedCall {
+	return preparedCallPool.Get().(*PreparedCall)
+}
+
+// putPreparedCall returns a PreparedCall to the pool after resetting it
+func putPreparedCall(p *PreparedCall) {
+	p.Reset()
+	preparedCallPool.Put(p)
+}
+
 // PrepareCall sets up a call without executing it.
 // Returns a PreparedCall that can be used to execute the call, or an error if setup fails.
 // The caller is responsible for handling state reversion on errors.
@@ -610,14 +641,14 @@ func (evm *EVM) PrepareCall(typ OpCode, caller, callerAddress, addr accounts.Add
 
 	// For precompiles, return immediately with precompile info
 	if isPrecompile {
-		return &PreparedCall{
-			Gas:          gas,
-			Input:        input,
-			Snapshot:     snapshot,
-			Addr:         addr,
-			IsPrecompile: true,
-			Precompile:   p,
-		}, nil
+		prepared := getPreparedCall()
+		prepared.Gas = gas
+		prepared.Input = input
+		prepared.Snapshot = snapshot
+		prepared.Addr = addr
+		prepared.IsPrecompile = true
+		prepared.Precompile = p
+		return prepared, nil
 	}
 
 	// No code means nothing to execute
@@ -664,14 +695,14 @@ func (evm *EVM) PrepareCall(typ OpCode, caller, callerAddress, addr accounts.Add
 		}
 	}
 
-	return &PreparedCall{
-		Contract: contract,
-		Gas:      gas,
-		Input:    input,
-		ReadOnly: typ == STATICCALL,
-		Snapshot: snapshot,
-		Addr:     addr,
-	}, nil
+	prepared := getPreparedCall()
+	prepared.Contract = contract
+	prepared.Gas = gas
+	prepared.Input = input
+	prepared.ReadOnly = typ == STATICCALL
+	prepared.Snapshot = snapshot
+	prepared.Addr = addr
+	return prepared, nil
 }
 
 // FinishCall handles the completion of a call, reverting state if needed.

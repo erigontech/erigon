@@ -977,15 +977,15 @@ func opCreate(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 	scope.useGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
 	// Store pending create info for iterative execution
-	interpreter.pendingCall = &PendingCall{
-		CallType:  CREATE,
-		Caller:    scope.Contract.Address(),
-		Input:     input,
-		Gas:       gas,
-		Value:     value,
-		IsCreate:  true,
-		IsCreate2: false,
-	}
+	pending := getPendingCall()
+	pending.CallType = CREATE
+	pending.Caller = scope.Contract.Address()
+	pending.Input = input
+	pending.Gas = gas
+	pending.Value = value
+	pending.IsCreate = true
+	pending.IsCreate2 = false
+	interpreter.pendingCall = pending
 
 	return pc, nil, errSuspendForCreate
 }
@@ -1019,16 +1019,16 @@ func opCreate2(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint
 	scope.useGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 
 	// Store pending create info for iterative execution
-	interpreter.pendingCall = &PendingCall{
-		CallType:  CREATE2,
-		Caller:    scope.Contract.Address(),
-		Input:     input,
-		Gas:       gas,
-		Value:     endowment,
-		Salt:      salt,
-		IsCreate:  true,
-		IsCreate2: true,
-	}
+	pending := getPendingCall()
+	pending.CallType = CREATE2
+	pending.Caller = scope.Contract.Address()
+	pending.Input = input
+	pending.Gas = gas
+	pending.Value = endowment
+	pending.Salt = salt
+	pending.IsCreate = true
+	pending.IsCreate2 = true
+	interpreter.pendingCall = pending
 
 	return pc, nil, errSuspendForCreate
 }
@@ -1054,8 +1054,9 @@ func opCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64,
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
-	// Get the arguments from the memory - make a copy for safety
-	args := scope.Memory.GetCopy(inOffset.Uint64(), inSize.Uint64())
+	// Get arguments from memory - no copy needed in iterative interpreter since
+	// parent memory is not modified while child executes
+	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	if !value.IsZero() {
 		if interpreter.readOnly {
@@ -1065,19 +1066,19 @@ func opCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64,
 	}
 
 	// Store pending call info for iterative execution
-	interpreter.pendingCall = &PendingCall{
-		CallType:   CALL,
-		Caller:     scope.Contract.Address(),
-		CallerAddr: scope.Contract.Address(),
-		Addr:       toAddr,
-		Input:      args,
-		Gas:        gas,
-		Value:      value,
-		RetOffset:  retOffset.Uint64(),
-		RetSize:    retSize.Uint64(),
-		IsReadOnly: false,
-		IsCreate:   false,
-	}
+	pending := getPendingCall()
+	pending.CallType = CALL
+	pending.Caller = scope.Contract.Address()
+	pending.CallerAddr = scope.Contract.Address()
+	pending.Addr = toAddr
+	pending.Input = args
+	pending.Gas = gas
+	pending.Value = value
+	pending.RetOffset = retOffset.Uint64()
+	pending.RetSize = retSize.Uint64()
+	pending.IsReadOnly = false
+	pending.IsCreate = false
+	interpreter.pendingCall = pending
 
 	return pc, nil, errSuspendForCall
 }
@@ -1100,27 +1101,28 @@ func opCallCode(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uin
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
-	// Get arguments from the memory - make a copy
-	args := scope.Memory.GetCopy(inOffset.Uint64(), inSize.Uint64())
+	// Get arguments from memory - no copy needed in iterative interpreter since
+	// parent memory is not modified while child executes
+	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	if !value.IsZero() {
 		gas += params.CallStipend
 	}
 
 	// Store pending call info for iterative execution
-	interpreter.pendingCall = &PendingCall{
-		CallType:   CALLCODE,
-		Caller:     scope.Contract.Address(),
-		CallerAddr: scope.Contract.Address(),
-		Addr:       toAddr,
-		Input:      args,
-		Gas:        gas,
-		Value:      value,
-		RetOffset:  retOffset.Uint64(),
-		RetSize:    retSize.Uint64(),
-		IsReadOnly: false,
-		IsCreate:   false,
-	}
+	pending := getPendingCall()
+	pending.CallType = CALLCODE
+	pending.Caller = scope.Contract.Address()
+	pending.CallerAddr = scope.Contract.Address()
+	pending.Addr = toAddr
+	pending.Input = args
+	pending.Gas = gas
+	pending.Value = value
+	pending.RetOffset = retOffset.Uint64()
+	pending.RetSize = retSize.Uint64()
+	pending.IsReadOnly = false
+	pending.IsCreate = false
+	interpreter.pendingCall = pending
 
 	return pc, nil, errSuspendForCall
 }
@@ -1143,24 +1145,25 @@ func opDelegateCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
-	// Get arguments from the memory - make a copy
-	args := scope.Memory.GetCopy(inOffset.Uint64(), inSize.Uint64())
+	// Get arguments from memory - no copy needed in iterative interpreter since
+	// parent memory is not modified while child executes
+	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	// Store pending call info for iterative execution
 	// For DELEGATECALL: preserve caller chain
-	interpreter.pendingCall = &PendingCall{
-		CallType:   DELEGATECALL,
-		Caller:     scope.Contract.addr,   // Current contract's address
-		CallerAddr: scope.Contract.caller, // Original caller
-		Addr:       toAddr,
-		Input:      args,
-		Gas:        gas,
-		Value:      scope.Contract.value, // Preserve original value
-		RetOffset:  retOffset.Uint64(),
-		RetSize:    retSize.Uint64(),
-		IsReadOnly: false,
-		IsCreate:   false,
-	}
+	pending := getPendingCall()
+	pending.CallType = DELEGATECALL
+	pending.Caller = scope.Contract.addr   // Current contract's address
+	pending.CallerAddr = scope.Contract.caller // Original caller
+	pending.Addr = toAddr
+	pending.Input = args
+	pending.Gas = gas
+	pending.Value = scope.Contract.value // Preserve original value
+	pending.RetOffset = retOffset.Uint64()
+	pending.RetSize = retSize.Uint64()
+	pending.IsReadOnly = false
+	pending.IsCreate = false
+	interpreter.pendingCall = pending
 
 	return pc, nil, errSuspendForCall
 }
@@ -1183,23 +1186,24 @@ func opStaticCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (u
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
-	// Get arguments from the memory - make a copy
-	args := scope.Memory.GetCopy(inOffset.Uint64(), inSize.Uint64())
+	// Get arguments from memory - no copy needed in iterative interpreter since
+	// parent memory is not modified while child executes
+	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	// Store pending call info for iterative execution
-	interpreter.pendingCall = &PendingCall{
-		CallType:   STATICCALL,
-		Caller:     scope.Contract.Address(),
-		CallerAddr: scope.Contract.Address(),
-		Addr:       toAddr,
-		Input:      args,
-		Gas:        gas,
-		Value:      uint256.Int{}, // No value for STATICCALL
-		RetOffset:  retOffset.Uint64(),
-		RetSize:    retSize.Uint64(),
-		IsReadOnly: true,
-		IsCreate:   false,
-	}
+	pending := getPendingCall()
+	pending.CallType = STATICCALL
+	pending.Caller = scope.Contract.Address()
+	pending.CallerAddr = scope.Contract.Address()
+	pending.Addr = toAddr
+	pending.Input = args
+	pending.Gas = gas
+	// Value is already zero from pool reset
+	pending.RetOffset = retOffset.Uint64()
+	pending.RetSize = retSize.Uint64()
+	pending.IsReadOnly = true
+	pending.IsCreate = false
+	interpreter.pendingCall = pending
 
 	return pc, nil, errSuspendForCall
 }
