@@ -601,6 +601,7 @@ frameLoop:
 
 				callContext.refundGas(returnGas, in.cfg.Tracer, tracing.GasChangeCallLeftOverRefunded)
 				in.returnData = ret
+				in.buffers.Track(ret) // Track precompile return buffer for pooling
 				frame.pc = pc + 1
 				putPreparedCall(prepared)
 				putPendingCall(pending)
@@ -820,11 +821,10 @@ frameLoop:
 				}
 				parentCallContext.Stack.push(result)
 
-				// Copy return data to memory
+				// Copy return data to memory (res is already a pooled buffer from opReturn/opRevert)
 				if err == nil || err == ErrExecutionReverted {
-					ret := common.Copy(res)
-					parentCallContext.Memory.Set(parentFrame.retOffset, parentFrame.retSize, ret)
-					in.returnData = ret
+					parentCallContext.Memory.Set(parentFrame.retOffset, parentFrame.retSize, res)
+					in.returnData = res
 				} else {
 					in.returnData = nil
 				}

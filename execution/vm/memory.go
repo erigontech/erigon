@@ -39,6 +39,9 @@ var (
 
 // getPooledBuffer gets a buffer from the appropriate pool
 func getPooledBuffer(size uint64) []byte {
+	if size == 0 {
+		return nil
+	}
 	if size <= 4096 {
 		return (*bufPool4K.Get().(*[]byte))[:size]
 	}
