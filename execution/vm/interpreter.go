@@ -214,6 +214,9 @@ type VM struct {
 	// callStack is the explicit frame stack for iterative EVM execution.
 	// It replaces the implicit Go call stack used in recursive execution.
 	callStack *CallStack
+
+	// buffers tracks pooled buffers allocated during tx execution for batch return
+	buffers BufferTracker
 }
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {
@@ -350,6 +353,7 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 	in.callStack.Clear()
 	in.depth = 0
 	in.readOnly = false
+	in.buffers.ReturnAll()
 
 	return ret, retGas, err
 }
@@ -389,6 +393,8 @@ frameLoop:
 		callContext := frame.callContext
 		contract := &frame.contract // Use pointer to avoid struct copy
 		pc := frame.pc
+		code := contract.Code       // Cache code slice for fast access
+		codeLen := uint64(len(code))
 
 		// Inner loop: execute instructions within the same frame
 		// This avoids re-fetching frame/callContext/contract on every instruction
@@ -402,17 +408,25 @@ frameLoop:
 				}
 			}
 
-			// Get the operation from the jump table
-			op = contract.GetOp(pc)
+			// Get the operation - inline GetOp for speed
+			if pc < codeLen {
+				op = OpCode(code[pc])
+			} else {
+				op = STOP
+			}
 			operation := in.jt[op]
 			cost = operation.constantGas
+			numPop := operation.numPop
+			maxStack := operation.maxStack
 
 			// Validate stack
-			if sLen := callContext.Stack.len(); sLen < operation.numPop {
-				err = &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+			sLen := callContext.Stack.len()
+			if sLen < numPop {
+				err = &ErrStackUnderflow{stackLen: sLen, required: numPop}
 				goto handleError
-			} else if sLen > operation.maxStack {
-				err = &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			}
+			if sLen > maxStack {
+				err = &ErrStackOverflow{stackLen: sLen, limit: maxStack}
 				goto handleError
 			}
 

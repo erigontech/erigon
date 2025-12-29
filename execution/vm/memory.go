@@ -31,6 +31,60 @@ var memoryPool = sync.Pool{
 	},
 }
 
+// Buffer pools for return data - sized by power of 2 buckets
+var (
+	bufPool4K = sync.Pool{New: func() any { b := make([]byte, 4096); return &b }}
+	bufPool64K = sync.Pool{New: func() any { b := make([]byte, 65536); return &b }}
+)
+
+// getPooledBuffer gets a buffer from the appropriate pool
+func getPooledBuffer(size uint64) []byte {
+	if size <= 4096 {
+		return (*bufPool4K.Get().(*[]byte))[:size]
+	}
+	if size <= 65536 {
+		return (*bufPool64K.Get().(*[]byte))[:size]
+	}
+	return make([]byte, size)
+}
+
+// returnPooledBuffer returns a buffer to its pool based on capacity
+func returnPooledBuffer(b []byte) {
+	switch cap(b) {
+	case 4096:
+		bp := b[:4096]
+		bufPool4K.Put(&bp)
+	case 65536:
+		bp := b[:65536]
+		bufPool64K.Put(&bp)
+	}
+}
+
+// BufferTracker tracks allocated buffers for batch return to pool
+type BufferTracker struct {
+	buffers [][]byte
+}
+
+// Track adds a buffer to be returned later
+func (bt *BufferTracker) Track(b []byte) {
+	if b != nil && (cap(b) == 4096 || cap(b) == 65536) {
+		bt.buffers = append(bt.buffers, b)
+	}
+}
+
+// ReturnAll returns all tracked buffers to their pools
+func (bt *BufferTracker) ReturnAll() {
+	for _, b := range bt.buffers {
+		returnPooledBuffer(b)
+	}
+	bt.buffers = bt.buffers[:0]
+}
+
+// Reset clears the tracker without returning buffers (for reuse)
+func (bt *BufferTracker) Reset() {
+	bt.buffers = bt.buffers[:0]
+}
+
 // Memory implements a simple memory model for the ethereum virtual machine.
 type Memory struct {
 	store       []byte
@@ -123,6 +177,17 @@ func (m *Memory) GetCopy(offset, size uint64) (cpy []byte) {
 	cpy = make([]byte, size)
 	copy(cpy, m.store[offset:offset+size])
 	return
+}
+
+// GetCopyPooled returns offset + size using a pooled buffer.
+// The buffer should be tracked with BufferTracker for later return.
+func (m *Memory) GetCopyPooled(offset, size uint64) []byte {
+	if size == 0 {
+		return nil
+	}
+	buf := getPooledBuffer(size)
+	copy(buf, m.store[offset:offset+size])
+	return buf
 }
 
 // GetPtr returns the offset + size

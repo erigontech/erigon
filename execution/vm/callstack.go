@@ -153,12 +153,25 @@ type CallStack struct {
 	maxSize int
 }
 
+// callStackPool provides CallStack reuse to reduce allocations
+var callStackPool = sync.Pool{
+	New: func() any {
+		return &CallStack{
+			frames:  make([]*CallFrame, 0, 8), // Start small, will grow if needed
+			maxSize: int(params.CallCreateDepth),
+		}
+	},
+}
+
 // NewCallStack creates a new CallStack with the EVM depth limit.
 func NewCallStack() *CallStack {
-	return &CallStack{
-		frames:  make([]*CallFrame, 0, 64),  // Pre-allocate reasonable capacity
-		maxSize: int(params.CallCreateDepth), // EVM max call depth
-	}
+	return callStackPool.Get().(*CallStack)
+}
+
+// ReturnCallStack returns a CallStack to the pool after clearing it
+func ReturnCallStack(cs *CallStack) {
+	cs.Clear()
+	callStackPool.Put(cs)
 }
 
 // Push adds a frame to the stack. Returns ErrDepth if at maximum depth.

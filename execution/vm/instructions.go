@@ -967,8 +967,10 @@ func opCreate(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 		value  = scope.Stack.pop()
 		offset = scope.Stack.pop()
 		size   = scope.Stack.pop()
-		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas    = scope.gas
+		// Use GetPtr instead of GetCopy - in iterative interpreter, parent memory
+		// is preserved while child executes, so no copy needed
+		input = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
+		gas   = scope.gas
 	)
 	if interpreter.evm.ChainRules().IsTangerineWhistle {
 		gas -= gas / 64
@@ -1010,8 +1012,10 @@ func opCreate2(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint
 		endowment    = scope.Stack.pop()
 		offset, size = scope.Stack.pop(), scope.Stack.pop()
 		salt         = scope.Stack.pop()
-		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas          = scope.gas
+		// Use GetPtr instead of GetCopy - in iterative interpreter, parent memory
+		// is preserved while child executes, so no copy needed
+		input = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
+		gas   = scope.gas
 	)
 
 	// Apply EIP150
@@ -1220,13 +1224,15 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 
 func opReturn(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop(), scope.Stack.pop()
-	ret := scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	ret := scope.Memory.GetCopyPooled(offset.Uint64(), size.Uint64())
+	interpreter.buffers.Track(ret)
 	return pc, ret, errStopToken
 }
 
 func opRevert(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop(), scope.Stack.pop()
-	ret := scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	ret := scope.Memory.GetCopyPooled(offset.Uint64(), size.Uint64())
+	interpreter.buffers.Track(ret)
 	interpreter.returnData = ret
 	return pc, ret, ErrExecutionReverted
 }
