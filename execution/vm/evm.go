@@ -538,7 +538,11 @@ type PreparedCall struct {
 
 // Reset clears the PreparedCall for reuse
 func (p *PreparedCall) Reset() {
-	p.Contract = Contract{}
+	// Only reset Contract if it was used (non-precompile calls)
+	// For precompiles, Contract is never set so skip the expensive zero
+	if !p.IsPrecompile {
+		p.Contract = Contract{}
+	}
 	p.Gas = 0
 	p.Input = nil
 	p.ReadOnly = false
@@ -634,8 +638,8 @@ func (evm *EVM) PrepareCall(typ OpCode, caller, callerAddress, addr accounts.Add
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
 		evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout)
-	} else if typ == STATICCALL {
-		// Touch account for STATICCALL
+	} else if typ == STATICCALL && !isPrecompile {
+		// Touch account for STATICCALL (skip for precompiles - they don't have state)
 		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
 	}
 

@@ -381,33 +381,25 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 		}
 	}
 
-	steps := 0
-
 	// Outer loop: iterate over frames in the call stack
 	// We only re-fetch frame/callContext/contract when switching frames
 frameLoop:
 	for !in.callStack.IsEmpty() {
 		frame := in.callStack.Peek()
 		callContext := frame.callContext
-		contract := frame.contract
+		contract := &frame.contract // Use pointer to avoid struct copy
 		pc := frame.pc
 
 		// Inner loop: execute instructions within the same frame
 		// This avoids re-fetching frame/callContext/contract on every instruction
 		for {
-			// Reset variables for this iteration
-			res = nil
-			logged = false
-
-			steps++
-			if steps%5000 == 0 && in.evm.Cancelled() {
-				// Return with current frame's gas
-				return nil, callContext.gas, nil
-			}
-
-			if dbg.TraceDyanmicGas || debug || trace {
+			// Capture state for tracer (only when tracing is enabled)
+			if debug || trace {
+				logged = false
 				pcCopy, gasCopy = pc, callContext.gas
-				blockNum, txIndex, txIncarnation = in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation()
+				if trace {
+					blockNum, txIndex, txIncarnation = in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation()
+				}
 			}
 
 			// Get the operation from the jump table
@@ -424,10 +416,12 @@ frameLoop:
 				goto handleError
 			}
 
-			if !callContext.useGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+			// Fast path for gas check - inline the common case
+			if callContext.gas < cost {
 				err = ErrOutOfGas
 				goto handleError
 			}
+			callContext.gas -= cost
 
 			// Handle dynamic gas
 			if operation.dynamicGas != nil {
@@ -454,13 +448,16 @@ frameLoop:
 				callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp()
 
 				if dbg.TraceDyanmicGas && dynamicCost > 0 {
-					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
+					bn, ti, ti2 := in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation()
+					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", bn, ti, ti2, traceGas(op, callGas, cost), op)
 				}
 
-				if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+				// Fast path for dynamic gas check - inline the common case
+				if callContext.gas < dynamicCost {
 					err = ErrOutOfGas
 					goto handleError
 				}
+				callContext.gas -= dynamicCost
 
 				if memorySize > 0 {
 					callContext.Memory.Resize(memorySize)
@@ -583,9 +580,8 @@ frameLoop:
 				}
 				callContext.Stack.push(result)
 
-				// Copy return data to memory
+				// Copy return data to memory (Memory.Set copies internally)
 				if callErr == nil || callErr == ErrExecutionReverted {
-					ret = common.Copy(ret)
 					callContext.Memory.Set(pending.RetOffset, pending.RetSize, ret)
 				}
 
