@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
@@ -493,7 +494,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
 		var ok bool
 		if gasRemaining, ok = useGas(gasRemaining, createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage); ok {
-			evm.intraBlockState.SetCode(address, ret)
+			evm.intraBlockState.SetCode(address, common.Copy(ret))
 		} else {
 			// If we run out of gas, we do not store the code: the returned code must be empty.
 			ret = []byte{}

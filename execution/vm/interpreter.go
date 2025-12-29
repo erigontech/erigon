@@ -772,7 +772,7 @@ frameLoop:
 					Snapshot: completedFrame.snapshot,
 					Addr:     completedFrame.createAddr,
 				}
-				finalRet, finalGas, finalErr := in.evm.FinishCreate(prepCreate, res, completedFrame.callContext.gas, err)
+				finalRet, finalGas, finalErr := in.evm.FinishCreate(prepCreate, common.Copy(res), completedFrame.callContext.gas, err)
 
 				// Call tracer OnExit for CREATE/CREATE2 completion (use parent's depth, same as captureBegin)
 				if in.cfg.Tracer != nil {
