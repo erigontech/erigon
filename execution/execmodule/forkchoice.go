@@ -621,18 +621,14 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(sd *state.Execut
 			pruneStart := time.Now()
 			defer UpdateForkChoicePruneDuration(pruneStart)
 			if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-
 				if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, 2*time.Second); err != nil {
 					return err
 				}
-				if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-					timings = append(timings, pruneTimings...)
-				}
-
 				return nil
 			}); err != nil {
 				return err
 			}
+			timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))
 
 			if len(timings) > 0 {
 				timings = append(timings, "initialCycle", initialCycle)
