@@ -174,6 +174,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			if !se.isMining && !bytes.Equal(rh, header.Root.Bytes()) {
 				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+				panic("fail")
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
 		}
@@ -582,7 +583,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx) {
 				logIndexAfterTx -= uint32(len(result.Logs))
 			}
-			se.logger.Info("appending receipt", "blockNum", txTask.BlockNumber(), "txNum", txTask.TxNum, "logIndexAfterTx", logIndexAfterTx, "cumGasUsed", cumGasUsed)
+			se.logger.Info("appending receipt", "blockNum", txTask.BlockNumber(), "txNum", txTask.TxNum, "txIndex", txTask.TxIndex, "logIndexAfterTx", logIndexAfterTx, "cumGasUsed", cumGasUsed)
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
