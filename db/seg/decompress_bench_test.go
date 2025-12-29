@@ -96,9 +96,6 @@ func BenchmarkDecompressTorrent(t *testing.B) {
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
-	condensePatternTableBitThreshold = 5
-	fmt.Printf("bit threshold: %d\n", condensePatternTableBitThreshold)
-
 	t.Run("init", func(t *testing.B) {
 		for i := 0; i < t.N; i++ {
 			d, err := NewDecompressor(fpath)
