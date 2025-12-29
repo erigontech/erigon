@@ -104,6 +104,8 @@ func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuilding
 	if err != nil {
 		return nil, fmt.Errorf("update fork choice failed: %w", err)
 	}
+	// wait for the block t be published (note: we could just poll the rpc layer
+	// if we want to remove the internal api dependency)
 	<-lastBlock
 	return clPayload, nil
 }
