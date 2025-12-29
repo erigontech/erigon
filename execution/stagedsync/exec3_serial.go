@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/daemon/logger"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -454,7 +455,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
 				} else if txTask.TxIndex > 0 {
-					se.logger.Debug("Need to fetch previous receipt for tx", "txIndex", txTask.TxIndex, "startTxIndex", startTxIndex, "blockNum", txTask.BlockNumber())
+					se.logger.Info("Need to fetch previous receipt for tx", "txIndex", txTask.TxIndex, "startTxIndex", startTxIndex, "blockNum", txTask.BlockNumber())
 					prevTask := *txTask
 					prevTask.HistoryExecution = true
 					prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
@@ -582,6 +583,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx) {
 				logIndexAfterTx -= uint32(len(result.Logs))
 			}
+			logger.Info("appending receipt", "blockNum", txTask.BlockNumber(), "txNum", txTask.TxNum, "logIndexAfterTx", logIndexAfterTx, "cumGasUsed", cumGasUsed)
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
