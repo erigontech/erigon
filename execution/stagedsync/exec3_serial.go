@@ -377,6 +377,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 	var gasPool *protocol.GasPool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
+		se.logger.Info(fmt.Sprintf("[%s] Executing tx task", se.logPrefix), "block", task.BlockNumber(), "txNum", txTask.TxNum, "txIndex", txTask.TxIndex)
 
 		if gasPool == nil {
 			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
@@ -455,7 +456,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
 				} else if txTask.TxIndex > 0 {
-					se.logger.Info("Need to fetch previous receipt for tx", "txIndex", txTask.TxIndex, "startTxIndex", startTxIndex, "blockNum", txTask.BlockNumber())
+					se.logger.Info("Need to fetch previous receipt for tx", "txIndex", txTask.TxIndex, "startTxIndex", startTxIndex, "blockNum", txTask.BlockNumber(), "historical", txTask.HistoryExecution)
 					prevTask := *txTask
 					prevTask.HistoryExecution = true
 					prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
@@ -524,6 +525,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 			return false, err
 		}
+
+		se.logger.Info(fmt.Sprintf("[%s] 2 Executing tx task", se.logPrefix), "block", task.BlockNumber(), "txNum", txTask.TxNum, "txIndex", txTask.TxIndex, "historical", txTask.HistoryExecution)
 
 		var logIndexAfterTx uint32
 		var cumGasUsed uint64
