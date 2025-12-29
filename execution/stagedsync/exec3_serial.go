@@ -464,6 +464,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 						return err
 					}
 					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+					if err != nil {
+						return err
+					}
 				} else {
 					receipt, err = result.CreateNextReceipt(nil)
 					if err != nil {
