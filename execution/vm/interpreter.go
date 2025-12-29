@@ -576,10 +576,7 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 
 			// Handle precompiles synchronously
 			if prepared.IsPrecompile {
-				// Call tracer OnEnter for precompile
-				if in.cfg.Tracer != nil {
-					in.evm.captureBegin(in.depth, pending.CallType, pending.Caller, pending.Addr, true, pending.Input, pending.Gas, pending.Value, nil)
-				}
+				// Note: captureBegin was already called by PrepareCall, so we don't call it again here
 
 				ret, returnGas, callErr := RunPrecompiledContract(prepared.Precompile, prepared.Input, prepared.Gas, in.cfg.Tracer)
 				returnGas = in.evm.FinishCall(prepared.Snapshot, returnGas, callErr)
@@ -624,11 +621,6 @@ func (in *EVMInterpreter) runLoop() ([]byte, uint64, error) {
 			// Set readOnly mode if needed
 			if childFrame.readOnly && !in.readOnly {
 				in.readOnly = true
-			}
-
-			// Call tracer OnEnter for the new frame
-			if in.cfg.Tracer != nil {
-				in.evm.captureBegin(in.depth, pending.CallType, pending.Caller, pending.Addr, false, pending.Input, prepared.Gas, pending.Value, prepared.Contract.Code)
 			}
 
 			in.callStack.Push(childFrame)
