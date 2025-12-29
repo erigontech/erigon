@@ -96,6 +96,9 @@ func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 	ctx.gas = gas
 	ctx.input = input
 	ctx.Contract = contract
+	// Reset Memory and Stack to ensure clean state for gas calculations
+	ctx.Memory.reset()
+	ctx.Stack.Reset()
 	return ctx
 }
 
@@ -393,7 +396,7 @@ frameLoop:
 		callContext := frame.callContext
 		contract := &frame.contract // Use pointer to avoid struct copy
 		pc := frame.pc
-		code := contract.Code       // Cache code slice for fast access
+		code := contract.Code // Cache code slice for fast access
 		codeLen := uint64(len(code))
 
 		// Inner loop: execute instructions within the same frame
