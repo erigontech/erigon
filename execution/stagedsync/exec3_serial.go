@@ -468,10 +468,19 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					var cumGasUsed uint64
 					var logIndexAfterTx uint32
 					if txTask.TxIndex > 1 {
-						cumGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-2)
+						// As of gives value before the tx, so to get the last tx's receipt we need to query txNum-2 + 1
+						cumGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-2+1)
 						if err != nil {
 							return err
 						}
+
+						// for i := uint64(txTask.TxNum - uint64(txTask.TxIndex)); i < txTask.TxNum-1; i++ {
+						// 	cumGasUsed2, _, logIndexAfterTx2, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-2)
+						// 	if err != nil {
+						// 		return err
+						// 	}
+						// 	se.logger.Info("Intermediate receipt", "txNum", i, "cumGasUsed", cumGasUsed2, "logIndexAfterTx", logIndexAfterTx2)
+						// }
 					}
 					prev, err = result.CreateReceipt(txTask.TxIndex-1,
 						cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
@@ -587,7 +596,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx) {
 				logIndexAfterTx -= uint32(len(result.Logs))
 			}
-			se.logger.Info("appending receipt", "blockNum", txTask.BlockNumber(), "txNum", txTask.TxNum, "txIndex", txTask.TxIndex, "logIndexAfterTx", logIndexAfterTx, "cumGasUsed", cumGasUsed)
+			se.logger.Info("appending receipt", "blockNum", txTask.BlockNumber(), "txNum", txTask.TxNum, "txIndex", txTask.TxIndex, "logIndexAfterTx", logIndexAfterTx, "cumGasUsed", cumGasUsed, "gasUsed", result.ExecutionResult.GasUsed)
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
