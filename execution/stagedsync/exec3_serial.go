@@ -125,7 +125,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				Hooks:            se.hooks,
 				Logger:           se.logger,
 			}
-			se.logger.Info("Preparing tx task", "block", blockNum, "txNum", txTask.TxNum, "txIndex", txTask.TxIndex, "historical", txTask.HistoryExecution, "initialTxNum", initialTxNum, "lastFrozenTxNum", lastFrozenTxNum, "inputTxNum", inputTxNum)
 
 			if txTask.TxNum > 0 && txTask.TxNum <= initialTxNum {
 				havePartialBlock = true
@@ -378,7 +377,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 	var gasPool *protocol.GasPool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
-		se.logger.Info(fmt.Sprintf("[%s] Executing tx task", se.logPrefix), "block", task.BlockNumber(), "txNum", txTask.TxNum, "txIndex", txTask.TxIndex)
 
 		if gasPool == nil {
 			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
@@ -453,48 +451,28 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					panic(err)
 				}
 			} else if txTask.TxIndex >= 0 {
-				var prev *types.Receipt
+				var prev, receipt *types.Receipt
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
+					receipt, err = result.CreateNextReceipt(prev)
+					if err != nil {
+						return err
+					}
 				} else if txTask.TxIndex > 0 {
-					se.logger.Info("Need to fetch previous receipt for tx", "txIndex", txTask.TxIndex, "startTxIndex", startTxIndex, "blockNum", txTask.BlockNumber(), "historical", txTask.HistoryExecution)
-					prevTask := *txTask
-					prevTask.HistoryExecution = true
-					prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
-					result := se.worker.RunTxTaskNoLock(&prevTask)
-					if result.Err != nil {
-						return fmt.Errorf("error while finding last receipt: %w", result.Err)
+					// reconstruct receipt from previous receipt values
+					cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
+					if err != nil {
+						return err
 					}
-					var cumGasUsed uint64
-					var logIndexAfterTx uint32
-					if txTask.TxIndex > 1 {
-						// As of gives value before the tx, so to get the last tx's receipt we need to query txNum-2 + 1
-						cumGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-2+1)
-						if err != nil {
-							return err
-						}
-
-						// for i := uint64(txTask.TxNum - uint64(txTask.TxIndex)); i < txTask.TxNum-1; i++ {
-						// 	cumGasUsed2, _, logIndexAfterTx2, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-2)
-						// 	if err != nil {
-						// 		return err
-						// 	}
-						// 	se.logger.Info("Intermediate receipt", "txNum", i, "cumGasUsed", cumGasUsed2, "logIndexAfterTx", logIndexAfterTx2)
-						// }
-					}
-					prev, err = result.CreateReceipt(txTask.TxIndex-1,
-						cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+				} else {
+					receipt, err = result.CreateNextReceipt(nil)
 					if err != nil {
 						return err
 					}
 				}
 
-				receipt, err := result.CreateNextReceipt(prev)
-				if err != nil {
-					return err
-				}
 				blockReceipts = append(blockReceipts, receipt)
-
 				if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
 					hooks.OnTxEnd(receipt, result.Err)
 				}
@@ -535,8 +513,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 			return false, err
 		}
-
-		se.logger.Info(fmt.Sprintf("[%s] 2 Executing tx task", se.logPrefix), "block", task.BlockNumber(), "txNum", txTask.TxNum, "txIndex", txTask.TxIndex, "historical", txTask.HistoryExecution)
 
 		var logIndexAfterTx uint32
 		var cumGasUsed uint64
@@ -596,7 +572,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx) {
 				logIndexAfterTx -= uint32(len(result.Logs))
 			}
-			se.logger.Info("appending receipt", "blockNum", txTask.BlockNumber(), "txNum", txTask.TxNum, "txIndex", txTask.TxIndex, "logIndexAfterTx", logIndexAfterTx, "cumGasUsed", cumGasUsed, "gasUsed", result.ExecutionResult.GasUsed)
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
