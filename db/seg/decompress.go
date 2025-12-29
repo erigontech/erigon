@@ -69,10 +69,6 @@ func (pt *patternTable) insertWord(cw *codeword) {
 	}
 }
 
-func (pt *patternTable) condensedTableSearch(code uint16) *codeword {
-	return pt.patterns[code]
-}
-
 type posTable struct {
 	pos    []uint64
 	lens   []byte
@@ -619,7 +615,7 @@ func (g *Getter) nextPattern() []byte {
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 
-		cw := table.condensedTableSearch(code)
+		cw := table.patterns[code]
 		l = cw.len
 		if l == 0 {
 			table = cw.ptr
