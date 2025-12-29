@@ -1156,6 +1156,11 @@ var (
 		Usage: "Enables the EL engine v2 block downloader",
 		Value: true,
 	}
+	ArbitrumImportPathFlag = cli.StringFlag{
+		Name:  "arbitrum.import.path",
+		Usage: "Path to Arbitrum chain JSON export for import on first run",
+		Value: "",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}

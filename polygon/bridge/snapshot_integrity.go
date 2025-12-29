@@ -27,7 +27,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader bloc
 		cc = genesis.Config
 	} else {
 		err = db.View(ctx, func(tx kv.Tx) error {
-			cc, err = chain.GetConfig(tx, nil)
+			cc, err = chain.GetConfig(tx, nil, 0)
 			if err != nil {
 				return err
 			}

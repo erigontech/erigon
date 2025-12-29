@@ -74,8 +74,6 @@ func (s ArbitrumSigner) SignatureValues(tx Transaction, sig []byte) (R, S, V *ui
 
 		return nil, nil, nil, nil
 	case *ArbitrumLegacyTxData:
-		// legacyData := tx.(*ArbitrumLegacyTxData)
-		// fakeTx := NewArbTx(legacyData.LegacyTx)
 		return s.Signer.SignatureValues(dataTx.LegacyTx, sig)
 	default:
 		return s.Signer.SignatureValues(tx, sig)

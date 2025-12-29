@@ -263,7 +263,9 @@ var (
 				defer d.MadvSequential().DisableReadAhead()
 				defer bodiesSegment.MadvSequential().DisableReadAhead()
 
+				// TODO required for arb1 chain parsing - there are two duplicate hashes. Instead, have to extract their hashes during dumping from rpc and skip them during indexing
 				uniq := make(map[common.Hash]uint64, 1_000_00)
+
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
 					var ti, offset, nextPos uint64
@@ -313,16 +315,16 @@ var (
 							}
 							txnHash = txn.Hash()
 						}
-						// if chainConfig.IsArbitrum() {
-						_, ok := uniq[txnHash]
-						uniq[txnHash]++
-						if ok {
-							_, err = rand.Read(txnHash[:])
-							if err != nil {
-								return fmt.Errorf("failed to generate new txnHash: %w", err)
+						if chainConfig.IsArbitrum() && chainConfig.ChainName == networkname.ArbitrumOne {
+							_, ok := uniq[txnHash]
+							uniq[txnHash]++
+							if ok {
+								_, err = rand.Read(txnHash[:])
+								if err != nil {
+									return fmt.Errorf("failed to generate new txnHash: %w", err)
+								}
 							}
 						}
-						// }
 
 						if err := txnHashIdx.AddKey(txnHash[:], offset); err != nil {
 							return err
@@ -345,7 +347,7 @@ var (
 							txnHashIdx.ResetNextSalt()
 							txnHash2BlockNumIdx.ResetNextSalt()
 
-							uniq = make(map[common.Hash]uint64, 1_000_00)
+							clear(uniq)
 							continue
 						}
 						return fmt.Errorf("txnHashIdx: %w", err)
@@ -355,10 +357,24 @@ var (
 							logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 							txnHashIdx.ResetNextSalt()
 							txnHash2BlockNumIdx.ResetNextSalt()
-							uniq = make(map[common.Hash]uint64, 1_000_00)
+
+							clear(uniq)
 							continue
 						}
 						return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
+					}
+
+					if chainConfig.ChainName == networkname.ArbitrumOne { // TODO remove related to arb1 filtering code
+						count := 0
+						for txh, v := range uniq {
+							if v > 1 {
+								fmt.Printf("Duplicate transaction hash %x found %d times\n", txh, v)
+								count++
+							}
+						}
+						if count > 0 {
+							log.Warn("TransactionsIdx: finished building", "file", sn.Name(), "duplicateHashes", count)
+						}
 					}
 
 					return nil

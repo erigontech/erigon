@@ -144,7 +144,7 @@ func SaveChainConfigIfNeed(
 
 	for {
 		if err = coreDB.View(ctx, func(tx kv.Tx) error {
-			cc, err = chain.GetConfig(tx, nil)
+			cc, err = chain.GetConfig(tx, nil, 0)
 			if err != nil {
 				return err
 			}

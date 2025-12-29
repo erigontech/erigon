@@ -145,6 +145,7 @@ func init() {
 	//withChaosMonkey(stateStages)
 	withL2RPCaddress(stateStages)
 	withL2RPCReceiptAddress(stateStages)
+	withArbInitJson(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
