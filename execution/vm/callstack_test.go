@@ -110,7 +110,9 @@ func TestCallStack_PushPop(t *testing.T) {
 func TestCallStack_DepthLimit(t *testing.T) {
 	cs := NewCallStack()
 
-	// Push up to the limit (1024)
+	// Push up to the limit (1024 frames, which allows depths 1-1024)
+	// The 1025th frame can be pushed (for depth 1025), but PrepareCall
+	// will fail with ErrDepth before that frame executes anything meaningful.
 	frames := make([]*CallFrame, 1024)
 	for i := 0; i < 1024; i++ {
 		frames[i] = getFrame()
@@ -124,13 +126,24 @@ func TestCallStack_DepthLimit(t *testing.T) {
 		t.Errorf("CallStack depth should be 1024, got %d", cs.Depth())
 	}
 
-	// Next push should fail with ErrDepth
+	// One more push should succeed (for depth 1025)
 	extraFrame := getFrame()
 	err := cs.Push(extraFrame)
+	if err != nil {
+		t.Errorf("Push for depth 1025 should succeed, got %v", err)
+	}
+
+	if cs.Depth() != 1025 {
+		t.Errorf("CallStack depth should be 1025, got %d", cs.Depth())
+	}
+
+	// But the next push should fail with ErrDepth
+	extraFrame2 := getFrame()
+	err = cs.Push(extraFrame2)
 	if err != ErrDepth {
 		t.Errorf("Push beyond limit should return ErrDepth, got %v", err)
 	}
-	putFrame(extraFrame)
+	putFrame(extraFrame2)
 
 	// Clean up
 	cs.Clear()

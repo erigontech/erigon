@@ -21,6 +21,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -118,14 +119,16 @@ type CallStack struct {
 // NewCallStack creates a new CallStack with the EVM depth limit.
 func NewCallStack() *CallStack {
 	return &CallStack{
-		frames:  make([]*CallFrame, 0, 64), // Pre-allocate reasonable capacity
-		maxSize: 1024,                      // params.CallCreateDepth
+		frames:  make([]*CallFrame, 0, 64),  // Pre-allocate reasonable capacity
+		maxSize: int(params.CallCreateDepth), // EVM max call depth
 	}
 }
 
 // Push adds a frame to the stack. Returns ErrDepth if at maximum depth.
+// We allow up to maxSize+1 frames because the depth check in PrepareCall
+// needs to run at depth maxSize+1 to fail properly.
 func (cs *CallStack) Push(frame *CallFrame) error {
-	if len(cs.frames) >= cs.maxSize {
+	if len(cs.frames) > cs.maxSize {
 		return ErrDepth
 	}
 	cs.frames = append(cs.frames, frame)
