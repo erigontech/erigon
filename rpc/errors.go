@@ -101,6 +101,16 @@ func (e *UnsupportedForkError) ErrorCode() int { return -38005 }
 
 func (e *UnsupportedForkError) Error() string { return e.Message }
 
+type BlockNotFoundErr struct {
+	BlockId string
+}
+
+func (e BlockNotFoundErr) ErrorCode() int { return -32000 }
+
+func (e BlockNotFoundErr) Error() string {
+	return fmt.Sprintf("block not found: %s", e.BlockId)
+}
+
 type CustomError struct {
 	Code    int
 	Message string
