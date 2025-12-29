@@ -454,6 +454,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
 				} else if txTask.TxIndex > 0 {
+					se.logger.Debug("Need to fetch previous receipt for tx", "txIndex", txTask.TxIndex, "startTxIndex", startTxIndex, "blockNum", txTask.BlockNumber())
 					prevTask := *txTask
 					prevTask.HistoryExecution = true
 					prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
