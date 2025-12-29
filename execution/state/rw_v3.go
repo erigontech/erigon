@@ -551,8 +551,8 @@ func NewWriter(ec *ExecutionContext, tx kv.TemporalTx, accumulator *shards.Accum
 	}
 }
 
-func (w *Writer) SetTxNum(v uint64)              { w.txNum = v }
-func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
+func (w *Writer) SetTxNum(v uint64)      { w.txNum = v }
+func (w *Writer) SetTx(tx kv.TemporalTx) { w.tx = tx }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
@@ -669,9 +669,9 @@ func NewStateReader(ec *ExecutionContext, tx kv.TemporalTx) *ReaderV3 {
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()                   {}
-func (r *ReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
-func (r *ReaderV3) SetGetter(getter kv.TemporalGetter) { r.getter = getter }
+func (r *ReaderV3) DiscardReadList()       {}
+func (r *ReaderV3) SetTxNum(txNum uint64)  { r.txNum = txNum }
+func (r *ReaderV3) SetTx(tx kv.TemporalTx) { r.tx = tx }
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.trace = trace
@@ -708,6 +708,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 	var acc *accounts.Account
 	var ok bool
 	var err error
+	var value common.Address
 
 	if r.ec != nil {
 		acc, _, ok, err = r.ec.GetAccount(context.Background(), address, r.tx)
@@ -715,7 +716,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 			return nil, err
 		}
 	} else {
-		var value common.Address
+
 		if !address.IsNil() {
 			value = address.Value()
 		}
@@ -735,7 +736,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 
 	if !ok {
 		if r.trace {
-			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, value, r.txNum)
+			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, r.txNum)
 		}
 		return nil, nil
 	}
@@ -758,6 +759,8 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	var res uint256.Int
 	var ok bool
 	var err error
+	var addressValue common.Address
+	var keyValue common.Hash
 
 	if r.ec != nil {
 		res, _, ok, err = r.ec.GetStorage(context.Background(), address, key, r.tx)
@@ -766,8 +769,8 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 		}
 	} else {
 		var composite [20 + 32]byte
-		addressValue := address.Value()
-		keyValue := key.Value()
+		addressValue = address.Value()
+		keyValue = key.Value()
 		copy(composite[0:20], addressValue[0:20])
 		copy(composite[20:], keyValue[:])
 		enc, _, err := r.tx.GetLatest(kv.StorageDomain, composite[:])
@@ -796,13 +799,13 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var code []byte
 	var err error
+	var addressValue common.Address
 	if r.ec != nil {
 		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		var addressValue common.Address
 		if !address.IsNil() {
 			addressValue = address.Value()
 		}
@@ -819,10 +822,10 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var code []byte
 	var err error
+	var addressValue common.Address
 	if r.ec != nil {
 		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
 	} else {
-		var addressValue common.Address
 		if !address.IsNil() {
 			addressValue = address.Value()
 		}
@@ -849,38 +852,12 @@ type bufferedReader struct {
 	bufferedState *StateV3Buffered
 }
 
-type latestBufferedReader struct {
-	bufferedReader
-}
-
-func (r *latestBufferedReader) SetGetter(getter kv.TemporalGetter) {
-	r.reader.(interface{ SetGetter(kv.TemporalGetter) }).SetGetter(getter)
-}
-
-type historicBufferedReader struct {
-	bufferedReader
-}
-
-func (r *historicBufferedReader) SetTx(tx kv.TemporalTx) {
-	r.reader.(interface{ SetTx(kv.TemporalTx) }).SetTx(tx)
-}
-
 func NewBufferedReader(bufferedState *StateV3Buffered, reader StateReader) StateReader {
-	type latest interface {
-		SetGetter(kv.TemporalGetter)
-	}
+	return &bufferedReader{reader: reader, bufferedState: bufferedState}
+}
 
-	type historic interface {
-		SetTx(kv.TemporalTx)
-	}
-	switch reader.(type) {
-	case latest:
-		return &latestBufferedReader{bufferedReader{reader: reader, bufferedState: bufferedState}}
-	case historic:
-		return &historicBufferedReader{bufferedReader{reader: reader, bufferedState: bufferedState}}
-	default:
-		return &bufferedReader{reader: reader, bufferedState: bufferedState}
-	}
+func (r *bufferedReader) SetTx(tx kv.TemporalTx) {
+	r.reader.(interface{ SetTx(tx kv.TemporalTx) }).SetTx(tx)
 }
 
 func (r *bufferedReader) SetTrace(trace bool, tracePrefix string) {

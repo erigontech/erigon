@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -50,10 +50,10 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/node/debug"
 )
 
@@ -157,7 +157,7 @@ Examples:
 		// Use LatestStateReader to read from the commitment domain.
 		// This is the same approach used by commitmentdb.TrieContext.Branch internally:
 		// TrieContext.Branch -> TrieContext.readDomain -> StateReader.Read
-		commitmentReader := commitmentdb.NewLatestStateReader(tx)
+		commitmentReader := commitment.NewLatestStateReader(tx)
 
 		if err := readBranch(commitmentReader, prefix, logger); err != nil {
 			logger.Error("Failed to read branch", "error", err)
@@ -166,11 +166,11 @@ Examples:
 	},
 }
 
-func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, logger interface {
+func readBranch(stateReader *commitment.LatestStateReader, prefix []byte, logger interface {
 	Info(msg string, ctx ...interface{})
 }) error {
 	compactKey := commitment.HexNibblesToCompactBytes(prefix)
-	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
 	}
@@ -321,13 +321,36 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}
 
-	str, err := dbstate.CheckCommitmentForPrint(ctx, db)
+	str, err := checkCommitmentForPrint(ctx, db)
 	if err != nil {
 		return fmt.Errorf("failed to check commitment: %w", err)
 	}
 	fmt.Printf("\n%s", str)
 
 	return nil
+}
+
+func checkCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {
+	a := rwDb.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+
+	rwTx, err := rwDb.BeginTemporalRw(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer rwTx.Rollback()
+
+	domains, err := state.NewExecutionContext(ctx, rwTx, log.New())
+	if err != nil {
+		return "", err
+	}
+	rootHash, err := domains.GetCommitmentCtx().Trie().RootHash()
+	if err != nil {
+		return "", err
+	}
+	var s strings.Builder
+	s.WriteString(fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash))
+	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues))
+	return s.String(), nil
 }
 
 // integration commitment visualize

@@ -27,10 +27,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/node/direct"
@@ -147,7 +147,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 
 	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
 	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
+		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
 		if err != nil {
 			return err
 		}

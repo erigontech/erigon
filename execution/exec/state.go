@@ -195,21 +195,13 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		var getter kv.TemporalGetter
-		if chainTx != nil {
-			getter = rs.Domains().AsGetter(chainTx)
-		}
-		rw.SetReader(state.NewBufferedReader(rs, state.NewStateReader(getter)))
+		rw.SetReader(state.NewBufferedReader(rs, state.NewStateReader(rs.Domains(), chainTx)))
 	}
 
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		var putdel kv.TemporalPutDel
-		if chainTx != nil {
-			putdel = rs.Domains().AsPutDel(chainTx)
-		}
-		rw.stateWriter = state.NewWriter(putdel, accumulator, 0)
+		rw.stateWriter = state.NewWriter(rs.Domains(), chainTx, accumulator, 0)
 	}
 
 	if chainTx != nil {
@@ -249,18 +241,12 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 	rw.chainTx = chainTx
 
 	if rw.chainTx != nil {
-		type latest interface {
-			SetGetter(kv.TemporalGetter)
-		}
-
-		type historic interface {
+		type resettable interface {
 			SetTx(kv.TemporalTx)
 		}
 
 		switch typedReader := rw.stateReader.(type) {
-		case latest:
-			typedReader.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
-		case historic:
+		case resettable:
 			typedReader.SetTx(rw.chainTx)
 		default:
 			if rw.stateReader != nil {
@@ -362,18 +348,12 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 // like compute gas used for block and then to set state reader to continue processing on latest data.
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
-	type latest interface {
-		SetGetter(kv.TemporalGetter)
-	}
-
-	type historic interface {
+	type resettable interface {
 		SetTx(kv.TemporalTx)
 	}
 
 	switch typedReader := rw.stateReader.(type) {
-	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
-	case historic:
+	case resettable:
 		typedReader.SetTx(rw.chainTx)
 	}
 	rw.ibs = state.New(rw.stateReader)
@@ -393,7 +373,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3(rw.chainTx, txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewStateReader(rw.rs.Domains().AsGetter(rw.chainTx))))
+		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewStateReader(rw.rs.Domains(), rw.chainTx)))
 	}
 
 	if rw.background && rw.chainTx == nil {

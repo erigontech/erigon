@@ -18,23 +18,23 @@ package backtester
 
 import (
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
-var _ commitmentdb.StateReader = (*backtestStateReader)(nil)
+var _ commitment.StateReader = (*backtestStateReader)(nil)
 
 // backtestStateReader implements StateReader for commitment backtesting. What we need for that is to:
 //   - read commitment data as-of the beginning of the block
 //   - read account/storage/code data as-of the end of the block
 type backtestStateReader struct {
-	commitmentReader commitmentdb.StateReader
-	plainStateReader commitmentdb.StateReader
+	commitmentReader commitment.StateReader
+	plainStateReader commitment.StateReader
 }
 
 func newBacktestStateReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64) backtestStateReader {
 	return backtestStateReader{
-		commitmentReader: commitmentdb.NewHistoryStateReader(tx, commitmentAsOf),
-		plainStateReader: commitmentdb.NewHistoryStateReader(tx, plainStateAsOf),
+		commitmentReader: commitment.NewHistoryStateReader(tx, commitmentAsOf),
+		plainStateReader: commitment.NewHistoryStateReader(tx, plainStateAsOf),
 	}
 }
 
@@ -47,9 +47,9 @@ func (b backtestStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
 	return nil
 }
 
-func (b backtestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+func (b backtestStateReader) Read(d kv.Domain, plainKey []byte) ([]byte, kv.Step, error) {
 	if d == kv.CommitmentDomain {
-		return b.commitmentReader.Read(d, plainKey, stepSize)
+		return b.commitmentReader.Read(d, plainKey)
 	}
-	return b.plainStateReader.Read(d, plainKey, stepSize)
+	return b.plainStateReader.Read(d, plainKey)
 }

@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 type Opt func(bt *Backtester)
@@ -178,7 +178,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if bt.paraTrie {
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
-	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger)
+	sd, err := state.NewExecutionContext(ctx, tx, bt.logger)
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	return nil
 }
 
-func (bt Backtester) replayChanges(tx kv.TemporalTx, d kv.Domain, sd *execctx.SharedDomains, fromTxNum uint64, toTxNum uint64) error {
+func (bt Backtester) replayChanges(tx kv.TemporalTx, d kv.Domain, sd *state.ExecutionContext, fromTxNum uint64, toTxNum uint64) error {
 	starTime := time.Now()
 	changes := 0
 	defer func() {

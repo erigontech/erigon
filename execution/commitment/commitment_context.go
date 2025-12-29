@@ -174,11 +174,9 @@ func (sdc *CommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
-func NewCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *CommitmentContext {
-	ctx := &CommitmentContext{
-		sharedDomains: sd,
-	}
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
+func NewCommitmentContext(mode Mode, trieVariant TrieVariant, tmpDir string) *CommitmentContext {
+	ctx := &CommitmentContext{}
+	ctx.patriciaTrie, ctx.updates = InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	return ctx
 }
 
@@ -222,6 +220,24 @@ func (sdc *CommitmentContext) KeysCount() uint64 {
 
 func (sdc *CommitmentContext) Trie() Trie {
 	return sdc.patriciaTrie
+}
+
+func (sdc *CommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
+	if sdc.updates.Mode() == ModeDisabled {
+		return
+	}
+
+	switch d {
+	case kv.AccountsDomain:
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.touchAccount)
+	case kv.CodeDomain:
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.touchCode)
+	case kv.StorageDomain:
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.touchStorage)
+	//case kv.CommitmentDomain, kv.ReceiptDomain:
+	default:
+		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
+	}
 }
 
 func (sdc *CommitmentContext) TouchAccount(addr accounts.Address, val *accounts.Account) {
