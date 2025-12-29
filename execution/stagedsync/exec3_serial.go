@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/daemon/logger"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -583,7 +582,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx) {
 				logIndexAfterTx -= uint32(len(result.Logs))
 			}
-			logger.Info("appending receipt", "blockNum", txTask.BlockNumber(), "txNum", txTask.TxNum, "logIndexAfterTx", logIndexAfterTx, "cumGasUsed", cumGasUsed)
+			se.logger.Info("appending receipt", "blockNum", txTask.BlockNumber(), "txNum", txTask.TxNum, "logIndexAfterTx", logIndexAfterTx, "cumGasUsed", cumGasUsed)
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
