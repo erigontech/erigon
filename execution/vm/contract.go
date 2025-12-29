@@ -22,6 +22,7 @@ package vm
 import (
 	"fmt"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
@@ -29,6 +30,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// globalJumpDestCache is a global thread-safe LRU cache for JUMPDEST analysis.
+// Since contract code is immutable once deployed, the analysis can be cached permanently.
+// This cache persists across blocks and transactions.
+var globalJumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](10_000)
 
 // AccountRef is a reference to an account address.
 //
@@ -113,27 +119,24 @@ func (c *Contract) validJumpdest(dest uint256.Int) (bool, bool) {
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
-	// Fast path: if we already have the analysis cached, use it directly
+	// Fast path: if we already have the analysis cached locally, use it directly
 	if c.analysis != nil {
 		return c.analysis.codeSegment(udest)
 	}
 
 	// Do we have a contract hash already?
 	// If we do have a hash, that means it's a 'regular' contract. For regular
-	// contracts ( not temporary initcode), we store the analysis in a map
+	// contracts (not temporary initcode), we can use the global cache.
 	if !c.CodeHash.IsZero() {
-		// Does parent context have the analysis?
-		c.jumpdests.total++
-		analysis, exist := c.jumpdests.Get(c.CodeHash)
-		if !exist {
-			// Do the analysis and save in parent context
-			// We do not need to store it in c.analysis
-			analysis = codeBitmap(c.Code)
-			c.jumpdests.Add(c.CodeHash, analysis)
-		} else {
-			c.jumpdests.hit++
+		// Check global cache first (thread-safe, persists across blocks)
+		if analysis, ok := globalJumpDestCache.Get(c.CodeHash); ok {
+			c.analysis = analysis
+			return c.analysis.codeSegment(udest)
 		}
-		// Also stash it in current contract for faster access
+
+		// Not in global cache, compute and store
+		analysis := codeBitmap(c.Code)
+		globalJumpDestCache.Add(c.CodeHash, analysis)
 		c.analysis = analysis
 		return c.analysis.codeSegment(udest)
 	}
@@ -141,7 +144,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	// We don't have the code hash, most likely a piece of initcode not already
 	// in state trie. In that case, we do an analysis, and save it locally, so
 	// we don't have to recalculate it for every JUMP instruction in the execution
-	// However, we don't save it within the parent context
+	// However, we don't save it within the global cache (initcode is temporary)
 	c.analysis = codeBitmap(c.Code)
 	return c.analysis.codeSegment(udest)
 }
