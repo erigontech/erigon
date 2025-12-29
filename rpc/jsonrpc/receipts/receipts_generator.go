@@ -424,7 +424,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	vmCfg := vm.Config{
 		JumpDestCache: vm.NewJumpDestCache(16),
 	}
-
+	hashFn := protocol.GetHashFn(genEnv.header, genEnv.getHeader)
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
@@ -463,8 +463,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		default:
 		}
 
-		evm := protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
-		go func() {
+		evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)		go func() {
 			<-ctx.Done()
 			evm.Cancel()
 		}()
