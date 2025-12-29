@@ -113,6 +113,11 @@ func (c *Contract) validJumpdest(dest uint256.Int) (bool, bool) {
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
+	// Fast path: if we already have the analysis cached, use it directly
+	if c.analysis != nil {
+		return c.analysis.codeSegment(udest)
+	}
+
 	// Do we have a contract hash already?
 	// If we do have a hash, that means it's a 'regular' contract. For regular
 	// contracts ( not temporary initcode), we store the analysis in a map
@@ -137,10 +142,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	// in state trie. In that case, we do an analysis, and save it locally, so
 	// we don't have to recalculate it for every JUMP instruction in the execution
 	// However, we don't save it within the parent context
-	if c.analysis == nil {
-		c.analysis = codeBitmap(c.Code)
-	}
-
+	c.analysis = codeBitmap(c.Code)
 	return c.analysis.codeSegment(udest)
 }
 
