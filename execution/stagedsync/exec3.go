@@ -890,7 +890,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
-		panic("fail")
 		return false, times, err
 	}
 	return domsFlushFn()

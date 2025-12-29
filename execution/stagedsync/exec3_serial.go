@@ -174,7 +174,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			if !se.isMining && !bytes.Equal(rh, header.Root.Bytes()) {
 				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-				panic("fail")
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
 		}
