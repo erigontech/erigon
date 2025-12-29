@@ -464,7 +464,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					var cumGasUsed uint64
 					var logIndexAfterTx uint32
 					if txTask.TxIndex > 1 {
-						cumGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-1)
+						cumGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-2)
 						if err != nil {
 							return err
 						}
