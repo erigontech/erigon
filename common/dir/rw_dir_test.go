@@ -61,3 +61,33 @@ func Test_CreateTempWithExt(t *testing.T) {
 	base2 := filepath.Base(ogfile)
 	require.True(t, strings.HasPrefix(base1, base2))
 }
+
+func TestRemoveFile_NonExistent(t *testing.T) {
+	tmpDir := t.TempDir()
+	nonExistent := filepath.Join(tmpDir, "does-not-exist.txt")
+
+	// Should not return error for non-existent file
+	err := RemoveFile(nonExistent)
+	require.NoError(t, err)
+
+	// Should work twice (idempotency)
+	err = RemoveFile(nonExistent)
+	require.NoError(t, err)
+}
+
+func TestRemoveFile_ExistingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "test.txt")
+
+	// Create file
+	err := WriteFileWithFsync(file, []byte("test"), 0644)
+	require.NoError(t, err)
+
+	// Should successfully remove existing file
+	err = RemoveFile(file)
+	require.NoError(t, err)
+
+	// Second call should also succeed (file already removed)
+	err = RemoveFile(file)
+	require.NoError(t, err)
+}

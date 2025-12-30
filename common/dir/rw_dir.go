@@ -222,6 +222,9 @@ func RemoveFile(path string) error {
 	}
 
 	if err := os.Remove(path); err != nil { //nolint
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		return err
 	}
 	if dbg.AssertEnabled {
