@@ -159,13 +159,13 @@ var CaplinIndexes = struct {
 
 func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	dir := info.Dir()
-	segment, err := seg.NewDecompressor(info.Path)
+	// segment, err := seg.NewDecompressor(info.Path)
 
-	if err != nil {
-		return false
-	}
+	// if err != nil {
+	// 	return false
+	// }
 
-	defer segment.Close()
+	// defer segment.Close()
 
 	fNameMask := IdxFileMask(info.From, info.To, i.Name)
 	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
