@@ -59,6 +59,12 @@ func (v *parallelBlockPostExecutionValidator) Process(gasUsed, blobGasUsed uint6
 	header *types.Header, isMining bool, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) error {
 	v.wg.Add(1)
+	v.mu.Lock()
+	if v.err != nil {
+		v.mu.Unlock()
+		return v.err
+	}
+	v.mu.Unlock()
 	go func() {
 		defer v.wg.Done()
 		if err := protocol.BlockPostValidation(gasUsed, blobGasUsed, checkReceipts, receipts, header, isMining, txns, chainConfig, logger); err != nil {
