@@ -402,8 +402,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
-
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
+				fmt.Println("XX")
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
