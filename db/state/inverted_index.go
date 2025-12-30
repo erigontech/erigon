@@ -720,7 +720,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 	val, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
 	if err != nil {
-		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+		//iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
 		return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
 	}
 	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum() || val != nil

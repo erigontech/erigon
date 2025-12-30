@@ -98,14 +98,12 @@ func HashSeekingPrune(
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		switch mode {
 		case KeyStorageMode:
-			println("deleting KeyStorageMode")
 			seek := make([]byte, 8, 256)
 			seek = append(bytes.Clone(key), txnm...)
 			if err := valDelCursor.Delete(seek); err != nil {
 				return err
 			}
 		case SmallHistoryMode:
-			println("deleting SH")
 			vv, err := valDelCursor.(kv.RwCursorDupSort).SeekBothRange(key, txnm)
 			if err != nil {
 				return err

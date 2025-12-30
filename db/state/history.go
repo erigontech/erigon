@@ -963,6 +963,13 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
 	//}()
 
+	val, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
+	if err != nil {
+		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+	}
+
+	pruneInProgress := val != nil
+
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
 			return false, 0
@@ -986,7 +993,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	case "commitment":
 		mxPrunableHComm.Set(float64(txTo - minIdxTx))
 	}
-	return minIdxTx < txTo, txTo
+	return minIdxTx < txTo || pruneInProgress, txTo
 }
 
 // Prune [txFrom; txTo)
