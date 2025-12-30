@@ -20,9 +20,12 @@
 package vm
 
 import (
+	"fmt"
+
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -80,6 +83,10 @@ func (c *Contract) validJumpdest(dest uint256.Int) (bool, bool) {
 	return c.isCode(udest), true
 }
 
+var hit int
+var miss int
+var evicted int
+
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
@@ -89,15 +96,20 @@ func (c *Contract) isCode(udest uint64) bool {
 
 	if !c.CodeHash.IsZero() {
 		if analysis, ok := jumpDestCache.Get(c.CodeHash); ok {
+			hit++
 			c.analysis = analysis
 			return c.analysis.codeSegment(udest)
 		}
+		miss++
 	}
 
 	c.analysis = codeBitmap(c.Code)
 
 	if !c.CodeHash.IsZero() {
-		jumpDestCache.Add(c.CodeHash, c.analysis)
+		evicted := jumpDestCache.Add(c.CodeHash, c.analysis)
+		if evicted {
+			log.Warn("[dbg] JumpDestCache", "hit", hit, "total", hit+miss, "limit", 256, "ratio", fmt.Sprintf("%.2f", float64(hit)/float64(hit+miss)))
+		}
 	}
 
 	return c.analysis.codeSegment(udest)

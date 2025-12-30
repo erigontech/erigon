@@ -605,7 +605,8 @@ into ./build/bin folder).
 # start RPCD on datadir. Disable: receipts LRU. Disable: json marshaling of response. Disable: http compression.  
 RPC_DROP_RESPONSE=true RPC_DISABLE_RCACHE=true RPC_DISABLE_RLRU=true go run ./cmd/rpcdaemon --datadir /erigon-data/mainnet_full/ --http.compression=false --pprof --pprof.port=6062 --private.api.addr=127.0.0.1:0
 
-echo '{"method":"eth_getLogs","params":[{"fromBlock":"0x16E3600","toBlock":"0x16E3610"}],"id":1,"jsonrpc":"2.0"}' > body.json
+# Run perf test on 4 blocks range  
+echo '{"method":"eth_getLogs","params":[{"fromBlock":"0x16E3600","toBlock":"0x16E3604"}],"id":1,"jsonrpc":"2.0"}' > body.json
 
 cat > getLogs.http << 'EOF'
 POST http://localhost:8545
