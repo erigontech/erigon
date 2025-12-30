@@ -85,7 +85,7 @@ func (c *Contract) validJumpdest(dest uint256.Int) (bool, bool) {
 
 var hit int
 var miss int
-var evicted int
+var evictedN int
 
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
@@ -108,8 +108,8 @@ func (c *Contract) isCode(udest uint64) bool {
 	if !c.CodeHash.IsZero() {
 		evicted := jumpDestCache.Add(c.CodeHash, c.analysis)
 		if evicted {
-			evicted++
-			if evicted%10 == 0 {
+			evictedN++
+			if evictedN%10 == 0 {
 				log.Warn("[dbg] JumpDestCache", "hit", hit, "total", hit+miss, "limit", 256, "ratio", fmt.Sprintf("%.2f", float64(hit)/float64(hit+miss)))
 			}
 		}
