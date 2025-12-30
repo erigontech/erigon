@@ -300,6 +300,8 @@ func TableScanningPrune(
 					break
 				}
 				if time.Since(start) > timeOut {
+					lastPrunedVal = iiVal
+					isNotDone = true
 					break
 				}
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
@@ -309,6 +311,9 @@ func TableScanningPrune(
 				}
 				mxPruneSizeIndex.Inc()
 				stat.PruneCountValues++
+			}
+			if isNotDone {
+				break
 			}
 		}
 
