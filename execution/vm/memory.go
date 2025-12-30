@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -86,6 +87,8 @@ var zeroes = make([]byte, 4*4096)
 
 // Resize resizes the memory to size
 func (m *Memory) Resize(size uint64) {
+	fmt.Printf("Resize: %d\n", size)
+
 	currLen := uint64(len(m.store))
 	if size <= currLen {
 		return
