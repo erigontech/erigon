@@ -246,6 +246,9 @@ func ExecV3(ctx context.Context,
 	var lastCommittedBlockNum uint64
 
 	postValidator := newBlockPostExecutionValidator()
+	if maxBlockNum == startBlockNum {
+		postValidator = newParallelBlockPostExecutionValidator()
+	}
 
 	if parallel {
 		if !inMemExec { //nolint:staticcheck
