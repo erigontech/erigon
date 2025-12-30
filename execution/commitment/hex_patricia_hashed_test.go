@@ -67,7 +67,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	firstRootHash, err := hph.Process(ctx, upds, "", nil)
+	firstRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	t.Logf("rootHash %x\n", firstRootHash)
@@ -84,7 +84,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	secondRootHash, err := hph.Process(ctx, upds, "", nil)
+	secondRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEqual(t, firstRootHash, secondRootHash)
 	t.Logf("rootHash %x\n", secondRootHash)
@@ -100,7 +100,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, plainKeys, updates)
 
-	thirdRootHash, err := hph.Process(ctx, upds, "", nil)
+	thirdRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	t.Logf("rootHash %x\n", thirdRootHash)
 	require.NoError(t, err)
 	require.NotEqual(t, secondRootHash, thirdRootHash)
@@ -129,7 +129,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer upds.Close()
 
-	hashBeforeEmptyUpdate, err := hph.Process(ctx, upds, "", nil)
+	hashBeforeEmptyUpdate, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 

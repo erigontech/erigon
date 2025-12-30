@@ -214,7 +214,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer upds.Close()
 
-		rootHash, err := hph.Process(ctx, upds, "", nil)
+		rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Lenf(t, rootHash, length.Hash, "invalid root hash length")
 	})

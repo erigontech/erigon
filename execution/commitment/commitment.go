@@ -107,7 +107,7 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates
-	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error)
+	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
 }
 
 type CommitProgress struct {

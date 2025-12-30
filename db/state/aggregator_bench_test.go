@@ -55,6 +55,18 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *s
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 
+type txwrapper struct {
+	tx kv.TemporalRwTx
+}
+
+func (w txwrapper) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
+	return w.tx
+}
+
+func (w txwrapper) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
+	return w.tx
+}
+
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx := b.Context()
 
@@ -92,7 +104,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 			b.StopTimer()
 			domains.Flush(ctx, tx)
 			b.StartTimer()
-			_, err := comitCtx.ComputeCommitment(ctx, tx, tx, true, blockNum, txNum, "", nil)
+			_, err := comitCtx.ComputeCommitment(ctx, txwrapper{tx}, tx, true, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 		}
 	}

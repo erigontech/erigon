@@ -148,11 +148,18 @@ type CommitmentContext struct {
 	traceDomain       bool
 	commitmentCapture bool
 	stateReader       StateReader
+	warmupDB          kv.TemporalRoDB // if set, enables parallel warmup of MDBX page cache during commitment
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in CommitmentContext.trieContext).
 func (sdc *CommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
+}
+
+// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
+// When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
+func (sdc *CommitmentContext) SetWarmupDB(db kv.TemporalRoDB) {
+	sdc.warmupDB = db
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
@@ -265,8 +272,13 @@ func (sdc *CommitmentContext) Witness(ctx context.Context, codeReads map[common.
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
+type executionContext interface {
+	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
+	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+}
+
 // Evaluates commitment for gathered updates.
-func (sdc *CommitmentContext) ComputeCommitment(ctx context.Context, getter kv.TemporalGetter, setter kv.TemporalPutDel, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *CommitProgress) (rootHash []byte, err error) {
+func (sdc *CommitmentContext) ComputeCommitment(ctx context.Context, sd executionContext, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -293,10 +305,46 @@ func (sdc *CommitmentContext) ComputeCommitment(ctx context.Context, getter kv.T
 		}
 	}
 
-	trieContext := sdc.trieContext(getter, setter, txNum)
+	trieContext := sdc.trieContext(sd.AsGetter(tx), sd.AsPutDel(tx), txNum)
 	sdc.Reset()
 
-	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress)
+	var warmupConfig WarmupConfig
+	if sdc.warmupDB != nil {
+		// avoid races like this
+		db := sdc.warmupDB
+		// Create factory for warmup TrieContexts with their own transactions
+		ctxFactory := func() (PatriciaContext, func()) {
+			roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+			if err != nil {
+				return &errorTrieContext{err: err}, nil
+			}
+
+			warmupCtx := &TrieContext{
+				getter: sd.AsGetter(roTx),
+				txNum:  txNum,
+			}
+			if sdc.stateReader != nil {
+				warmupCtx.stateReader = sdc.stateReader
+			} else {
+				warmupCtx.stateReader = &LatestStateReader{warmupCtx.getter}
+			}
+
+			cleanup := func() {
+				roTx.Rollback()
+			}
+			return warmupCtx, cleanup
+		}
+
+		warmupConfig = WarmupConfig{
+			Enabled:    true,
+			CtxFactory: ctxFactory,
+			NumWorkers: 16,
+			MaxDepth:   WarmupMaxDepth,
+			LogPrefix:  logPrefix,
+		}
+	}
+
+	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress, warmupConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +357,28 @@ func (sdc *CommitmentContext) ComputeCommitment(ctx context.Context, getter kv.T
 	}
 
 	return rootHash, err
+}
+
+// errorTrieContext is a PatriciaContext that always returns an error.
+// Used when transaction creation fails in warmup factory.
+type errorTrieContext struct {
+	err error
+}
+
+func (e *errorTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	return nil, 0, e.err
+}
+
+func (e *errorTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+	return e.err
+}
+
+func (e *errorTrieContext) Account(plainKey []byte) (*Update, error) {
+	return nil, e.err
+}
+
+func (e *errorTrieContext) Storage(plainKey []byte) (*Update, error) {
+	return nil, e.err
 }
 
 // by that key stored latest root hash and tree state

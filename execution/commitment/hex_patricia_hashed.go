@@ -461,6 +461,137 @@ func readUvarint(data []byte) (uint64, int, error) {
 	return l, n, nil
 }
 
+// skipCellFields skips over the fields in branch data based on fieldBits.
+// Used during warmup traversal to find the right child's data.
+func skipCellFields(data []byte, pos int, fieldBits byte) int {
+	// Field flags: extension=1, accountAddr=2, storageAddr=4, hash=8, stateHash=16
+	for bit := byte(1); bit <= 16; bit <<= 1 {
+		if fieldBits&bit != 0 {
+			if pos >= len(data) {
+				return pos
+			}
+			// Read length varint
+			l, n := binary.Uvarint(data[pos:])
+			if n <= 0 {
+				return pos
+			}
+			pos += n + int(l) // Skip length + data
+		}
+	}
+	return pos
+}
+
+// extractBranchCellAddresses extracts account/storage addresses from branch data.
+// pathNibble is the nibble on the update path (-1 if none) - its addresses are always
+// extracted since that cell will have stateHash cleared during update.
+// Sibling cells with stateHash (memoized) are skipped.
+func extractBranchCellAddresses(branchData []byte, pathNibble int) (accountAddrs [][]byte, storageAddrs [][]byte) {
+	if len(branchData) < 4 {
+		return nil, nil
+	}
+	// Skip touch map (first 2 bytes)
+	branchData = branchData[2:]
+	bitmap := binary.BigEndian.Uint16(branchData[0:2])
+	pos := 2
+
+	// Iterate over all cells in the branch
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+
+		if pos >= len(branchData) {
+			break
+		}
+		fieldBits := branchData[pos]
+		pos++
+
+		// Cell on update path will have stateHash cleared - always extract its addresses.
+		// Sibling cells with stateHash (bit 4) are memoized - skip them.
+		isOnPath := nibble == pathNibble
+		hasMemoizedHash := fieldBits&16 != 0
+		shouldExtract := isOnPath || !hasMemoizedHash
+
+		// Parse each field
+		// extension (bit 0)
+		if fieldBits&1 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+
+		// accountAddr (bit 1)
+		if fieldBits&2 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n
+			if l > 0 && pos+int(l) <= len(branchData) {
+				if shouldExtract {
+					addr := make([]byte, l)
+					copy(addr, branchData[pos:pos+int(l)])
+					accountAddrs = append(accountAddrs, addr)
+				}
+				pos += int(l)
+			}
+		}
+
+		// storageAddr (bit 2)
+		if fieldBits&4 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n
+			if l > 0 && pos+int(l) <= len(branchData) {
+				if shouldExtract {
+					addr := make([]byte, l)
+					copy(addr, branchData[pos:pos+int(l)])
+					storageAddrs = append(storageAddrs, addr)
+				}
+				pos += int(l)
+			}
+		}
+
+		// hash (bit 3)
+		if fieldBits&8 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+
+		// stateHash (bit 4)
+		if fieldBits&16 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+	}
+	return accountAddrs, storageAddrs
+}
+
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
@@ -2307,7 +2438,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, witnessTrieRootHash, nil
 }
 
-func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2329,6 +2460,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	defer func() { logEvery.Stop() }()
+
+	// Setup warmup if configured
+	var warmuper *Warmuper
+	if warmup.Enabled {
+		warmuper = NewWarmuper(ctx, warmup)
+		warmuper.Start()
+		defer warmuper.Close()
+	}
 
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
@@ -2365,7 +2504,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 				}
 			}
 
-			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey)
 
 			if hph.trace || hph.traceDomain {
 				fmt.Println(trace)

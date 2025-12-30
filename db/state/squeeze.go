@@ -570,7 +570,7 @@ func rebuildCommitmentShard(ctx context.Context, ec execContext, tx kv.TemporalT
 	}
 
 	collectionSpent := time.Since(sf)
-	rh, err := ec.GetCommitmentCtx().ComputeCommitment(ctx, ec.AsGetter(tx), ec.AsPutDel(tx), true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+	rh, err := ec.GetCommitmentCtx().ComputeCommitment(ctx, ec, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
 	}
