@@ -299,6 +299,9 @@ func TableScanningPrune(
 				if txNumDup >= txTo {
 					break
 				}
+				if time.Since(start) > timeOut {
+					break
+				}
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
 				if err = valDelCursor.DeleteCurrent(); err != nil {
