@@ -85,9 +85,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReade
 	return ie
 }
 
-func (e *TraceWorker) Close() {
-	e.evm.Config().JumpDestCache.LogStats()
-}
+func (e *TraceWorker) Close() {}
 
 func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockNum = header.Number.Uint64()

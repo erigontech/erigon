@@ -112,7 +112,7 @@ func NewHistoricalTraceWorker(
 		stateReader: state.NewHistoryReaderV3(),
 
 		taskGasPool: new(protocol.GasPool),
-		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
+		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
 	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
@@ -120,9 +120,7 @@ func NewHistoricalTraceWorker(
 	return ie
 }
 
-func (rw *HistoricalTraceWorker) LogStats() {
-	rw.evm.Config().JumpDestCache.LogStats()
-}
+func (rw *HistoricalTraceWorker) LogStats() {}
 
 func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
