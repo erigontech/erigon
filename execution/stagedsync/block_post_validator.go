@@ -30,7 +30,7 @@ func (v *blockPostExecutionValidator) Process(gasUsed, blobGasUsed uint64, check
 	chainConfig *chain.Config, logger log.Logger) error {
 	start := time.Now()
 	defer func() {
-		logger.Debug("block post execution validation completed",
+		log.Debug("block post execution validation completed",
 			"block", header.Number,
 			"gasUsed", gasUsed,
 			"blobGasUsed", blobGasUsed,
