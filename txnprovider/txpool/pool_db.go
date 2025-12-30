@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -144,10 +146,12 @@ func SaveChainConfigIfNeed(
 
 	for {
 		if err = coreDB.View(ctx, func(tx kv.Tx) error {
-			cc, err = chain.GetConfig(tx, nil, 0)
-			if err != nil {
-				return err
-			}
+			//cc, err = chain.GetConfig(tx, nil, 0)
+			//if err != nil {
+			//	return err
+			//}
+			spec, _ := chainspec.ChainSpecByName(networkname.ArbitrumOne)
+			cc = spec.Config
 			n, err := chain.CurrentBlockNumber(tx)
 			if err != nil {
 				return err
