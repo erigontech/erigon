@@ -419,7 +419,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
 	stateFlushingInParallel := mergeExtendingFork && e.syncCfg.ParallelStateFlushing
 	if mergeExtendingFork {
-		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
+		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if stateFlushingInParallel {
 			// Send forkchoice early (We already know the fork is valid)
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{

@@ -98,6 +98,7 @@ var (
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+	TrimStackToCaller     = EnvBool("TRIMMED_STACK", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

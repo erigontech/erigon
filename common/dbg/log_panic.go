@@ -29,7 +29,11 @@ import (
 
 // Stack returns stack-trace in logger-friendly compact formatting
 func Stack() string {
-	return stack2.Trace().TrimBelow(stack2.Caller(1)).TrimAbove(stack2.Caller(1)).String()
+	if TrimStackToCaller {
+		return stack2.Trace().TrimBelow(stack2.Caller(1)).TrimAbove(stack2.Caller(1)).String()
+	} else {
+		return stack2.Trace().TrimBelow(stack2.Caller(1)).String()
+	}
 }
 func StackSkip(skip int) string {
 	return stack2.Trace().TrimBelow(stack2.Caller(skip)).TrimAbove(stack2.Caller(1)).String()
