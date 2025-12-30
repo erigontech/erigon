@@ -448,38 +448,31 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					panic(err)
 				}
 			} else if txTask.TxIndex >= 0 {
-				var prev *types.Receipt
+				var prev, receipt *types.Receipt
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
+					receipt, err = result.CreateNextReceipt(prev)
+					if err != nil {
+						return err
+					}
 				} else if txTask.TxIndex > 0 {
-					prevTask := *txTask
-					prevTask.HistoryExecution = true
-					prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
-					result := se.worker.RunTxTaskNoLock(&prevTask)
-					if result.Err != nil {
-						return fmt.Errorf("error while finding last receipt: %w", result.Err)
+					// reconstruct receipt from previous receipt values
+					cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
+					if err != nil {
+						return err
 					}
-					var cumGasUsed uint64
-					var logIndexAfterTx uint32
-					if txTask.TxIndex > 1 {
-						cumGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-1)
-						if err != nil {
-							return err
-						}
+					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+					if err != nil {
+						return err
 					}
-					prev, err = result.CreateReceipt(txTask.TxIndex-1,
-						cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+				} else {
+					receipt, err = result.CreateNextReceipt(nil)
 					if err != nil {
 						return err
 					}
 				}
 
-				receipt, err := result.CreateNextReceipt(prev)
-				if err != nil {
-					return err
-				}
 				blockReceipts = append(blockReceipts, receipt)
-
 				if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
 					hooks.OnTxEnd(receipt, result.Err)
 				}
