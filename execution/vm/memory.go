@@ -92,7 +92,7 @@ func (m *Memory) Resize(size uint64) {
 	if size <= currLen {
 		return
 	}
-	fmt.Printf("Resize: %d -> %d\n", cap(m.store), size)
+	fmt.Printf("Resize: %d", size)
 
 	grow := size - currLen
 	if uint64(cap(m.store)) >= size {
