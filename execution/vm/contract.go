@@ -109,7 +109,7 @@ func (c *Contract) isCode(udest uint64) bool {
 		evicted := jumpDestCache.Add(c.CodeHash, c.analysis)
 		if evicted {
 			evictedN++
-			if evictedN%1_000 == 0 {
+			if evictedN%10_000 == 0 {
 				log.Warn("[dbg] JumpDestCache", "hit", hit, "total", hit+miss, "limit", 256, "ratio", fmt.Sprintf("%.2f", float64(hit)/float64(hit+miss)), "evictedN", evictedN)
 			}
 		}
