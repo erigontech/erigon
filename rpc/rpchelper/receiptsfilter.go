@@ -38,11 +38,6 @@ type ReceiptsFilter struct {
 	sender            Sub[*remoteproto.SubscribeReceiptsReply]
 }
 
-// Send sends a receipt to the subscriber
-func (f *ReceiptsFilter) Send(receipt *remoteproto.SubscribeReceiptsReply) {
-	f.sender.Send(receipt)
-}
-
 // Close closes the sender
 func (f *ReceiptsFilter) Close() {
 	f.sender.Close()
