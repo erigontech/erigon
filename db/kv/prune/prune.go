@@ -183,7 +183,7 @@ func TableScanningPrune(
 
 	timeOut := 999 * time.Hour
 	if limit < 1000 { //TODO: change after tests
-		timeOut = 400 * time.Millisecond
+		timeOut = 100 * time.Millisecond
 	}
 
 	var lastPrunedVal []byte
@@ -207,11 +207,7 @@ func TableScanningPrune(
 		txNum := binary.BigEndian.Uint64(txnb)
 		if txNum >= txTo {
 			break
-		} else if limit == 0 {
-			txTo = txNum
-			break
 		}
-		limit--
 		stat.PruneCountTx++
 		dups, err := keysCursor.CountDuplicates()
 		if err != nil {
