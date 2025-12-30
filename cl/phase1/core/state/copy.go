@@ -32,7 +32,7 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	if err != nil {
 		return err
 	}
-	err = bs.reinitCaches()
+	err = bs.reinitCaches(bs)
 	if err != nil {
 		return err
 	}
