@@ -226,18 +226,22 @@ func TableScanningPrune(
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	valLen := uint64(0)
-	//fVal, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
-	//if err != nil {
-	//	return nil, err
-	//}
-	//if fVal != nil {
-	//	iiVal, txNumBytes, err = valDelCursor.Seek(fVal)
-	//} else {
-	//	iiVal, txNumBytes, err = valDelCursor.First()
-	//}
 	txNumBytes, iiVal := common.Copy(startKey), common.Copy(startVal)
 
 	isNotDone := false
+
+	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
+		switch mode {
+		case KeyStorageMode:
+			return binary.BigEndian.Uint64(key[len(key)-8:])
+		case SmallHistoryMode:
+			return binary.BigEndian.Uint64(val)
+		case DefaultStorageMode:
+			return binary.BigEndian.Uint64(val)
+		default:
+			return 0
+		}
+	}
 
 	for ; iiVal != nil; iiVal, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
@@ -254,7 +258,7 @@ func TableScanningPrune(
 			isNotDone = true
 			break
 		}
-		txNum := binary.BigEndian.Uint64(txNumBytes)
+		txNum := txNumGetter(iiVal, txNumBytes)
 		lastDupTxNumB, err := valDelCursor.LastDup()
 		if err != nil {
 			return nil, fmt.Errorf("LastDup iterate over %s index keys: %w", filenameBase, err)
@@ -263,11 +267,11 @@ func TableScanningPrune(
 		if err != nil {
 			return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
 		}
-		lastDupTxNum := binary.BigEndian.Uint64(lastDupTxNumB)
-		dupsDelete := lastDupTxNum < txTo && txNum >= txFrom
+		lastDupTxNum := txNumGetter(iiVal, lastDupTxNumB)
 		if txNum >= txTo {
 			break
 		}
+		dupsDelete := lastDupTxNum < txTo && txNum >= txFrom
 		if asserts && txNum < txFrom {
 			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
 		}
@@ -288,7 +292,7 @@ func TableScanningPrune(
 				if err != nil {
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
-				txNumDup := binary.BigEndian.Uint64(txNumBytes)
+				txNumDup := txNumGetter(iiVal, txNumBytes)
 				if txNumDup < txFrom {
 					continue
 				}

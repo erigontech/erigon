@@ -1054,44 +1054,11 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		}
 	}
 
-	//var pruned int
-	//pruneValue := func(k, txnm []byte) error {
-	//	txNum := binary.BigEndian.Uint64(txnm)
-	//	if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
-	//		return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
-	//	}
-	//
-	//	if ht.h.HistoryLargeValues {
-	//		seek = append(bytes.Clone(k), txnm...)
-	//		if err := valsC.Delete(seek); err != nil {
-	//			return err
-	//		}
-	//	} else {
-	//		vv, err := valsCDup.SeekBothRange(k, txnm)
-	//		if err != nil {
-	//			return err
-	//		}
-	//		if len(vv) < 8 {
-	//			return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.FilenameBase, len(vv))
-	//		}
-	//		if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
-	//			return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
-	//		}
-	//		if err = valsCDup.DeleteCurrent(); err != nil {
-	//			return err
-	//		}
-	//	}
-	//
-	//	pruned++
-	//	return nil
-	//}
-	// ht.h.logger.Info("history pruning res:", "name", ht.h.FilenameBase, "txFrom", txFrom, "txTo", txTo, "limit", limit, "pruned", pruned)
-
 	if !forced && ht.h.SnapshotsDisabled {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
-	return ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, mxPruneSizeHistory, mode)
+	return ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, &ht.h.ValuesTable, mxPruneSizeHistory, mode)
 }
 
 func (ht *HistoryRoTx) Close() {

@@ -1266,7 +1266,8 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 
 	stats := make([]*InvertedIndexPruneStat, len(at.a.iis))
 	for iikey := range at.a.iis {
-		stat, err := at.iis[iikey].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil, nil, prune.DefaultStorageMode)
+		stat, err := at.iis[iikey].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil,
+			nil, nil, prune.DefaultStorageMode)
 		if err != nil {
 			return nil, err
 		}
