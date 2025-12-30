@@ -109,7 +109,7 @@ func NewHistoricalTraceWorker(
 		execArgs: execArgs,
 
 		background:  background,
-		stateReader: state.NewHistoryReaderV3(),
+		stateReader: state.NewHistoryReaderV3(nil, 0),
 
 		taskGasPool: new(protocol.GasPool),
 		vmCfg:       &vm.Config{},
@@ -485,9 +485,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 			if result.BlockNumber() > 0 {
 				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 				// End of block transaction in a block
-				reader := state.NewHistoryReaderV3()
-				reader.SetTx(tx)
-				reader.SetTxNum(outputTxNum)
+				reader := state.NewHistoryReaderV3(tx, outputTxNum)
 				ibs := state.New(reader)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {

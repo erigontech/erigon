@@ -59,6 +59,10 @@ type TemporalMemBatch struct {
 	iiWriters       []*InvertedIndexBufferedWriter
 	forkableWriters map[kv.ForkableId]kv.BufferedWriter
 
+	pastDomainWriters   [kv.DomainLen][]*DomainBufferedWriter
+	pastIIWriters       []*InvertedIndexBufferedWriter
+	pastForkableWriters map[kv.ForkableId][]kv.BufferedWriter
+
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
 
@@ -331,7 +335,17 @@ func (sd *TemporalMemBatch) PutForkable(id kv.ForkableId, num kv.Num, v []byte) 
 
 func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
-		d.Close()
+		if d != nil {
+			d.Close()
+		}
+	}
+	for _, ds := range sd.pastDomainWriters {
+		for _, d := range ds {
+			d.Close()
+		}
+	}
+	for _, iiWriter := range sd.iiWriters {
+		iiWriter.close()
 	}
 	for _, iiWriter := range sd.iiWriters {
 		iiWriter.close()
@@ -339,7 +353,98 @@ func (sd *TemporalMemBatch) Close() {
 	for _, fWriter := range sd.forkableWriters {
 		fWriter.Close()
 	}
+	for _, fs := range sd.pastForkableWriters {
+		for _, f := range fs {
+			f.Close()
+		}
+	}
 	sd.ClearRam()
+}
+
+func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
+	other, ok := o.(*TemporalMemBatch)
+	if !ok {
+		return fmt.Errorf("Can't merge %T into *TemporalMemBatch", o)
+	}
+
+	for domain, otherEntries := range other.domains {
+		entries := sd.domains[domain]
+		for key, value := range otherEntries {
+			entries[key] = value
+		}
+	}
+
+	other.storage.Scan(func(key string, value dataWithStep) bool {
+		sd.storage.Set(key, value)
+		return true
+	})
+
+	for domain, writer := range other.domainWriters {
+		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)
+		other.domainWriters[domain] = nil
+	}
+
+	for domain, writers := range other.pastDomainWriters {
+		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writers...)
+		other.pastDomainWriters[domain] = nil
+	}
+
+	sd.pastIIWriters = append(sd.pastIIWriters, other.iiWriters...)
+	other.iiWriters = nil
+	sd.pastIIWriters = append(sd.pastIIWriters, other.pastIIWriters...)
+	other.pastIIWriters = nil
+
+	for id, writer := range other.forkableWriters {
+		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writer)
+	}
+	other.forkableWriters = nil
+
+	for id, writers := range other.pastForkableWriters {
+		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writers...)
+	}
+	other.pastForkableWriters = nil
+
+	if sd.currentChangesAccumulator != nil {
+		return fmt.Errorf("can't merge to batch with non-nil currentChangesAccumulator")
+	}
+
+	if other.currentChangesAccumulator != nil {
+		return fmt.Errorf("can't merge from batch with non-nil currentChangesAccumulator")
+	}
+
+	for key, changeSet := range other.pastChangesAccumulator {
+		if sd.pastChangesAccumulator == nil {
+			sd.pastChangesAccumulator = map[string]*changeset.StateChangeSet{}
+		}
+		sd.pastChangesAccumulator[key] = changeSet
+	}
+
+	if other.unwindChangeset != nil {
+		if sd.unwindChangeset == nil {
+			sd.unwindToTxNum = other.unwindToTxNum
+			sd.unwindChangeset = other.unwindChangeset
+		} else {
+			for domain, otherDiffs := range other.unwindChangeset {
+				for key, otherDiff := range otherDiffs {
+					if diff, ok := sd.unwindChangeset[domain][key]; ok {
+						if sd.unwindToTxNum < other.unwindToTxNum {
+							sd.unwindChangeset[domain][key] = changeset.MergeDiffSets([]kv.DomainEntryDiff{otherDiff}, []kv.DomainEntryDiff{diff})[0]
+						} else {
+							sd.unwindChangeset[domain][key] = changeset.MergeDiffSets([]kv.DomainEntryDiff{diff}, []kv.DomainEntryDiff{otherDiff})[0]
+						}
+					} else {
+						sd.unwindChangeset[domain][key] = otherDiff
+					}
+				}
+			}
+			if sd.unwindToTxNum < other.unwindToTxNum {
+				sd.unwindToTxNum = other.unwindToTxNum
+			}
+		}
+	}
+
+	other.Close()
+	return nil
 }
 
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -359,7 +464,6 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
-	sd.pastChangesAccumulator = make(map[string]*changeset.StateChangeSet)
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}
@@ -382,6 +486,14 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
+	for _, ws := range sd.pastDomainWriters {
+		for i := len(ws) - 1; i >= 0; i-- {
+			if err := ws[i].Flush(ctx, tx); err != nil {
+				return err
+			}
+			ws[i].Close()
+		}
+	}
 	for di, w := range sd.domainWriters {
 		if w == nil {
 			continue
@@ -392,6 +504,12 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()
 	}
+	for i := len(sd.pastIIWriters) - 1; i >= 0; i-- {
+		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
+			return err
+		}
+		sd.pastIIWriters[i].close()
+	}
 	for _, w := range sd.iiWriters {
 		if w == nil {
 			continue
@@ -400,6 +518,14 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		w.close()
+	}
+	for _, ws := range sd.pastForkableWriters {
+		for i := len(ws) - 1; i >= 0; i-- {
+			if err := ws[i].Flush(ctx, tx); err != nil {
+				return err
+			}
+			ws[i].Close()
+		}
 	}
 	for _, w := range sd.forkableWriters {
 		if w == nil {
@@ -416,6 +542,12 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 func (sd *TemporalMemBatch) DiscardWrites(domain kv.Domain) {
 	sd.domainWriters[domain].discard = true
 	sd.domainWriters[domain].h.discard = true
+	if ws := sd.pastDomainWriters[domain]; len(ws) > 0 {
+		for _, w := range ws {
+			w.discard = true
+			w.h.discard = true
+		}
+	}
 }
 
 func AggTx(tx kv.Tx) *AggregatorRoTx {

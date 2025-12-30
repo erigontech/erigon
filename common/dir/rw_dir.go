@@ -56,7 +56,7 @@ func trackRemovedFiles() {
 		case <-ticker.C:
 			for _, path := range removedFiles {
 				if exists, _ := FileExist(path); exists {
-					panic("Removed file unexpectedly exists: " + path)
+					log.Warn("Removed file unexpectedly exists", "path", path)
 				}
 			}
 		}
