@@ -40,6 +40,7 @@ type Memory struct {
 
 // NewMemory returns a new memory model.
 func NewMemory() *Memory {
+	fmt.Printf("----- NewMemory ---- \n")
 	m := memoryPool.Get().(*Memory)
 	m.reset()
 	return m
