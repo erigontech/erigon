@@ -788,7 +788,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txT
 		}
 	}
 	if txTo == MaxUint64 {
-		return iit.oldPrune(ctx, tx, txFrom, txTo, limit, logEvery, nil, nil, mode)
+		return iit.oldPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
 	}
 	return iit.prune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, valTable, pruneSizeMetric, mode)
 }
