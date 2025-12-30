@@ -112,6 +112,8 @@ func (m *Memory) Resize(size uint64) {
 }
 
 func (m *Memory) reset() {
+	fmt.Printf("reset\n")
+
 	m.lastGasCost = 0
 	m.store = m.store[:0]
 }
