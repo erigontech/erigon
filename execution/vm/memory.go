@@ -92,7 +92,6 @@ func (m *Memory) Resize(size uint64) {
 	if size <= currLen {
 		return
 	}
-	fmt.Printf("Resize: %d\n", size)
 
 	grow := size - currLen
 	if uint64(cap(m.store)) >= size {
@@ -102,6 +101,7 @@ func (m *Memory) Resize(size uint64) {
 		}
 		return
 	}
+	fmt.Printf("Resize: %d\n", size)
 
 	if grow <= uint64(len(zeroes)) {
 		m.store = append(m.store, zeroes[:grow]...)
@@ -112,8 +112,6 @@ func (m *Memory) Resize(size uint64) {
 }
 
 func (m *Memory) reset() {
-	fmt.Printf("reset\n")
-
 	m.lastGasCost = 0
 	m.store = m.store[:0]
 }
