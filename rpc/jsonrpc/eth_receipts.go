@@ -199,7 +199,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 	}
 
-	return rpcLogs, nil
+	return nil, nil
+	//return rpcLogs, nil
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
