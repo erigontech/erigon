@@ -320,3 +320,21 @@ func BenchmarkWarmupCache_Mixed(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkComparison_Map_100k benchmarks map with 100k entries
+func BenchmarkComparison_Map_100k(b *testing.B) {
+	cache := NewWarmupCache()
+	keys := generateTestKeys(100000, 52)
+	update := &Update{}
+
+	for _, key := range keys {
+		cache.PutStorage(key, update)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		cache.GetStorage(keys[i%len(keys)])
+	}
+}

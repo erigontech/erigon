@@ -24,20 +24,22 @@ import (
 )
 
 // Key sizes for different cache types
+// Account and storage keys are fixed-size, branch keys are variable length.
 const (
 	// AccountKeySize is 20 bytes (address)
 	AccountKeySize = 20
 	// StorageKeySize is 52 bytes (20 addr + 32 hash)
 	StorageKeySize = 52
-	// BranchKeySize is max 64 bytes (nibble path)
-	BranchKeySize = 64
+	// BranchKeySize is 1 byte length + max 64 bytes data = 65 bytes total
+	// The first byte stores the actual key length to distinguish keys with different lengths
+	BranchKeySize = 65
 )
 
 // Fixed-size array types for map keys (no allocations)
 type (
 	accountCacheKey [AccountKeySize]byte
 	storageCacheKey [StorageKeySize]byte
-	branchCacheKey  [BranchKeySize]byte
+	branchCacheKey  [BranchKeySize]byte // first byte is length, rest is data
 )
 
 type branchEntry struct {
@@ -82,9 +84,17 @@ func (c *WarmupCache) IsEnabled() bool {
 }
 
 // Helper functions to convert byte slices to fixed-size arrays
+
+// toBranchKey converts a variable-length branch key to a fixed-size array.
+// The first byte stores the length to distinguish keys with different lengths.
 func toBranchKey(key []byte) branchCacheKey {
 	var k branchCacheKey
-	copy(k[:], key)
+	l := len(key)
+	if l > 64 {
+		l = 64 // cap at max length
+	}
+	k[0] = byte(l)
+	copy(k[1:], key[:l])
 	return k
 }
 
