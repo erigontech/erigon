@@ -141,6 +141,9 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 }
 
 func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Receipts) {
+	if rpcDisableRCache {
+		return
+	}
 	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
