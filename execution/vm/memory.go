@@ -81,22 +81,30 @@ func (m *Memory) Set32(offset uint64, val *uint256.Int) {
 	val.PutUint256(m.store[offset:])
 }
 
+// zeroes - pre-allocated zeroes for Resize()
+var zeroes = make([]byte, 4*4096)
+
 // Resize resizes the memory to size
 func (m *Memory) Resize(size uint64) {
-	if size <= uint64(len(m.store)) {
+	currLen := uint64(len(m.store))
+	if size <= currLen {
 		return
 	}
 
-	if size <= uint64(cap(m.store)) {
-		prevLen := len(m.store)
+	if uint64(cap(m.store)) >= size {
 		m.store = m.store[:size]
-		clear(m.store[prevLen:])
+		// Use clear() for fast zeroing (compiler optimizes to memclr)
+		clear(m.store[currLen:])
 		return
 	}
 
-	store := make([]byte, size, size*2)
-	copy(store, m.store)
-	m.store = store[:size]
+	grow := size - currLen
+	if grow <= uint64(len(zeroes)) {
+		m.store = append(m.store, zeroes[:grow]...)
+		return
+	}
+
+	m.store = append(m.store, make([]byte, grow)...)
 }
 
 func (m *Memory) reset() {
