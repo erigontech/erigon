@@ -122,9 +122,9 @@ var (
 		Name:  "override.osaka",
 		Usage: "Manually specify the Osaka fork time, overriding the bundled setting",
 	}
-	OverrideBalancerFlag = flags.BigFlag{
-		Name:  "override.balancer",
-		Usage: "Manually specify the Balancer fork time, overriding the bundled setting",
+	OverrideAmsterdamFlag = flags.BigFlag{
+		Name:  "override.amsterdam",
+		Usage: "Manually specify the Amsterdam fork time, overriding the bundled setting",
 	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
@@ -1945,8 +1945,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
 		cfg.OverrideOsakaTime = flags.GlobalBig(ctx, OverrideOsakaFlag.Name)
 	}
-	if ctx.IsSet(OverrideBalancerFlag.Name) {
-		cfg.OverrideBalancerTime = flags.GlobalBig(ctx, OverrideBalancerFlag.Name)
+	if ctx.IsSet(OverrideAmsterdamFlag.Name) {
+		cfg.OverrideAmsterdamTime = flags.GlobalBig(ctx, OverrideAmsterdamFlag.Name)
 	}
 	cfg.KeepStoredChainConfig = ctx.Bool(KeepStoredChainConfigFlag.Name)
 

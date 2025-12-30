@@ -80,7 +80,7 @@ type RequestGenerator interface {
 	SendTransaction(signedTx types.Transaction) (common.Hash, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
 	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
-	Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error)
+	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error)
 	TxpoolContent() (int, int, int, error)
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
@@ -168,7 +168,7 @@ var Methods = struct {
 	ETHCall:                  "eth_call",
 }
 
-func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response interface{}) callResult {
+func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response any) callResult {
 	ctx := context.Background()
 	req.reqID++
 	start := time.Now()
@@ -188,7 +188,7 @@ func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response
 	}
 }
 
-func (req *requestGenerator) rpcCall(ctx context.Context, result interface{}, method RPCMethod, args ...interface{}) error {
+func (req *requestGenerator) rpcCall(ctx context.Context, result any, method RPCMethod, args ...any) error {
 	client, err := req.rpcClient(ctx)
 	if err != nil {
 		return err
@@ -332,7 +332,7 @@ func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error)
 	return req.requestClient, nil
 }
 
-func post(ctx context.Context, client *http.Client, url, method, request string, response interface{}, logger log.Logger) error {
+func post(ctx context.Context, client *http.Client, url, method, request string, response any, logger log.Logger) error {
 	start := time.Now()
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(request))
@@ -378,7 +378,7 @@ func post(ctx context.Context, client *http.Client, url, method, request string,
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
-func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error) {
+func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error) {
 	if req.subscriptionClient == nil {
 		err := retryConnects(ctx, func(ctx context.Context) error {
 			var err error
@@ -396,7 +396,7 @@ func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, su
 		return nil, fmt.Errorf("cannot get namespace and submethod from method: %v", err)
 	}
 
-	args = append([]interface{}{subMethod}, args...)
+	args = append([]any{subMethod}, args...)
 
 	return req.subscriptionClient.Subscribe(ctx, namespace, subChan, args...)
 }

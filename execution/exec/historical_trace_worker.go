@@ -109,10 +109,10 @@ func NewHistoricalTraceWorker(
 		execArgs: execArgs,
 
 		background:  background,
-		stateReader: state.NewHistoryReaderV3(),
+		stateReader: state.NewHistoryReaderV3(nil, 0),
 
 		taskGasPool: new(protocol.GasPool),
-		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
+		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
 	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
@@ -120,9 +120,7 @@ func NewHistoricalTraceWorker(
 	return ie
 }
 
-func (rw *HistoricalTraceWorker) LogStats() {
-	rw.evm.Config().JumpDestCache.LogStats()
-}
+func (rw *HistoricalTraceWorker) LogStats() {}
 
 func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
@@ -487,9 +485,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 			if result.BlockNumber() > 0 {
 				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 				// End of block transaction in a block
-				reader := state.NewHistoryReaderV3()
-				reader.SetTx(tx)
-				reader.SetTxNum(outputTxNum)
+				reader := state.NewHistoryReaderV3(tx, outputTxNum)
 				ibs := state.New(reader)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -695,7 +691,7 @@ func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader r
 	if err != nil {
 		return 0, 0, err
 	}
-	toTxNum, err := txNumsReader.Min(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return 0, 0, err
 	}

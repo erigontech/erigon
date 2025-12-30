@@ -54,7 +54,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
-func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	reply, err := api.ethBackend.Syncing(ctx)
 	if err != nil {
 		return false, err
@@ -76,7 +76,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),

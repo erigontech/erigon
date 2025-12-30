@@ -444,7 +444,7 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	// for k := range s.visible {
 	// 	s.visible[k] = getNewVisibleSegments(s.dirty[k])
 	// }
-	s.visible.Range(func(k, v interface{}) bool {
+	s.visible.Range(func(k, v any) bool {
 		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(string)]))
 		return true
 	})
@@ -463,7 +463,7 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	// 		min = segs[len(segs)-1].to
 	// 	}
 	// }
-	s.visible.Range(func(_, v interface{}) bool {
+	s.visible.Range(func(_, v any) bool {
 		segs := v.([]*VisibleSegment)
 		if len(segs) == 0 {
 			min = 0
@@ -552,7 +552,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	// for k, segments := range s.visible {
 	// 	v.roTxs[k] = segments.BeginRo()
 	// }
-	s.visible.Range(func(k, val interface{}) bool {
+	s.visible.Range(func(k, val any) bool {
 		v.roTxs[k.(string)] = VisibleSegments(val.([]*VisibleSegment)).BeginRo()
 		return true
 	})

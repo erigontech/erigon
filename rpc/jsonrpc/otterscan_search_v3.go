@@ -33,7 +33,7 @@ import (
 
 type txNumsIterFactory func(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)
 
-func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*ethapi.RPCTransaction, []map[string]interface{}, bool, error) {
+func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*ethapi.RPCTransaction, []map[string]any, bool, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, nil, false, err
@@ -46,7 +46,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 
 	var block *types.Block
 	txs := make([]*ethapi.RPCTransaction, 0, pageSize)
-	receipts := make([]map[string]interface{}, 0, pageSize)
+	receipts := make([]map[string]any, 0, pageSize)
 	resultCount := uint16(0)
 
 	mustReadBlock := true

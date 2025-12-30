@@ -345,8 +345,8 @@ Loop:
 	} else {
 		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
 			Quit: quitCh,
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"block", binary.BigEndian.Uint64(k)}
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []any) {
+				return []any{"block", binary.BigEndian.Uint64(k)}
 			},
 		}); err != nil {
 			return err
