@@ -31,7 +31,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -529,10 +528,6 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 		}
 		if h.traceRequests {
 			h.logger.Info("Served", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
-		}
-
-		if dbg.RpcDropResponse {
-			return nil
 		}
 
 		return resp
