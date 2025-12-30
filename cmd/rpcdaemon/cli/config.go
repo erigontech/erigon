@@ -316,7 +316,13 @@ func EmbeddedServices(ctx context.Context,
 		// ... adding back in place to see about the above statement
 		stateCache = kvcache.New(stateCacheCfg)
 	} else {
-		stateCache = kvcache.NewDummy()
+		if stateCacheCfg.LocalCache != nil {
+			// this attaches the rpc layer to the local
+			// execution caches if they are availible
+			stateCache = stateCacheCfg.LocalCache
+		} else {
+			stateCache = kvcache.NewDummy()
+		}
 	}
 
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)

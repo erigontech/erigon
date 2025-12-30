@@ -21,7 +21,7 @@ import (
 	"errors"
 	"math/big"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -90,6 +92,71 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 	return common.HexToHash(hashStr), true
 }
 
+type Cache struct {
+	execModule *EthereumExecutionModule
+}
+
+var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
+var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
+
+func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	return &CacheView{cache: c, tx: tx}, nil
+}
+func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
+func (c *Cache) Evict() int                                  { return 0 }
+func (c *Cache) Len() int                                    { return 0 }
+func (c *Cache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+	var getter kv.TemporalGetter = tx
+	if c.execModule != nil {
+		c.execModule.lock.RLock()
+		if c.execModule.currentContext != nil {
+			getter = c.execModule.currentContext.AsGetter(tx)
+		}
+		c.execModule.lock.RUnlock()
+	}
+	if len(k) == 20 {
+		v, _, err := getter.GetLatest(kv.AccountsDomain, k)
+		return v, err
+	}
+	v, _, err := getter.GetLatest(kv.StorageDomain, k)
+	return v, err
+}
+func (c *Cache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+	var getter kv.TemporalGetter = tx
+	if c.execModule != nil {
+		c.execModule.lock.RLock()
+		if c.execModule.currentContext != nil {
+			getter = c.execModule.currentContext.AsGetter(tx)
+		}
+		c.execModule.lock.RUnlock()
+	}
+	v, _, err := getter.GetLatest(kv.CodeDomain, k)
+	return v, err
+}
+func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcache.CacheValidationResult, error) {
+	return &kvcache.CacheValidationResult{Enabled: false}, nil
+}
+
+type CacheView struct {
+	cache *Cache
+	tx    kv.TemporalTx
+}
+
+func (c *CacheView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
+func (c *CacheView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
+func (c *CacheView) HasStorage(address common.Address) (bool, error) {
+	var getter kv.TemporalGetter = c.tx
+	if c.cache.execModule != nil {
+		c.cache.execModule.lock.RLock()
+		if c.cache.execModule.currentContext != nil {
+			getter = c.cache.execModule.currentContext.AsGetter(c.tx)
+		}
+		c.cache.execModule.lock.RUnlock()
+	}
+	_, _, hasStorage, err := getter.HasPrefix(kv.StorageDomain, address[:])
+	return hasStorage, err
+}
+
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
 	bacgroundCtx context.Context
@@ -99,6 +166,7 @@ type EthereumExecutionModule struct {
 	// MDBX database
 	db                kv.TemporalRwDB // main database
 	semaphore         *semaphore.Weighted
+	lock              sync.RWMutex
 	executionPipeline *stagedsync.Sync
 	forkValidator     *engine_helpers.ForkValidator
 
@@ -121,10 +189,12 @@ type EthereumExecutionModule struct {
 	// rules engine
 	engine rules.Engine
 
-	doingPostForkchoice atomic.Bool
+	doingPostForkchoice bool
 
 	// metrics for average mgas/sec
 	avgMgasSec float64
+
+	currentContext *execctx.SharedDomains
 
 	executionproto.UnimplementedExecutionServer
 }
@@ -134,11 +204,11 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stageloop.Hook, accumulator *shards.Accumulator,
 	recentReceipts *shards.RecentReceipts,
-	stateChangeConsumer shards.StateChangeConsumer,
+	stateCache *Cache, stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine rules.Engine,
 	syncCfg ethconfig.Sync,
 ) *EthereumExecutionModule {
-	return &EthereumExecutionModule{
+	em := &EthereumExecutionModule{
 		blockReader:         blockReader,
 		db:                  db,
 		executionPipeline:   executionPipeline,
@@ -156,6 +226,11 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 		syncCfg:             syncCfg,
 		bacgroundCtx:        ctx,
 	}
+
+	if stateCache != nil {
+		stateCache.execModule = em
+	}
+	return em
 }
 
 func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {

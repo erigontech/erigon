@@ -172,6 +172,7 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
+	LocalCache      Cache
 }
 
 var DefaultCoherentConfig = CoherentConfig{
