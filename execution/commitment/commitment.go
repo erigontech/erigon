@@ -199,6 +199,7 @@ type BranchEncoder struct {
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
 	metrics   *Metrics
+	cache     *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -210,6 +211,10 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
+}
+
+func (be *BranchEncoder) SetCache(cache *WarmupCache) {
+	be.cache = cache
 }
 
 func (be *BranchEncoder) CollectUpdate(
@@ -240,8 +245,14 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
-	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
+	prefixCopy := common.Copy(prefix)
+	updateCopy := common.Copy(update)
+	if err = ctx.PutBranch(prefixCopy, updateCopy, prev, prevStep); err != nil {
 		return 0, err
+	}
+	// Update cache with the new branch data
+	if be.cache != nil {
+		be.cache.PutBranch(prefixCopy, updateCopy, prevStep)
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)

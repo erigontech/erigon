@@ -2489,7 +2489,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		// Set cache on trie if warmup cache is enabled
 		if warmuper.Cache() != nil {
 			hph.cache = warmuper.Cache()
-			defer func() { hph.cache = nil }()
+			hph.branchEncoder.SetCache(hph.cache)
+			defer func() {
+				hph.cache = nil
+				hph.branchEncoder.SetCache(nil)
+			}()
 		}
 	}
 

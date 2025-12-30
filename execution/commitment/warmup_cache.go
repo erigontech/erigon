@@ -23,27 +23,50 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
+// Key sizes for different cache types
+const (
+	// AccountKeySize is 20 bytes (address)
+	AccountKeySize = 20
+	// StorageKeySize is 52 bytes (20 addr + 32 hash)
+	StorageKeySize = 52
+	// BranchKeySize is max 64 bytes (nibble path)
+	BranchKeySize = 64
+)
+
+// Fixed-size array types for map keys (no allocations)
+type (
+	accountCacheKey [AccountKeySize]byte
+	storageCacheKey [StorageKeySize]byte
+	branchCacheKey  [BranchKeySize]byte
+)
+
 type branchEntry struct {
 	data []byte
 	step kv.Step
 }
 
 // WarmupCache stores pre-fetched data from the warmup phase to avoid
-// repeated DB reads during trie processing.
+// repeated DB reads during trie processing. Uses fixed-size array keys
+// to avoid string allocations on every lookup.
 type WarmupCache struct {
-	branches sync.Map // map[string]branchEntry
-	accounts sync.Map // map[string]*Update
-	storage  sync.Map // map[string]*Update
+	mu sync.RWMutex
 
-	// Permanently evicted keys - keys stored here will never be served from cache
-	evictedKeys sync.Map // map[string]struct{}
+	branches    map[branchCacheKey]branchEntry
+	accounts    map[accountCacheKey]*Update
+	storage     map[storageCacheKey]*Update
+	evictedKeys map[storageCacheKey]struct{} // use largest key size for evicted
 
 	enabled atomic.Bool
 }
 
 // NewWarmupCache creates a new warmup cache instance.
 func NewWarmupCache() *WarmupCache {
-	c := &WarmupCache{}
+	c := &WarmupCache{
+		branches:    make(map[branchCacheKey]branchEntry),
+		accounts:    make(map[accountCacheKey]*Update),
+		storage:     make(map[storageCacheKey]*Update),
+		evictedKeys: make(map[storageCacheKey]struct{}),
+	}
 	c.enabled.Store(true)
 	return c
 }
@@ -58,16 +81,39 @@ func (c *WarmupCache) IsEnabled() bool {
 	return c.enabled.Load()
 }
 
-// EvictKey permanently evicts a key from the cache. Once evicted, the key
-// will never be served from cache regardless of type (branch, account, or storage).
-// This is useful when a key is known to be modified and the cached value is stale.
+// Helper functions to convert byte slices to fixed-size arrays
+func toBranchKey(key []byte) branchCacheKey {
+	var k branchCacheKey
+	copy(k[:], key)
+	return k
+}
+
+func toAccountKey(key []byte) accountCacheKey {
+	var k accountCacheKey
+	copy(k[:], key)
+	return k
+}
+
+func toStorageKey(key []byte) storageCacheKey {
+	var k storageCacheKey
+	copy(k[:], key)
+	return k
+}
+
+// EvictKey permanently evicts a key from the cache.
 func (c *WarmupCache) EvictKey(key []byte) {
-	c.evictedKeys.Store(string(key), struct{}{})
+	k := toStorageKey(key) // use largest key size
+	c.mu.Lock()
+	c.evictedKeys[k] = struct{}{}
+	c.mu.Unlock()
 }
 
 // IsEvicted returns true if the key has been permanently evicted.
 func (c *WarmupCache) IsEvicted(key []byte) bool {
-	_, evicted := c.evictedKeys.Load(string(key))
+	k := toStorageKey(key)
+	c.mu.RLock()
+	_, evicted := c.evictedKeys[k]
+	c.mu.RUnlock()
 	return evicted
 }
 
@@ -80,11 +126,13 @@ func (c *WarmupCache) PutBranch(prefix []byte, data []byte, step kv.Step) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
-	c.branches.Store(string(prefix), branchEntry{data: dataCopy, step: step})
+	k := toBranchKey(prefix)
+	c.mu.Lock()
+	c.branches[k] = branchEntry{data: dataCopy, step: step}
+	c.mu.Unlock()
 }
 
 // GetBranch retrieves branch data from the cache.
-// Returns (data, step, found).
 func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
 	if !c.enabled.Load() {
 		return nil, 0, false
@@ -92,8 +140,11 @@ func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
 	if c.IsEvicted(prefix) {
 		return nil, 0, false
 	}
-	if v, found := c.branches.Load(string(prefix)); found {
-		entry := v.(branchEntry)
+	k := toBranchKey(prefix)
+	c.mu.RLock()
+	entry, found := c.branches[k]
+	c.mu.RUnlock()
+	if found {
 		return entry.data, entry.step, true
 	}
 	return nil, 0, false
@@ -104,17 +155,18 @@ func (c *WarmupCache) PutAccount(plainKey []byte, update *Update) {
 	if !c.enabled.Load() {
 		return
 	}
-	// Make a copy of the update
 	var updateCopy *Update
 	if update != nil {
 		updateCopy = update.Copy()
 	}
 
-	c.accounts.Store(string(plainKey), updateCopy)
+	k := toAccountKey(plainKey)
+	c.mu.Lock()
+	c.accounts[k] = updateCopy
+	c.mu.Unlock()
 }
 
 // GetAccount retrieves account data from the cache.
-// Returns (update, found).
 func (c *WarmupCache) GetAccount(plainKey []byte) (*Update, bool) {
 	if !c.enabled.Load() {
 		return nil, false
@@ -122,10 +174,11 @@ func (c *WarmupCache) GetAccount(plainKey []byte) (*Update, bool) {
 	if c.IsEvicted(plainKey) {
 		return nil, false
 	}
-	if v, found := c.accounts.Load(string(plainKey)); found {
-		return v.(*Update), true
-	}
-	return nil, false
+	k := toAccountKey(plainKey)
+	c.mu.RLock()
+	update, found := c.accounts[k]
+	c.mu.RUnlock()
+	return update, found
 }
 
 // PutStorage stores storage data in the cache.
@@ -133,17 +186,18 @@ func (c *WarmupCache) PutStorage(plainKey []byte, update *Update) {
 	if !c.enabled.Load() {
 		return
 	}
-	// Make a copy of the update
 	var updateCopy *Update
 	if update != nil {
 		updateCopy = update.Copy()
 	}
 
-	c.storage.Store(string(plainKey), updateCopy)
+	k := toStorageKey(plainKey)
+	c.mu.Lock()
+	c.storage[k] = updateCopy
+	c.mu.Unlock()
 }
 
 // GetStorage retrieves storage data from the cache.
-// Returns (update, found).
 func (c *WarmupCache) GetStorage(plainKey []byte) (*Update, bool) {
 	if !c.enabled.Load() {
 		return nil, false
@@ -151,16 +205,19 @@ func (c *WarmupCache) GetStorage(plainKey []byte) (*Update, bool) {
 	if c.IsEvicted(plainKey) {
 		return nil, false
 	}
-	if v, found := c.storage.Load(string(plainKey)); found {
-		return v.(*Update), true
-	}
-	return nil, false
+	k := toStorageKey(plainKey)
+	c.mu.RLock()
+	update, found := c.storage[k]
+	c.mu.RUnlock()
+	return update, found
 }
 
 // Clear clears all cached data.
 func (c *WarmupCache) Clear() {
-	c.branches = sync.Map{}
-	c.accounts = sync.Map{}
-	c.storage = sync.Map{}
-	c.evictedKeys = sync.Map{}
+	c.mu.Lock()
+	c.branches = make(map[branchCacheKey]branchEntry)
+	c.accounts = make(map[accountCacheKey]*Update)
+	c.storage = make(map[storageCacheKey]*Update)
+	c.evictedKeys = make(map[storageCacheKey]struct{})
+	c.mu.Unlock()
 }
