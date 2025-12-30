@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"sync"
-	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
@@ -28,14 +27,6 @@ func newBlockPostExecutionValidator() BlockPostExecutionValidator {
 func (v *blockPostExecutionValidator) Process(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
 	header *types.Header, isMining bool, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) error {
-	start := time.Now()
-	defer func() {
-		log.Debug("block post execution validation completed",
-			"block", header.Number,
-			"gasUsed", gasUsed,
-			"blobGasUsed", blobGasUsed,
-			"duration", time.Since(start))
-	}()
 	return protocol.BlockPostValidation(gasUsed, blobGasUsed, checkReceipts, receipts, header, isMining, txns, chainConfig, logger)
 }
 
