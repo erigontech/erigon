@@ -573,30 +573,33 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(finishProgressBe
 				return err
 			}
 			defer e.semaphore.Release(1)
-			tx, err := e.db.BeginTemporalRw(e.bacgroundCtx) //nolint
-			if err != nil {
-				return err
-			}
-			defer func() {
-				tx.Rollback()
-			}()
 
-			flushStart := time.Now()
-			if err := e.currentContext.Flush(e.bacgroundCtx, tx); err != nil {
-				return err
-			}
-			timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
-			commitStart := time.Now()
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
+			if e.currentContext != nil {
+				tx, err := e.db.BeginTemporalRw(e.bacgroundCtx) //nolint
+				if err != nil {
+					return err
+				}
+				defer func() {
+					tx.Rollback()
+				}()
 
-			e.currentContext.ClearRam(true)
-			e.lock.Lock()
-			e.currentContext = nil
-			e.lock.Unlock()
+				flushStart := time.Now()
+				if err := e.currentContext.Flush(e.bacgroundCtx, tx); err != nil {
+					return err
+				}
+				timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
+				commitStart := time.Now()
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
 
+				e.currentContext.ClearRam(true)
+				e.lock.Lock()
+				e.currentContext = nil
+				e.lock.Unlock()
+			}
+			
 			if e.hook != nil {
 				if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
 					return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
