@@ -39,7 +39,7 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	return nil
 }
 
-func (bs *CachingBeaconState) reinitCaches() error {
+func (bs *CachingBeaconState) reinitCaches(other *CachingBeaconState) error {
 	if bs.Version() == clparams.Phase0Version {
 		return bs.InitBeaconState()
 	}
@@ -59,7 +59,7 @@ func (bs *CachingBeaconState) reinitCaches() error {
 	bs.totalActiveBalanceCache = nil
 	bs._refreshActiveBalancesIfNeeded()
 	bs.previousStateRoot = common.Hash{}
-	bs.initCaches()
+	bs.initCaches(other)
 	if err := bs._updateProposerIndex(); err != nil {
 		return err
 	}

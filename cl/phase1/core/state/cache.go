@@ -249,13 +249,28 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
 }
 
-func (b *CachingBeaconState) initCaches() error {
+func (b *CachingBeaconState) initCaches(other *CachingBeaconState) error {
 	var err error
 	if b.activeValidatorsCache, err = lru.New[uint64, []uint64]("beacon_active_validators_cache", activeValidatorsCacheSize); err != nil {
 		return err
 	}
 	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", shuffledSetsCacheSize); err != nil {
 		return err
+	}
+	if other == nil {
+		return nil
+	}
+	if other.activeValidatorsCache != nil {
+		for _, k := range other.activeValidatorsCache.Keys() {
+			v, _ := other.activeValidatorsCache.Get(k)
+			b.activeValidatorsCache.Add(k, v)
+		}
+	}
+	if other.shuffledSetsCache != nil {
+		for _, k := range other.shuffledSetsCache.Keys() {
+			v, _ := other.shuffledSetsCache.Get(k)
+			b.shuffledSetsCache.Add(k, v)
+		}
 	}
 
 	return nil
