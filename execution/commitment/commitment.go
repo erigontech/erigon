@@ -223,11 +223,20 @@ func (be *BranchEncoder) CollectUpdate(
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
+	var prev []byte
+	var prevStep kv.Step
+	var foundInCache bool
 
-	prev, prevStep, err := ctx.Branch(prefix)
-	if err != nil {
-		return 0, err
+	if be.cache != nil {
+		prev, prevStep, foundInCache = be.cache.GetBranch(prefix)
 	}
+	if !foundInCache {
+		prev, prevStep, err = ctx.Branch(prefix)
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	update, lastNibble, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
 		return 0, err

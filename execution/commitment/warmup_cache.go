@@ -154,10 +154,7 @@ func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
 	c.mu.RLock()
 	entry, found := c.branches[k]
 	c.mu.RUnlock()
-	if found {
-		return entry.data, entry.step, true
-	}
-	return nil, 0, false
+	return entry.data, entry.step, found
 }
 
 // PutAccount stores account data in the cache.
