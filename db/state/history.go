@@ -1028,7 +1028,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		}
 		defer valsCDup.Close()
 		valsCP = valsCDup
-		mode = prune.DefaultStorageMode
+		mode = prune.SmallHistoryMode
 	} else {
 		valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
 		if err != nil {

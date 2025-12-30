@@ -1504,6 +1504,17 @@ func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	return v, nil
 }
 
+func (c *MdbxDupSortCursor) DeleteBothRange(key, value []byte) error {
+	_, _, err := c.c.Get(key, value, mdbx.GetBothRange)
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("in SeekBothRange, table=%s: %w", c.bucketName, err)
+	}
+	return c.c.Del(mdbx.Current)
+}
+
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
 	_, v, err := c.c.Get(nil, nil, mdbx.FirstDup)
 	if err != nil {

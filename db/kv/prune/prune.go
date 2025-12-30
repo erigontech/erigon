@@ -29,6 +29,7 @@ type StorageMode int
 const (
 	DefaultStorageMode StorageMode = iota
 	KeyStorageMode
+	SmallHistoryMode //TODO: change name
 )
 
 func HashSeekingPrune(
@@ -95,14 +96,32 @@ func HashSeekingPrune(
 	}
 
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if mode == KeyStorageMode {
+		switch mode {
+		case KeyStorageMode:
+			println("deleting KeyStorageMode")
 			seek := make([]byte, 8, 256)
 			seek = append(bytes.Clone(key), txnm...)
 			if err := valDelCursor.Delete(seek); err != nil {
 				return err
 			}
-		} else {
-			if err = valDelCursor.DeleteExact(key, txnm); err != nil {
+		case SmallHistoryMode:
+			println("deleting SH")
+			vv, err := valDelCursor.(kv.RwCursorDupSort).SeekBothRange(key, txnm)
+			if err != nil {
+				return err
+			}
+			if len(vv) < 8 {
+				return fmt.Errorf("prune history %s got invalid value length: %d < 8", filenameBase, len(vv))
+			}
+			if vtx := binary.BigEndian.Uint64(vv); vtx != binary.BigEndian.Uint64(txnm) {
+				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, 1132)
+			}
+			if err = valDelCursor.DeleteCurrent(); err != nil {
+				return err
+			}
+		case DefaultStorageMode:
+			err = valDelCursor.DeleteExact(key, txnm)
+			if err != nil {
 				return err
 			}
 		}
