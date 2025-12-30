@@ -565,69 +565,78 @@ func (g *Getter) Count() int          { return g.d.Count() }
 func (g *Getter) FileName() string    { return g.fName }
 func (g *Getter) GetMetadata() []byte { return g.d.GetMetadata() }
 
-func (g *Getter) nextPos(clean bool) (pos uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("nextPos fails: file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
+func (g *Getter) nextPos(clean bool) uint64 {
 	if clean && g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
-	table, dataLen, data := g.posDict, len(g.data), g.data
+	table := g.posDict
 	if table.bitLen == 0 {
 		return table.pos[0]
 	}
-	for l := byte(0); l == 0; {
-		code := uint16(data[g.dataP]) >> g.dataBit
-		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < dataLen {
-			code |= uint16(data[g.dataP+1]) << (8 - g.dataBit)
+	data := g.data
+	dataP := g.dataP
+	dataBit := g.dataBit
+	dataLen := uint64(len(data))
+	// Precompute mask for the first table (hot path optimization)
+	mask := uint16(1)<<table.bitLen - 1
+	for {
+		// Read up to 16 bits starting at dataP, shifted by dataBit
+		code := uint16(data[dataP]) >> dataBit
+		if 8-dataBit < table.bitLen && dataP+1 < dataLen {
+			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
-		code &= (uint16(1) << table.bitLen) - 1
-		l = table.lens[code]
+		code &= mask
+		l := int(table.lens[code])
 		if l == 0 {
 			table = table.ptrs[code]
-			g.dataBit += 9
+			dataBit += 9
+			dataP += uint64(dataBit >> 3)
+			dataBit &= 7
+			mask = uint16(1)<<table.bitLen - 1
 		} else {
-			g.dataBit += int(l)
-			pos = table.pos[code]
+			dataBit += l
+			dataP += uint64(dataBit >> 3)
+			g.dataP = dataP
+			g.dataBit = dataBit & 7
+			return table.pos[code]
 		}
-		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit %= 8
 	}
-	return pos
 }
 
 func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
-
 	if table.bitLen == 0 {
 		return table.patterns[0].pattern
 	}
 
-	var l byte
-	var pattern []byte
-	for l == 0 {
-		code := uint16(g.data[g.dataP]) >> g.dataBit
-		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
-			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
+	data := g.data
+	dataP := g.dataP
+	dataBit := g.dataBit
+	dataLen := uint64(len(data))
+
+	for {
+		code := uint16(data[dataP]) >> dataBit
+		if 8-dataBit < table.bitLen && dataP+1 < dataLen {
+			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 
 		cw := table.patterns[code]
-		l = cw.len
-		if l == 0 {
+		if cw.len == 0 {
 			table = cw.ptr
-			g.dataBit += 9
+			dataBit += 9
 		} else {
-			g.dataBit += int(l)
-			pattern = cw.pattern
+			dataBit += int(cw.len)
 		}
-		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit %= 8
+		dataP += uint64(dataBit >> 3)
+		dataBit &= 7
+		if cw.len != 0 {
+			g.dataP = dataP
+			g.dataBit = dataBit
+			return cw.pattern
+		}
 	}
-	return pattern
 }
 
 func (g *Getter) Size() int {
@@ -816,21 +825,12 @@ func (g *Getter) SkipUncompressed() (uint64, int) {
 // MatchPrefix only checks if the word at the current offset has a buf prefix. Does not move offset to the next word.
 func (g *Getter) MatchPrefix(prefix []byte) bool {
 	savePos := g.dataP
-	defer func() {
-		g.dataP, g.dataBit = savePos, 0
-	}()
 
 	wordLen := g.nextPos(true /* clean */)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	prefixLen := len(prefix)
 	if wordLen == 0 || int(wordLen) < prefixLen {
-		if g.dataBit > 0 {
-			g.dataP++
-			g.dataBit = 0
-		}
-		if prefixLen != 0 {
-			g.dataP, g.dataBit = savePos, 0
-		}
+		g.dataP, g.dataBit = savePos, 0
 		return prefixLen == int(wordLen)
 	}
 
@@ -848,6 +848,7 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 		}
 		if bufPos < prefixLen {
 			if !bytes.Equal(prefix[bufPos:bufPos+comparisonLen], pattern[:comparisonLen]) {
+				g.dataP, g.dataBit = savePos, 0
 				return false
 			}
 		}
@@ -874,6 +875,7 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 				comparisonLen = int(dif)
 			}
 			if !bytes.Equal(prefix[lastUncovered:lastUncovered+comparisonLen], g.data[postLoopPos:postLoopPos+uint64(comparisonLen)]) {
+				g.dataP, g.dataBit = savePos, 0
 				return false
 			}
 			postLoopPos += dif
@@ -889,9 +891,11 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 			comparisonLen = int(dif)
 		}
 		if !bytes.Equal(prefix[lastUncovered:lastUncovered+comparisonLen], g.data[postLoopPos:postLoopPos+uint64(comparisonLen)]) {
+			g.dataP, g.dataBit = savePos, 0
 			return false
 		}
 	}
+	g.dataP, g.dataBit = savePos, 0
 	return true
 }
 

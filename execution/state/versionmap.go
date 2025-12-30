@@ -42,7 +42,7 @@ func (p AccountPath) String() string {
 }
 
 const (
-	AddressPath = iota
+	AddressPath AccountPath = iota
 	BalancePath
 	NoncePath
 	CodePath
@@ -321,8 +321,14 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
 				if path == BalancePath || path == NoncePath || path == CodeHashPath {
-					valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, checkVersion, traceInvalid, tracePrefix)
+					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
+						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, checkVersion, traceInvalid, tracePrefix)
+					} else {
+						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, checkVersion, traceInvalid, tracePrefix)
+					}
 				}
 			}
 		}
@@ -393,6 +399,13 @@ type ReadResult struct {
 	depIdx      int
 	incarnation int
 	value       any
+}
+
+func (res *ReadResult) DepString() string {
+	if res.depIdx == UnknownDep {
+		return "unknown"
+	}
+	return fmt.Sprintf("%d.%d", res.depIdx, res.incarnation)
 }
 
 func (res *ReadResult) DepIdx() int {

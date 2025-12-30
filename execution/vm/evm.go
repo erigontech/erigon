@@ -102,10 +102,6 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		chainConfig:     chainConfig,
 		chainRules:      blockCtx.Rules(chainConfig),
 	}
-	if evm.config.JumpDestCache == nil {
-		evm.config.JumpDestCache = NewJumpDestCache(JumpDestCacheLimit)
-	}
-
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
 
 	return evm
@@ -130,9 +126,6 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
-	if vmConfig.JumpDestCache == nil && evm.config.JumpDestCache != nil {
-		vmConfig.JumpDestCache = evm.config.JumpDestCache
-	}
 	evm.config = vmConfig
 	evm.chainRules = chainRules
 
@@ -265,30 +258,27 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		var contract Contract
 		if typ == CALLCODE {
 			contract = Contract{
-				caller:    caller,
-				addr:      caller,
-				value:     value,
-				jumpdests: evm.config.JumpDestCache,
-				Code:      code,
-				CodeHash:  codeHash,
+				caller:   caller,
+				addr:     caller,
+				value:    value,
+				Code:     code,
+				CodeHash: codeHash,
 			}
 		} else if typ == DELEGATECALL {
 			contract = Contract{
-				caller:    callerAddress,
-				addr:      caller,
-				value:     value,
-				jumpdests: evm.config.JumpDestCache,
-				Code:      code,
-				CodeHash:  codeHash,
+				caller:   callerAddress,
+				addr:     caller,
+				value:    value,
+				Code:     code,
+				CodeHash: codeHash,
 			}
 		} else {
 			contract = Contract{
-				caller:    caller,
-				addr:      addr,
-				value:     value,
-				jumpdests: evm.config.JumpDestCache,
-				Code:      code,
-				CodeHash:  codeHash,
+				caller:   caller,
+				addr:     addr,
+				value:    value,
+				Code:     code,
+				CodeHash: codeHash,
 			}
 		}
 		readOnly := false
@@ -459,12 +449,11 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
 	contract := Contract{
-		caller:    caller,
-		addr:      address,
-		value:     value,
-		jumpdests: evm.config.JumpDestCache,
-		Code:      codeAndHash.code,
-		CodeHash:  codeAndHash.hash,
+		caller:   caller,
+		addr:     address,
+		value:    value,
+		Code:     codeAndHash.code,
+		CodeHash: codeAndHash.hash,
 	}
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -673,30 +662,30 @@ func (evm *EVM) PrepareCall(typ OpCode, caller, callerAddress, addr accounts.Add
 	var contract Contract
 	if typ == CALLCODE {
 		contract = Contract{
-			caller:    caller,
-			addr:      caller,
-			value:     value,
-			jumpdests: evm.config.JumpDestCache,
-			Code:      code,
-			CodeHash:  codeHash,
+			caller: caller,
+			addr:   caller,
+			value:  value,
+			//jumpdests: evm.config.JumpDestCache,
+			Code:     code,
+			CodeHash: codeHash,
 		}
 	} else if typ == DELEGATECALL {
 		contract = Contract{
-			caller:    callerAddress,
-			addr:      caller,
-			value:     value,
-			jumpdests: evm.config.JumpDestCache,
-			Code:      code,
-			CodeHash:  codeHash,
+			caller: callerAddress,
+			addr:   caller,
+			value:  value,
+			//jumpdests: evm.config.JumpDestCache,
+			Code:     code,
+			CodeHash: codeHash,
 		}
 	} else {
 		contract = Contract{
-			caller:    caller,
-			addr:      addr,
-			value:     value,
-			jumpdests: evm.config.JumpDestCache,
-			Code:      code,
-			CodeHash:  codeHash,
+			caller: caller,
+			addr:   addr,
+			value:  value,
+			//jumpdests: evm.config.JumpDestCache,
+			Code:     code,
+			CodeHash: codeHash,
 		}
 	}
 
@@ -867,12 +856,12 @@ func (evm *EVM) PrepareCreate(caller accounts.Address, code []byte, gas uint64, 
 	// already computed above when calculating the address.
 	prepared := getPreparedCreate()
 	prepared.Contract = Contract{
-		caller:    caller,
-		addr:      address,
-		value:     value,
-		jumpdests: evm.config.JumpDestCache,
-		Code:      code,
-		CodeHash:  codeAndHash.hash,
+		caller: caller,
+		addr:   address,
+		value:  value,
+		//jumpdests: evm.config.JumpDestCache,
+		Code:     code,
+		CodeHash: codeAndHash.hash,
 	}
 	prepared.Gas = gas
 	prepared.Snapshot = snapshot

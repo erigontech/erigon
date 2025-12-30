@@ -39,7 +39,7 @@ func TestEVMWithNoBaseFeeAndNoTxGasPrice(t *testing.T) {
 
 func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
-	c := NewJumpDestCache(128)
+	//c := NewJumpDestCache(128)
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 
@@ -70,7 +70,7 @@ func TestInterpreterReadonly(t *testing.T) {
 			accounts.ZeroAddress,
 			accounts.ZeroAddress,
 			uint256.Int{},
-			c,
+			//c,
 		)
 
 		newTestSequential(env, currentIdx, readOnlySliceTest, isEVMSliceTest).Run(dummyContract, nil, false)
@@ -146,7 +146,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 func TestReadonlyBasicCases(t *testing.T) {
 	t.Parallel()
-	c := NewJumpDestCache(128)
+	// c := NewJumpDestCache(128)
 
 	cases := []struct {
 		testName          string
@@ -328,7 +328,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 					accounts.ZeroAddress,
 					accounts.ZeroAddress,
 					uint256.Int{},
-					c,
+					//c,
 				)
 
 				newTestSequential(env, currentIdx, readonlySliceTest, evmsTestcase.emvs).Run(dummyContract, nil, false)
@@ -414,13 +414,13 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 
 func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, uint64, error) {
 	*st.currentIdx++
-	c := NewJumpDestCache(16)
+	//c := NewJumpDestCache(16)
 	nextContract := *NewContract(
 		accounts.ZeroAddress,
 		accounts.ZeroAddress,
 		accounts.ZeroAddress,
 		uint256.Int{},
-		c,
+		//c,
 	)
 
 	return st.env.interpreter.Run(nextContract, 0, nil, st.readOnlys[*st.currentIdx])

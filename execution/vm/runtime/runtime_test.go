@@ -186,7 +186,7 @@ func BenchmarkCall(b *testing.B) {
 	tx, sd := testTemporalTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
 	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
-	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
+	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
 
@@ -231,7 +231,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			SpuriousDragonBlock:   new(big.Int),
 		},
 		EVMConfig: vm.Config{
-			JumpDestCache: vm.NewJumpDestCache(128),
+			//JumpDestCache: vm.NewJumpDestCache(128),
 		},
 	}
 	// Warm up the intpools and stuff

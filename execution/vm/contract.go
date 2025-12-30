@@ -20,21 +20,16 @@
 package vm
 
 import (
-	"fmt"
-
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // globalJumpDestCache is a global thread-safe LRU cache for JUMPDEST analysis.
 // Since contract code is immutable once deployed, the analysis can be cached permanently.
 // This cache persists across blocks and transactions.
-var globalJumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](10_000)
+var globalJumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](256)
 
 // AccountRef is a reference to an account address.
 //
@@ -53,10 +48,9 @@ type Contract struct {
 	// caller is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
-	caller    accounts.Address
-	addr      accounts.Address
-	jumpdests *JumpDestCache // Aggregated result of JUMPDEST analysis.
-	analysis  bitvec         // Locally cached result of JUMPDEST analysis
+	caller   accounts.Address
+	addr     accounts.Address
+	analysis bitvec // Locally cached result of JUMPDEST analysis
 
 	Code     []byte
 	CodeHash accounts.CodeHash
@@ -64,39 +58,14 @@ type Contract struct {
 	value uint256.Int
 }
 
-type JumpDestCache struct {
-	*simplelru.LRU[accounts.CodeHash, bitvec]
-	hit, total int
-	trace      bool
-}
-
-var (
-	JumpDestCacheLimit = dbg.EnvInt("JD_LRU", 128)
-	jumpDestCacheTrace = dbg.EnvBool("JD_LRU_TRACE", false)
-)
-
-func NewJumpDestCache(limit int) *JumpDestCache {
-	c, err := simplelru.NewLRU[accounts.CodeHash, bitvec](limit, nil)
-	if err != nil {
-		panic(err)
-	}
-	return &JumpDestCache{LRU: c, trace: jumpDestCacheTrace}
-}
-
-func (c *JumpDestCache) LogStats() {
-	if c == nil || !c.trace {
-		return
-	}
-	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", JumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
-}
+var jumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](256)
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
 	return &Contract{
-		caller:    callerAddress,
-		addr:      addr,
-		value:     value,
-		jumpdests: jumpDest,
+		caller: callerAddress,
+		addr:   addr,
+		value:  value,
 	}
 }
 
@@ -119,33 +88,23 @@ func (c *Contract) validJumpdest(dest uint256.Int) (bool, bool) {
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
-	// Fast path: if we already have the analysis cached locally, use it directly
 	if c.analysis != nil {
 		return c.analysis.codeSegment(udest)
 	}
 
-	// Do we have a contract hash already?
-	// If we do have a hash, that means it's a 'regular' contract. For regular
-	// contracts (not temporary initcode), we can use the global cache.
 	if !c.CodeHash.IsZero() {
-		// Check global cache first (thread-safe, persists across blocks)
-		if analysis, ok := globalJumpDestCache.Get(c.CodeHash); ok {
+		if analysis, ok := jumpDestCache.Get(c.CodeHash); ok {
 			c.analysis = analysis
 			return c.analysis.codeSegment(udest)
 		}
-
-		// Not in global cache, compute and store
-		analysis := codeBitmap(c.Code)
-		globalJumpDestCache.Add(c.CodeHash, analysis)
-		c.analysis = analysis
-		return c.analysis.codeSegment(udest)
 	}
 
-	// We don't have the code hash, most likely a piece of initcode not already
-	// in state trie. In that case, we do an analysis, and save it locally, so
-	// we don't have to recalculate it for every JUMP instruction in the execution
-	// However, we don't save it within the global cache (initcode is temporary)
 	c.analysis = codeBitmap(c.Code)
+
+	if !c.CodeHash.IsZero() {
+		jumpDestCache.Add(c.CodeHash, c.analysis)
+	}
+
 	return c.analysis.codeSegment(udest)
 }
 
