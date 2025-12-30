@@ -56,7 +56,7 @@ type Contract struct {
 	value uint256.Int
 }
 
-var jumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](256)
+var jumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](5212)
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
