@@ -350,13 +350,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 
 		if err := tx.Commit(); err != nil {
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-			return
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+
 		}
 		tx, err = e.db.BeginTemporalRw(ctx)
 		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-			return
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
