@@ -56,7 +56,7 @@ type Contract struct {
 	value uint256.Int
 }
 
-var jumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](5212)
+var jumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](512)
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
@@ -110,7 +110,7 @@ func (c *Contract) isCode(udest uint64) bool {
 		if evicted {
 			evictedN++
 			if evictedN%10_000 == 0 {
-				log.Warn("[dbg] JumpDestCache", "hit_m", hit/1_000_000, "total_m", (hit+miss)/1_000_000, "limit", 256, "ratio", fmt.Sprintf("%.2f", float64(hit)/float64(hit+miss)), "evictedN_k", evictedN/1_000)
+				log.Warn("[dbg] JumpDestCache", "hit_m", hit/1_000_000, "total_m", (hit+miss)/1_000_000, "limit", jumpDestCache.Len(), "ratio", fmt.Sprintf("%.2f", float64(hit)/float64(hit+miss)), "evictedN_k", evictedN/1_000)
 			}
 		}
 	}
