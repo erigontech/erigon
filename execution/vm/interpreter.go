@@ -40,7 +40,6 @@ import (
 // Config are the configuration options for the Interpreter
 type Config struct {
 	Tracer        *tracing.Hooks
-	JumpDestCache *JumpDestCache
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
@@ -50,7 +49,6 @@ type Config struct {
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
-
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {

@@ -421,9 +421,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 	//genEnv.ibs.SetTrace(true)
-	vmCfg := vm.Config{
-		JumpDestCache: vm.NewJumpDestCache(16),
-	}
+	vmCfg := vm.Config{}
 
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
