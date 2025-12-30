@@ -432,6 +432,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if err := e.forkValidator.MergeExtendingFork(ctx, currentContext, tx, e.accumulator, e.recentReceipts); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice
 	initialCycle := limitedBigJump
