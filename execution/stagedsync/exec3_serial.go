@@ -403,7 +403,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
-				fmt.Println("XX")
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
@@ -437,6 +436,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
+				fmt.Println(txTask.BlockNumber() > 0 && startTxIndex == 0)
+
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := se.getPostValidator().Process(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
