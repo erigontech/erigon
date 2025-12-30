@@ -111,6 +111,7 @@ func (b *CachingBeaconState) ComputeCommittee(
 		if cachedIndicies, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && err == nil {
 			shuffledIndicies = cachedIndicies
 		} else {
+			fmt.Println("cache-non-hit", epoch, seed, blockRootAtBegginingPrevEpoch)
 			// print stack trace
 			shuffledIndicies = make([]uint64, lenIndicies)
 			start := time.Now()
