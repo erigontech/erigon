@@ -94,9 +94,9 @@ func (m *Memory) Resize(size uint64) {
 		return
 	}
 
-	store := make([]byte, size)
+	store := make([]byte, size, size*2)
 	copy(store, m.store)
-	m.store = store
+	m.store = store[:size]
 }
 
 func (m *Memory) reset() {
