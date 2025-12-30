@@ -1551,7 +1551,7 @@ func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 	require.NoError(err)
 }
 
-func TestGetBlobsV1(t *testing.T) {
+func TestGetBlobs(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
