@@ -110,7 +110,7 @@ func (c *Contract) isCode(udest uint64) bool {
 		if evicted {
 			evictedN++
 			if evictedN%10_000 == 0 {
-				log.Warn("[dbg] JumpDestCache", "hit", hit, "total", hit+miss, "limit", 256, "ratio", fmt.Sprintf("%.2f", float64(hit)/float64(hit+miss)), "evictedN", evictedN)
+				log.Warn("[dbg] JumpDestCache", "hit_m", hit/1_000_000, "total_m", (hit+miss)/1_000_000, "limit", 256, "ratio", fmt.Sprintf("%.2f", float64(hit)/float64(hit+miss)), "evictedN", evictedN)
 			}
 		}
 	}
