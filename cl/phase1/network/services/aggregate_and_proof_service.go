@@ -289,7 +289,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			localValidatorIsProposer = a.isLocalValidatorProposer(headState, currentEpoch, localValidators)
 		}
 
-		if localValidatorIsProposer {
+		if localValidatorIsProposer || aggregateAndProof.ImmediateProcess {
 			// aggregate signatures for later verification
 			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 			if err != nil {
@@ -303,6 +303,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	}
 	if a.test {
 		return nil
+	}
+	if aggregateVerificationData == nil {
+		return ErrIgnore
 	}
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
@@ -323,9 +326,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	if localValidatorIsProposer {
-		a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-	}
+	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
+
 	return ErrIgnore
 
 }
