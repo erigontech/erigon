@@ -278,12 +278,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return errors.New("invalid aggregate and proof")
 		}
 
-		// aggregate signatures for later verification
-		aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
-		if err != nil {
-			return err
-		}
-
 		monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
 		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 		monitor.ObserveCommitteeSize(float64(len(committee)))
@@ -293,6 +287,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if len(localValidators) > 0 {
 			currentEpoch := state.Epoch(headState)
 			localValidatorIsProposer = a.isLocalValidatorProposer(headState, currentEpoch, localValidators)
+		}
+
+		if localValidatorIsProposer {
+			// aggregate signatures for later verification
+			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
+			if err != nil {
+				return err
+			}
 		}
 
 		return nil
