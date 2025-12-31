@@ -167,8 +167,12 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	} else {
 		t.MerkleTree = nil
 	}
-	// skip copying (unsupported for phase0)
-	t.phase0Data = v.phase0Data
+
+	if cap(t.phase0Data) <= len(v.phase0Data) {
+		t.phase0Data = make([]Phase0Data, len(v.phase0Data), len(v.phase0Data)*2)
+	}
+	t.phase0Data = t.phase0Data[:len(v.phase0Data)]
+	copy(t.phase0Data, v.phase0Data)
 	copy(t.buffer, v.buffer)
 	copy(t.attesterBits, v.attesterBits)
 	t.buffer = t.buffer[:v.l*validatorSize]
