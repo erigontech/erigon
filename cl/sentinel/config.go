@@ -22,12 +22,11 @@ import (
 	"net"
 
 	"github.com/c2h5oh/datasize"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
-
 	"github.com/libp2p/go-libp2p"
-	mplex "github.com/libp2p/go-libp2p-mplex"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
 
@@ -109,14 +108,28 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 		}
 	}
 
+	// Connection manager to limit open connections
+	low := int(cfg.MaxPeerCount / 2)
+	high := int(cfg.MaxPeerCount)
+	if low < 1 {
+		low = 10
+	}
+	if high < 2 {
+		high = 20
+	}
+	cm, err := connmgr.NewConnManager(low, high, connmgr.WithGracePeriod(0))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection manager: %w", err)
+	}
+
 	options := []libp2p.Option{
 		privKeyOption(priKey),
 		libp2p.ListenAddrs(listen),
 		libp2p.UserAgent("erigon/caplin"),
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Transport(libp2pquic.NewTransport),
-		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
-		libp2p.DefaultMuxers,
+		libp2p.DefaultMuxers, // yamux only
+		libp2p.ConnectionManager(cm),
 		libp2p.Ping(false),
 	}
 	if cfg.EnableUPnP {
