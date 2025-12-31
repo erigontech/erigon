@@ -1027,7 +1027,6 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.InsufficientFunds
 	}
 	if txn.Type == BlobTxnType {
-		fmt.Println(txn.IDHash)
 		return p.validateBlobTxn(txn, isLocal)
 	}
 	return txpoolcfg.Success
