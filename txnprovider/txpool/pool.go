@@ -1027,7 +1027,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.InsufficientFunds
 	}
 	if txn.Type == BlobTxnType {
-		return p.validateBlobTxn(txn, isLocal)
+		fmt.Println(txn.IDHash)
+		return txpoolcfg.Spammer // temporarily disable blob txns
+		//return p.validateBlobTxn(txn, isLocal)
 	}
 	return txpoolcfg.Success
 }
