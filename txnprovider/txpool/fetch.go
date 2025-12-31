@@ -204,6 +204,15 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return
 		}
 
+		if f.db == nil {
+			for range toProcess {
+				if f.wg != nil {
+					f.wg.Done()
+				}
+			}
+			return
+		}
+
 		tx, txErr := f.db.BeginRo(streamCtx)
 		if txErr != nil {
 			f.logger.Warn("[txpool.fetch] failed to begin batch transaction", "err", txErr)
