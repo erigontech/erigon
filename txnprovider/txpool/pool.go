@@ -1029,7 +1029,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	if txn.Type == BlobTxnType {
 		fmt.Println(txn.IDHash)
 		return txpoolcfg.Spammer // temporarily disable blob txns
-		//return p.validateBlobTxn(txn, isLocal)
+		return p.validateBlobTxn(txn, isLocal)
 	}
 	return txpoolcfg.Success
 }
