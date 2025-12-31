@@ -26,7 +26,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
 
@@ -108,10 +107,13 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 		}
 	}
 
-	// Connection manager to limit open connections
-	low := int(cfg.MaxPeerCount / 2)
-	high := int(cfg.MaxPeerCount)
-	cm, err := connmgr.NewConnManager(low, high, connmgr.WithGracePeriod(0))
+	// Connection manager with Prysm-style watermarks
+	const connManagerPruneAmount = 32
+	const defaultConnManagerHigh = 192
+	maxPeersPlusMargin := int(cfg.MaxPeerCount) + connManagerPruneAmount
+	high := max(maxPeersPlusMargin, defaultConnManagerHigh)
+	low := high - connManagerPruneAmount
+	cm, err := connmgr.NewConnManager(low, high)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection manager: %w", err)
 	}
@@ -121,7 +123,6 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 		libp2p.ListenAddrs(listen),
 		libp2p.UserAgent("erigon/caplin"),
 		libp2p.Transport(tcp.NewTCPTransport),
-		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.DefaultMuxers, // yamux only
 		libp2p.ConnectionManager(cm),
 		libp2p.Ping(false),
