@@ -435,7 +435,6 @@ func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.Beaco
 	shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, epoch*beaconConfig.SlotsPerEpoch)
 	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 
-	fmt.Println("cache-non-hit", epoch, blockRootAtBegginingPrevEpoch)
 
 	caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
 	log.Info("Pre-cached shuffled set", "epoch", epoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
