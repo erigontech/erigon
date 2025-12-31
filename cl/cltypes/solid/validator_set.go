@@ -153,9 +153,9 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 			t.MerkleTree = &merkle_tree.MerkleTree{}
 		}
 		v.MerkleTree.CopyInto(t.MerkleTree)
+		var hashBuffer [8 * 32]byte
 
 		t.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
-			var hashBuffer [8 * 32]byte
 			validator := t.Get(idx)
 			if err := validator.CopyHashBufferTo(hashBuffer[:]); err != nil {
 				panic(err)
