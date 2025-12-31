@@ -444,12 +444,13 @@ func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.Beaco
 }
 
 func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot common.Hash) {
-	// Skip if already cached
-	if _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok {
+	// Skip if already fully cached (both active validators and total balance)
+	if indicies, totalBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok && len(indicies) > 0 && totalBalance > 0 {
 		return
 	}
 
-	// GetActiveValidatorsIndices will compute and cache the result
+	// GetActiveValidatorsIndices and GetTotalActiveBalance will compute and cache the results
 	indicies := b.GetActiveValidatorsIndices(epoch)
-	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies)
+	totalBalance := b.GetTotalActiveBalance()
+	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, totalBalance)
 }

@@ -12,9 +12,10 @@ var ActiveValidatorsCacheGlobal = NewActiveValidatorsCache(MaxActiveValidatorsCa
 const MaxActiveValidatorsCacheSize = 8
 
 type activeValidatorsCacheVal struct {
-	epoch            uint64
-	root             common.Hash
-	activeValidators []uint64
+	epoch              uint64
+	root               common.Hash
+	activeValidators   []uint64
+	totalActiveBalance uint64
 }
 
 type ActiveValidatorsCache struct {
@@ -31,18 +32,18 @@ func NewActiveValidatorsCache(cap int) *ActiveValidatorsCache {
 	}
 }
 
-func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint64, bool) {
+func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint64, uint64, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for i := 0; i < len(c.list); i++ {
 		if c.list[i] != nil && c.list[i].epoch == epoch && c.list[i].root == root {
-			return c.list[i].activeValidators, true
+			return c.list[i].activeValidators, c.list[i].totalActiveBalance, true
 		}
 	}
-	return nil, false
+	return nil, 0, false
 }
 
-func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint64) {
+func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint64, totalActiveBalance uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.list) == 0 {
@@ -54,9 +55,10 @@ func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValida
 	for i := 0; i < len(c.list); i++ {
 		if c.list[i] == nil {
 			c.list[i] = &activeValidatorsCacheVal{
-				epoch:            epoch,
-				root:             root,
-				activeValidators: activeValidators,
+				epoch:              epoch,
+				root:               root,
+				activeValidators:   activeValidators,
+				totalActiveBalance: totalActiveBalance,
 			}
 			return
 		}
@@ -66,8 +68,9 @@ func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValida
 		}
 	}
 	c.list[minEpochIdx] = &activeValidatorsCacheVal{
-		epoch:            epoch,
-		root:             root,
-		activeValidators: activeValidators,
+		epoch:              epoch,
+		root:               root,
+		activeValidators:   activeValidators,
+		totalActiveBalance: totalActiveBalance,
 	}
 }
