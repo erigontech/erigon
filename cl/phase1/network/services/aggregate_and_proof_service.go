@@ -77,6 +77,9 @@ type aggregateAndProofServiceImpl struct {
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
 	validatorParams        *validator_params.ValidatorParams
 
+	// Cached proposer indices per epoch (for current epoch check)
+	proposerIndicesCache *lru.Cache[uint64, []uint64]
+
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
 }
@@ -95,6 +98,10 @@ func NewAggregateAndProofService(
 	if err != nil {
 		panic(err)
 	}
+	proposerIndicesCache, err := lru.New[uint64, []uint64]("proposerIndices", 3)
+	if err != nil {
+		panic(err)
+	}
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager:      syncedDataManager,
 		forkchoiceStore:        forkchoiceStore,
@@ -104,6 +111,7 @@ func NewAggregateAndProofService(
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
 		validatorParams:        validatorParams,
+		proposerIndicesCache:   proposerIndicesCache,
 	}
 	go a.loop(ctx)
 	return a
@@ -111,6 +119,41 @@ func NewAggregateAndProofService(
 
 func (a *aggregateAndProofServiceImpl) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBeaconAggregateAndProof
+}
+
+// isLocalValidatorProposer checks if any local validator is a proposer in the current or next epoch.
+// For current epoch: uses cached GetBeaconProposerIndices.
+// For next epoch: uses GetProposerLookahead() (Fulu+) or always returns true (pre-Fulu).
+func (a *aggregateAndProofServiceImpl) isLocalValidatorProposer(headState *state.CachingBeaconState, currentEpoch uint64, localValidators []uint64) bool {
+	if headState.Version() < clparams.FuluVersion {
+		return true
+	}
+	// Check current epoch using cached proposer indices
+	currentProposers, ok := a.proposerIndicesCache.Get(currentEpoch)
+	if !ok {
+		var err error
+		currentProposers, err = headState.GetBeaconProposerIndices(currentEpoch)
+		if err == nil {
+			a.proposerIndicesCache.Add(currentEpoch, currentProposers)
+		}
+	}
+	for _, validatorIndex := range localValidators {
+		if slices.Contains(currentProposers, validatorIndex) {
+			return true
+		}
+	}
+
+	// For Fulu+, use the efficient proposer lookahead for next epoch
+	lookahead := headState.GetProposerLookahead()
+	// The lookahead contains proposers for current and next epoch, skip current epoch slots
+	slotsPerEpoch := int(a.beaconCfg.SlotsPerEpoch)
+	for i := slotsPerEpoch; i < lookahead.Length(); i++ {
+		proposerIndex := lookahead.Get(i)
+		if slices.Contains(localValidators, proposerIndex) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedAggregateAndProofForGossip, error) {
@@ -249,22 +292,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		localValidators := a.validatorParams.GetValidators()
 		if len(localValidators) > 0 {
 			currentEpoch := state.Epoch(headState)
-			// Get proposer indices for current and next epoch
-			currentProposers, err := headState.GetBeaconProposerIndices(currentEpoch)
-			if err != nil {
-				return err
-			}
-			nextProposers, err := headState.GetBeaconProposerIndices(currentEpoch + 1)
-			if err != nil {
-				return err
-			}
-			// Check if any local validator is in the proposer set
-			for _, validatorIndex := range localValidators {
-				if slices.Contains(currentProposers, validatorIndex) || slices.Contains(nextProposers, validatorIndex) {
-					localValidatorIsProposer = true
-					break
-				}
-			}
+			localValidatorIsProposer = a.isLocalValidatorProposer(headState, currentEpoch, localValidators)
 		}
 
 		return nil
