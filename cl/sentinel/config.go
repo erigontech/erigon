@@ -111,12 +111,6 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 	// Connection manager to limit open connections
 	low := int(cfg.MaxPeerCount / 2)
 	high := int(cfg.MaxPeerCount)
-	if low < 1 {
-		low = 10
-	}
-	if high < 2 {
-		high = 20
-	}
 	cm, err := connmgr.NewConnManager(low, high, connmgr.WithGracePeriod(0))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection manager: %w", err)
