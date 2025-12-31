@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"sync"
 	"time"
 
@@ -184,7 +185,10 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 	)
 
 	// LRU cache for deduplication - filters duplicates before they enter the batch
-	seenLRU, _ := simplelru.NewLRU[string, struct{}](4096, nil)
+	// Uses maphash to avoid string allocations
+	var hasher maphash.Hash
+	hasher.Reset() // just to be sure the seed is randomly set.
+	seenLRU, _ := simplelru.NewLRU[uint64, struct{}](4096, nil)
 
 	flushBatch := func() {
 		batchLock.Lock()
@@ -248,15 +252,17 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return nil
 		}
 
-		// Skip duplicates using LRU cache
-		key := string(req.Data)
-		if _, seen := seenLRU.Get(key); seen {
+		// Skip duplicates using LRU cache with maphash to avoid string allocs
+		hasher.Reset()
+		hasher.Write(req.Data)
+		hash := hasher.Sum64()
+		if _, seen := seenLRU.Get(hash); seen {
 			if f.wg != nil {
 				f.wg.Done()
 			}
 			continue
 		}
-		seenLRU.Add(key, struct{}{})
+		seenLRU.Add(hash, struct{}{})
 
 		batchLock.Lock()
 		batch = append(batch, req)
