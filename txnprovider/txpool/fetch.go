@@ -189,6 +189,8 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		if req == nil {
 			return nil
 		}
+		// print the hash of req.Data
+		fmt.Printf("%x\n", req.Data)
 		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
 				time.Sleep(3 * time.Second)
