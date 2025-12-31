@@ -25,36 +25,56 @@ import (
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
+	// If we are copying into our parent state, we can optimize some stuff
+	// aka we can unwind less of the public key indices cache
+	var fixedCachesUnwind bool
 	if bs.BeaconState == nil {
 		bs.BeaconState = raw.New(b.BeaconConfig())
 	}
+
+	// if the state we are copying into is the parent state, we can optimize some stuff
+	blockRoot, _ := bs.BlockRoot()
+	fixedCachesUnwind = blockRoot == b.LatestBlockHeader().ParentRoot
+
 	err = b.BeaconState.CopyInto(bs.BeaconState)
 	if err != nil {
 		return err
 	}
-	err = bs.reinitCaches()
+
+	err = bs.reinitCaches(fixedCachesUnwind)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (bs *CachingBeaconState) reinitCaches() error {
+func (bs *CachingBeaconState) reinitCaches(fixedCachesUnwind bool) error {
 	if bs.Version() == clparams.Phase0Version {
 		return bs.InitBeaconState()
 	}
 
-	// Clear the existing map instead of re-allocating
-	if bs.publicKeyIndicies == nil {
-		bs.publicKeyIndicies = make(map[[48]byte]uint64)
+	if bs.publicKeyIndicies != nil && fixedCachesUnwind {
+		const opsCount = 256
+		startIdx := len(bs.publicKeyIndicies) - opsCount
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		for i := startIdx; i < bs.ValidatorLength(); i++ {
+			v := bs.Validators().Get(i)
+			bs.publicKeyIndicies[v.PublicKey()] = uint64(i)
+		}
 	} else {
-		maps.Clear(bs.publicKeyIndicies)
-	}
+		if bs.publicKeyIndicies == nil {
+			bs.publicKeyIndicies = make(map[[48]byte]uint64)
+		} else {
+			maps.Clear(bs.publicKeyIndicies)
+		}
 
-	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		bs.publicKeyIndicies[v.PublicKey()] = uint64(idx)
-		return true
-	})
+		bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+			bs.publicKeyIndicies[v.PublicKey()] = uint64(idx)
+			return true
+		})
+	}
 
 	bs.totalActiveBalanceCache = nil
 	bs._refreshActiveBalancesIfNeeded()
