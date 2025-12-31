@@ -154,14 +154,13 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		}
 		v.MerkleTree.CopyInto(t.MerkleTree)
 
-		hashBuffer := make([]byte, 8*32)
 		t.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
+			var hashBuffer [8 * 32]byte
 			validator := t.Get(idx)
-			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
+			if err := validator.CopyHashBufferTo(hashBuffer[:]); err != nil {
 				panic(err)
 			}
-			hashBuffer = hashBuffer[:(8 * 32)]
-			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
+			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer[:], out); err != nil {
 				panic(err)
 			}
 		})
@@ -169,7 +168,7 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		t.MerkleTree = nil
 	}
 	// skip copying (unsupported for phase0)
-	// t.phase0Data = make([]Phase0Data, v.l)
+	//t.phase0Data = make([]Phase0Data, v.l)
 	copy(t.buffer, v.buffer)
 	copy(t.attesterBits, v.attesterBits)
 	t.buffer = t.buffer[:v.l*validatorSize]
