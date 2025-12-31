@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -74,6 +75,7 @@ type aggregateAndProofServiceImpl struct {
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
+	validatorParams        *validator_params.ValidatorParams
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
@@ -87,6 +89,7 @@ func NewAggregateAndProofService(
 	opPool pool.OperationsPool,
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
+	validatorParams *validator_params.ValidatorParams,
 ) AggregateAndProofService {
 	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
 	if err != nil {
@@ -100,6 +103,7 @@ func NewAggregateAndProofService(
 		test:                   test,
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
+		validatorParams:        validatorParams,
 	}
 	go a.loop(ctx)
 	return a
@@ -156,6 +160,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		aggregateVerificationData *AggregateVerificationData
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
+		localValidatorIsProposer  bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
@@ -239,6 +244,29 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
 		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 		monitor.ObserveCommitteeSize(float64(len(committee)))
+
+		// Check if any local validator is a proposer in this or the next epoch
+		localValidators := a.validatorParams.GetValidators()
+		if len(localValidators) > 0 {
+			currentEpoch := state.Epoch(headState)
+			// Get proposer indices for current and next epoch
+			currentProposers, err := headState.GetBeaconProposerIndices(currentEpoch)
+			if err != nil {
+				return err
+			}
+			nextProposers, err := headState.GetBeaconProposerIndices(currentEpoch + 1)
+			if err != nil {
+				return err
+			}
+			// Check if any local validator is in the proposer set
+			for _, validatorIndex := range localValidators {
+				if slices.Contains(currentProposers, validatorIndex) || slices.Contains(nextProposers, validatorIndex) {
+					localValidatorIsProposer = true
+					break
+				}
+			}
+		}
+
 		return nil
 	}); err != nil {
 		return err
@@ -265,9 +293,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	// push the signatures to verify asynchronously and run final functions after that.
-	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-
+	if localValidatorIsProposer {
+		a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
+	}
 	return ErrIgnore
 
 }
