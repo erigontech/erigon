@@ -436,7 +436,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
-				fmt.Println(txTask.BlockNumber() > 0 && startTxIndex == 0, startTxIndex, checkReceipts)
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
