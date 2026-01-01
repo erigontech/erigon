@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"time"
@@ -83,6 +84,7 @@ func HashSeekingPrune(
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
+			println("key", hex.EncodeToString(k), "value", hex.EncodeToString(v))
 			if err := collector.Collect(v, k); err != nil {
 				return nil, err
 			}
@@ -98,6 +100,7 @@ func HashSeekingPrune(
 		case KeyStorageMode:
 			seek := make([]byte, 8, 256)
 			seek = append(bytes.Clone(key), txnm...)
+			println("deleted", hex.EncodeToString(seek), hex.EncodeToString(key), hex.EncodeToString(txnm))
 			if err := valDelCursor.Delete(seek); err != nil {
 				return err
 			}
@@ -112,6 +115,7 @@ func HashSeekingPrune(
 			if vtx := binary.BigEndian.Uint64(vv); vtx != binary.BigEndian.Uint64(txnm) {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, 1132)
 			}
+			println("deleted sh", hex.EncodeToString(key))
 			if err = valDelCursor.DeleteCurrent(); err != nil {
 				return err
 			}
@@ -212,6 +216,7 @@ func TableScanningPrune(
 			return nil, err
 		}
 		pairs += dups
+		//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
 		if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
 			return nil, err
 		}
@@ -220,9 +225,9 @@ func TableScanningPrune(
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	valLen := uint64(0)
-	txNumBytes, iiVal := common.Copy(startKey), common.Copy(startVal)
+	txNumBytes, val := common.Copy(startKey), common.Copy(startVal)
 
-	isNotDone := false
+	isDone := false
 
 	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
 		switch mode {
@@ -237,7 +242,7 @@ func TableScanningPrune(
 		}
 	}
 
-	for ; iiVal != nil; iiVal, txNumBytes, err = valDelCursor.NextNoDup() {
+	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 		}
@@ -248,11 +253,12 @@ func TableScanningPrune(
 		valLen += dups
 		if time.Since(start) > timeOut {
 			logger.Info("prune val timed out", "name", filenameBase)
-			lastPrunedVal = iiVal
-			isNotDone = true
+			lastPrunedVal = val
+			isDone = true
 			break
 		}
-		txNum := txNumGetter(iiVal, txNumBytes)
+		txNum := txNumGetter(val, txNumBytes)
+		//println("txnum first", txNum, txFrom, txTo)
 		lastDupTxNumB, err := valDelCursor.LastDup()
 		if err != nil {
 			return nil, fmt.Errorf("LastDup iterate over %s index keys: %w", filenameBase, err)
@@ -261,9 +267,10 @@ func TableScanningPrune(
 		if err != nil {
 			return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
 		}
-		lastDupTxNum := txNumGetter(iiVal, lastDupTxNumB)
+		lastDupTxNum := txNumGetter(val, lastDupTxNumB)
+		//println("txnum last", lastDupTxNum)
 		if txNum >= txTo {
-			break
+			continue
 		}
 		dupsDelete := lastDupTxNum < txTo && txNum >= txFrom
 		if asserts && txNum < txFrom {
@@ -273,20 +280,24 @@ func TableScanningPrune(
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 		if dupsDelete {
+			//println("deleted", hex.EncodeToString(val), txNumGetter(val, txNumBytes), dups)
 			err = valDelCursor.DeleteCurrentDuplicates()
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
+			if dups > 1 {
+				mxDupsPruneSizeIndex.AddUint64(dups)
+				stat.DupsDeleted += dups
+			}
 			mxPruneSizeIndex.AddUint64(dups)
-			mxDupsPruneSizeIndex.AddUint64(dups)
 			stat.PruneCountValues += dups
-			stat.DupsDeleted += dups
 		} else {
 			for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
 				if err != nil {
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
-				txNumDup := txNumGetter(iiVal, txNumBytes)
+				txNumDup := txNumGetter(val, txNumBytes)
+				//println("txnum in loop", txNumDup)
 				if txNumDup < txFrom {
 					continue
 				}
@@ -294,19 +305,22 @@ func TableScanningPrune(
 					break
 				}
 				if time.Since(start) > timeOut {
-					lastPrunedVal = iiVal
-					isNotDone = true
+					lastPrunedVal = val
+					isDone = true
 					break
 				}
+				//println("txnum passed checks loop", txNumDup)
+
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
+				//println("deleted loop", hex.EncodeToString(val))
 				if err = valDelCursor.DeleteCurrent(); err != nil {
 					return nil, err
 				}
 				mxPruneSizeIndex.Inc()
 				stat.PruneCountValues++
 			}
-			if isNotDone {
+			if isDone {
 				break
 			}
 		}
@@ -325,7 +339,7 @@ func TableScanningPrune(
 		}
 	}
 
-	if isNotDone {
+	if isDone {
 		lastPrunedVal = nil
 	}
 

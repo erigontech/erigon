@@ -84,12 +84,20 @@ func SavePruneValProgress(db kv.Putter, prunedTblName string, prunedVal []byte) 
 }
 
 func GetPruneValProgress(db kv.Getter, tbl []byte) (pruned []byte, err error) {
-	v, err := db.GetOne(kv.TblPruningValsProg, []byte(tbl))
+	v, err := db.GetOne(kv.TblPruningValsProg, tbl)
 	if err != nil {
 		return nil, err
 	}
-	if len(v) == 0 {
+	switch len(v) {
+	case 0:
 		return nil, nil
+	case 1:
+		if v[0] == 1 {
+			return []byte{}, nil
+		}
+		// nil values returned an empty key which actually is a value
+		return nil, nil
+	default:
+		return v[1:], nil
 	}
-	return v, nil
 }

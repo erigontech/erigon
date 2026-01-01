@@ -57,6 +57,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
 			kv.TblPruningProgress: kv.TableCfgItem{},
+			kv.TblPruningValsProg: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	tb.Cleanup(db.Close)

@@ -858,7 +858,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		pruneSizeMetric = mxPruneSizeIndex
 	}
 
-	var lastPrunedVal []byte
+	var lastPrunedVal []byte = nil
 	var vtbl string
 	if valTable != nil {
 		vtbl = *valTable

@@ -1048,7 +1048,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		case *mdbx2.MdbxCursor:
 			valsCP = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
 		case *mdbx2.MdbxDupSortCursor:
-			valsCP = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c.MdbxCursor}
+			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
 		default:
 			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
 		}
