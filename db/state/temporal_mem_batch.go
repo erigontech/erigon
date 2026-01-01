@@ -53,7 +53,8 @@ type TemporalMemBatch struct {
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		aggTx: AggTx(tx),
+		aggTx:         AggTx(tx),
+		unwindToTxNum: math.MaxUint64,
 	}
 
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(sd.aggTx.iis))
@@ -233,7 +234,7 @@ func (sd *TemporalMemBatch) Close() {
 		}
 	}
 
-	sd.unwindToTxNum = 0
+	sd.unwindToTxNum = math.MaxUint64
 	sd.unwindChangeset = nil
 }
 
@@ -301,7 +302,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 					}
 				}
 			}
-			if sd.unwindToTxNum < other.unwindToTxNum {
+			if other.unwindToTxNum < sd.unwindToTxNum {
 				sd.unwindToTxNum = other.unwindToTxNum
 			}
 		}

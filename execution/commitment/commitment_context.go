@@ -177,6 +177,12 @@ func (sdc *CommitmentContext) SetTrace(trace bool) {
 	sdc.patriciaTrie.SetTrace(trace)
 }
 
+func (sdc *CommitmentContext) SetTraceDomain(b, capture bool) []string {
+	sdc.traceDomain = b
+	sdc.commitmentCapture = capture
+	return sdc.GetCapture(true)
+}
+
 func (sdc *CommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }

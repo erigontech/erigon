@@ -605,7 +605,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						if finalTask.IsHistoric() {
 							reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
 						} else {
-							reader = state.NewStateReader(pe.rs.Domains(),applyTx)
+							reader = state.NewStateReader(pe.rs.Domains(), applyTx)
 						}
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
 						ibs.SetVersion(finalVersion.Incarnation)
@@ -1254,6 +1254,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
+
 	be.results[tx] = &execResult{res, nil}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {

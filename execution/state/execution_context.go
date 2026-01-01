@@ -355,9 +355,7 @@ func (sd *ExecutionContext) SetBlockNum(blockNum uint64) {
 }
 
 func (sd *ExecutionContext) SetTrace(b, capture bool) []string {
-	sd.trace = b
-	sd.commitmentCapture = capture
-	return sd.sdCtx.GetCapture(true)
+	return sd.sdCtx.SetTraceDomain(b, capture)
 }
 
 func (sd *ExecutionContext) HasStorage(ctx context.Context, addr accounts.Address, roTx kv.Tx) (bool, error) {

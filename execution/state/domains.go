@@ -177,7 +177,7 @@ type updates[K comparable, V any] interface {
 }
 
 type domain[K comparable, V any] struct {
-	sync.RWMutex
+	lock       sync.RWMutex
 	mem        kv.TemporalMemBatch
 	metrics    *DomainMetrics
 	commitCtx  *commitment.CommitmentContext
@@ -191,9 +191,13 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 	}
 
 	start := time.Now()
-	if val, ok := d.updates.Get(k); ok {
+	d.lock.RLock()
+	val, ok := d.updates.Get(k)
+	d.lock.RUnlock()
+
+	if ok {
 		d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
-		return val.Value, val.Step, false, nil
+		return val.Value, val.Step, true, nil
 	}
 
 	maxStep := kv.Step(math.MaxUint64)
@@ -204,7 +208,7 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 			if v, err = deserializer(val); err != nil {
 				return v, step, false, err
 			}
-			d.metrics.UpdateCacheReads(kv.AccountsDomain, start)
+			d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
 			return v, step, true, nil
 		} else {
 			if step > 0 {
@@ -215,14 +219,19 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 
 	if d.valueCache != nil {
 		if val, ok := d.valueCache.Get(k); ok {
-			d.metrics.UpdateCacheReads(kv.AccountsDomain, start)
-			return val.Value, val.Step, false, nil
+			d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
+			return val.Value, val.Step, true, nil
 		}
 	}
 
 	av := serializer(k)
-	val, step, err := d.getLatest(ctx, d.valueCache.Name(), av[:], tx, maxStep, start)
-	if v, err = deserializer(val); err != nil {
+	latest, step, err := d.getLatest(ctx, d.valueCache.Name(), av[:], tx, maxStep, start)
+
+	if len(latest) == 0 {
+		return v, step, false, nil
+	}
+
+	if v, err = deserializer(latest); err != nil {
 		return v, step, false, err
 	}
 
@@ -269,7 +278,11 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 	putKeySize := 0
 	putValueSize := 0
 
-	if inserted := d.updates.Put(k, ValueWithStep[V]{v, kv.Step(txNum / roTx.StepSize())}); inserted {
+	d.lock.Lock()
+	inserted := d.updates.Put(k, ValueWithStep[V]{v, kv.Step(txNum / roTx.StepSize())})
+	d.lock.Unlock()
+
+	if inserted {
 		putKeySize += len(kbuf)
 		putValueSize += len(vbuf)
 	} else {
@@ -312,7 +325,11 @@ func (d *domain[K, V]) del(ctx context.Context, k K,
 	putKeySize := 0
 	putValueSize := 0
 
-	if inserted := d.updates.Put(k, ValueWithStep[V]{Step: kv.Step(txNum / roTx.StepSize())}); inserted {
+	d.lock.Lock()
+	inserted := d.updates.Put(k, ValueWithStep[V]{Step: kv.Step(txNum / roTx.StepSize())})
+	d.lock.Unlock()
+
+	if inserted {
 		putKeySize += len(kbuf)
 	} else {
 		putValueSize = -len(pvbuf)
@@ -352,16 +369,16 @@ func (sd *domain[K, V]) ClearMetrics() {
 }
 
 func (d *domain[K, V]) Merge(other *domain[K, V]) {
-	d.Lock()
-	defer d.Unlock()
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	for key, value := range other.updates.Iter() {
 		d.updates.Put(key, value)
 	}
 }
 
 func (d *domain[K, V]) FlushUpdates() {
-	d.Lock()
-	defer d.Unlock()
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	for k, v := range d.updates.Iter() {
 		d.valueCache.Add(k, v.Value, v.Step)
 	}
@@ -409,7 +426,7 @@ func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *Co
 		}
 	} else {
 		var err error
-		cache, err = newLRUValueCache[accounts.Address, accounts.Address, *accounts.Account](kv.AccountsDomain, 250_000)
+		cache, err = newLRUValueCache[accounts.Address, common.Address, *accounts.Account](kv.AccountsDomain, 250_000)
 		if err != nil {
 			return nil, err
 		}
@@ -510,12 +527,12 @@ type storageLocation struct {
 	key     accounts.StorageKey
 }
 
-type stroageCache struct {
+type storageCache struct {
 	lru   *freelru.ShardedLRU[storageLocation, ValueWithStep[uint256.Int]]
 	limit uint32
 }
 
-func newStroageCache(limit uint32) (*stroageCache, error) {
+func newStroageCache(limit uint32) (*storageCache, error) {
 	type handle[U comparable] struct{ value *U }
 
 	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
@@ -531,22 +548,22 @@ func newStroageCache(limit uint32) (*stroageCache, error) {
 		return nil, err
 	}
 
-	return &stroageCache{lru: c, limit: limit}, nil
+	return &storageCache{lru: c, limit: limit}, nil
 }
 
-func (c *stroageCache) Name() kv.Domain {
-	return kv.CodeDomain
+func (c *storageCache) Name() kv.Domain {
+	return kv.StorageDomain
 }
 
-func (c *stroageCache) Add(key storageLocation, value uint256.Int, step kv.Step) (evicted bool) {
+func (c *storageCache) Add(key storageLocation, value uint256.Int, step kv.Step) (evicted bool) {
 	return c.lru.Add(key, ValueWithStep[uint256.Int]{value, step})
 }
 
-func (c stroageCache) Remove(key storageLocation) (evicted bool) {
+func (c storageCache) Remove(key storageLocation) (evicted bool) {
 	return c.lru.Remove(key)
 }
 
-func (c *stroageCache) Get(key storageLocation) (value ValueWithStep[uint256.Int], ok bool) {
+func (c *storageCache) Get(key storageLocation) (value ValueWithStep[uint256.Int], ok bool) {
 	return c.lru.GetAndRefresh(key, 5*time.Minute)
 }
 
@@ -586,8 +603,9 @@ func (u storageUpdates) UpdatedSlots(addr accounts.Address) (map[accounts.Storag
 
 func (u storageUpdates) SortedIter(addr accounts.Address) iter.Seq2[storageLocation, ValueWithStep[uint256.Int]] {
 	if addr.IsNil() {
+		iter := slices.SortedFunc(maps.Keys(u), func(a, b accounts.Address) int { return a.Value().Cmp(b.Value()) })
 		return func(yield func(storageLocation, ValueWithStep[uint256.Int]) bool) {
-			for _, a := range slices.SortedFunc(maps.Keys(u), func(a, b accounts.Address) int { return a.Value().Cmp(b.Value()) }) {
+			for _, a := range iter {
 				for _, k := range slices.SortedFunc(maps.Keys(u[a]), func(a, b accounts.StorageKey) int { return a.Value().Cmp(b.Value()) }) {
 					yield(storageLocation{address: a, key: k}, u[a][k])
 				}
@@ -614,8 +632,8 @@ func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentC
 	cache := mem.ValueCache(kv.StorageDomain)
 
 	if cache != nil {
-		if _, ok := cache.(*lruValueCache[accounts.Address, common.Address, *accounts.Account]); !ok {
-			return nil, fmt.Errorf("unexpected cache initializaton type: got: %T, expected %T", cache, &lruValueCache[accounts.Address, common.Address, *accounts.Account]{})
+		if _, ok := cache.(*storageCache); !ok {
+			return nil, fmt.Errorf("unexpected cache initializaton type: got: %T, expected %T", cache, &storageCache{})
 		}
 	} else {
 		var err error
@@ -631,7 +649,7 @@ func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentC
 			metrics:    metrics,
 			mem:        mem,
 			commitCtx:  commitCtx,
-			valueCache: cache.(*stroageCache),
+			valueCache: cache.(*storageCache),
 			updates:    storageUpdates{},
 		},
 	}, nil
@@ -709,8 +727,11 @@ func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key acc
 }
 
 func (sd *StorageDomain) slotIterator(addr accounts.Address) func(yield func(string, kv.DataWithStep) bool) {
+	sd.lock.RLock()
+	iter := sd.updates.(storageUpdates).SortedIter(addr)
+	sd.lock.RUnlock()
 	return func(yield func(string, kv.DataWithStep) bool) {
-		for k, v := range sd.updates.(storageUpdates).SortedIter(addr) {
+		for k, v := range iter {
 			aval := k.address.Value()
 			kval := k.key.Value()
 			yield(string(append(aval[:], kval[:]...)), kv.DataWithStep{Data: v.Value.Bytes(), Step: v.Step})
@@ -763,7 +784,10 @@ func (sd *StorageDomain) DelAll(ctx context.Context, addr accounts.Address, roTx
 }
 
 func (sd *StorageDomain) HasStorage(ctx context.Context, addr accounts.Address, roTx kv.Tx) (bool, error) {
-	if slots, ok := sd.updates.(*storageUpdates).UpdatedSlots(addr); ok {
+	sd.lock.RLock()
+	slots, ok := sd.updates.(storageUpdates).UpdatedSlots(addr)
+	sd.lock.RUnlock()
+	if ok {
 		for _, slot := range slots {
 			if slot.Value.ByteLen() > 0 {
 				return true, nil
@@ -847,7 +871,10 @@ func (u codeUpdates) Iter() iter.Seq2[accounts.Address, ValueWithStep[codeWithHa
 }
 
 func (u codeUpdates) Clear() updates[accounts.Address, codeWithHash] {
-	return codeUpdates{}
+	return codeUpdates{
+		hashes: map[accounts.Address]accounts.CodeHash{},
+		code:   map[accounts.CodeHash]ValueWithStep[codeWithHash]{},
+	}
 }
 
 type codeCache struct {
@@ -954,7 +981,10 @@ func NewCodeDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentCont
 			mem:        mem,
 			commitCtx:  commitCtx,
 			valueCache: cache.(valueCache[accounts.Address, codeWithHash]),
-			updates:    codeUpdates{},
+			updates: codeUpdates{
+				hashes: map[accounts.Address]accounts.CodeHash{},
+				code:   map[accounts.CodeHash]ValueWithStep[codeWithHash]{},
+			},
 		},
 	}, nil
 }
@@ -987,7 +1017,7 @@ func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.Co
 		}
 	}
 
-	if bytes.Equal(c, *pv.Value.code.Value()) {
+	if pv != nil && pv.Value.code.Value() != nil && bytes.Equal(c, *pv.Value.code.Value()) {
 		return nil
 	}
 
@@ -1072,16 +1102,25 @@ var statePath = commitment.InternPath([]byte("state"))
 func (c *branchCache) Get(key commitment.Path) (ValueWithStep[commitment.Branch], bool) {
 	switch {
 	case key == statePath:
+		if len(c.state.Value) == 0 {
+			return ValueWithStep[commitment.Branch]{}, false
+		}
+		return c.state, true
 	case len(key.Value()) < 3:
 		keyValue := key.Value()
-		if len(keyValue) == 0 {
+		switch len(keyValue) {
+		case 0:
 			if len(c.root.Value) > 0 {
 				return c.root, true
 			}
 			return ValueWithStep[commitment.Branch]{}, false
+		case 1:
+			value, ok := c.trunk[uint16(keyValue[0])<<8]
+			return value, ok
+		default:
+			value, ok := c.trunk[binary.BigEndian.Uint16(keyValue)]
+			return value, ok
 		}
-		value, ok := c.trunk[binary.BigEndian.Uint16(keyValue)]
-		return value, ok
 	}
 
 	return c.branches.Get(key)
@@ -1094,11 +1133,14 @@ func (c *branchCache) Add(k commitment.Path, v commitment.Branch, s kv.Step) (ev
 		return false
 	case len(k.Value()) < 3:
 		keyValue := k.Value()
-		if len(keyValue) == 0 {
+		switch len(keyValue) {
+		case 0:
 			c.root = ValueWithStep[commitment.Branch]{Value: v, Step: s}
-			return false
+		case 1:
+			c.trunk[uint16(keyValue[0])<<8] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+		default:
+			c.trunk[binary.BigEndian.Uint16(keyValue)] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
 		}
-		c.trunk[binary.BigEndian.Uint16(keyValue)] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
 		return false
 	}
 
@@ -1113,12 +1155,17 @@ func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
 		return evicted
 	case len(k.Value()) < 3:
 		keyValue := k.Value()
-		if len(keyValue) == 0 {
+		var kv uint16
+		switch len(keyValue) {
+		case 0:
 			evicted = len(c.root.Value) > 0
 			c.root = ValueWithStep[commitment.Branch]{}
 			return evicted
+		case 1:
+			kv = uint16(keyValue[0]) << 8
+		default:
+			kv = binary.BigEndian.Uint16(keyValue)
 		}
-		kv := binary.BigEndian.Uint16(keyValue)
 		if _, ok := c.trunk[kv]; ok {
 			delete(c.trunk, kv)
 			return true

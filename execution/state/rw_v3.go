@@ -708,19 +708,21 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 	var acc *accounts.Account
 	var ok bool
 	var err error
-	var value common.Address
+	var addressValue common.Address
 
 	if r.ec != nil {
 		acc, _, ok, err = r.ec.GetAccount(context.Background(), address, r.tx)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-
-		if !address.IsNil() {
-			value = address.Value()
+		if r.trace && !address.IsNil() {
+			addressValue = address.Value()
 		}
-		enc, _, err := r.tx.GetLatest(kv.AccountsDomain, value[:])
+	} else {
+		if !address.IsNil() {
+			addressValue = address.Value()
+		}
+		enc, _, err := r.tx.GetLatest(kv.AccountsDomain, addressValue[:])
 		if err != nil {
 			return nil, err
 		}
@@ -736,13 +738,13 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 
 	if !ok {
 		if r.trace {
-			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, r.txNum)
+			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, addressValue, r.txNum)
 		}
 		return nil, nil
 	}
 
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, value, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, addressValue, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
 	return acc, nil
 }
@@ -766,6 +768,10 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 		res, _, ok, err = r.ec.GetStorage(context.Background(), address, key, r.tx)
 		if err != nil {
 			return uint256.Int{}, false, err
+		}
+		if r.trace {
+			addressValue = address.Value()
+			keyValue = key.Value()
 		}
 	} else {
 		var composite [20 + 32]byte
@@ -805,6 +811,9 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		if r.trace && !address.IsNil() {
+			addressValue = address.Value()
+		}
 	} else {
 		if !address.IsNil() {
 			addressValue = address.Value()
@@ -825,6 +834,9 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var addressValue common.Address
 	if r.ec != nil {
 		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
+		if r.trace {
+			addressValue = address.Value()
+		}
 	} else {
 		if !address.IsNil() {
 			addressValue = address.Value()
