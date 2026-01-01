@@ -132,8 +132,12 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 				c.buf = c.allocator.Get()
 			} else {
 				prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
-				c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
-				c.buf.Prealloc(prevLen/8, prevSize/8)
+				if c.allocator != nil {
+					c.buf = c.allocator.Get()
+				} else {
+					c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
+					c.buf.Prealloc(prevLen/8, prevSize/8)
+				}
 			}
 			provider, err = FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator)
 			if err != nil {
