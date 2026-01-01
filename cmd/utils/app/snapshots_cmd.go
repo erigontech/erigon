@@ -1213,10 +1213,10 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
 	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
-	to := int64(-1)
+	//to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
-		uto, empty, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), CheckFilesParams{
-			checkLastFileTo: to,
+		_, empty, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), CheckFilesParams{
+			checkLastFileTo: -1,
 			emptyOk:         emptyOk,
 			doesntStartAt0:  snapt.Enum() == snaptype.BlobSidecars.Enum(),
 		})
@@ -1227,10 +1227,10 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 			continue
 		}
 
-		to = int64(uto)
+		//to = int64(uto)
 	}
 
-	to = int64(-1)
+	to := int64(-1)
 	somethingPresent, somethingEmpty := false, false
 	for table := range stateSnapTypes.KeyValueGetters {
 		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
