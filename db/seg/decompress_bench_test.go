@@ -33,7 +33,7 @@ func BenchmarkDecompressNext(b *testing.B) {
 		b.ReportAllocs()
 		var k []byte
 		g := d.MakeGetter()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			g.Reset(0)
 			for g.HasNext() {
 				k, _ = g.Next(k[:0])
@@ -46,7 +46,7 @@ func BenchmarkDecompressNext(b *testing.B) {
 	b.Run("heap", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			g.Reset(0)
 			for g.HasNext() {
 				k, _ := g.Next(nil)
@@ -66,7 +66,7 @@ func BenchmarkDecompressSkip(b *testing.B) {
 	b.Run("skip", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, _ = g.Skip()
 			if !g.HasNext() {
 				g.Reset(0)
@@ -77,7 +77,7 @@ func BenchmarkDecompressSkip(b *testing.B) {
 	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = g.MatchCmp([]byte("longlongword"))
 			if !g.HasNext() {
 				g.Reset(0)
