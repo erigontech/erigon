@@ -253,6 +253,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
 	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
