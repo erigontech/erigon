@@ -302,6 +302,29 @@ func (g *RequestGenerator) ethCall(from common.Address, to *common.Address, gas 
 	return sb.String()
 }
 
+
+func (g *RequestGenerator) ethEstimateGas(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_estimateGas", "params": [{"from":"0x%x"`, from)
+	if to != nil {
+		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
+	}
+	if gas != nil {
+		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
+	}
+	if gasPrice != nil {
+		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
+	}
+	if len(data) > 0 {
+		fmt.Fprintf(&sb, `,"data":"%s"`, data)
+	}
+	if value != nil {
+		fmt.Fprintf(&sb, `,"value":"%s"`, value)
+	}
+	fmt.Fprintf(&sb, `}], "id":%d}`, g.reqID.Add(1))
+	return sb.String()
+}
+
 func (g *RequestGenerator) ethCreateAccessList(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_createAccessList", "params": [{"from":"0x%x"`, from)
