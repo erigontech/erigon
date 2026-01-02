@@ -15,12 +15,10 @@ func init() {
 }
 
 func SetSeed(s uint64) {
-	// the stupid retards at golang decided to make the seed unexported
-	// so we have to use unsafe to set it
 	*(*uint64)(unsafe.Pointer(&seed)) = s
 }
 
-// hash computes a uint64 hash for a byte slice using the global seed.
+// Hash computes a uint64 hash for a byte slice using the global seed.
 func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
 }
