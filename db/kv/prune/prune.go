@@ -254,7 +254,7 @@ func TableScanningPrune(
 		if time.Since(start) > timeOut {
 			logger.Info("prune val timed out", "name", filenameBase)
 			lastPrunedVal = val
-			isDone = true
+			isDone = false
 			break
 		}
 		txNum := txNumGetter(val, txNumBytes)
