@@ -19,13 +19,12 @@ package state
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"runtime"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils/threading"
 	"github.com/erigontech/erigon/common/maphash"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -219,33 +218,23 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
 
-	numWorkers := runtime.NumCPU()
-	activeBalanceShards := make([]uint64, numWorkers)
-	wp := threading.NewParallelExecutor()
-	shardSize := b.ValidatorSet().Length() / numWorkers
-
-	for i := 0; i < numWorkers; i++ {
-		from := i * shardSize
-		to := (i + 1) * shardSize
-		if i == numWorkers-1 || to > b.ValidatorSet().Length() {
-			to = b.ValidatorSet().Length()
+	// Check global cache using block root at beginning of previous epoch
+	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
+	if err == nil {
+		if _, cachedBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && cachedBalance != 0 {
+			*b.totalActiveBalanceCache = cachedBalance
+			b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
+			return
 		}
-		workerID := i
-		wp.AddWork(func() error {
-			for j := from; j < to; j++ {
-				validator := b.ValidatorSet().Get(j)
-				if validator.Active(epoch) {
-					activeBalanceShards[workerID] += validator.EffectiveBalance()
-				}
-			}
-			return nil
-		})
 	}
-	wp.Execute()
 
-	for _, shard := range activeBalanceShards {
-		*b.totalActiveBalanceCache += shard
+	for i := 0; i < b.ValidatorSet().Length(); i++ {
+		validator := b.ValidatorSet().Get(i)
+		if validator.Active(epoch) {
+			*b.totalActiveBalanceCache += validator.EffectiveBalance()
+		}
 	}
+
 	*b.totalActiveBalanceCache = max(b.BeaconConfig().EffectiveBalanceIncrement, *b.totalActiveBalanceCache)
 	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
 }
