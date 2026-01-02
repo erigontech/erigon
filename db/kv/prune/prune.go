@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"time"
@@ -84,7 +83,6 @@ func HashSeekingPrune(
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
-			println("key", hex.EncodeToString(k), "value", hex.EncodeToString(v))
 			if err := collector.Collect(v, k); err != nil {
 				return nil, err
 			}
@@ -100,7 +98,6 @@ func HashSeekingPrune(
 		case KeyStorageMode:
 			seek := make([]byte, 8, 256)
 			seek = append(bytes.Clone(key), txnm...)
-			println("deleted", hex.EncodeToString(seek), hex.EncodeToString(key), hex.EncodeToString(txnm))
 			if err := valDelCursor.Delete(seek); err != nil {
 				return err
 			}
@@ -115,7 +112,6 @@ func HashSeekingPrune(
 			if vtx := binary.BigEndian.Uint64(vv); vtx != binary.BigEndian.Uint64(txnm) {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, 1132)
 			}
-			println("deleted sh", hex.EncodeToString(key))
 			if err = valDelCursor.DeleteCurrent(); err != nil {
 				return err
 			}
