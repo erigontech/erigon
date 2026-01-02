@@ -28,7 +28,7 @@ import (
 
 // Implementation of paticia tree for efficient search of substrings from a dictionary in a given string
 type node struct {
-	val interface{} // value associated with the key
+	val any // value associated with the key
 	n0  *node
 	n1  *node
 	p0  uint32
@@ -287,7 +287,7 @@ func (s *pathWalker) diverge(divergence uint32) {
 	s.tail = 0
 }
 
-func (n *node) insert(key []byte, value interface{}) {
+func (n *node) insert(key []byte, value any) {
 	s := newPathWalker(n)
 	for _, b := range key {
 		divergence := s.transition(b, false /* readonly */)
@@ -298,7 +298,7 @@ func (n *node) insert(key []byte, value interface{}) {
 	s.insert(value)
 }
 
-func (s *pathWalker) insert(value interface{}) {
+func (s *pathWalker) insert(value any) {
 	if s.tail != 0 {
 		s.diverge(0)
 	}
@@ -316,7 +316,7 @@ func (s *pathWalker) insert(value interface{}) {
 	s.n.val = value
 }
 
-func (n *node) get(key []byte) (interface{}, bool) {
+func (n *node) get(key []byte) (any, bool) {
 	s := newPathWalker(n)
 	for _, b := range key {
 		divergence := s.transition(b, true /* readonly */)
@@ -335,17 +335,17 @@ type PatriciaTree struct {
 	root node
 }
 
-func (pt *PatriciaTree) Insert(key []byte, value interface{}) {
+func (pt *PatriciaTree) Insert(key []byte, value any) {
 	//fmt.Printf("%p Insert [%x]\n", pt, key)
 	pt.root.insert(key, value)
 }
 
-func (pt *PatriciaTree) Get(key []byte) (interface{}, bool) {
+func (pt *PatriciaTree) Get(key []byte) (any, bool) {
 	return pt.root.get(key)
 }
 
 type Match struct {
-	Val   interface{}
+	Val   any
 	Start int
 	End   int
 }

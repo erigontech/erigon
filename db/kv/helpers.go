@@ -131,8 +131,6 @@ func bytes2bool(in []byte) bool {
 	return in[0] == 1
 }
 
-var ErrChanged = errors.New("key must not change")
-
 // EnsureNotChangedBool - used to store immutable config flags in db. protects from human mistakes
 func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (notChanged, enabled bool, err error) {
 	vBytes, err := tx.GetOne(bucket, k)

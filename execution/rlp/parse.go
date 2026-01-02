@@ -29,8 +29,6 @@ var (
 	ErrDecode = fmt.Errorf("%w decode", ErrBase)
 )
 
-func IsRLPError(err error) bool { return errors.Is(err, ErrBase) }
-
 // BeInt parses Big Endian representation of an integer from given payload at given position
 func BeInt(payload []byte, pos, length int) (int, error) {
 	var r int

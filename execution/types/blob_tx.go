@@ -117,7 +117,7 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(BlobTxType, []interface{}{
+	hash := prefixedRlpHash(BlobTxType, []any{
 		stx.ChainID,
 		stx.Nonce,
 		stx.TipCap,
@@ -138,7 +138,7 @@ func (stx *BlobTx) Hash() common.Hash {
 func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
-		[]interface{}{
+		[]any{
 			chainID,
 			stx.Nonce,
 			stx.TipCap,

@@ -170,9 +170,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 }
 
 func TestDecompressMatchOKCondensed(t *testing.T) {
-	condensePatternTableBitThreshold = 4
 	d := prepareStupidDict(t, 10000)
-	defer func() { condensePatternTableBitThreshold = 9 }()
 	defer d.Close()
 
 	g := d.MakeGetter()
@@ -537,8 +535,6 @@ func TestDecompressTorrent(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
-	condensePatternTableBitThreshold = 9
-	fmt.Printf("bit threshold: %d\n", condensePatternTableBitThreshold)
 	d, err := NewDecompressor(fpath)
 
 	require.NoError(t, err)

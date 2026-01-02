@@ -58,7 +58,7 @@ func (rh ReconHeap) Swap(i, j int) {
 }
 
 // Push (part of heap.Interface) places a new link onto the end of queue. Note that idx attribute is set to the correct position of the new link
-func (rh *ReconHeap) Push(x interface{}) {
+func (rh *ReconHeap) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	l := x.(*ReconItem)
@@ -66,7 +66,7 @@ func (rh *ReconHeap) Push(x interface{}) {
 }
 
 // Pop (part of heap.Interface) removes the first link from the queue
-func (rh *ReconHeap) Pop() interface{} {
+func (rh *ReconHeap) Pop() any {
 	old := *rh
 	n := len(old)
 	x := old[n-1]

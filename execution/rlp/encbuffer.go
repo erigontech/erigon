@@ -35,7 +35,7 @@ type encBuffer struct {
 
 // encbufs are pooled.
 var encBufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		var bytes []byte
 		return &encBuffer{bufvalue: reflect.ValueOf(&bytes).Elem()}
 	},
@@ -53,7 +53,7 @@ func (w *encBuffer) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (w *encBuffer) encode(val interface{}) error {
+func (w *encBuffer) encode(val any) error {
 	rval := reflect.ValueOf(val)
 	writer, err := cachedWriter(rval.Type())
 	if err != nil {

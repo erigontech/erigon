@@ -60,7 +60,7 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 		}
 
 		WrapKeyUpdatesInto(b, upds, pk[i:i+5], updates[i:i+5])
-		_, err := hph.Process(ctx, upds, "", nil)
+		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(b, err)
 	}
 }

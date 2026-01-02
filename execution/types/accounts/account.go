@@ -162,7 +162,7 @@ func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool,
 }
 
 var rlpEncodingBufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, 0, 128)
 		return &buf
 	},
