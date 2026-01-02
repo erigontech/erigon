@@ -47,7 +47,7 @@ const (
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// WorstCase is "Exec of large batch of blocks. While Caplin also syncing in background":
+// etlSmallBufRAM - Worst-case is "Exec of large batch of blocks. While Caplin also syncing in background":
 //   - State: 5_domains * 4 collectors + 4_standelone_indices * 2 collectors = 25 etl collectors * (256Mb/8) = 800Mb
 //   - Caplin: `cl/antiquary/beacon_states_collector.go`: 25 etl collectors * (256Mb/8) = 800Mb
 //   - `asyncDiskDump=true` feature of ETL - doubling RAM usage (1 collector is current, 1 collector flushing/sorting in background): 2 * (800MB + 800MB) = 3.2GB
