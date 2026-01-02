@@ -21,7 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/common"
-	"golang.org/x/exp/maps"
+	"github.com/erigontech/erigon/common/maphash"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
@@ -44,15 +44,12 @@ func (bs *CachingBeaconState) reinitCaches() error {
 		return bs.InitBeaconState()
 	}
 
-	// Clear the existing map instead of re-allocating
-	if bs.publicKeyIndicies == nil {
-		bs.publicKeyIndicies = make(map[[48]byte]uint64)
-	} else {
-		maps.Clear(bs.publicKeyIndicies)
-	}
+	// Always create a new map (maphash.Map doesn't have a Clear method)
+	bs.publicKeyIndicies = maphash.NewMap[uint64]()
 
 	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		bs.publicKeyIndicies[v.PublicKey()] = uint64(idx)
+		pk := v.PublicKey()
+		bs.publicKeyIndicies.Set(pk[:], uint64(idx))
 		return true
 	})
 
