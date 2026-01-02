@@ -18,6 +18,7 @@ package state
 
 import (
 	"encoding/binary"
+	"errors"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -76,54 +77,144 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step kv.Step, err erro
 	return kv.Step(binary.BigEndian.Uint64(v)), nil
 }
 
-func SavePruneValProgress(db kv.Putter, prunedTblName string, prunedStat *prune.Stat) error {
-	doneKey := make([]byte, 1)
-	if prunedStat.KeyDone {
-		doneKey[0] = 1
+//func SavePruneValProgress(db kv.Putter, prunedTblName string, prunedStat *prune.Stat) error {
+//	doneKey := make([]byte, 1)
+//	if prunedStat.KeyDone {
+//		doneKey[0] = 1
+//	}
+//	doneVal := make([]byte, 1)
+//	if prunedStat.ValueDone {
+//		doneVal[0] = 1
+//	}
+//	err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"keys"), append(doneKey, prunedStat.LastPrunedKey...))
+//	if err != nil {
+//		return err
+//	}
+//	err = db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"vals"), append(doneVal, prunedStat.LastPrunedValue...))
+//	if err != nil {
+//		return err
+//	}
+//	return nil
+//}
+//
+//func GetPruneValProgress(db kv.Getter, tbl []byte) (stat *prune.Stat, err error) {
+//	stat = &prune.Stat{}
+//	v, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "vals"...))
+//	if err != nil {
+//		return nil, err
+//	}
+//	switch len(v) {
+//	case 0:
+//	case 1:
+//		if v[0] == 1 {
+//			stat.ValueDone = true
+//		}
+//	default:
+//		stat.LastPrunedValue = v[1:]
+//	}
+//	k, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "keys"...))
+//	if err != nil {
+//		return nil, err
+//	}
+//	switch len(v) {
+//	case 0:
+//	case 1:
+//		if k[0] == 1 {
+//			stat.KeyDone = true
+//		}
+//	default:
+//		stat.LastPrunedKey = k[1:]
+//	}
+//
+//	return stat, nil
+//}
+
+func encodeRange(txFrom, txTo uint64) []byte {
+	b := make([]byte, 16)
+	binary.BigEndian.PutUint64(b[0:8], txFrom)
+	binary.BigEndian.PutUint64(b[8:16], txTo)
+	return b
+}
+
+func decodeRange(v []byte) (txFrom, txTo uint64, err error) {
+	if len(v) == 0 {
+		return 0, 0, nil
 	}
-	doneVal := make([]byte, 1)
-	if prunedStat.ValueDone {
-		doneVal[0] = 1
+	if len(v) < 16 {
+		return 0, 0, errors.New("prune progress: short range value")
 	}
-	err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"keys"), append(doneKey, prunedStat.LastPrunedKey...))
-	if err != nil {
+	return binary.BigEndian.Uint64(v[0:8]), binary.BigEndian.Uint64(v[8:16]), nil
+}
+
+const (
+	flagDone = 1 << 0
+)
+
+func encodeProgress(done bool, last []byte) []byte {
+	b := make([]byte, 1+len(last))
+	if done {
+		b[0] = flagDone
+	}
+	copy(b[1:], last)
+	return b
+}
+
+func decodeProgress(v []byte) (done bool, last []byte, err error) {
+	if len(v) == 0 {
+		return false, nil, nil
+	}
+	done = (v[0] & flagDone) != 0
+	if len(v) > 1 {
+		last = v[1:]
+	}
+	return done, last, nil
+}
+
+func SavePruneValProgress(db kv.Putter, prunedTblName string, st *prune.Stat) error {
+	if err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"range"), encodeRange(st.TxFrom, st.TxTo)); err != nil {
 		return err
 	}
-	err = db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"vals"), append(doneVal, prunedStat.LastPrunedValue...))
-	if err != nil {
+
+	if err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"keys"), encodeProgress(st.KeyDone, st.LastPrunedKey)); err != nil {
 		return err
 	}
+
+	if err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"vals"), encodeProgress(st.ValueDone, st.LastPrunedValue)); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func GetPruneValProgress(db kv.Getter, tbl []byte) (stat *prune.Stat, err error) {
-	stat = &prune.Stat{}
+func GetPruneValProgress(db kv.Getter, tbl []byte) (*prune.Stat, error) {
+	st := &prune.Stat{}
+
+	r, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "range"...))
+	if err != nil {
+		return nil, err
+	}
+	st.TxFrom, st.TxTo, err = decodeRange(r)
+	if err != nil {
+		return nil, err
+	}
+
 	v, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "vals"...))
 	if err != nil {
 		return nil, err
 	}
-	switch len(v) {
-	case 0:
-	case 1:
-		if v[0] == 1 {
-			stat.ValueDone = true
-		}
-	default:
-		stat.LastPrunedValue = v[1:]
+	st.ValueDone, st.LastPrunedValue, err = decodeProgress(v)
+	if err != nil {
+		return nil, err
 	}
+
 	k, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "keys"...))
 	if err != nil {
 		return nil, err
 	}
-	switch len(v) {
-	case 0:
-	case 1:
-		if k[0] == 1 {
-			stat.KeyDone = true
-		}
-	default:
-		stat.LastPrunedKey = k[1:]
+	st.KeyDone, st.LastPrunedKey, err = decodeProgress(k)
+	if err != nil {
+		return nil, err
 	}
 
-	return stat, nil
+	return st, nil
 }

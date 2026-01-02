@@ -25,6 +25,8 @@ type Stat struct {
 	LastPrunedKey    []byte
 	KeyDone          bool
 	ValueDone        bool
+	TxFrom           uint64
+	TxTo             uint64
 }
 
 type StorageMode int
@@ -193,6 +195,11 @@ func TableScanningPrune(
 	}
 
 	var startKey, startVal = &StartPos{}, &StartPos{}
+	// invalidate progress if new params here
+	if !(prevStat.TxFrom == txFrom && prevStat.TxTo == txTo) {
+		prevStat.ValueDone = false
+		prevStat.KeyDone = false
+	}
 	if !prevStat.ValueDone {
 		startVal.StartVal, startVal.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
 	} else {
@@ -210,7 +217,9 @@ func TableScanningPrune(
 
 	var pairs, valLen uint64
 
-	defer logger.Info("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds(), "prune ended", stat.KeyDone && stat.ValueDone)
+	defer func() {
+		logger.Info("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds(), "prune ended", stat.KeyDone && stat.ValueDone)
+	}()
 
 	if !prevStat.KeyDone {
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully

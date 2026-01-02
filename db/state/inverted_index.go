@@ -877,6 +877,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return nil, err
 	}
 	defer func() {
+		pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
 		err = SavePruneValProgress(rwTx, vtbl, pruneStat)
 		if err != nil {
 			iit.ii.logger.Error("prune val progress", "name", iit.name, "err", err)
