@@ -227,7 +227,7 @@ func TableScanningPrune(
 	valLen := uint64(0)
 	txNumBytes, val := common.Copy(startKey), common.Copy(startVal)
 
-	isDone := false
+	isDone := true
 
 	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
 		switch mode {
@@ -306,7 +306,7 @@ func TableScanningPrune(
 				}
 				if time.Since(start) > timeOut {
 					lastPrunedVal = val
-					isDone = true
+					isDone = false
 					break
 				}
 				//println("txnum passed checks loop", txNumDup)
@@ -320,7 +320,7 @@ func TableScanningPrune(
 				mxPruneSizeIndex.Inc()
 				stat.PruneCountValues++
 			}
-			if isDone {
+			if !isDone {
 				break
 			}
 		}
