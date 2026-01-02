@@ -320,3 +320,202 @@ func BenchmarkMapConcurrentReadWrite(b *testing.B) {
 		}
 	})
 }
+
+// LRU tests
+
+func TestLRUBasicOperations(t *testing.T) {
+	SetSeed(42)
+	l, err := NewLRU[int](10)
+	if err != nil {
+		t.Fatalf("failed to create LRU: %v", err)
+	}
+
+	// Test Set and Get
+	l.Set([]byte("key1"), 100)
+	l.Set([]byte("key2"), 200)
+
+	v, ok := l.Get([]byte("key1"))
+	if !ok || v != 100 {
+		t.Errorf("expected (100, true), got (%d, %v)", v, ok)
+	}
+
+	v, ok = l.Get([]byte("key2"))
+	if !ok || v != 200 {
+		t.Errorf("expected (200, true), got (%d, %v)", v, ok)
+	}
+
+	// Test non-existent key
+	v, ok = l.Get([]byte("nonexistent"))
+	if ok || v != 0 {
+		t.Errorf("expected (0, false), got (%d, %v)", v, ok)
+	}
+
+	// Test Len
+	if l.Len() != 2 {
+		t.Errorf("expected len 2, got %d", l.Len())
+	}
+
+	// Test Delete
+	l.Delete([]byte("key1"))
+	v, ok = l.Get([]byte("key1"))
+	if ok {
+		t.Errorf("expected key1 to be deleted, got (%d, %v)", v, ok)
+	}
+
+	if l.Len() != 1 {
+		t.Errorf("expected len 1 after delete, got %d", l.Len())
+	}
+}
+
+func TestLRUEviction(t *testing.T) {
+	SetSeed(42)
+	l, err := NewLRU[int](3)
+	if err != nil {
+		t.Fatalf("failed to create LRU: %v", err)
+	}
+
+	// Fill the cache
+	l.Set([]byte("key1"), 1)
+	l.Set([]byte("key2"), 2)
+	l.Set([]byte("key3"), 3)
+
+	if l.Len() != 3 {
+		t.Errorf("expected len 3, got %d", l.Len())
+	}
+
+	// Add one more, should evict the oldest (key1)
+	l.Set([]byte("key4"), 4)
+
+	if l.Len() != 3 {
+		t.Errorf("expected len 3 after eviction, got %d", l.Len())
+	}
+
+	// key1 should be evicted
+	_, ok := l.Get([]byte("key1"))
+	if ok {
+		t.Error("expected key1 to be evicted")
+	}
+
+	// key2, key3, key4 should still exist
+	for _, key := range []string{"key2", "key3", "key4"} {
+		if !l.Contains([]byte(key)) {
+			t.Errorf("expected %s to exist", key)
+		}
+	}
+}
+
+func TestLRUContains(t *testing.T) {
+	SetSeed(42)
+	l, err := NewLRU[int](10)
+	if err != nil {
+		t.Fatalf("failed to create LRU: %v", err)
+	}
+
+	l.Set([]byte("exists"), 42)
+
+	if !l.Contains([]byte("exists")) {
+		t.Error("expected Contains to return true for existing key")
+	}
+
+	if l.Contains([]byte("not-exists")) {
+		t.Error("expected Contains to return false for non-existing key")
+	}
+}
+
+func TestLRUPurge(t *testing.T) {
+	SetSeed(42)
+	l, err := NewLRU[int](10)
+	if err != nil {
+		t.Fatalf("failed to create LRU: %v", err)
+	}
+
+	l.Set([]byte("key1"), 1)
+	l.Set([]byte("key2"), 2)
+	l.Set([]byte("key3"), 3)
+
+	if l.Len() != 3 {
+		t.Errorf("expected len 3, got %d", l.Len())
+	}
+
+	l.Purge()
+
+	if l.Len() != 0 {
+		t.Errorf("expected len 0 after purge, got %d", l.Len())
+	}
+}
+
+func TestLRUConcurrentAccess(t *testing.T) {
+	SetSeed(42)
+	l, err := NewLRU[int](1000)
+	if err != nil {
+		t.Fatalf("failed to create LRU: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	n := 100
+
+	// Concurrent writes
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := []byte{byte(i)}
+			l.Set(key, i)
+		}(i)
+	}
+	wg.Wait()
+
+	// Concurrent reads
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := []byte{byte(i)}
+			l.Get(key)
+		}(i)
+	}
+	wg.Wait()
+
+	// Concurrent mixed operations
+	for i := 0; i < n; i++ {
+		wg.Add(3)
+		go func(i int) {
+			defer wg.Done()
+			key := []byte{byte(i)}
+			l.Set(key, i*2)
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			key := []byte{byte(i)}
+			l.Get(key)
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			l.Len()
+		}(i)
+	}
+	wg.Wait()
+}
+
+func BenchmarkLRUSet(b *testing.B) {
+	SetSeed(42)
+	l, _ := NewLRU[int](10000)
+	key := []byte("benchmark-key")
+
+	b.ResetTimer()
+	for b.Loop() {
+		l.Set(key, 123)
+	}
+}
+
+func BenchmarkLRUGet(b *testing.B) {
+	SetSeed(42)
+	l, _ := NewLRU[int](10000)
+	key := []byte("benchmark-key")
+	l.Set(key, 123)
+
+	b.ResetTimer()
+	for b.Loop() {
+		l.Get(key)
+	}
+}
