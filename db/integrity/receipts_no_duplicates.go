@@ -39,7 +39,7 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, ReceiptsNoDupsRange)
 }
 
-func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -60,23 +60,92 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.T
 		return err
 	}
 
-	prevCumUsedGas := -1
-	prevLogIdxAfterTx := uint32(0)
+	prevCumGasUsed := -1
 	blockNum := fromBlock
 	var _min, _max uint64
 	_min = fromTxNum
 	_max, _ = txNumsReader.Max(tx, fromBlock)
 
-	cumGasUsedTx, err := db.BeginTemporalRo(ctx)
+	cumGasTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
-	defer cumGasUsedTx.Rollback()
-	cumUsedGasIt, err := cumGasUsedTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.CumulativeGasUsedInBlockKey, fromTxNum, toTxNum+1)
+	defer cumGasTx.Rollback()
+	cumGasIt, err := cumGasTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.CumulativeGasUsedInBlockKey, fromTxNum, toTxNum+1)
 	if err != nil {
 		return err
 	}
-	defer cumUsedGasIt.Close()
+	defer cumGasIt.Close()
+
+	for cumGasIt.HasNext() {
+		txNum, v, err := cumGasIt.Next()
+		if err != nil {
+			return err
+		}
+		cumGasUsed := uvarint(v)
+		blockChanged := false
+
+		for txNum >= _max {
+			blockNum++
+			_min = _max + 1
+			_max, _ = txNumsReader.Max(tx, blockNum)
+			blockChanged = true
+		}
+		//fmt.Println("txNum:", txNum, "cumGasUsed:", cumGasUsed)
+		if blockChanged {
+			prevCumGasUsed = 0
+		}
+
+		strongMonotonicCumGasUsed := int(cumGasUsed) > prevCumGasUsed
+		if !strongMonotonicCumGasUsed && !blockChanged { // system tx can be skipped
+			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
+			if failFast {
+				return err
+			}
+			log.Error(err.Error())
+		}
+
+		if !blockChanged {
+			prevCumGasUsed = int(cumGasUsed)
+		}
+
+		if txNum%1000 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+	}
+	return nil
+}
+
+func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	txNumsReader := blockReader.TxnumReader(ctx)
+	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	if err != nil {
+		return err
+	}
+
+	if toBlock > 0 {
+		toBlock-- // [fromBlock,toBlock)
+	}
+
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	if err != nil {
+		return err
+	}
+
+	prevLogIdxAfterTx := uint32(0)
+	blockNum := fromBlock
+	var _min, _max uint64
+	_min = fromTxNum
+	_max, _ = txNumsReader.Max(tx, fromBlock)
 
 	logIdxAfterTxTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -89,39 +158,27 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.T
 		return err
 	}
 	defer logIdxAfterTxIt.Close()
-
-	for cumUsedGasIt.HasNext() {
-		txNum, v, err := cumUsedGasIt.Next()
-		if err != nil {
-			return err
-		}
-		cumUsedGas := uvarint(v)
-		txNum2, v, err := logIdxAfterTxIt.Next()
+	for logIdxAfterTxIt.HasNext() {
+		txNum, v, err := logIdxAfterTxIt.Next()
 		if err != nil {
 			return err
 		}
 		logIdxAfterTx := uint32(uvarint(v))
-		if txNum != txNum2 {
-			return fmt.Errorf("CheckReceiptsNoDups: mismatched txNums in cumulativeGasUsed, cumulativeBlobGasUsed, logIdxAfterTx: %d, %d", txNum, txNum2)
+		blockChanged := false
+
+		for txNum >= _max {
+			blockNum++
+			_min, _ = txNumsReader.Min(tx, blockNum)
+			_max, _ = txNumsReader.Max(tx, blockNum)
+			blockChanged = true
 		}
 
-		blockChanged := txNum == _min
 		if blockChanged {
-			prevCumUsedGas = 0
 			prevLogIdxAfterTx = 0
 		}
 
-		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
-		if !strongMonotonicCumGasUsed && txNum != _min && txNum != _max { // system tx can be skipped
-			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
-			if failFast {
-				return err
-			}
-			log.Error(err.Error())
-		}
-
 		monotonicLogIdx := logIdxAfterTx >= prevLogIdxAfterTx
-		if !monotonicLogIdx && txNum != _min && txNum != _max {
+		if !monotonicLogIdx && !blockChanged {
 			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdxAfterTx=%d, prevLogIdxAfterTx=%d", txNum, blockNum, _min, _max, logIdxAfterTx, prevLogIdxAfterTx)
 			if failFast {
 				return err
@@ -129,13 +186,8 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.T
 			log.Error(err.Error())
 		}
 
-		prevCumUsedGas = int(cumUsedGas)
-		prevLogIdxAfterTx = logIdxAfterTx
-
-		for txNum >= _max {
-			blockNum++
-			_min = _max + 1
-			_max, _ = txNumsReader.Max(tx, blockNum)
+		if !blockChanged {
+			prevLogIdxAfterTx = logIdxAfterTx
 		}
 
 		if txNum%1000 == 0 {
@@ -146,7 +198,16 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.T
 			}
 		}
 	}
+	return nil
+}
 
+func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	if err := checkCumGas(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
+		return err
+	}
+	if err := checkLogIdx(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -172,12 +172,6 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 		chunkEnd := end     // Capture loop variable
 
 		g.Go(func() error {
-			tx, err := db.BeginTemporalRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-
 			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast)
 			if chunkErr != nil {
 				return chunkErr
