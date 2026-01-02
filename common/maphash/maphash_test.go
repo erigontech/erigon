@@ -3,6 +3,7 @@ package maphash
 import (
 	"sync"
 	"testing"
+	"unique"
 )
 
 func TestSetSeed(t *testing.T) {
@@ -518,4 +519,304 @@ func BenchmarkLRUGet(b *testing.B) {
 	for b.Loop() {
 		l.Get(key)
 	}
+}
+
+// Comparison benchmarks: maphash.Map vs map[string] vs unique.Handle
+
+// StringMap is a simple map with string keys for comparison
+type StringMap[V any] struct {
+	m  map[string]V
+	mu sync.RWMutex
+}
+
+func NewStringMap[V any]() *StringMap[V] {
+	return &StringMap[V]{m: make(map[string]V)}
+}
+
+func (m *StringMap[V]) Get(key []byte) (V, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	v, ok := m.m[string(key)]
+	return v, ok
+}
+
+func (m *StringMap[V]) Set(key []byte, value V) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.m[string(key)] = value
+}
+
+// Benchmark Set operations
+
+func BenchmarkMaphashMapSet(b *testing.B) {
+	SetSeed(42)
+	m := NewMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+
+	b.ResetTimer()
+	for b.Loop() {
+		m.Set(key, 123)
+	}
+}
+
+func BenchmarkStringMapSet(b *testing.B) {
+	m := NewStringMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+
+	b.ResetTimer()
+	for b.Loop() {
+		m.Set(key, 123)
+	}
+}
+
+// Benchmark Get operations
+
+func BenchmarkMaphashMapGet(b *testing.B) {
+	SetSeed(42)
+	m := NewMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+	m.Set(key, 123)
+
+	b.ResetTimer()
+	for b.Loop() {
+		m.Get(key)
+	}
+}
+
+func BenchmarkStringMapGet(b *testing.B) {
+	m := NewStringMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+	m.Set(key, 123)
+
+	b.ResetTimer()
+	for b.Loop() {
+		m.Get(key)
+	}
+}
+
+// Benchmark Set with many keys (more realistic cache scenario)
+
+func BenchmarkMaphashMapSetManyKeys(b *testing.B) {
+	SetSeed(42)
+
+	// Pre-generate 10000 keys
+	keys := make([][]byte, 10000)
+	for i := range keys {
+		keys[i] = make([]byte, 48)
+		keys[i][0] = byte(i >> 24)
+		keys[i][1] = byte(i >> 16)
+		keys[i][2] = byte(i >> 8)
+		keys[i][3] = byte(i)
+	}
+
+	b.ResetTimer()
+	i := 0
+	for b.Loop() {
+		m := NewMap[int]()
+		for _, key := range keys {
+			m.Set(key, i)
+			i++
+		}
+	}
+}
+
+func BenchmarkStringMapSetManyKeys(b *testing.B) {
+	// Pre-generate 10000 keys
+	keys := make([][]byte, 10000)
+	for i := range keys {
+		keys[i] = make([]byte, 48)
+		keys[i][0] = byte(i >> 24)
+		keys[i][1] = byte(i >> 16)
+		keys[i][2] = byte(i >> 8)
+		keys[i][3] = byte(i)
+	}
+
+	b.ResetTimer()
+	i := 0
+	for b.Loop() {
+		m := NewStringMap[int]()
+		for _, key := range keys {
+			m.Set(key, i)
+			i++
+		}
+	}
+}
+
+func BenchmarkUniqueHandleMapSetManyKeys(b *testing.B) {
+	// Pre-generate 10000 keys
+	keys := make([][]byte, 10000)
+	for i := range keys {
+		keys[i] = make([]byte, 48)
+		keys[i][0] = byte(i >> 24)
+		keys[i][1] = byte(i >> 16)
+		keys[i][2] = byte(i >> 8)
+		keys[i][3] = byte(i)
+	}
+
+	b.ResetTimer()
+	i := 0
+	for b.Loop() {
+		m := NewUniqueHandleMap[int]()
+		for _, key := range keys {
+			m.Set(key, i)
+			i++
+		}
+	}
+}
+
+// Benchmark Get with many keys (more realistic cache scenario)
+
+func BenchmarkMaphashMapGetManyKeys(b *testing.B) {
+	SetSeed(42)
+	m := NewMap[int]()
+
+	// Pre-populate with 10000 keys
+	keys := make([][]byte, 10000)
+	for i := range keys {
+		keys[i] = make([]byte, 48)
+		keys[i][0] = byte(i >> 24)
+		keys[i][1] = byte(i >> 16)
+		keys[i][2] = byte(i >> 8)
+		keys[i][3] = byte(i)
+		m.Set(keys[i], i)
+	}
+
+	b.ResetTimer()
+	i := 0
+	for b.Loop() {
+		m.Get(keys[i%len(keys)])
+		i++
+	}
+}
+
+func BenchmarkStringMapGetManyKeys(b *testing.B) {
+	m := NewStringMap[int]()
+
+	// Pre-populate with 10000 keys
+	keys := make([][]byte, 10000)
+	for i := range keys {
+		keys[i] = make([]byte, 48)
+		keys[i][0] = byte(i >> 24)
+		keys[i][1] = byte(i >> 16)
+		keys[i][2] = byte(i >> 8)
+		keys[i][3] = byte(i)
+		m.Set(keys[i], i)
+	}
+
+	b.ResetTimer()
+	i := 0
+	for b.Loop() {
+		m.Get(keys[i%len(keys)])
+		i++
+	}
+}
+
+// Benchmark concurrent access
+
+func BenchmarkMaphashMapConcurrent(b *testing.B) {
+	SetSeed(42)
+	m := NewMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+	m.Set(key, 123)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			m.Get(key)
+		}
+	})
+}
+
+func BenchmarkStringMapConcurrent(b *testing.B) {
+	m := NewStringMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+	m.Set(key, 123)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			m.Get(key)
+		}
+	})
+}
+
+// UniqueHandleMap uses unique.Handle for string interning
+type UniqueHandleMap[V any] struct {
+	m  map[unique.Handle[string]]V
+	mu sync.RWMutex
+}
+
+func NewUniqueHandleMap[V any]() *UniqueHandleMap[V] {
+	return &UniqueHandleMap[V]{m: make(map[unique.Handle[string]]V)}
+}
+
+func (m *UniqueHandleMap[V]) Get(key []byte) (V, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	h := unique.Make(string(key))
+	v, ok := m.m[h]
+	return v, ok
+}
+
+func (m *UniqueHandleMap[V]) Set(key []byte, value V) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h := unique.Make(string(key))
+	m.m[h] = value
+}
+
+func BenchmarkUniqueHandleMapSet(b *testing.B) {
+	m := NewUniqueHandleMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+
+	b.ResetTimer()
+	for b.Loop() {
+		m.Set(key, 123)
+	}
+}
+
+func BenchmarkUniqueHandleMapGet(b *testing.B) {
+	m := NewUniqueHandleMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+	m.Set(key, 123)
+
+	b.ResetTimer()
+	for b.Loop() {
+		m.Get(key)
+	}
+}
+
+func BenchmarkUniqueHandleMapGetManyKeys(b *testing.B) {
+	m := NewUniqueHandleMap[int]()
+
+	// Pre-populate with 10000 keys
+	keys := make([][]byte, 10000)
+	for i := range keys {
+		keys[i] = make([]byte, 48)
+		keys[i][0] = byte(i >> 24)
+		keys[i][1] = byte(i >> 16)
+		keys[i][2] = byte(i >> 8)
+		keys[i][3] = byte(i)
+		m.Set(keys[i], i)
+	}
+
+	b.ResetTimer()
+	i := 0
+	for b.Loop() {
+		m.Get(keys[i%len(keys)])
+		i++
+	}
+}
+
+func BenchmarkUniqueHandleMapConcurrent(b *testing.B) {
+	m := NewUniqueHandleMap[int]()
+	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
+	m.Set(key, 123)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			m.Get(key)
+		}
+	})
 }
