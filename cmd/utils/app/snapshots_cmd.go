@@ -1215,7 +1215,7 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 
 	//to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
-		_, empty, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), CheckFilesParams{
+		_, _, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), CheckFilesParams{
 			checkLastFileTo: -1,
 			emptyOk:         emptyOk,
 			doesntStartAt0:  snapt.Enum() == snaptype.BlobSidecars.Enum(),
@@ -1223,9 +1223,9 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 		if err != nil {
 			return err
 		}
-		if empty {
-			continue
-		}
+		// if empty {
+		// 	continue
+		// }
 
 		//to = int64(uto)
 	}
