@@ -24,10 +24,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -54,7 +55,7 @@ func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.A
 
 func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context, blockNum uint64, searchAddr common.Address, chainConfig *chain.Config) (bool, *TransactionsWithReceipts, error) {
 	rpcTxs := make([]*ethapi.RPCTransaction, 0)
-	receipts := make([]map[string]interface{}, 0)
+	receipts := make([]map[string]any, 0)
 
 	// Retrieve the transaction and assemble its EVM context
 	blockHash, ok, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)
@@ -97,7 +98,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, err
 	}
 	header := block.Header()
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, nil, chainConfig)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, chainConfig)
 	rules := blockContext.Rules(chainConfig)
 	found := false
 	for idx, txn := range block.Transactions() {
@@ -110,7 +111,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 
-		tracer := NewTouchTracer(searchAddr)
+		tracer := NewTouchTracer(accounts.InternAddress(searchAddr))
 		ibs.SetHooks(tracer.TracingHooks())
 		txContext := protocol.NewEVMTxContext(msg)
 

@@ -68,7 +68,7 @@ type Encoder interface {
 // buffered.
 //
 // Please see package-level documentation of encoding rules.
-func Encode(w io.Writer, val interface{}) error {
+func Encode(w io.Writer, val any) error {
 	if outer, ok := w.(*encBuffer); ok {
 		// Encode was called by some type's EncodeRLP.
 		// Avoid copying by writing to the outer encBuffer directly.
@@ -97,7 +97,7 @@ func Write(w io.Writer, val []byte) error {
 
 // EncodeToBytes returns the RLP encoding of val.
 // Please see package-level documentation for the encoding rules.
-func EncodeToBytes(val interface{}) ([]byte, error) {
+func EncodeToBytes(val any) ([]byte, error) {
 	eb := encBufferPool.Get().(*encBuffer)
 	defer encBufferPool.Put(eb)
 	eb.reset()
@@ -112,7 +112,7 @@ func EncodeToBytes(val interface{}) ([]byte, error) {
 // data.
 //
 // Please see the documentation of Encode for the encoding rules.
-func EncodeToReader(val interface{}) (size int, r io.Reader, err error) {
+func EncodeToReader(val any) (size int, r io.Reader, err error) {
 	eb := encBufferPool.Get().(*encBuffer)
 	eb.reset()
 	if err := eb.encode(val); err != nil {
@@ -153,7 +153,7 @@ func puthead(buf []byte, smalltag, largetag byte, size uint64) int {
 	return sizesize + 1
 }
 
-var encoderInterface = reflect.TypeOf(new(Encoder)).Elem()
+var encoderInterface = reflect.TypeFor[Encoder]()
 
 // makeWriter creates a writer function for the given type.
 func makeWriter(typ reflect.Type, ts tags) (writer, error) {
@@ -302,7 +302,7 @@ func writeBytes(val reflect.Value, w *encBuffer) error {
 	return nil
 }
 
-var byteType = reflect.TypeOf(byte(0))
+var byteType = reflect.TypeFor[byte]()
 
 func makeByteArrayWriter(typ reflect.Type) writer {
 	length := typ.Len()
@@ -566,30 +566,30 @@ func intsize(i uint64) (size int) {
 	return common.BitLenToByteLen(bits.Len64(i))
 }
 
-func IntLenExcludingHead(i uint64) int {
-	if i < 0x80 {
-		return 0
+func BigIntLen(i *big.Int) int {
+	bitLen := 0 // treat nil as 0
+	if i != nil {
+		bitLen = i.BitLen()
 	}
-	return intsize(i)
+	if bitLen < 8 {
+		return 1
+	}
+	// Strictly speaking, +1 is not correct when the number is longer than 55 bytes
+	// (see https://ethereum.org/developers/docs/data-structures-and-encoding/rlp/),
+	// but in practice all our numbers are smaller than that.
+	return 1 + common.BitLenToByteLen(bitLen)
 }
 
-func BigIntLenExcludingHead(i *big.Int) int {
+func Uint256Len(i uint256.Int) int {
 	bitLen := i.BitLen()
 	if bitLen < 8 {
-		return 0
+		return 1
 	}
-	return common.BitLenToByteLen(bitLen)
-}
-
-func Uint256LenExcludingHead(i uint256.Int) int {
-	bitLen := i.BitLen()
-	if bitLen < 8 {
-		return 0
-	}
-	return common.BitLenToByteLen(bitLen)
+	return 1 + common.BitLenToByteLen(bitLen)
 }
 
 // precondition: len(buffer) >= 9
+// TODO(yperbasis): replace with EncodeU64?
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
 	if 0 < i && i < 0x80 {
 		buffer[0] = byte(i)

@@ -39,12 +39,13 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // prestateTrace is the result of a prestateTrace run.
-type prestateTrace = map[common.Address]*account
+type prestateTrace = map[accounts.Address]*account
 
 type account struct {
 	Balance string                      `json:"balance"`
@@ -59,7 +60,7 @@ type testcase struct {
 	Context      *callContext    `json:"context"`
 	Input        string          `json:"input"`
 	TracerConfig json.RawMessage `json:"tracerConfig"`
-	Result       interface{}     `json:"result"`
+	Result       any             `json:"result"`
 }
 
 func TestPrestateTracerLegacy(t *testing.T) {
@@ -105,7 +106,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			context := evmtypes.BlockContext{
 				CanTransfer: protocol.CanTransfer,
 				Transfer:    rules.Transfer,
-				Coinbase:    test.Context.Miner,
+				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
 				Difficulty:  (*big.Int)(test.Context.Difficulty),

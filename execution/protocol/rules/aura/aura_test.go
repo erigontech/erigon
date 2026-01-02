@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
@@ -115,7 +116,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		Nonce:       [8]byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
 
-	syscallCustom := func(common.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
+	syscallCustom := func(accounts.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
 		//Packing as constructor gives the same effect as unpacking the returned value
 		json := `[{"inputs": [{"internalType": "uint256","name": "blockGasLimit","type": "uint256"}],"stateMutability": "nonpayable","type": "constructor"}]`
 		fakeAbi, err := abi.JSON(strings.NewReader(json))
@@ -124,19 +125,13 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		fakeVal, err := fakeAbi.Pack("", big.NewInt(12500000))
 		return fakeVal, err
 	}
-	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil, nil)
-	})
+	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil, nil))
 
 	invalidPreMergeHeader := validPreMergeHeader
 	invalidPreMergeHeader.GasLimit = 12_123456 //a different, wrong gasLimit
-	require.Panics(func() {
-		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil)
-	})
+	require.Error(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil))
 
 	invalidPostMergeHeader := invalidPreMergeHeader
 	invalidPostMergeHeader.Difficulty = big.NewInt(0) //zero difficulty detected as PoS
-	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil)
-	})
+	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil))
 }

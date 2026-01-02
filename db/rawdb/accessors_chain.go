@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb/utils"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -352,10 +353,10 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	var (
 		hash      = header.Hash()
 		number    = header.Number.Uint64()
-		encoded   = hexutil.EncodeTs(number)
 		headerKey = dbutils.HeaderKey(number, hash)
 	)
-	if err := db.Put(kv.HeaderNumber, hash[:], encoded); err != nil {
+
+	if err := WriteHeaderNumber(db, hash, number); err != nil {
 		return fmt.Errorf("HeaderNumber mapping: %w", err)
 	}
 
@@ -376,7 +377,7 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, header
 	if skipIndexing {
 		return nil
 	}
-	if err := db.Put(kv.HeaderNumber, hash[:], hexutil.EncodeTs(number)); err != nil {
+	if err := WriteHeaderNumber(db, hash, number); err != nil {
 		return err
 	}
 	return nil
@@ -472,13 +473,12 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 // Write transactions into DB and use txnID as first identifier
 func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, baseTxnID types.BaseTxnID) error {
 	rawTxs := make([][]byte, len(txs))
-	buf := bytes.NewBuffer(nil)
 	for i, txn := range txs {
-		buf.Reset()
-		if err := rlp.Encode(buf, txn); err != nil {
+		raw, err := rlp.EncodeToBytes(txn)
+		if err != nil {
 			return fmt.Errorf("broken txn rlp: %w", err)
 		}
-		rawTxs[i] = common.Copy(buf.Bytes())
+		rawTxs[i] = raw
 	}
 	return WriteRawTransactions(rwTx, rawTxs, baseTxnID)
 }
@@ -1221,6 +1221,30 @@ type RCacheV2Query struct {
 	TxNum     uint64
 
 	DontCalcBloom bool // avoid calculating bloom (can be bottleneck)
+}
+
+// doesn't do DeriveFieldsV4ForCachedReceipt
+func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.Duo[uint64, *types.Receipt], error) {
+	it, err := tx.Debug().TraceKey(kv.RCacheDomain, receiptCacheKey, fromTxNum, toTxNum)
+	if err != nil {
+		return nil, err
+	}
+
+	return stream.TransformDuoV(it, func(txNum uint64, v []byte) (uint64, *types.Receipt, error) {
+		if len(v) == 0 {
+			return txNum, nil, nil
+		}
+
+		//fmt.Println("stream", "txnum", txNum, "v", len(v))
+
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return txNum, nil, fmt.Errorf("%w, of txNum %d, len(v)=%d", err, txNum, len(v))
+		}
+		res := (*types.Receipt)(receipt)
+		//res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
+		return txNum, res, nil
+	}), nil
 }
 
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {

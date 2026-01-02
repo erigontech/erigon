@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
@@ -47,6 +48,12 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
+)
+
+const (
+	rewardTraceType = "reward"
+	rewardTypeBlock = "block"
+	rewardTypeUncle = "uncle"
 )
 
 // Transaction implements trace_transaction
@@ -156,13 +163,13 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 func rewardKindToString(kind protocolrules.RewardKind) string {
 	switch kind {
 	case protocolrules.RewardAuthor:
-		return "block"
+		return rewardTypeBlock
 	case protocolrules.RewardEmptyStep:
 		return "emptyStep"
 	case protocolrules.RewardExternal:
 		return "external"
 	case protocolrules.RewardUncle:
-		return "uncle"
+		return rewardTypeUncle
 	default:
 		return "unknown"
 	}
@@ -226,7 +233,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	for _, r := range rewards {
 		var tr ParityTrace
 		rewardAction := &RewardTraceAction{}
-		rewardAction.Author = r.Beneficiary
+		rewardAction.Author = r.Beneficiary.Value()
 		rewardAction.RewardType = rewardKindToString(r.Kind)
 		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
 		tr.Action = rewardAction
@@ -234,7 +241,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		copy(tr.BlockHash[:], block.Hash().Bytes())
 		tr.BlockNumber = new(uint64)
 		*tr.BlockNumber = block.NumberU64()
-		tr.Type = "reward" // nolint: goconst
+		tr.Type = rewardTraceType
 		tr.TraceAddress = []int{}
 		out = append(out, tr)
 	}
@@ -465,14 +472,14 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				var tr ParityTrace
 				var rewardAction = &RewardTraceAction{}
 				rewardAction.Author = lastHeader.Coinbase
-				rewardAction.RewardType = "block" // nolint: goconst
+				rewardAction.RewardType = rewardTypeBlock
 				rewardAction.Value.ToInt().Set(minerReward.ToBig())
 				tr.Action = rewardAction
 				tr.BlockHash = &common.Hash{}
 				copy(tr.BlockHash[:], lastBlockHash.Bytes())
 				tr.BlockNumber = new(uint64)
 				*tr.BlockNumber = blockNum
-				tr.Type = "reward" // nolint: goconst
+				tr.Type = rewardTraceType
 				tr.TraceAddress = []int{}
 				b, err := json.Marshal(tr)
 				if err != nil {
@@ -505,14 +512,14 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 						var tr ParityTrace
 						rewardAction := &RewardTraceAction{}
 						rewardAction.Author = uncle.Coinbase
-						rewardAction.RewardType = "uncle" // nolint: goconst
+						rewardAction.RewardType = rewardTypeUncle
 						rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
 						tr.Action = rewardAction
 						tr.BlockHash = &common.Hash{}
 						copy(tr.BlockHash[:], lastBlockHash[:])
 						tr.BlockNumber = new(uint64)
 						*tr.BlockNumber = blockNum
-						tr.Type = "reward" // nolint: goconst
+						tr.Type = rewardTraceType
 						tr.TraceAddress = []int{}
 						b, err := json.Marshal(tr)
 						if err != nil {
@@ -774,7 +781,7 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
@@ -817,7 +824,7 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, cmErr
 	}
 
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := protocol.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}

@@ -34,12 +34,12 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Config are the configuration options for the Interpreter
 type Config struct {
 	Tracer        *tracing.Hooks
-	JumpDestCache *JumpDestCache
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
@@ -49,7 +49,6 @@ type Config struct {
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
-
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -80,7 +79,7 @@ type CallContext struct {
 }
 
 var contextPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &CallContext{
 			Stack: Stack{data: make([]uint256.Int, 0, 16)},
 		}
@@ -154,12 +153,12 @@ func (ctx *CallContext) StackData() []uint256.Int {
 }
 
 // Caller returns the current caller.
-func (ctx *CallContext) Caller() common.Address {
+func (ctx *CallContext) Caller() accounts.Address {
 	return ctx.Contract.Caller()
 }
 
 // Address returns the address where this scope of execution is taking place.
-func (ctx *CallContext) Address() common.Address {
+func (ctx *CallContext) Address() accounts.Address {
 	return ctx.Contract.Address()
 }
 
@@ -178,7 +177,7 @@ func (ctx *CallContext) Code() []byte {
 	return ctx.Contract.Code
 }
 
-func (ctx *CallContext) CodeHash() common.Hash {
+func (ctx *CallContext) CodeHash() accounts.CodeHash {
 	return ctx.Contract.CodeHash
 }
 

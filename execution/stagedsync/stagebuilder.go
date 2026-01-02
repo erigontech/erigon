@@ -32,6 +32,8 @@ type ChainEventNotifier interface {
 	OnNewPendingLogs(types.Logs)
 	OnLogs([]*remoteproto.SubscribeLogsReply)
 	HasLogSubscriptions() bool
+	OnReceipts([]*remoteproto.SubscribeReceiptsReply)
+	HasReceiptSubscriptions() bool
 }
 
 func MiningStages(
@@ -59,7 +61,7 @@ func MiningStages(
 			ID:          stages.MiningExecution,
 			Description: "Mining: execute new block from txn pool",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnMiningExecStage(s, sd, tx, execCfg, sendersCfg, executeBlockCfg, ctx, logger, nil)
+				return SpawnMiningExecStage(ctx, s, sd, tx, execCfg, sendersCfg, executeBlockCfg, logger, nil)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil

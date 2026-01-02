@@ -29,7 +29,7 @@ jobs:
       changed_files: ${{ steps.filter.outputs.changed_files }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Check for changes within out-of-scope dirs or files
         id: filter
@@ -79,7 +79,7 @@ jobs:
           
       - name: "Checkout code and submodules with large files (lfs)"
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           lfs: true
@@ -103,7 +103,7 @@ jobs:
 
       - name: SonarCloud scan in case OS Linux and changed_files is not true
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -138,7 +138,7 @@ jobs:
 
       - name: "Checkout code with submodules and large files (lfs) on ${{ matrix.os }}"
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
           submodules: recursive

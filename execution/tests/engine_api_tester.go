@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -82,6 +81,7 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	var chainConfig chain.Config
 	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
 	require.NoError(t, err)
+	chainConfig.AmsterdamTime = nil // test uses osaka spec, unset amsterdam config to prevent "unsupported fork" error
 	genesis := &types.Genesis{
 		Config:     &chainConfig,
 		Coinbase:   coinbaseAddr,
@@ -91,13 +91,13 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 			coinbaseAddr: {
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil), // 1_000 ETH
 			},
-			params.ConsolidationRequestAddress: {
+			params.ConsolidationRequestAddress.Value(): {
 				Code:    consolidationRequestCode, // can't be empty
 				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
 				Nonce:   1,
 			},
-			params.WithdrawalRequestAddress: {
+			params.WithdrawalRequestAddress.Value(): {
 				Code:    withdrawalRequestCode, // can't be empty'
 				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
@@ -165,9 +165,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		Miner: buildercfg.MiningConfig{
 			EnabledPOS: true,
 		},
-		KeepStoredChainConfig:     true,
-		ErigonDBStepSize:          config3.DefaultStepSize,
-		ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		KeepStoredChainConfig: true,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)

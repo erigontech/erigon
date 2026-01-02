@@ -80,7 +80,7 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 
 	h := History{
 		HistCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:    btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
 	}
 
@@ -298,11 +298,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				if err = rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
-				if h.HistoryValuesOnCompressedPage == 0 {
+
+				if h.CompressorCfg.ValuesOnCompressedPage == 0 {
 					valOffset, _ = histReader.Skip()
 				} else {
 					i++
-					if i%h.HistoryValuesOnCompressedPage == 0 {
+					if i%h.CompressorCfg.ValuesOnCompressedPage == 0 {
 						valOffset, _ = histReader.Skip()
 					}
 				}
@@ -349,6 +350,13 @@ func (h *History) Scan(toTxNum uint64) error {
 	}
 
 	h.reCalcVisibleFiles(toTxNum)
+
+	salt, err := GetStateIndicesSalt(h.dirs, false, h.logger)
+	if err != nil {
+		return err
+	}
+
+	h.salt.Store(salt)
 	return nil
 }
 
@@ -856,10 +864,12 @@ func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), h.HistoryValuesOnCompressedPage, true)
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
 }
-func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader     { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter { return ht.h.dataWriter(f) }
+func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
+func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter {
+	return ht.h.dataWriter(f)
+}
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	k, err := kv.FirstKey(tx, h.ValuesTable)
@@ -1137,7 +1147,13 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
 
-	if ht.h.HistoryValuesOnCompressedPage > 1 {
+	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
+
+	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+	}
+
+	if compressedPageValuesCount > 1 {
 		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 	}
 	return v, true, nil
@@ -1353,7 +1369,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if err != nil {
 		return nil, err
 	}
-	return stream.UnionKV(itOnDB, itOnFiles, limit), nil
+	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
 }
 
 func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) error {
@@ -1400,9 +1416,15 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 					return fmt.Errorf("HistoryDump: failed to resolve offset in .vi %s file for key [%x]", viFile.Fullpath(), key)
 				}
 
+				compressedPageValuesCount := viFile.src.decompressor.CompressedPageValuesCount()
+
+				if viFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+					compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+				}
+
 				vGetter := seg.NewPagedReader(
 					ht.statelessGetter(viFile.i),
-					ht.h.HistoryValuesOnCompressedPage,
+					compressedPageValuesCount,
 					true,
 				)
 
@@ -1415,6 +1437,26 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 	}
 
 	return nil
+}
+
+// CompactRange rebuilds the history files within the specified transaction range by performing a forced self-merge.
+// If the range contains existing static files, the method collects all files belonging to that span and merges them.
+func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint64) error {
+	if len(ht.iit.files) == 0 {
+		return nil
+	}
+
+	mergeRange := NewHistoryRanges(
+		*NewMergeRange("", true, fromTxNum, toTxNum),
+		*NewMergeRange("", true, fromTxNum, toTxNum),
+	)
+
+	efFiles, vFiles, err := ht.staticFilesInRange(mergeRange)
+	if err != nil {
+		return err
+	}
+
+	return ht.deduplicateFiles(ctx, efFiles, vFiles, mergeRange, background.NewProgressSet())
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
@@ -1474,5 +1516,37 @@ func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.
 	if err != nil {
 		return nil, err
 	}
-	return stream.Union[uint64](frozenIt, recentIt, asc, limit), nil
+	return stream.Union(frozenIt, recentIt, asc, limit), nil
+}
+
+func (ht *HistoryRoTx) DebugHistoryTraceKey(ctx context.Context, key []byte, fromTxNum, toTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
+	files := HistoryTraceKeyFiles{
+		hc:        ht,
+		fromTxNum: fromTxNum,
+		toTxNum:   toTxNum,
+		key:       key,
+		logger:    ht.h.logger,
+		ctx:       ctx,
+	}
+	if err := files.init(); err != nil {
+		files.Close()
+		return nil, err
+	}
+	db := HistoryTraceKeyDB{
+		largeValues: ht.h.HistoryLargeValues,
+		roTx:        roTx,
+		valsTable:   ht.h.ValuesTable,
+		fromTxNum:   fromTxNum,
+		toTxNum:     toTxNum,
+		key:         key,
+
+		logger: ht.h.logger,
+		ctx:    ctx,
+	}
+	if err := db.init(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return stream.Union2(&files, &db, order.Asc, kv.Unlim), nil
+
 }

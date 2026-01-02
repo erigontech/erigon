@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/exec/calltracer"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -101,7 +101,7 @@ type Worker struct {
 	notifier    *sync.Cond
 	runnable    atomic.Bool
 	logger      log.Logger
-	chainDb     kv.RoDB
+	chainDb     kv.TemporalRoDB
 	chainTx     kv.TemporalTx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
@@ -126,7 +126,7 @@ type Worker struct {
 	metrics *WorkerMetrics
 }
 
-func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.RoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
+func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
@@ -184,7 +184,7 @@ func (rw *Worker) Resume() {
 	rw.notifier.Signal()
 }
 
-func (rw *Worker) LogLRUStats() { rw.evm.Config().JumpDestCache.LogStats() }
+func (rw *Worker) LogLRUStats() {}
 
 func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
 	rw.lock.Lock()
@@ -206,7 +206,6 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	}
 }
 
-func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
 func (rw *Worker) ResetTx(chainTx kv.TemporalTx) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
@@ -324,7 +323,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
 	if resettable, ok := reader.(interface{ SetTx(kv.Tx) }); ok {
-		resettable.SetTx(rw.Tx())
+		resettable.SetTx(rw.chainTx)
 	}
 	rw.ibs = state.New(rw.stateReader)
 
@@ -349,7 +348,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	if rw.background && rw.chainTx == nil {
-		chainTx, err := rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx) //nolint
+		chainTx, err := rw.chainDb.BeginTemporalRo(rw.ctx) //nolint
 
 		if err != nil {
 			return &TxResult{
@@ -359,6 +358,15 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		}
 
 		rw.resetTx(chainTx)
+	}
+
+	if txTask.IsHistoric() && !rw.historyMode {
+		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
+		// from the beginning until committed txNum and only then disable history mode.
+		// Needed to correctly evaluate spent gas and other things.
+		rw.SetReader(state.NewHistoryReaderV3())
+	} else if !txTask.IsHistoric() && rw.historyMode {
+		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx))))
 	}
 
 	txIndex := txTask.Version().TxIndex
@@ -392,7 +400,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	return result
 }
 
-func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.RoDB,
+func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)

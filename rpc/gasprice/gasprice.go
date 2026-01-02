@@ -193,7 +193,7 @@ func (t transactionsByGasPrice) Less(i, j int) bool {
 }
 
 // Push (part of heap.Interface) places a new link onto the end of queue
-func (t *transactionsByGasPrice) Push(x interface{}) {
+func (t *transactionsByGasPrice) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	l, ok := x.(types.Transaction)
@@ -204,7 +204,7 @@ func (t *transactionsByGasPrice) Push(x interface{}) {
 }
 
 // Pop (part of heap.Interface) removes the first link from the queue
-func (t *transactionsByGasPrice) Pop() interface{} {
+func (t *transactionsByGasPrice) Pop() any {
 	old := t.txs
 	n := len(old)
 	x := old[n-1]
@@ -260,7 +260,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 			continue
 		}
 		sender, _ := tx.GetSender()
-		if sender != block.Coinbase() {
+		if sender.Value() != block.Coinbase() {
 			heap.Push(s, tip)
 			count = count + 1
 		}
@@ -275,7 +275,7 @@ func (s sortingHeap) Less(i, j int) bool { return s[i].Lt(s[j]) }
 func (s sortingHeap) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // Push (part of heap.Interface) places a new link onto the end of queue
-func (s *sortingHeap) Push(x interface{}) {
+func (s *sortingHeap) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	l := x.(*uint256.Int)
@@ -283,7 +283,7 @@ func (s *sortingHeap) Push(x interface{}) {
 }
 
 // Pop (part of heap.Interface) removes the first link from the queue
-func (s *sortingHeap) Pop() interface{} {
+func (s *sortingHeap) Pop() any {
 	old := *s
 	n := len(old)
 	x := old[n-1]

@@ -85,7 +85,7 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	return header, nil
 }
 
-func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]interface{}, error) {
+func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -174,7 +174,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	return response, nil
 }
 
-func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
+func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]any, error) {
 	header, err := br.HeaderByNumber(ctx, db, blockNum)
 	if err != nil {
 		return nil, err
@@ -191,7 +191,7 @@ func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.
 		return nil, nil
 	}
 
-	additionalFields := make(map[string]interface{})
+	additionalFields := make(map[string]any)
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
 
@@ -249,7 +249,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		}
 		oldBalance := oldAcc.Balance
 
-		address := common.BytesToAddress(addressBytes)
+		address := accounts.InternAddress(common.BytesToAddress(addressBytes))
 		newAcc, err := latestState.ReadAccountData(address)
 		if err != nil {
 			return nil, err
@@ -262,7 +262,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 		if !oldBalance.Eq(newBalance) {
 			newBalanceDesc := (*hexutil.Big)(newBalance.ToBig())
-			balancesMapping[address] = newBalanceDesc
+			balancesMapping[address.Value()] = newBalanceDesc
 		}
 	}
 

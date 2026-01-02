@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/asm"
 	"github.com/erigontech/erigon/execution/vm/program"
@@ -121,7 +122,7 @@ func TestCall(t *testing.T) {
 	tx, domains := testTemporalTxSD(t, db)
 
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	address := common.HexToAddress("0xaa")
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
 		byte(vm.PUSH1), 0,
@@ -151,7 +152,7 @@ func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execc
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := execctx.NewSharedDomains(tx, log.New())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -185,7 +186,7 @@ func BenchmarkCall(b *testing.B) {
 	tx, sd := testTemporalTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
 	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
-	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
+	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
 
@@ -207,8 +208,8 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 
 	var (
 		statedb  = state.New(state.NewReaderV3(domains.AsGetter(tx)))
-		sender   = common.BytesToAddress([]byte("sender"))
-		receiver = common.BytesToAddress([]byte("receiver"))
+		sender   = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
+		receiver = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 	)
 
 	statedb.CreateAccount(sender, true)
@@ -219,7 +220,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		GasLimit:    10000000,
 		Difficulty:  big.NewInt(0x200000),
 		Time:        new(big.Int).SetUint64(0),
-		Coinbase:    common.Address{},
+		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: new(big.Int).SetUint64(1),
 		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),
@@ -230,7 +231,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			SpuriousDragonBlock:   new(big.Int),
 		},
 		EVMConfig: vm.Config{
-			JumpDestCache: vm.NewJumpDestCache(128),
+			//JumpDestCache: vm.NewJumpDestCache(128),
 		},
 	}
 	// Warm up the intpools and stuff
@@ -274,7 +275,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	tx, domains := testTemporalTxSD(b, db)
 
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	contractAddr := common.BytesToAddress([]byte("contract"))
+	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
 	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
 		b.Run(strconv.FormatUint(n, 10), func(b *testing.B) {
@@ -459,6 +460,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 
 	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	cfg.GasLimit = gas
+	cfg.Origin = accounts.ZeroAddress
 	//if len(tracerCode) > 0 {
 	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
 	//	if err != nil {
@@ -470,17 +472,17 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	//}
 
 	var (
-		destination = common.BytesToAddress([]byte("contract"))
+		destination = accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 		vmenv       = NewEnv(cfg)
 		sender      = cfg.Origin
 	)
 	cfg.State.CreateAccount(destination, true)
-	eoa := common.HexToAddress("E0")
+	eoa := accounts.InternAddress(common.HexToAddress("E0"))
 	{
 		cfg.State.CreateAccount(eoa, true)
 		cfg.State.SetNonce(eoa, 100)
 	}
-	reverting := common.HexToAddress("EE")
+	reverting := accounts.InternAddress(common.HexToAddress("EE"))
 	{
 		cfg.State.CreateAccount(reverting, true)
 		cfg.State.SetCode(reverting, []byte{
@@ -701,7 +703,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 	db := testTemporalDB(b)
 	tx, domains := testTemporalTxSD(b, db)
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	contractAddr := common.BytesToAddress([]byte("contract"))
+	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
 	b.Run("10k", func(b *testing.B) {
 		contractCode := swapContract(10_000)

@@ -39,7 +39,7 @@ func BenchmarkEncodingLengthForStorage(b *testing.B) {
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
 				Root:     empty.RootHash, // extAccount doesn't have Root value
-				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+				CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -49,7 +49,7 @@ func BenchmarkEncodingLengthForStorage(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 
@@ -59,7 +59,7 @@ func BenchmarkEncodingLengthForStorage(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 	}
@@ -91,7 +91,7 @@ func BenchmarkEncodingLengthForHashing(b *testing.B) {
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
 				Root:     empty.RootHash, // extAccount doesn't have Root value
-				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+				CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -101,7 +101,7 @@ func BenchmarkEncodingLengthForHashing(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 
@@ -111,7 +111,7 @@ func BenchmarkEncodingLengthForHashing(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 	}
@@ -145,7 +145,7 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
 				Root:     empty.RootHash, // extAccount doesn't have Root value
-				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+				CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -155,7 +155,7 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 
@@ -165,7 +165,7 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 	}
@@ -200,7 +200,7 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
 				Root:     empty.RootHash, // extAccount doesn't have Root value
-				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+				CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -210,7 +210,7 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 
@@ -220,7 +220,7 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 	}
@@ -253,7 +253,7 @@ func BenchmarkDecodingAccount(b *testing.B) {
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
 				Root:     empty.RootHash, // extAccount doesn't have Root value
-				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+				CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -263,7 +263,7 @@ func BenchmarkDecodingAccount(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 
@@ -273,7 +273,7 @@ func BenchmarkDecodingAccount(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 	}
@@ -321,7 +321,7 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
 				Root:     empty.RootHash, // extAccount doesn't have Root value
-				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+				CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -331,7 +331,7 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 
@@ -341,7 +341,7 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 	}
@@ -391,7 +391,7 @@ func BenchmarkRLPEncodingAccount(b *testing.B) {
 				Nonce:    0,
 				Balance:  *new(uint256.Int),
 				Root:     empty.RootHash, // extAccount doesn't have Root value
-				CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+				CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -401,7 +401,7 @@ func BenchmarkRLPEncodingAccount(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 
@@ -411,7 +411,7 @@ func BenchmarkRLPEncodingAccount(b *testing.B) {
 				Nonce:    2,
 				Balance:  *new(uint256.Int).SetUint64(1000),
 				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+				CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 			},
 		},
 	}
@@ -433,7 +433,7 @@ func BenchmarkIsEmptyCodeHash(b *testing.B) {
 		Nonce:    0,
 		Balance:  *new(uint256.Int),
 		Root:     empty.RootHash, // extAccount doesn't have Root value
-		CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+		CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 	}
 
 	var isEmpty bool
@@ -451,7 +451,7 @@ func BenchmarkIsEmptyRoot(b *testing.B) {
 		Nonce:    0,
 		Balance:  *new(uint256.Int),
 		Root:     empty.RootHash, // extAccount doesn't have Root value
-		CodeHash: empty.CodeHash, // extAccount doesn't have CodeHash value
+		CodeHash: EmptyCodeHash,  // extAccount doesn't have CodeHash value
 	}
 
 	var isEmpty bool

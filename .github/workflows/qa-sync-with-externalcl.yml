@@ -31,11 +31,11 @@ jobs:
       TRACKING_TIME_SECONDS: 3600 # 1 hour
       TOTAL_TIME_SECONDS: 28800 # 8 hours
       ERIGON_ASSERT: true
-      LIGHTHOUSE_VERSION: v8.0.0
+      LIGHTHOUSE_VERSION: v8.0.1
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Clean Erigon Build & Data Directories
         run: |
@@ -88,14 +88,17 @@ jobs:
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "Tests completed successfully"
+            echo "::notice::Tests completed successfully"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
             echo "Error detected during tests"
+            echo "::error::Error detected during tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
           fi
 
       - name: Save test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
         run: |
@@ -110,8 +113,8 @@ jobs:
             --result_file ${{ github.workspace }}/result-${{ matrix.chain }}.json
 
       - name: Upload test results (Lighthouse)
-        if: ${{ steps.test_step.outputs.test_executed == 'true' && matrix.client == 'lighthouse' }}
-        uses: actions/upload-artifact@v5
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' && matrix.client == 'lighthouse' }}
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
@@ -120,8 +123,8 @@ jobs:
             ${{ github.workspace }}/consensus/data/beacon/logs/beacon.log
 
       - name: Upload test results (Prysm)
-        if: ${{ steps.test_step.outputs.test_executed == 'true' && matrix.client == 'prysm' }}
-        uses: actions/upload-artifact@v5
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' && matrix.client == 'prysm' }}
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
@@ -130,11 +133,18 @@ jobs:
             ${{ github.workspace }}/consensus/data/beacon.log
 
       - name: Upload metric plots
-        if: steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v5
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v6
         with:
           name: metric-plots--${{ matrix.client }}-${{ matrix.chain }}
           path: ${{ github.workspace }}/metrics-${{ matrix.chain }}-plots*
+
+      - name: Upload FD Leak Analysis
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: fd-leak-analysis-${{ env.CHAIN }}
+          path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
       - name: Clean up Erigon data directory
         if: always()
@@ -147,18 +157,9 @@ jobs:
           rm -rf $CL_DATA_DIR
 
       - name: Resume the Erigon instance dedicated to db maintenance
+        if: always()
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-
-      - name: Action for Success
-        if: steps.test_step.outputs.TEST_RESULT == 'success'
-        run: echo "::notice::Tests completed successfully"
-
-      - name: Action for Not Success
-        if: steps.test_step.outputs.TEST_RESULT != 'success'
-        run: |
-          echo "::error::Error detected during tests"
-          exit 1
 
       - name: Display Error Reason
         if: always()

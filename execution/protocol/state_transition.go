@@ -29,9 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -39,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -102,8 +101,8 @@ type StateTransition struct {
 
 // Message represents a message sent to a contract.
 type Message interface {
-	From() common.Address
-	To() *common.Address
+	From() accounts.Address
+	To() accounts.Address
 
 	GasPrice() *uint256.Int
 	FeeCap() *uint256.Int
@@ -161,7 +160,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
-		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+		syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
 			return ret, err
 		}
@@ -185,27 +184,25 @@ func (st *StateTransition) SetTrace(trace bool) {
 }
 
 // to returns the recipient of the message.
-func (st *StateTransition) to() common.Address {
-	if st.msg == nil || st.msg.To() == nil /* contract creation */ {
-		return common.Address{}
+func (st *StateTransition) to() accounts.Address {
+	if st.msg == nil || st.msg.To().IsNil() /* contract creation */ {
+		return accounts.ZeroAddress
 	}
-	return *st.msg.To()
+	return st.msg.To()
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	gasVal := &uint256.Int{}
-	gasVal.SetUint64(st.msg.Gas())
-	gasVal, overflow := gasVal.MulOverflow(gasVal, st.gasPrice)
+	gasVal, overflow := u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
 	if overflow {
-		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 	}
 
 	// compute blob fee for eip-4844 data blobs if any
-	blobGasVal := &uint256.Int{}
+	blobGasVal := uint256.Int{}
 	if st.evm.ChainRules().IsCancun {
-		blobGasVal, overflow = blobGasVal.MulOverflow(&st.evm.Context.BlobBaseFee, new(uint256.Int).SetUint64(st.msg.BlobGas()))
+		blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(st.msg.BlobGas()))
 		if overflow {
-			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, blobGasVal)
+			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, &blobGasVal)
 		}
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
 			return err
@@ -216,23 +213,22 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		balanceCheck := gasVal
 
 		if st.feeCap != nil {
-			balanceCheck = (&uint256.Int{}).SetUint64(st.msg.Gas())
-			balanceCheck, overflow = balanceCheck.MulOverflow(balanceCheck, st.feeCap)
+			balanceCheck, overflow = u256.MulOverflow(u256.U64(st.msg.Gas()), *st.feeCap)
 			if overflow {
-				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 			}
-			balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, &st.value)
+			balanceCheck, overflow = u256.AddOverflow(balanceCheck, st.value)
 			if overflow {
-				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 			}
 			if st.evm.ChainRules().IsCancun {
-				maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
+				maxBlobFee, overflow := u256.MulOverflow(*st.msg.MaxFeePerBlobGas(), u256.U64(st.msg.BlobGas()))
 				if overflow {
-					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 				}
-				balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, maxBlobFee)
+				balanceCheck, overflow = u256.AddOverflow(balanceCheck, maxBlobFee)
 				if overflow {
-					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 				}
 			}
 		}
@@ -240,11 +236,11 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if err != nil {
 			return err
 		}
-		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
-			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), &have, want)
+		if have, want := balance, balanceCheck; have.Cmp(&want) < 0 {
+			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From(), &have, &want)
 		}
-		st.state.SubBalance(st.msg.From(), *gasVal, tracing.BalanceDecreaseGasBuy)
-		st.state.SubBalance(st.msg.From(), *blobGasVal, tracing.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
 	}
 
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
@@ -257,91 +253,91 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
-	st.evm.BlobFee = *blobGasVal
+	st.evm.BlobFee = blobGasVal
 	return nil
 }
 
-func CheckEip1559TxGasFeeCap(from common.Address, feeCap, tipCap, baseFee *uint256.Int, isFree bool) error {
+func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uint256.Int, isFree bool) error {
 	if feeCap.Lt(tipCap) {
-		return fmt.Errorf("%w: address %v, tipCap: %s, feeCap: %s", ErrTipAboveFeeCap,
-			from.Hex(), tipCap, feeCap)
+		return fmt.Errorf("%w: address %v, tipCap: %s, feeCap: %s", ErrTipAboveFeeCap, from, tipCap, feeCap)
 	}
 	if baseFee != nil && feeCap.Lt(baseFee) && !isFree {
-		return fmt.Errorf("%w: address %v, feeCap: %s baseFee: %s", ErrFeeCapTooLow,
-			from.Hex(), feeCap, baseFee)
+		return fmt.Errorf("%w: address %v, feeCap: %s baseFee: %s", ErrFeeCapTooLow, from, feeCap, baseFee)
 	}
 	return nil
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
-	if st.evm.ChainRules().IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
-		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, st.msg.From().Hex(), len(st.msg.BlobHashes()))
+	rules := st.evm.ChainRules()
+	from := st.msg.From()
+	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
+		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
 	}
 
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
-		stNonce, err := st.state.GetNonce(st.msg.From())
+		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
-				st.msg.From().Hex(), msgNonce, stNonce)
+				from, msgNonce, stNonce)
 		} else if stNonce > msgNonce {
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
-				st.msg.From().Hex(), msgNonce, stNonce)
+				from, msgNonce, stNonce)
 		} else if stNonce+1 < stNonce {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
-				st.msg.From().Hex(), stNonce)
+				from, stNonce)
 		}
 	}
 
 	if st.msg.CheckTransaction() {
 		// Make sure the sender is an EOA (EIP-3607)
-		codeHash, err := st.state.GetCodeHash(st.msg.From())
+		codeHash, err := st.state.GetCodeHash(from)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
-		if codeHash != empty.CodeHash && codeHash != (common.Hash{}) {
+		if !codeHash.IsEmpty() {
 			// common.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
 
 			// eip-7702 allows tx origination from accounts having delegated designation code.
-			_, ok, err := st.state.GetDelegatedDesignation(st.msg.From())
+			_, ok, err := st.state.GetDelegatedDesignation(from)
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if !ok {
 				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-					st.msg.From().Hex(), codeHash)
+					from, codeHash)
 			}
 		}
 	}
 
 	// Make sure the transaction feeCap is greater than the block's baseFee.
-	if st.evm.ChainRules().IsLondon {
+	if rules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
-			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+			if err := CheckEip1559TxGasFeeCap(from, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
 				return err
 			}
 		}
 	}
-	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
+	if st.msg.BlobGas() > 0 && rules.IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
 		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
-				ErrMaxFeePerBlobGas, st.msg.From().Hex(), st.msg.MaxFeePerBlobGas(), blobGasPrice)
+				ErrMaxFeePerBlobGas, from, st.msg.MaxFeePerBlobGas(), blobGasPrice)
 		}
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
-		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
+	if st.msg.CheckGas() && rules.IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
 	}
 
 	return st.buyGas(gasBailout)
@@ -363,7 +359,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	sender := msg.From()
-	contractCreation := msg.To() == nil
+	contractCreation := msg.To().IsNil()
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
@@ -472,7 +468,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	msg := st.msg
 	sender := msg.From()
-	contractCreation := msg.To() == nil
+	contractCreation := msg.To().IsNil()
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
@@ -564,62 +560,59 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
 
-	effectiveTip := st.gasPrice
+	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
 		if st.feeCap.Gt(&st.evm.Context.BaseFee) {
-			effectiveTip = math.U256Min(st.tipCap, (&uint256.Int{}).Sub(st.feeCap, &st.evm.Context.BaseFee))
+			effectiveTip = u256.Min(*st.tipCap, u256.Sub(*st.feeCap, st.evm.Context.BaseFee))
 		} else {
 			effectiveTip = u256.Num0
 		}
 	}
 
-	tipAmount := (&uint256.Int{}).SetUint64(st.gasUsed())
-	tipAmount.Mul(tipAmount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
+	tipAmount := u256.Mul(u256.U64(st.gasUsed()), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, *tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 	}
 
 	var burnAmount uint256.Int
-	var burntContractAddress *common.Address
+	var burntContractAddress accounts.Address
 
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
-		if burntContractAddress != nil {
-			burnAmount = *(&uint256.Int{}).Mul((&uint256.Int{}).SetUint64(st.gasUsed()), &st.evm.Context.BaseFee)
+		if !burntContractAddress.IsNil() {
+			burnAmount = u256.Mul(u256.U64(st.gasUsed()), st.evm.Context.BaseFee)
 
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				burnAmount = *(&uint256.Int{}).Add(&burnAmount, &st.evm.BlobFee)
+				burnAmount = u256.Add(burnAmount, st.evm.BlobFee)
 			}
 
 			if !st.noFeeBurnAndTip {
-				st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+				st.state.AddBalance(burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
 			}
 		}
 	}
 
-	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From()) {
-		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
+	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
+		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 
 	result = &evmtypes.ExecutionResult{
 		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
-		Reverted:            vmerr == vm.ErrExecutionReverted,
+		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           *tipAmount,
+		FeeTipped:           tipAmount,
 		FeeBurnt:            burnAmount,
 		EvmRefund:           st.state.GetRefund(),
 	}
 
-	if burntContractAddress != nil {
-		result.BurntContractAddress = *burntContractAddress
-	}
+	result.BurntContractAddress = burntContractAddress
 
 	if st.evm.Context.PostApplyMessage != nil {
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
@@ -628,8 +621,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	return result, nil
 }
 
-func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]common.Address, error) {
-	verifiedAuthorities := make([]common.Address, 0)
+func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, error) {
+	verifiedAuthorities := make([]accounts.Address, 0)
 	if len(auths) > 0 {
 		if contractCreation {
 			return nil, errors.New("contract creation not allowed with type4 txs")
@@ -651,18 +644,21 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
 				continue
 			}
-			authority := *authorityPtr
+			authority := accounts.InternAddress(*authorityPtr)
 
 			// 3. add authority account to accesses_addresses
 			verifiedAuthorities = append(verifiedAuthorities, authority)
 			// authority is added to accessed_address in prepare step
+
+			// BAL: captures authorities even if validation fails
+			st.state.MarkAddressAccess(authority)
 
 			// 4. authority code should be empty or already delegated
 			codeHash, err := st.state.GetCodeHash(authority)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
-			if codeHash != empty.CodeHash && codeHash != (common.Hash{}) {
+			if !codeHash.IsEmpty() {
 				// check for delegation
 				_, ok, err := st.state.GetDelegatedDesignation(authority)
 				if err != nil {
@@ -700,7 +696,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}
 			} else {
-				if err := st.state.SetCode(authority, types.AddressToDelegation(auth.Address)); err != nil {
+				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address))); err != nil {
 					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}
 			}
@@ -717,12 +713,12 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 
 func (st *StateTransition) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
-	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From()) {
-		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining)
+	remaining := u256.Mul(u256.U64(st.gasRemaining), *st.gasPrice)
+	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
+		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
 	}
 
-	st.state.AddBalance(st.msg.From(), *remaining, tracing.BalanceIncreaseGasReturn)
+	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.

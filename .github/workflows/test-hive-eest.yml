@@ -36,7 +36,7 @@ jobs:
           echo "Pruning docker system..."
           docker system prune -af --volumes
       - name: Checkout Hive
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           ref: master
@@ -118,7 +118,7 @@ jobs:
           run_suite eels/consume-engine
         continue-on-error: true
       - name: Upload output log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hive-workspace-log
           path: hive/workspace/logs

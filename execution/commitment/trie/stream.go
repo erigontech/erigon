@@ -700,7 +700,8 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 					}
 				} else if !a.IsEmptyCodeHash() {
 					fieldSet |= AccountFieldCodeOnly
-					if err := hb.hash(a.CodeHash[:]); err != nil {
+					codeHashValue := a.CodeHash.Value()
+					if err := hb.hash(codeHashValue[:]); err != nil {
 						return common.Hash{}, err
 					}
 				}

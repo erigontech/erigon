@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -83,7 +84,7 @@ type SharedDomains struct {
 	metrics           changeset.DomainMetrics
 }
 
-func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -100,7 +101,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
+	if err := sd.SeekCommitment(ctx, tx); err != nil {
 		return nil, err
 	}
 
@@ -177,6 +178,10 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
 }
 
+func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.mem.Unwind(txNumUnwindTo, changeset)
+}
+
 func (sd *SharedDomains) Trace() bool {
 	return sd.trace
 }
@@ -234,8 +239,8 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-		firstKey = common.CopyBytes(k)
-		firstVal = common.CopyBytes(v)
+		firstKey = common.Copy(k)
+		firstVal = common.Copy(v)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
 	})
@@ -274,15 +279,26 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
 	start := time.Now()
-	if v, _step, ok := sd.mem.GetLatest(domain, k); ok {
+	maxStep := kv.Step(math.MaxUint64)
+
+	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		sd.metrics.UpdateCacheReads(domain, start)
-		return v, _step, nil
+		return v, step, nil
+	} else {
+		if step > 0 {
+			maxStep = step
+		}
 	}
-	//if aggTx, ok := tx.AggTx().(*state.AggregatorRoTx); ok {
-	//	v, step, _, err = aggTx.getLatest(domain, k, tx, &sd.metrics, start)
-	//} else {
-	v, step, err = tx.GetLatest(domain, k)
-	//}
+
+	type MeteredGetter interface {
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+	}
+
+	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
+		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+	} else {
+		v, step, err = tx.GetLatest(domain, k)
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -302,7 +318,9 @@ func (sd *SharedDomains) LogMetrics() []any {
 
 	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
 		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
-			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"puts", common.PrettyCounter(sd.metrics.CachePutCount),
+			"size", fmt.Sprintf("%s(%s/%s)",
+				common.PrettyCounter(sd.metrics.CachePutSize), common.PrettyCounter(sd.metrics.CachePutKeySize), common.PrettyCounter(sd.metrics.CachePutValueSize)),
 			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
 			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
@@ -367,11 +385,11 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 	switch domain {
-	case kv.CodeDomain:
+	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-	case kv.StorageDomain, kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
+	case kv.RCacheDomain, kv.CommitmentDomain:
 		//noop
 	default:
 		if bytes.Equal(prevVal, v) {
@@ -477,6 +495,13 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	return nil
 }
 
+// ComputeCommitment evaluates commitment for gathered updates.
+// If warmupDB was set via SetWarmupDB, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
-	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, sd.txNum, logPrefix, commitProgress)
+	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
+}
+
+// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
+func (sd *SharedDomains) SetWarmupDB(db kv.TemporalRoDB) {
+	sd.sdCtx.SetWarmupDB(db)
 }

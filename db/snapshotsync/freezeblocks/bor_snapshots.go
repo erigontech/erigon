@@ -93,7 +93,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		if err := snapshots.OpenFolder(); err != nil {
 			return blocksRetired, fmt.Errorf("reopen: %w", err)
 		}
-		snapshots.LogStat("bor:retire")
+		//snapshots.LogStat("bor:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
@@ -115,13 +115,16 @@ func (br *BlockRetire) MergeBorBlocks(ctx context.Context, lvl log.Lvl, seedNewS
 	if len(rangesToMerge) == 0 {
 		return false, nil
 	}
-	onMerge := func(r snapshotsync.Range) error {
+	onMerge := func(mergedFiles []string) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
 
 		if seedNewSnapshots != nil {
-			downloadRequest := []services.DownloadRequest{{Path: "", TorrentHash: ""}}
+			downloadRequest := make([]services.DownloadRequest, 0, len(mergedFiles))
+			for _, filePath := range mergedFiles {
+				downloadRequest = append(downloadRequest, services.DownloadRequest{Path: filePath, TorrentHash: ""})
+			}
 			if err := seedNewSnapshots(downloadRequest); err != nil {
 				return err
 			}

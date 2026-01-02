@@ -46,7 +46,7 @@ jobs:
         echo "Load sequence: ${{ env.LOAD_SEQUENCE }}"
 
     - name: Check out Erigon repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Checkout RPC Tests Repository & Install Requirements
       run: |
@@ -168,7 +168,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: torrent-client-status
         path: torrent-client-status.txt
@@ -196,35 +196,35 @@ jobs:
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: erigon-logs
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Upload profiling data
       if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: profiling-data
         path: ${{ github.workspace }}/profiling-data*
 
     - name: Upload FD Leak Analysis
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: fd-leak-analysis
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md

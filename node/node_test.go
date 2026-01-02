@@ -369,7 +369,7 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 
 	// Start the protocol stack, and ensure that a failing shut down terminates all
 	// Start the stack and make sure all is online
-	if err1 := stack.Start(); err != nil {
+	if err1 := stack.Start(); err1 != nil {
 		t.Fatalf("failed to start protocol stack: %v", err1)
 	}
 	for id := range lifecycles {
@@ -385,7 +385,7 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 	if err, ok := err.(*StopError); !ok {
 		t.Fatalf("termination failure mismatch: have %v, want StopError", err)
 	} else {
-		failer := reflect.TypeOf(&InstrumentedService{})
+		failer := reflect.TypeFor[*InstrumentedService]()
 		if !errors.Is(err.Services[failer], failure) {
 			t.Fatalf("failer termination failure mismatch: have %v, want %v", err.Services[failer], failure)
 		}

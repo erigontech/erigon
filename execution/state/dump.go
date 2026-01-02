@@ -154,10 +154,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	if err != nil {
 		return nil, err
 	}
-	txNumForStorage, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
-	if err != nil {
-		return nil, err
-	}
+	txNumForStorage := txNum
 
 	var nextKey []byte
 	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
@@ -188,8 +185,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			CodeHash: hexutil.Bytes(empty.CodeHash[:]),
 			Storage:  make(map[string]string),
 		}
-		if acc.CodeHash != empty.CodeHash {
-			account.CodeHash = hexutil.Bytes(acc.CodeHash.Bytes())
+		if !acc.CodeHash.IsEmpty() {
+			codeHashValue := acc.CodeHash.Value()
+			account.CodeHash = hexutil.Bytes(codeHashValue[:])
 
 			if !excludeCode {
 				r, _, err := ttx.GetLatest(kv.CodeDomain, k)

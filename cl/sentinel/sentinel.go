@@ -521,10 +521,7 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 			entry.State = "disconnected"
 		}
 		conns := s.host.Network().ConnsToPeer(p)
-		if len(conns) == 0 {
-			continue
-		}
-		if conns[0].Stat().Direction == network.DirOutbound {
+		if len(conns) == 0 || conns[0].Stat().Direction == network.DirOutbound {
 			entry.Direction = "outbound"
 		} else {
 			entry.Direction = "inbound"
@@ -532,12 +529,12 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		if enr, ok := s.pidToEnr.Load(p); ok {
 			entry.Enr = enr.(string)
 		} else {
-			continue
+			entry.Enr = ""
 		}
 		if enodeId, ok := s.pidToEnodeId.Load(p); ok {
 			entry.EnodeId = enodeId.(enode.ID).String()
 		} else {
-			continue
+			entry.EnodeId = ""
 		}
 		agent, err := s.host.Peerstore().Get(p, "AgentVersion")
 		if err == nil {

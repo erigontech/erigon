@@ -57,7 +57,7 @@ var (
 		Blocks:      Distance(math.MaxUint64),
 	}
 
-	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s", archiveModeStr, fullModeStr, minimalModeStr)
+	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s, %s", fullModeStr, archiveModeStr, minimalModeStr, blockModeStr)
 	ErrDistanceOnlyForArchive = fmt.Errorf("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=%s", archiveModeStr)
 )
 
@@ -89,14 +89,15 @@ func (m Mode) String() string {
 		return blockModeStr
 	}
 
-	short := archiveModeStr
+	var short strings.Builder
+	short.WriteString(archiveModeStr)
 	if m.History.toValue() != DefaultMode.History.toValue() {
-		short += fmt.Sprintf(" --prune.distance=%d", m.History.toValue())
+		short.WriteString(fmt.Sprintf(" --prune.distance=%d", m.History.toValue()))
 	}
 	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
-		short += fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue())
+		short.WriteString(fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue()))
 	}
-	return strings.TrimLeft(short, " ")
+	return strings.TrimLeft(short.String(), " ")
 }
 
 func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, error) {

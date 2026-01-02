@@ -56,7 +56,6 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
@@ -86,8 +85,8 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/execution/eth1"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -97,6 +96,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
@@ -163,7 +163,7 @@ type Ethereum struct {
 	genesisBlock *types.Block
 	genesisHash  common.Hash
 
-	eth1ExecutionServer *eth1.EthereumExecutionModule
+	eth1ExecutionServer *execmodule.EthereumExecutionModule
 
 	ethBackendRPC       *privateapi2.EthBackendServer
 	ethRpcClient        rpchelper.ApiBackend
@@ -379,7 +379,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -868,7 +868,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 
-	var signatures *lru.ARCCache[common.Hash, common.Address]
+	var signatures *lru.ARCCache[common.Hash, accounts.Address]
 
 	if bor, ok := backend.engine.(*bor.Bor); ok {
 		signatures = bor.Signatures
@@ -893,13 +893,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					&vm.Config{},
 					backend.notifications,
 					config.StateStream,
-					/*stateStream=*/ false,
+					/*badBlockHalt*/ false,
 					dirs,
 					blockReader,
 					backend.sentriesClient.Hd,
 					config.Genesis,
 					config.Sync,
 					stageloop.SilkwormForExecutionStage(backend.silkworm, config),
+					config.ExperimentalBAL,
 				),
 				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
@@ -990,12 +991,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentLogs, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
+	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000), txPoolRpcClient)
+	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, 1000), txPoolRpcClient)
 	if err != nil {
 		return nil, err
 	}
@@ -1071,11 +1072,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if !config.Snapshot.NoDownloader && backend.downloaderClient == nil {
 			panic("expect to have non-nil downloaderClient")
 		}
-		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
-			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-				backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
-				blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
-			)), nil, nil, backend.logger, stages.ModeApplyingBlocks)
+		backend.polygonDownloadSync = stagedsync.New(
+			backend.config.Sync,
+			stagedsync.DownloadSyncStages(
+				backend.sentryCtx, stagedsync.StageSnapshotsCfg(
+					backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
+					blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
+				)),
+			nil,
+			nil,
+			backend.logger,
+			stages.ModeApplyingBlocks,
+		)
 
 		// these range extractors set the db to the local db instead of the chain db
 		// TODO this needs be refactored away by having a retire/merge component per
@@ -1136,7 +1144,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
+		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
 			return err
 		}
 	}
@@ -1262,7 +1270,7 @@ func (s *Ethereum) setUpSnapDownloader(
 	cc *chain.Config,
 ) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		s.logger.Warn("files changed...sending notification")
+		s.logger.Debug("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
@@ -1272,14 +1280,8 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(frozenFileNames))}
-		for _, fName := range frozenFileNames {
-			req.Items = append(req.Items, &downloaderproto.AddItem{
-				Path: fName,
-			})
-		}
-		if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-			s.logger.Warn("[snapshots] downloader.Add", "err", err)
+		if _, err := s.downloaderClient.Seed(ctx, &downloaderproto.SeedRequest{Paths: frozenFileNames}); err != nil {
+			s.logger.Warn("[snapshots] downloader.Seed", "err", err)
 		}
 	}, func(deletedFiles []string) {
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
@@ -1311,16 +1313,17 @@ func (s *Ethereum) setUpSnapDownloader(
 		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
 			return nil
 		}
-		// Always disable the asynchronous adder. We will do it here to support downloader.verify.
-		downloaderCfg.AddTorrentsFromDisk = false
 
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
 		if err != nil {
 			return err
 		}
 		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
 		// start embedded Downloader
+		// TODO: Not sure if we want to add only the completed here, or add after we finish initial
+		// sync checks. Looks like we'd need to pass this or a callback all the way up into the sync
+		// stage somewhere?
 		err = s.downloader.AddTorrentsFromDisk(ctx)
 		if err != nil {
 			return fmt.Errorf("adding torrents from disk: %w", err)
@@ -1330,7 +1333,7 @@ func (s *Ethereum) setUpSnapDownloader(
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
-		s.downloader.MainLoopInBackground(true)
+		s.downloader.InitBackgroundLogger(true)
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
@@ -1357,18 +1360,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	if snConfig.ErigonDBStepSize == config3.DefaultStepSize {
-		logger.Info("Using default step size", "size", snConfig.ErigonDBStepSize)
-	} else {
-		logger.Warn("OVERRIDING STEP SIZE; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "size", snConfig.ErigonDBStepSize, "default", config3.DefaultStepSize)
-	}
-	if snConfig.ErigonDBStepsInFrozenFile == config3.DefaultStepsInFrozenFile {
-		logger.Info("Using default number of steps in frozen files", "steps", snConfig.ErigonDBStepsInFrozenFile)
-	} else {
-		logger.Warn("OVERRIDING NUMBER OF STEPS IN FROZEN FILES; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", snConfig.ErigonDBStepsInFrozenFile, "default", config3.DefaultStepsInFrozenFile)
-	}
-
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).StepSize(uint64(snConfig.ErigonDBStepSize)).StepsInFrozenFile(uint64(snConfig.ErigonDBStepsInFrozenFile)).Open(ctx, db)
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1625,6 +1617,10 @@ func (s *Ethereum) Stop() error {
 		s.logger.Error("background component error", "err", err)
 	}
 
+	if s.config.Downloader != nil {
+		_ = s.config.Downloader.CloseTorrentLogFile()
+	}
+
 	return nil
 }
 
@@ -1655,6 +1651,7 @@ func (s *Ethereum) SentryCtx() context.Context {
 func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
 	return s.sentriesClient
 }
+
 func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
 }
@@ -1663,7 +1660,7 @@ func (s *Ethereum) TxpoolServer() txpoolproto.TxpoolServer {
 	return s.txPoolGrpcServer
 }
 
-func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
+func (s *Ethereum) ExecutionModule() *execmodule.EthereumExecutionModule {
 	return s.eth1ExecutionServer
 }
 
@@ -1745,16 +1742,4 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config *txpoolcfg.
 
 func sentryMux(sentries []sentryproto.SentryClient) sentryproto.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
-}
-
-type engineAPISwitcher struct {
-	backend *Ethereum
-}
-
-func (e *engineAPISwitcher) SetConsuming(consuming bool) {
-	if e.backend.engineBackendRPC == nil {
-		return
-	}
-
-	e.backend.engineBackendRPC.SetConsuming(consuming)
 }

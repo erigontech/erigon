@@ -1653,10 +1653,10 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
-	return dt.getLatest(key, roTx, nil, time.Time{})
+	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}
@@ -1677,7 +1677,7 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *changeset.Domai
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
-	if found {
+	if found && foundStep <= maxStep {
 		if metrics != nil {
 			metrics.UpdateDbReads(dt.name, start)
 		}
@@ -1769,7 +1769,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		mxPrunableDComm.Set(delta)
 	}
 	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
-	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
+	return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
 }
 
 type DomainPruneStat struct {
@@ -1965,4 +1965,51 @@ func versionTooLowPanic(filename string, version version.Versions) {
 		version.MinSupported,
 		version.Current,
 	))
+}
+
+// [startTxNum, endTxNum)]
+func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
+	// need to do this first as TraceKey doesn't work if internal seg readers are seeked into different locations
+	v2, ok, err := dt.GetAsOf(key, endTxNum, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		v2 = nil
+	}
+
+	ht, err := dt.ht.DebugHistoryTraceKey(ctx, key, startTxNum, endTxNum, roTx)
+	if err != nil {
+		return nil, err
+	}
+
+	prevTxNum := int64(-1)
+	fht := stream.FilterDuo(ht, func(txNum uint64, v []byte) bool {
+		if prevTxNum == -1 {
+			prevTxNum = int64(txNum)
+			return false
+		}
+		return true
+	})
+
+	tfht := stream.TransformDuo(fht, func(txNum uint64, v []byte) (uint64, []byte, error) {
+		defer func() {
+			prevTxNum = int64(txNum)
+		}()
+
+		return uint64(prevTxNum), v, nil
+	})
+
+	// using maxuint64, so that this values goes last in asc order
+	// then when we actually use this value, we adjust the txNum
+	ds := stream.NewSingleDuo(uint64(math.MaxUint64), v2)
+	dst := stream.Union2(tfht, ds, order.Asc, kv.Unlim)
+
+	return stream.TransformDuo(dst, func(txNum uint64, v []byte) (uint64, []byte, error) {
+		if txNum == math.MaxUint64 {
+			// prevTxNum has the last txNum in the stream
+			txNum = uint64(prevTxNum)
+		}
+		return txNum, v, nil
+	}), nil
 }

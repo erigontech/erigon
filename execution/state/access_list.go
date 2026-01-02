@@ -20,15 +20,15 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type accessList struct {
-	addresses map[common.Address]map[common.Hash]struct{}
+	addresses map[accounts.Address]map[accounts.StorageKey]struct{}
 }
 
 // ContainsAddress returns true if the address is in the access list.
-func (al *accessList) ContainsAddress(address common.Address) bool {
+func (al *accessList) ContainsAddress(address accounts.Address) bool {
 	_, ok := al.addresses[address]
 	return ok
 }
@@ -42,7 +42,7 @@ func (al *accessList) ContainsAddress(address common.Address) bool {
 
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
-func (al *accessList) Contains(address common.Address, slot common.Hash) (addressPresent bool, slotPresent bool) {
+func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
 	slots, ok := al.addresses[address]
 	if !ok {
 		// no such address (and hence zero slots)
@@ -59,7 +59,7 @@ func (al *accessList) Contains(address common.Address, slot common.Hash) (addres
 // newAccessList creates a new accessList.
 func newAccessList() *accessList {
 	return &accessList{
-		addresses: map[common.Address]map[common.Hash]struct{}{},
+		addresses: map[accounts.Address]map[accounts.StorageKey]struct{}{},
 	}
 }
 
@@ -75,7 +75,7 @@ func (al *accessList) Copy() *accessList {
 		if v == nil {
 			cp.addresses[k] = v
 		} else {
-			slots := map[common.Hash]struct{}{}
+			slots := map[accounts.StorageKey]struct{}{}
 			for k := range v {
 				slots[k] = struct{}{}
 			}
@@ -88,7 +88,7 @@ func (al *accessList) Copy() *accessList {
 
 // AddAddress adds an address to the access list, and returns 'true' if the operation
 // caused a change (addr was not previously in the list).
-func (al *accessList) AddAddress(address common.Address) bool {
+func (al *accessList) AddAddress(address accounts.Address) bool {
 	if _, present := al.addresses[address]; present {
 		return false
 	}
@@ -101,11 +101,11 @@ func (al *accessList) AddAddress(address common.Address) bool {
 // - address added
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
-func (al *accessList) AddSlot(address common.Address, slot common.Hash) (addrChange bool, slotChange bool) {
+func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
 	slots, addrPresent := al.addresses[address]
 	if !addrPresent || slots == nil {
 		// Address not present, or addr present but no slots there
-		al.addresses[address] = map[common.Hash]struct{}{slot: {}}
+		al.addresses[address] = map[accounts.StorageKey]struct{}{slot: {}}
 		return !addrPresent, true
 	}
 	if _, ok := slots[slot]; !ok {
@@ -121,7 +121,7 @@ func (al *accessList) AddSlot(address common.Address, slot common.Hash) (addrCha
 // This operation needs to be performed in the same order as the addition happened.
 // This method is meant to be used  by the journal, which maintains ordering of
 // operations.
-func (al *accessList) DeleteSlot(address common.Address, slot common.Hash) {
+func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.StorageKey) {
 	slots, addrOk := al.addresses[address]
 	// There are two ways this can fail
 	if !addrOk {
@@ -131,7 +131,7 @@ func (al *accessList) DeleteSlot(address common.Address, slot common.Hash) {
 	// If that was the last (first) slot, remove it
 	// Since additions and rollbacks are always performed in order,
 	// we can delete the item without worrying about screwing up later indices
-	if len(slot) == 0 {
+	if len(slots) == 0 {
 		al.addresses[address] = nil
 	}
 }
@@ -140,7 +140,7 @@ func (al *accessList) DeleteSlot(address common.Address, slot common.Hash) {
 // needs to be performed in the same order as the addition happened.
 // This method is meant to be used  by the journal, which maintains ordering of
 // operations.
-func (al *accessList) DeleteAddress(address common.Address) {
+func (al *accessList) DeleteAddress(address accounts.Address) {
 	slots, addrOk := al.addresses[address]
 	if !addrOk {
 		panic("reverting address change, address not present in list")

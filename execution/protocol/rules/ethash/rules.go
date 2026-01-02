@@ -37,14 +37,15 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Ethash proof-of-work protocol constants.
@@ -112,8 +113,8 @@ func (ethash *Ethash) Type() chain.RulesName {
 // Author implements rules.Engine, returning the header's coinbase as the
 // proof-of-work verified author of the block.
 // This is thread-safe (only access the header.Coinbase)
-func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
-	return header.Coinbase, nil
+func (ethash *Ethash) Author(header *types.Header) (accounts.Address, error) {
+	return accounts.InternAddress(header.Coinbase), nil
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules of the
@@ -558,10 +559,13 @@ func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Heade
 }
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
 	if config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(state)
+		if err := misc.ApplyDAOHardFork(state); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // Finalize implements rules.Engine, accumulating the block and uncle rewards,
@@ -595,7 +599,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	hasher := sha3.NewLegacyKeccak256()
 
-	enc := []interface{}{
+	enc := []any{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,
@@ -618,7 +622,7 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	return hash
 }
 
-func (ethash *Ethash) IsServiceTransaction(sender common.Address, syscall rules.SystemCall) bool {
+func (ethash *Ethash) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
 	return false
 }
 
@@ -626,11 +630,11 @@ func (ethash *Ethash) CalculateRewards(config *chain.Config, header *types.Heade
 ) ([]rules.Reward, error) {
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	rewards := make([]rules.Reward, 1+len(uncles))
-	rewards[0].Beneficiary = header.Coinbase
+	rewards[0].Beneficiary = accounts.InternAddress(header.Coinbase)
 	rewards[0].Kind = rules.RewardAuthor
 	rewards[0].Amount = minerReward
 	for i, uncle := range uncles {
-		rewards[i+1].Beneficiary = uncle.Coinbase
+		rewards[i+1].Beneficiary = accounts.InternAddress(uncle.Coinbase)
 		rewards[i+1].Kind = rules.RewardUncle
 		rewards[i+1].Amount = uncleRewards[i]
 	}
@@ -656,7 +660,7 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 	headerNum, _ := uint256.FromBig(header.Number)
 	for _, uncle := range uncles {
 		uncleNum, _ := uint256.FromBig(uncle.Number)
-		r.Add(uncleNum, u256.Num8)
+		r.Add(uncleNum, &u256.Num8)
 		r.Sub(r, headerNum)
 		r.Mul(r, blockReward)
 		r.Rsh(r, 3) // ÷8
@@ -673,8 +677,8 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
 		if i < len(uncleRewards) {
-			state.AddBalance(uncle.Coinbase, uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
+			state.AddBalance(accounts.InternAddress(uncle.Coinbase), uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
 		}
 	}
-	state.AddBalance(header.Coinbase, minerReward, tracing.BalanceIncreaseRewardMineBlock)
+	state.AddBalance(accounts.InternAddress(header.Coinbase), minerReward, tracing.BalanceIncreaseRewardMineBlock)
 }

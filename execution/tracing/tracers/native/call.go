@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -76,7 +77,7 @@ func (f *callFrame) failed() bool {
 }
 
 func (f *callFrame) processOutput(output []byte, err error) {
-	output = common.CopyBytes(output)
+	output = common.Copy(output)
 	if err == nil {
 		f.Output = output
 		return
@@ -156,17 +157,20 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.precompiles = append(t.precompiles, precompile)
 	if precompile && !t.config.IncludePrecompiles {
 		return
 	}
-
+	var toValue common.Address
+	if !to.IsNil() {
+		toValue = to.Value()
+	}
 	t.callstack[0] = callFrame{
 		Type:  vm.CALL,
-		From:  from,
-		To:    to,
-		Input: common.CopyBytes(input),
+		From:  from.Value(),
+		To:    toValue,
+		Input: common.Copy(input),
 		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
@@ -190,7 +194,7 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.depth = depth
 	t.precompiles = append(t.precompiles, precompile)
 	if t.config.OnlyTopCall && depth > 0 {
@@ -204,11 +208,15 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 		return
 	}
 
+	var toValue common.Address
+	if !to.IsNil() {
+		toValue = to.Value()
+	}
 	call := callFrame{
 		Type:  vm.OpCode(typ),
-		From:  from,
-		To:    to,
-		Input: common.CopyBytes(input),
+		From:  from.Value(),
+		To:    toValue,
+		Input: common.Copy(input),
 		Gas:   gas,
 	}
 
@@ -264,7 +272,7 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 	t.callstack[0].processOutput(output, err)
 }
 
-func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.gasLimit = tx.GetGasLimit()
 	t.logIndex = 0
 	t.logGaps = make(map[uint64]int)

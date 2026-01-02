@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -56,7 +56,7 @@ type EngineBlockDownloader struct {
 	status        atomic.Value // current Status of the downloading process, aka: is it doing anything
 	blockReader   services.FullBlockReader
 	db            kv.RoDB
-	chainRW       eth1_chain_reader.ChainReaderWriterEth1
+	chainRW       chainreader.ChainReaderWriterEth1
 	syncCfg       ethconfig.Sync
 	lock          sync.Mutex
 	logger        log.Logger
@@ -87,7 +87,7 @@ func NewEngineBlockDownloader(
 		syncCfg:       syncCfg,
 		logger:        logger,
 		blockReader:   blockReader,
-		chainRW:       eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		chainRW:       chainreader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
 		bbd:           bbd,
 		badHeaders:    badHeaders,
 	}
@@ -196,7 +196,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	var blocks []*types.Block
 	var insertedBlocksWithoutExec int
 	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
-		progressLogArgs := []interface{}{
+		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
 			"fromHash", blocks[0].Hash(),
 			"to", blocks[len(blocks)-1].NumberU64(),

@@ -85,7 +85,7 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
-func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileInfo, toMerge []*DirtySegment, snapDir string, doIndex bool, indexBuilder snaptype.IndexBuilder, onMerge func(r Range) error) (newDirtySegment *DirtySegment, err error) {
+func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileInfo, toMerge []*DirtySegment, snapDir string, doIndex bool, indexBuilder snaptype.IndexBuilder, onMerge func(mergedFiles []string) error) (newDirtySegment *DirtySegment, err error) {
 	defer func() {
 		if err == nil {
 			if rec := recover(); rec != nil {
@@ -140,7 +140,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.I
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) (err error) {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(mergedFileNames []string) error, onDelete func(l []string) error) (err error) {
 	v := snapshots.View()
 	defer v.Close()
 
@@ -153,8 +153,10 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 
 	in := make(map[snaptype.Enum][]*DirtySegment)
 	out := make(map[snaptype.Enum][]*DirtySegment)
+	mergedFileNames := make([]string, 0, 16)
 
 	for _, r := range mergeRanges {
+		mergedFileNames = mergedFileNames[:0]
 		toMerge, err := m.filesByRange(v, r.From(), r.To())
 		if err != nil {
 			return err
@@ -175,12 +177,13 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
 			}
 			in[t.Enum()] = append(in[t.Enum()], newDirtySegment)
+			mergedFileNames = append(mergedFileNames, newDirtySegment.FilePath())
 		}
 
 		snapshots.LogStat("merge")
 
 		if onMerge != nil {
-			if err := onMerge(r); err != nil {
+			if err := onMerge(mergedFileNames); err != nil {
 				return err
 			}
 		}

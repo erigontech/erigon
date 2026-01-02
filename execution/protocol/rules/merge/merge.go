@@ -28,13 +28,14 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
-	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -89,11 +90,11 @@ func (s *Merge) Type() chain.RulesName {
 // Author implements rules.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
 // This is thread-safe (only access the header.Coinbase or the underlying engine's thread-safe method)
-func (s *Merge) Author(header *types.Header) (common.Address, error) {
+func (s *Merge) Author(header *types.Header) (accounts.Address, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Author(header)
 	}
-	return header.Coinbase, nil
+	return accounts.InternAddress(header.Coinbase), nil
 }
 
 func (s *Merge) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header, seal bool) error {
@@ -180,7 +181,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		} else {
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
-				state.AddBalance(w.Address, *amountInWei, tracing.BalanceIncreaseWithdrawal)
+				state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}
 	}
@@ -219,7 +220,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
-				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
+				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got:%v", header.RequestsHash, rh)
 			}
 		}
 	}
@@ -357,27 +358,43 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	return nil
 }
 
-func (s *Merge) IsServiceTransaction(sender common.Address, syscall rules.SystemCall) bool {
+func (s *Merge) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
 func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
-) {
-	auraEngine, isAura := s.eth1Engine.(*aura.AuRa)
+) error {
 	if !misc.IsPoSHeader(header) {
-		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
-	} else if isAura {
-		auraEngine.RewriteBytecode(header, state)
+		return s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
-	if chain.Config().IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
-		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr common.Address, data []byte) ([]byte, error) {
+
+	cfg := chain.Config()
+
+	// See https://hackmd.io/@filoozom/rycoQITlWl
+	if cfg.BalancerTime != nil && header.Time >= cfg.BalancerTime.Uint64() {
+		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		if parent == nil {
+			return rules.ErrUnknownAncestor
+		}
+		if parent.Time < cfg.BalancerTime.Uint64() { // first Balancer HF block
+			for address, rewrittenCode := range cfg.BalancerRewriteBytecode {
+				state.SetCode(accounts.InternAddress(address), rewrittenCode)
+			}
+		}
+	}
+
+	if cfg.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if chain.Config().IsPrague(header.Time) {
-		_ = misc.StoreBlockHashesEip2935(header, state)
+	if cfg.IsPrague(header.Time) {
+		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (s *Merge) APIs(chain rules.ChainHeaderReader) []rpc.API {

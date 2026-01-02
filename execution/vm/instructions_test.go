@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -585,9 +586,9 @@ func TestOpTstore(t *testing.T) {
 		state          = state.New(nil)
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
-		caller         = common.Address{}
-		to             = common.Address{1}
-		callContext    = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{}, NewJumpDestCache(16))}
+		caller         = accounts.ZeroAddress
+		to             = accounts.InternAddress(common.Address{1})
+		callContext    = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
 		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
 
@@ -690,7 +691,7 @@ func TestCreate2Addreses(t *testing.T) {
 		origin := common.BytesToAddress(common.FromHex(tt.origin))
 		salt := common.BytesToHash(common.FromHex(tt.salt))
 		code := common.FromHex(tt.code)
-		codeHash := crypto.Keccak256(code)
+		codeHash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(code)))
 		address := types.CreateAddress2(origin, salt, codeHash)
 		/*
 			stack          := newstack()

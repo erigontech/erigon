@@ -241,17 +241,17 @@ func NewHistoryRanges(history MergeRange, index MergeRange) HistoryRanges {
 }
 
 func (r HistoryRanges) String(aggStep uint64) string {
-	var str string
+	var str strings.Builder
 	if r.history.needMerge {
-		str += r.history.String("hist", aggStep)
+		str.WriteString(r.history.String("hist", aggStep))
 	}
 	if r.index.needMerge {
-		if str != "" {
-			str += ", "
+		if str.Len() > 0 {
+			str.WriteString(", ")
 		}
-		str += r.index.String("idx", aggStep)
+		str.WriteString(r.index.String("idx", aggStep))
 	}
-	return str
+	return str.String()
 }
 func (r HistoryRanges) any() bool {
 	return r.history.needMerge || r.index.needMerge
@@ -800,7 +800,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
+						compressedPageValuesCount := hi.decompressor.CompressedPageValuesCount()
+
+						if hi.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+						}
+
+						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
 						break
 					}
 				}

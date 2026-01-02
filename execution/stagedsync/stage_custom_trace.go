@@ -206,6 +206,10 @@ Loop:
 	return nil
 }
 
+// stage_custom_trace input range is block based, and not txNum based.
+// it doesn't need to account for "half-block execution" case, because it
+// must have some stage_exec progress, which means it resumes from full blocks.
+// also, it appends/puts to db blockResults and not "txResult".
 func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		if err := tx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
@@ -226,7 +230,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		}
 		defer tx.Rollback()
 
-		doms, err := execctx.NewSharedDomains(tx, logger)
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 		if err != nil {
 			return err
 		}
@@ -337,18 +341,15 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 						}
 					}
 				} else {
-					{
-						if txTask.TxIndex >= 0 {
-							receipt := blockResult.Receipts[txTask.TxIndex]
-							if receipt != nil {
-								logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(result.Logs))
-								cumGasUsed = receipt.CumulativeGasUsed
-							}
+					if txTask.TxIndex >= 0 {
+						receipt := blockResult.Receipts[txTask.TxIndex]
+						if receipt != nil {
+							logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(result.Logs))
+							cumGasUsed = receipt.CumulativeGasUsed
 						}
 					}
 				}
 
-				logger.Info("Append Reciept", "block", txTask.BlockNumber(), "tx", txTask.TxNum, "logidx", logIndexAfterTx, "gas", cumGasUsed)
 				if err := rawtemporaldb.AppendReceipt(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
@@ -364,6 +365,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 					receipt = result.Receipt
 				} else {
 					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+						// issue: https://github.com/erigontech/erigon/issues/16037
 						receipt = blockResult.Receipts[txTask.TxIndex-1]
 						if receipt == nil {
 							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
@@ -393,14 +395,16 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			}
 			if produce.TraceFrom {
 				for addr := range result.TraceFroms {
-					if err := doms.IndexAdd(kv.TracesFromIdx, addr[:], txTask.TxNum); err != nil {
+					addrValue := addr.Value()
+					if err := doms.IndexAdd(kv.TracesFromIdx, addrValue[:], txTask.TxNum); err != nil {
 						return err
 					}
 				}
 			}
 			if produce.TraceTo {
 				for addr := range result.TraceTos {
-					if err := doms.IndexAdd(kv.TracesToIdx, addr[:], txTask.TxNum); err != nil {
+					addrValue := addr.Value()
+					if err := doms.IndexAdd(kv.TracesToIdx, addrValue[:], txTask.TxNum); err != nil {
 						return err
 					}
 				}

@@ -56,6 +56,7 @@ func main() {
 		erigonURL        string
 		blockFrom        uint64
 		blockTo          uint64
+		randBlocks       uint64
 		latest           bool
 		recordFile       string
 		errorFile        string
@@ -72,6 +73,9 @@ func main() {
 	withBlockNum := func(cmd *cobra.Command) {
 		cmd.Flags().Uint64Var(&blockFrom, "blockFrom", 2000000, "Block number to start test generation from")
 		cmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
+	}
+	withRandBlockNum := func(cmd *cobra.Command) {
+		cmd.Flags().Uint64Var(&randBlocks, "randBlocks", 1000, "Number of random blocks to process")
 	}
 	withLatest := func(cmd *cobra.Command) {
 		cmd.Flags().BoolVar(&latest, "latest", false, "Exec on latest ")
@@ -504,6 +508,19 @@ func main() {
 	}
 	with(benchEthGetBalanceCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum)
 
+	var BenchEthGetBalanceRandomAccountCmd = &cobra.Command{
+		Use:   "benchEthGetBalanceRandomAccount",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchEthGetBalanceRandomAccount(erigonURL, int(randBlocks))
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(BenchEthGetBalanceRandomAccountCmd, withErigonUrl, withRandBlockNum)
+
 	var replayCmd = &cobra.Command{
 		Use:   "replay",
 		Short: "",
@@ -566,6 +583,7 @@ func main() {
 		benchTraceTransactionCmd,
 		benchEthBlockByNumberCmd,
 		benchEthGetBalanceCmd,
+		BenchEthGetBalanceRandomAccountCmd,
 		benchOtsGetBlockTransactions,
 		replayCmd,
 	)

@@ -214,36 +214,36 @@ func (cell *cell) reset() {
 func (cell *cell) FullString() string {
 	b := new(strings.Builder)
 	b.WriteString("{")
-	b.WriteString(fmt.Sprintf("loaded=%v ", cell.loaded))
+	b.WriteString(fmt.Sprintf("loaded=%v", cell.loaded))
 	if cell.Deleted() {
-		b.WriteString("DELETED ")
+		b.WriteString(" DELETED ")
 	}
 
 	if cell.accountAddrLen > 0 {
-		b.WriteString(fmt.Sprintf("addr=%x ", cell.accountAddr[:cell.accountAddrLen]))
-		b.WriteString(fmt.Sprintf("balance=%s ", cell.Balance.String()))
-		b.WriteString(fmt.Sprintf("nonce=%d ", cell.Nonce))
+		b.WriteString(fmt.Sprintf(" addr=%x", cell.accountAddr[:cell.accountAddrLen]))
+		b.WriteString(fmt.Sprintf(" balance=%s", cell.Balance.String()))
+		b.WriteString(fmt.Sprintf(" nonce=%d", cell.Nonce))
 		if cell.CodeHash != empty.CodeHash {
-			b.WriteString(fmt.Sprintf("codeHash=%x ", cell.CodeHash[:]))
+			b.WriteString(fmt.Sprintf(" codeHash=%x", cell.CodeHash[:]))
 		} else {
-			b.WriteString("codeHash=EMPTY ")
+			b.WriteString(" codeHash=EMPTY")
 		}
 	}
 	if cell.storageAddrLen > 0 {
-		b.WriteString(fmt.Sprintf("addr[s]=%x ", cell.storageAddr[:cell.storageAddrLen]))
-		b.WriteString(fmt.Sprintf("storage=%x ", cell.Storage[:cell.StorageLen]))
+		b.WriteString(fmt.Sprintf(" addr[s]=%x", cell.storageAddr[:cell.storageAddrLen]))
+		b.WriteString(fmt.Sprintf(" storage=%x", cell.Storage[:cell.StorageLen]))
 	}
 	if cell.hashLen > 0 {
-		b.WriteString(fmt.Sprintf("h=%x ", cell.hash[:cell.hashLen]))
+		b.WriteString(fmt.Sprintf(" h=%x", cell.hash[:cell.hashLen]))
 	}
 	if cell.stateHashLen > 0 {
-		b.WriteString(fmt.Sprintf("memHash=%x ", cell.stateHash[:cell.stateHashLen]))
+		b.WriteString(fmt.Sprintf(" memHash=%x", cell.stateHash[:cell.stateHashLen]))
 	}
 	if cell.extLen > 0 {
-		b.WriteString(fmt.Sprintf("extension=%x ", cell.extension[:cell.extLen]))
+		b.WriteString(fmt.Sprintf(" extension=%x", cell.extension[:cell.extLen]))
 	}
 	if cell.hashedExtLen > 0 {
-		b.WriteString(fmt.Sprintf("hashedExtension=%x ", cell.hashedExtension[:cell.hashedExtLen]))
+		b.WriteString(fmt.Sprintf(" hashedExtension=%x", cell.hashedExtension[:cell.hashedExtLen]))
 	}
 
 	b.WriteString("}")
@@ -461,6 +461,137 @@ func readUvarint(data []byte) (uint64, int, error) {
 	return l, n, nil
 }
 
+// skipCellFields skips over the fields in branch data based on fieldBits.
+// Used during warmup traversal to find the right child's data.
+func skipCellFields(data []byte, pos int, fieldBits byte) int {
+	// Field flags: extension=1, accountAddr=2, storageAddr=4, hash=8, stateHash=16
+	for bit := byte(1); bit <= 16; bit <<= 1 {
+		if fieldBits&bit != 0 {
+			if pos >= len(data) {
+				return pos
+			}
+			// Read length varint
+			l, n := binary.Uvarint(data[pos:])
+			if n <= 0 {
+				return pos
+			}
+			pos += n + int(l) // Skip length + data
+		}
+	}
+	return pos
+}
+
+// extractBranchCellAddresses extracts account/storage addresses from branch data.
+// pathNibble is the nibble on the update path (-1 if none) - its addresses are always
+// extracted since that cell will have stateHash cleared during update.
+// Sibling cells with stateHash (memoized) are skipped.
+func extractBranchCellAddresses(branchData []byte, pathNibble int) (accountAddrs [][]byte, storageAddrs [][]byte) {
+	if len(branchData) < 4 {
+		return nil, nil
+	}
+	// Skip touch map (first 2 bytes)
+	branchData = branchData[2:]
+	bitmap := binary.BigEndian.Uint16(branchData[0:2])
+	pos := 2
+
+	// Iterate over all cells in the branch
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+
+		if pos >= len(branchData) {
+			break
+		}
+		fieldBits := branchData[pos]
+		pos++
+
+		// Cell on update path will have stateHash cleared - always extract its addresses.
+		// Sibling cells with stateHash (bit 4) are memoized - skip them.
+		isOnPath := nibble == pathNibble
+		hasMemoizedHash := fieldBits&16 != 0
+		shouldExtract := isOnPath || !hasMemoizedHash
+
+		// Parse each field
+		// extension (bit 0)
+		if fieldBits&1 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+
+		// accountAddr (bit 1)
+		if fieldBits&2 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n
+			if l > 0 && pos+int(l) <= len(branchData) {
+				if shouldExtract {
+					addr := make([]byte, l)
+					copy(addr, branchData[pos:pos+int(l)])
+					accountAddrs = append(accountAddrs, addr)
+				}
+				pos += int(l)
+			}
+		}
+
+		// storageAddr (bit 2)
+		if fieldBits&4 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n
+			if l > 0 && pos+int(l) <= len(branchData) {
+				if shouldExtract {
+					addr := make([]byte, l)
+					copy(addr, branchData[pos:pos+int(l)])
+					storageAddrs = append(storageAddrs, addr)
+				}
+				pos += int(l)
+			}
+		}
+
+		// hash (bit 3)
+		if fieldBits&8 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+
+		// stateHash (bit 4)
+		if fieldBits&16 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+	}
+	return accountAddrs, storageAddrs
+}
+
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
@@ -608,7 +739,7 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if hasTerm(key) {
+	if HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
@@ -635,7 +766,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if hasTerm(key) {
+	if HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
@@ -1109,25 +1240,26 @@ func (c *cell) IsEmpty() bool {
 }
 
 func (c *cell) String() string {
-	s := "("
+	var s strings.Builder
+	s.WriteString("(")
 	if c.hashLen > 0 {
-		s += fmt.Sprintf("hash(len=%d)=%x, ", c.hashLen, c.hash)
+		s.WriteString(fmt.Sprintf("hash(len=%d)=%x, ", c.hashLen, c.hash))
 	}
 	if c.hashedExtLen > 0 {
-		s += fmt.Sprintf("hashedExtension(len=%d)=%x, ", c.hashedExtLen, c.hashedExtension[:c.hashedExtLen])
+		s.WriteString(fmt.Sprintf("hashedExtension(len=%d)=%x, ", c.hashedExtLen, c.hashedExtension[:c.hashedExtLen]))
 	}
 	if c.extLen > 0 {
-		s += fmt.Sprintf("extension(len=%d)=%x, ", c.extLen, c.extension[:c.extLen])
+		s.WriteString(fmt.Sprintf("extension(len=%d)=%x, ", c.extLen, c.extension[:c.extLen]))
 	}
 	if c.accountAddrLen > 0 {
-		s += fmt.Sprintf("accountAddr=%x, ", c.accountAddr)
+		s.WriteString(fmt.Sprintf("accountAddr=%x, ", c.accountAddr))
 	}
 	if c.storageAddrLen > 0 {
-		s += fmt.Sprintf("storageAddr=%x, ", c.storageAddr)
+		s.WriteString(fmt.Sprintf("storageAddr=%x, ", c.storageAddr))
 	}
 
-	s += ")"
-	return s
+	s.WriteString(")")
+	return s.String()
 }
 
 func (hph *HexPatriciaHashed) PrintGrid() {
@@ -1167,7 +1299,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	account.Balance = accountUpdate.Balance
 	account.Initialised = true
 	account.Root = accountUpdate.Storage
-	account.CodeHash = accountUpdate.CodeHash
+	account.CodeHash = accounts.InternCodeHash(accountUpdate.CodeHash)
 
 	addrHash, err := CompactKey(hashedKey[:64])
 	if err != nil {
@@ -1347,29 +1479,29 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				// the traversal can be stopped at this level
 				pathDivergenceFound = true
 				// special handling only if consuming the diverging hashed extension doesn't lead to account or storage
-				if pathDivergenceFound && fullPathLength != 64 && fullPathLength != 128 {
-					fullDivergingPath := make([]byte, fullPathLength)
-					for i := 0; i < int(keyPos+1); i++ {
-						fullDivergingPath[i] = hashedKey[i]
-					}
-					for i := 0; i < len(hashedExtKey); i++ {
-						fullDivergingPath[int(keyPos)+1+i] = hashedExtKey[i]
-					}
-					// // Code left commented out in case it might be needed in the future
-					// rowData, err := readBranchData(hph, fullDivergingPath)
-					// if err != nil {
-					// 	return nil, fmt.Errorf("failed to read branchdata: %w", err)
-					// }
-					// terminalNode, err := terminalRowToNode(hph, rowData, hph.depths[row])
-					// if err != nil {
-					// 	return nil, fmt.Errorf("failed to parse terminal node: %w", err)
-					// }
-					// nextNode = &trie.ShortNode{Key: hashedExtKey, Val: terminalNode}
+				// Code left commented out in case it might be needed in the future:
+				// if pathDivergenceFound && fullPathLength != 64 && fullPathLength != 128 {
+				// 	fullDivergingPath := make([]byte, fullPathLength)
+				// 	for i := 0; i < int(keyPos+1); i++ {
+				// 		fullDivergingPath[i] = hashedKey[i]
+				// 	}
+				// 	for i := 0; i < len(hashedExtKey); i++ {
+				// 		fullDivergingPath[int(keyPos)+1+i] = hashedExtKey[i]
+				// 	}
+				// 	rowData, err := readBranchData(hph, fullDivergingPath)
+				// 	if err != nil {
+				// 		return nil, fmt.Errorf("failed to read branchdata: %w", err)
+				// 	}
+				// 	terminalNode, err := terminalRowToNode(hph, rowData, hph.depths[row])
+				// 	if err != nil {
+				// 		return nil, fmt.Errorf("failed to parse terminal node: %w", err)
+				// 	}
+				// 	nextNode = &trie.ShortNode{Key: hashedExtKey, Val: terminalNode}
+				// }
 
-					// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
-					// Currently necessary, because the commented out code above which reads branch data and converts it
-					nextNode = &trie.ShortNode{Key: hashedExtKey}
-				}
+				// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
+				// Currently necessary, because the commented out code above which reads branch data and converts it
+				nextNode = &trie.ShortNode{Key: hashedExtKey}
 			} else {
 				keyPos += extKeyLength // jump ahead
 
@@ -1529,12 +1661,14 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
+
 	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
 		return err
 	}
+
 	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 
@@ -1818,7 +1952,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	}
 
 	depth := hph.depths[row]
-	updateKey := hexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
+	updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {
@@ -1936,7 +2070,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
 					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 					if err != nil {
-						return fmt.Errorf("failed to get account: %w", err)
+						return err
 					}
 					cell.setFromUpdate(upd)
 					// if update is empty, loaded flag was not updated so do it manually
@@ -1947,7 +2081,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
 					upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 					if err != nil {
-						return fmt.Errorf("failed to get storage: %w", err)
+						return err
 					}
 					cell.setFromUpdate(upd)
 					// if update is empty, loaded flag was not updated so do it manually
@@ -2216,7 +2350,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
-	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -2306,7 +2440,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, witnessTrieRootHash, nil
 }
 
-func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2318,7 +2452,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.trace = true
 
-	if collectCommitmentMetrics {
+	if hph.metrics.collectCommitmentMetrics {
 		hph.metrics.Reset()
 		hph.metrics.updates.Store(updatesCount)
 		defer func() {
@@ -2329,7 +2463,15 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	defer func() { logEvery.Stop() }()
 
-	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	// Setup warmup if configured
+	var warmuper *Warmuper
+	if warmup.Enabled {
+		warmuper = NewWarmuper(ctx, warmup)
+		warmuper.Start()
+		defer warmuper.Close()
+	}
+
+	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -2455,6 +2597,10 @@ func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 }
 
 func (hph *HexPatriciaHashed) SetCapture(capture []string) { hph.capture = capture }
+
+func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
+	hph.metrics.EnableCsvMetrics(filePathPrefix)
+}
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 

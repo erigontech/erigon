@@ -224,7 +224,7 @@ func (api *API) Status(ctx context.Context) (*status, error) {
 		if err != nil {
 			return nil, err
 		}
-		signStatus[sealer]++
+		signStatus[sealer.Value()]++
 	}
 	return &status{
 		InturnPercent: float64(100*optimals) / float64(numBlocks),

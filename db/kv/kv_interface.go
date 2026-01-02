@@ -436,6 +436,9 @@ type TemporalDebugTx interface {
 	GetLatestFromDB(domain Domain, k []byte) (v []byte, step Step, found bool, err error)
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
+	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
+	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
+
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
@@ -449,7 +452,7 @@ type TemporalDebugTx interface {
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
 
-	NewMemBatch(ioMetrics interface{}) TemporalMemBatch
+	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
 type TemporalDebugDB interface {
@@ -478,6 +481,7 @@ type TemporalMemBatch interface {
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
+	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 }
 
 type WithFreezeInfo interface {

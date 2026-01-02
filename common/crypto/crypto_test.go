@@ -265,15 +265,15 @@ func TestSaveECDSA(t *testing.T) {
 }
 
 func TestTransactionSignatureIsValid(t *testing.T) {
-	check := func(expected bool, v byte, r, s *uint256.Int) {
-		if TransactionSignatureIsValid(v, r, s, true) != expected {
+	check := func(expected bool, v byte, r, s uint256.Int) {
+		if TransactionSignatureIsValid(v, &r, &s, true) != expected {
 			t.Errorf("mismatch for v: %d r: %d s: %d want: %v", v, r, s, expected)
 		}
 	}
 	minusOne := uint256.NewInt(0).SetAllOne()
 	one := u256.N1
 	zero := u256.N0
-	secp256k1nMinus1 := new(uint256.Int).Sub(secp256k1N, u256.N1)
+	secp256k1nMinus1 := u256.Sub(secp256k1N, u256.N1)
 
 	// correct v,r,s
 	check(true, 0, one, one)
@@ -306,8 +306,8 @@ func TestTransactionSignatureIsValid(t *testing.T) {
 
 	// current callers ensures r,s cannot be negative, but let's test for that too
 	// as crypto package could be used stand-alone
-	check(false, 0, minusOne, one)
-	check(false, 0, one, minusOne)
+	check(false, 0, *minusOne, one)
+	check(false, 0, one, *minusOne)
 }
 
 func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte) {

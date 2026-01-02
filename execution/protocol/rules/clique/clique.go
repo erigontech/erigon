@@ -146,7 +146,7 @@ var (
 type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.Address]) (common.Address, error) {
+func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, accounts.Address]) (accounts.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 
@@ -157,19 +157,17 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.
 
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < ExtraSeal {
-		return common.Address{}, errMissingSignature
+		return accounts.NilAddress, errMissingSignature
 	}
 	signature := header.Extra[len(header.Extra)-ExtraSeal:]
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(SealHash(header).Bytes(), signature)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.NilAddress, err
 	}
 
-	var signer common.Address
-	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
-
+	signer := accounts.InternAddress(common.BytesToAddress(crypto.Keccak256(pubkey[1:])[12:]))
 	sigcache.Add(hash, signer)
 	return signer, nil
 }
@@ -182,8 +180,8 @@ type Clique struct {
 	snapshotConfig *chainspec.ConsensusSnapshotConfig // Rules engine configuration parameters
 	DB             kv.RwDB                            // Database to store and retrieve snapshot checkpoints
 
-	signatures *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
-	recents    *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
+	signatures *lru.ARCCache[common.Hash, accounts.Address] // Signatures of recent blocks to speed up mining
+	recents    *lru.ARCCache[common.Hash, *Snapshot]        // Snapshots for recent block to speed up reorgs
 
 	proposals map[common.Address]bool // Current list of proposals we are pushing
 
@@ -210,7 +208,7 @@ func New(cfg *chain.Config, snapshotConfig *chainspec.ConsensusSnapshotConfig, c
 	}
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC[common.Hash, *Snapshot](snapshotConfig.InmemorySnapshots)
-	signatures, _ := lru.NewARC[common.Hash, common.Address](snapshotConfig.InmemorySignatures)
+	signatures, _ := lru.NewARC[common.Hash, accounts.Address](snapshotConfig.InmemorySignatures)
 
 	exitCh := make(chan struct{})
 
@@ -255,7 +253,7 @@ func (c *Clique) Type() chain.RulesName {
 // from the signature in the header's extra-data section.
 // This is thread-safe (only access the header, as well as signatures, which
 // are lru.ARCCache, which is thread-safe)
-func (c *Clique) Author(header *types.Header) (common.Address, error) {
+func (c *Clique) Author(header *types.Header) (accounts.Address, error) {
 	return ecrecover(header, c.signatures)
 }
 
@@ -312,7 +310,7 @@ func (c *Clique) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 		// Gather all the proposals that make sense voting on
 		addresses := make([]common.Address, 0, len(c.proposals))
 		for address, authorize := range c.proposals {
-			if snap.validVote(address, authorize) {
+			if snap.validVote(accounts.InternAddress(address), authorize) {
 				addresses = append(addresses, address)
 			}
 		}
@@ -366,7 +364,8 @@ func (c *Clique) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 }
 
 func (c *Clique) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	return nil
 }
 
 func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall rules.SystemCall,
@@ -422,7 +421,7 @@ func (c *Clique) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Bl
 	}
 	// Don't hold the signer fields for the entire sealing procedure
 	c.lock.RLock()
-	signer, signFn := c.signer, c.signFn
+	signer, signFn := accounts.InternAddress(c.signer), c.signFn
 	c.lock.RUnlock()
 
 	// Bail out if we're unauthorized to sign a block
@@ -453,7 +452,7 @@ func (c *Clique) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Bl
 		c.logger.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
-	sighash, err := signFn(signer, accounts.MimetypeClique, CliqueRLP(header))
+	sighash, err := signFn(signer.Value(), accounts.MimetypeClique, CliqueRLP(header))
 	if err != nil {
 		return err
 	}
@@ -506,7 +505,7 @@ func (c *Clique) SealHash(header *types.Header) common.Hash {
 	return SealHash(header)
 }
 
-func (c *Clique) IsServiceTransaction(sender common.Address, syscall rules.SystemCall) bool {
+func (c *Clique) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
 	return false
 }
 
@@ -572,7 +571,7 @@ func CliqueRLP(header *types.Header) []byte {
 }
 
 func encodeSigHeader(w io.Writer, header *types.Header) {
-	enc := []interface{}{
+	enc := []any{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,

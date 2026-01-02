@@ -23,8 +23,6 @@ package math
 import (
 	"fmt"
 	"math/big"
-
-	"github.com/holiman/uint256"
 )
 
 // Various big integer limit values.
@@ -167,14 +165,6 @@ func BigMin(x, y *big.Int) *big.Int {
 	return x
 }
 
-// U256Min returns the smaller of x or y.
-func U256Min(x, y *uint256.Int) *uint256.Int {
-	if x.Cmp(y) > 0 {
-		return y
-	}
-	return x
-}
-
 // FirstBitSet returns the index of the first 1 bit in v, counting from LSB.
 func FirstBitSet(v *big.Int) int {
 	for i := 0; i < v.BitLen(); i++ {
@@ -269,13 +259,14 @@ func S256(x *big.Int) *big.Int {
 // Courtesy @karalabe and @chfast
 func Exp(base, exponent *big.Int) *big.Int {
 	result := big.NewInt(1)
+	baseCopy := new(big.Int).Set(base)
 
 	for _, word := range exponent.Bits() {
 		for i := 0; i < wordBits; i++ {
 			if word&1 == 1 {
-				U256(result.Mul(result, base))
+				U256(result.Mul(result, baseCopy))
 			}
-			U256(base.Mul(base, base))
+			U256(baseCopy.Mul(baseCopy, baseCopy))
 			word >>= 1
 		}
 	}

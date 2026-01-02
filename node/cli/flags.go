@@ -115,6 +115,10 @@ var (
 		Name:  "state.stream.disable",
 		Usage: "Disable streaming of state changes from core to RPC daemon",
 	}
+	ExperimentalBALFlag = cli.BoolFlag{
+		Name:  "experimental.bal",
+		Usage: "generate block access list",
+	}
 
 	// Throttling Flags
 	SyncLoopThrottleFlag = cli.StringFlag{
@@ -273,6 +277,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
+	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
 	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
 		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
@@ -363,8 +368,11 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
 		cfg.StateStream = false
 	}
+	if v := f.Bool(ExperimentalBALFlag.Name, false, ExperimentalBALFlag.Usage); v != nil {
+		cfg.ExperimentalBAL = *v
+	}
 
-	if v := f.Bool(utils.ChaosMonkeyFlag.Name, true, utils.ChaosMonkeyFlag.Usage); v != nil {
+	if v, _ := f.GetBool(utils.ChaosMonkeyFlag.Name); v {
 		cfg.ChaosMonkey = true
 	}
 }
@@ -418,7 +426,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AuthRpcTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(AuthRpcReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
-			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
+			IdleTimeout:  ctx.Duration(AuthRpcIdleTimeoutFlag.Name),
 		},
 		EvmCallTimeout:            ctx.Duration(EvmCallTimeoutFlag.Name),
 		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),

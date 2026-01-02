@@ -55,6 +55,7 @@ var DefaultFlags = []cli.Flag{
 	&TLSKeyFlag,
 	&TLSCACertFlag,
 	&StateStreamDisableFlag,
+	&ExperimentalBALFlag,
 	&SyncLoopThrottleFlag,
 	&BadBlockFlag,
 
@@ -173,6 +174,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
+	&utils.OverrideAmsterdamFlag,
 	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
@@ -250,7 +252,4 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
-
-	&utils.ErigonDBStepSizeFlag,
-	&utils.ErigonDBStepsInFrozenFileFlag,
 }
