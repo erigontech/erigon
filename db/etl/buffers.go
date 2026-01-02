@@ -26,6 +26,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common/dbg"
 
 	"github.com/erigontech/erigon/common"
@@ -46,7 +47,10 @@ const (
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
+// WorstCase is "Exec of large batch of blocks. While Caplin also syncing in background":
+//   - State: 5_domains * 4 collectors + 4_standelone_indices * 2 collectors = 25 etl collectors * (256Mb/8) = 800Mb
+//   - Caplin: `cl/antiquary/beacon_states_collector.go`: 25 etl collectors * (256Mb/8) = 800Mb
+//   - `asyncDiskDump=true` feature of ETL - doubling RAM usage (1 collector is current, 1 collector flushing/sorting in background): 2 * (800MB + 800MB) = 3.2GB
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
