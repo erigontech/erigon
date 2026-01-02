@@ -20,9 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"sync"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -176,6 +178,74 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 		return err
 	}
+
+	var (
+		batch     = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock sync.Mutex
+	)
+
+	// LRU cache for deduplication - filters duplicates before they enter the batch
+	// Uses maphash to avoid string allocations
+	var hasher maphash.Hash
+	hasher.Reset() // just to be sure the seed is randomly set.
+	seenLRU, _ := simplelru.NewLRU[uint64, struct{}](4096, nil)
+
+	flushBatch := func() {
+		batchLock.Lock()
+		if len(batch) == 0 {
+			batchLock.Unlock()
+			return
+		}
+		toProcess := batch
+		batch = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock.Unlock()
+
+		if !f.pool.Started() {
+			return
+		}
+
+		if f.db == nil {
+			for range toProcess {
+				if f.wg != nil {
+					f.wg.Done()
+				}
+			}
+			return
+		}
+
+		tx, txErr := f.db.BeginRo(streamCtx)
+		if txErr != nil {
+			f.logger.Warn("[txpool.fetch] failed to begin batch transaction", "err", txErr)
+			return
+		}
+		defer tx.Rollback()
+
+		for _, req := range toProcess {
+			if handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient); handleErr != nil {
+				if !grpcutil.IsRetryLater(handleErr) && !grpcutil.IsEndOfStream(handleErr) {
+					f.logger.Trace("[txpool.fetch] Handling batched message", "reqID", req.Id.String(), "err", handleErr)
+				}
+			}
+			if f.wg != nil {
+				f.wg.Done()
+			}
+		}
+	}
+
+	// Start ticker goroutine to flush batch every second
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-ticker.C:
+				flushBatch()
+			}
+		}
+	}()
+
 	var req *sentryproto.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
@@ -187,22 +257,29 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return fmt.Errorf("txpool.receiveMessage: %w", err)
 		}
 		if req == nil {
+			flushBatch()
 			return nil
 		}
-		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
+
+		// Skip duplicates using LRU cache with maphash to avoid string allocs
+		hasher.Reset()
+		hasher.Write(req.Data)
+		hash := hasher.Sum64()
+		if _, seen := seenLRU.Get(hash); seen {
+			if f.wg != nil {
+				f.wg.Done()
 			}
-			f.logger.Trace("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
+			continue
 		}
-		if f.wg != nil {
-			f.wg.Done()
-		}
+		seenLRU.Add(hash, struct{}{})
+
+		batchLock.Lock()
+		batch = append(batch, req)
+		batchLock.Unlock()
 	}
 }
 
-func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (err error) {
+func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s, rlp: %x", rec, dbg.Stack(), req.Data)
@@ -212,11 +289,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 	if !f.pool.Started() {
 		return nil
 	}
-	tx, err := f.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	switch req.Id {
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:

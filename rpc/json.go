@@ -142,11 +142,11 @@ func (err *jsonError) ErrorData() any {
 	return err.Data
 }
 
-func NewJsonError(code int, message string, data interface{}) interface{} {
+func NewJsonError(code int, message string, data any) any {
 	return &jsonError{Code: code, Message: message, Data: data}
 }
 
-func NewJsonErrorFromErr(err error) interface{} {
+func NewJsonErrorFromErr(err error) any {
 	return newJsonError(err)
 }
 

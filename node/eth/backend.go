@@ -379,7 +379,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.OverrideBalancerTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -991,7 +991,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
+	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
@@ -1202,6 +1202,10 @@ func (s *Ethereum) APIs() []rpc.API {
 	return s.apiList
 }
 
+func (s *Ethereum) StateDiffClient() *direct.StateDiffClientDirect {
+	return s.stateDiffClient
+}
+
 func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	s.lock.RLock()
 	etherbase := s.etherbase
@@ -1270,7 +1274,7 @@ func (s *Ethereum) setUpSnapDownloader(
 	cc *chain.Config,
 ) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		s.logger.Warn("files changed...sending notification")
+		s.logger.Debug("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
@@ -1742,15 +1746,4 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config *txpoolcfg.
 
 func sentryMux(sentries []sentryproto.SentryClient) sentryproto.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
-}
-
-type engineAPISwitcher struct {
-	backend *Ethereum
-}
-
-func (e *engineAPISwitcher) SetConsuming(consuming bool) {
-	if e.backend.engineBackendRPC == nil {
-		return
-	}
-	e.backend.engineBackendRPC.SetConsuming(consuming)
 }

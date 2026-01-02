@@ -156,8 +156,8 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 					}
 				}
 			}
-			prevJ = j
 		}
+		prevJ = j
 	}
 	return
 }

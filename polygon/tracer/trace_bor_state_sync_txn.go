@@ -75,7 +75,7 @@ func TraceBorStateSyncTxnDebugAPI(
 		return res, nil
 	}
 
-	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, nil, execCb)
 	return gasUsed, err
 }
 

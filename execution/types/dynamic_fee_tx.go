@@ -363,7 +363,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
+	hash := prefixedRlpHash(DynamicFeeTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -382,7 +382,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
-		[]interface{}{
+		[]any{
 			chainID,
 			tx.Nonce,
 			tx.TipCap,

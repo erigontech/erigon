@@ -15,8 +15,14 @@ import (
 
 // publishable check using snapnameschema
 
+type CheckFilesParams struct {
+	checkLastFileTo int64
+	emptyOk         bool
+	doesntStartAt0  bool // blobsidecars start at 1942 step on mainnet after dencun upgrade
+}
+
 // checkLastFileTo = -1 if don't need this check
-func CheckFilesForSchema(schema state.SnapNameSchema, checkLastFileTo int64, emptyOk bool) (lastFileTo uint64, empty bool, err error) {
+func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (lastFileTo uint64, empty bool, err error) {
 	// check in schema specific directory (and accessor directories)
 
 	// checks:
@@ -68,22 +74,22 @@ func CheckFilesForSchema(schema state.SnapNameSchema, checkLastFileTo int64, emp
 	})
 
 	if len(dataFiles) == 0 {
-		if !emptyOk {
+		if !params.emptyOk {
 			return 0, true, fmt.Errorf("no %s snapshot files found in %s", schema.DataTag(), schema.DataDirectory())
 		} else {
 			return 0, true, nil
 		}
 	}
 
-	if dataFiles[0].From != 0 {
+	if dataFiles[0].From != 0 && !params.doesntStartAt0 {
 		return 0, false, fmt.Errorf("first %s snapshot file must start from 0, found from %d", schema.DataTag(), dataFiles[0].From)
 	}
 
-	if checkLastFileTo >= 0 && int64(dataFiles[len(dataFiles)-1].To) != checkLastFileTo {
-		return 0, false, fmt.Errorf("last %s snapshot file must end at %d, found at %d (file: %s)", schema.DataTag(), checkLastFileTo, dataFiles[len(dataFiles)-1].To, dataFiles[len(dataFiles)-1].Name)
+	if params.checkLastFileTo >= 0 && int64(dataFiles[len(dataFiles)-1].To) != params.checkLastFileTo {
+		return 0, false, fmt.Errorf("last %s snapshot file must end at %d, found at %d (file: %s)", schema.DataTag(), params.checkLastFileTo, dataFiles[len(dataFiles)-1].To, dataFiles[len(dataFiles)-1].Name)
 	}
 
-	if sumRange != dataFiles[len(dataFiles)-1].To {
+	if sumRange != dataFiles[len(dataFiles)-1].To-dataFiles[0].From {
 		return 0, false, fmt.Errorf("sum of ranges of %s snapshot files (%d) does not match last 'to' value (%d)", schema.DataTag(), sumRange, dataFiles[len(dataFiles)-1].To)
 	}
 

@@ -34,7 +34,7 @@ import (
 type encodingBuf [32]byte
 
 var pooledBuf = sync.Pool{
-	New: func() interface{} { return new(encodingBuf) },
+	New: func() any { return new(encodingBuf) },
 }
 
 func newEncodingBuf() *encodingBuf {

@@ -40,7 +40,7 @@ func MarshalReceipt(
 	txnHash common.Hash,
 	signed bool,
 	withBlockTimestamp bool,
-) map[string]interface{} {
+) map[string]any {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -57,7 +57,7 @@ func MarshalReceipt(
 		from, _ = txn.Sender(*signer)
 	}
 
-	var logsToMarshal interface{}
+	var logsToMarshal any
 
 	if withBlockTimestamp {
 		if receipt.Logs != nil {
@@ -77,7 +77,7 @@ func MarshalReceipt(
 		}
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"blockHash":         receipt.BlockHash,
 		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		"transactionHash":   txnHash,
@@ -131,8 +131,8 @@ func MarshalReceipt(
 	return fields
 }
 
-func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) map[string]interface{} {
-	receipt := make(map[string]interface{})
+func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) map[string]any {
+	receipt := make(map[string]any)
 
 	// Basic metadata - convert to proper hex strings
 	blockHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.BlockHash))
@@ -178,9 +178,9 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 		receipt["logsBloom"] = hexutil.Bytes(protoReceipt.LogsBloom)
 	}
 
-	logs := make([]map[string]interface{}, 0, len(protoReceipt.Logs))
+	logs := make([]map[string]any, 0, len(protoReceipt.Logs))
 	for _, protoLog := range protoReceipt.Logs {
-		logEntry := make(map[string]interface{})
+		logEntry := make(map[string]any)
 
 		if protoLog.Address != nil {
 			logEntry["address"] = common.Address(gointerfaces.ConvertH160toAddress(protoLog.Address))
