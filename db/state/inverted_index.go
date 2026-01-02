@@ -718,12 +718,12 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	val, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
+	stat, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
 	if err != nil {
-		//iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
 		return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
 	}
-	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum() || val != nil
+	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum() || !stat.KeyDone || !stat.ValueDone
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
@@ -858,7 +858,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		pruneSizeMetric = mxPruneSizeIndex
 	}
 
-	var lastPrunedVal []byte = nil
 	var vtbl string
 	if valTable != nil {
 		vtbl = *valTable
@@ -866,30 +865,23 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		vtbl = iit.ii.ValuesTable
 	}
 
-	defer func() {
-		err = SavePruneValProgress(rwTx, vtbl, lastPrunedVal)
-		if err != nil {
-			iit.ii.logger.Error("prune val progress", "name", iit.name, "err", err)
-		}
-	}()
-
-	var iiVal, txNumBytes []byte
-	fVal, err := GetPruneValProgress(rwTx, []byte(vtbl))
+	prs, err := GetPruneValProgress(rwTx, []byte(vtbl))
 	if err != nil {
 		return nil, err
-	}
-	if fVal != nil {
-		iiVal, txNumBytes, err = valDelCursor.Seek(fVal)
-	} else {
-		iiVal, txNumBytes, err = valDelCursor.First()
 	}
 
 	pruneStat, err := prune.TableScanningPrune(ctx, iit.name.String(), iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, mxPruneInProgress, mxPruneTookIndex, pruneSizeMetric,
-		mxDupsPruneSizeIndex, txNumBytes, iiVal, mode)
+		mxDupsPruneSizeIndex, prs, mode)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		err = SavePruneValProgress(rwTx, vtbl, pruneStat)
+		if err != nil {
+			iit.ii.logger.Error("prune val progress", "name", iit.name, "err", err)
+		}
+	}()
 	if pruneStat == nil {
 		return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, errors.New("prune stat is nil")
 	}

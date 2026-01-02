@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 )
 
 // SaveExecV3PruneProgress saves latest pruned key in given table to the database.
@@ -75,29 +76,54 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step kv.Step, err erro
 	return kv.Step(binary.BigEndian.Uint64(v)), nil
 }
 
-func SavePruneValProgress(db kv.Putter, prunedTblName string, prunedVal []byte) error {
-	empty := make([]byte, 1)
-	if prunedVal != nil {
-		empty[0] = 1
+func SavePruneValProgress(db kv.Putter, prunedTblName string, prunedStat *prune.Stat) error {
+	doneKey := make([]byte, 1)
+	if prunedStat.KeyDone {
+		doneKey[0] = 1
 	}
-	return db.Put(kv.TblPruningValsProg, []byte(prunedTblName), append(empty, prunedVal...))
+	doneVal := make([]byte, 1)
+	if prunedStat.ValueDone {
+		doneVal[0] = 1
+	}
+	err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"keys"), append(doneKey, prunedStat.LastPrunedKey...))
+	if err != nil {
+		return err
+	}
+	err = db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"vals"), append(doneVal, prunedStat.LastPrunedValue...))
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func GetPruneValProgress(db kv.Getter, tbl []byte) (pruned []byte, err error) {
-	v, err := db.GetOne(kv.TblPruningValsProg, tbl)
+func GetPruneValProgress(db kv.Getter, tbl []byte) (stat *prune.Stat, err error) {
+	stat = &prune.Stat{}
+	v, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "vals"...))
 	if err != nil {
 		return nil, err
 	}
 	switch len(v) {
 	case 0:
-		return nil, nil
 	case 1:
 		if v[0] == 1 {
-			return []byte{}, nil
+			stat.ValueDone = true
 		}
-		// nil values returned an empty key which actually is a value
-		return nil, nil
 	default:
-		return v[1:], nil
+		stat.LastPrunedValue = v[1:]
 	}
+	k, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "keys"...))
+	if err != nil {
+		return nil, err
+	}
+	switch len(v) {
+	case 0:
+	case 1:
+		if k[0] == 1 {
+			stat.KeyDone = true
+		}
+	default:
+		stat.LastPrunedKey = k[1:]
+	}
+
+	return stat, nil
 }

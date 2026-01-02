@@ -22,6 +22,9 @@ type Stat struct {
 	PruneCountValues uint64
 	DupsDeleted      uint64
 	LastPrunedValue  []byte
+	LastPrunedKey    []byte
+	KeyDone          bool
+	ValueDone        bool
 }
 
 type StorageMode int
@@ -157,6 +160,11 @@ func HashSeekingPrune(
 	return stat, err
 }
 
+type StartPos struct {
+	StartKey []byte
+	StartVal []byte
+}
+
 func TableScanningPrune(
 	ctx context.Context,
 	name, filenameBase string,
@@ -166,7 +174,7 @@ func TableScanningPrune(
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
 	asserts bool,
 	mxPruneInProgress metrics.Gauge, mxPruneTookIndex metrics.Histogram, mxPruneSizeIndex, mxDupsPruneSizeIndex metrics.Counter,
-	startKey, startVal []byte,
+	prevStat *Stat,
 	mode StorageMode,
 ) (stat *Stat, err error) {
 	stat = &Stat{MinTxNum: math.MaxUint64}
@@ -184,46 +192,60 @@ func TableScanningPrune(
 		timeOut = 100 * time.Millisecond
 	}
 
-	var lastPrunedVal []byte
+	var startKey, startVal = &StartPos{}, &StartPos{}
+	if !prevStat.ValueDone {
+		startVal.StartVal, startVal.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
+	} else {
+		startVal.StartVal, startVal.StartKey, err = valDelCursor.First()
+	}
+	if !prevStat.KeyDone {
+		startKey.StartKey, startKey.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey)
+	} else {
+		var txKey [8]byte
+		binary.BigEndian.PutUint64(txKey[:], txFrom)
+		startKey.StartKey, _, err = keysCursor.Seek(txKey[:])
+	}
 
-	//defer func() {
-	//	err = SavePruneValProgress(rwTx, ii.ValuesTable, lastPrunedVal)
-	//	if err != nil {
-	//		logger.Error("prune val progress", "name", name, "err", err)
-	//	}
-	//}()
+	txnb := common.Copy(startKey.StartKey)
 
-	var txKey [8]byte
+	var pairs, valLen uint64
 
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	pairs := uint64(0)
-	// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
-	for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
-		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-		}
-		txNum := binary.BigEndian.Uint64(txnb)
-		if txNum >= txTo {
-			break
-		}
-		stat.PruneCountTx++
-		dups, err := keysCursor.CountDuplicates()
-		if err != nil {
-			return nil, err
-		}
-		pairs += dups
-		//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-		if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
-			return nil, err
+	defer logger.Info("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds(), "prune ended", stat.KeyDone && stat.ValueDone)
+
+	if !prevStat.KeyDone {
+		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
+		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
+			if err != nil {
+				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+			}
+			if time.Since(start) > timeOut {
+				logger.Info("prune key timed out", "name", filenameBase)
+				stat.LastPrunedKey = txnb
+				return stat, nil
+			}
+			txNum := binary.BigEndian.Uint64(txnb)
+			if txNum >= txTo {
+				break
+			}
+			stat.PruneCountTx++
+			dups, err := keysCursor.CountDuplicates()
+			if err != nil {
+				return nil, err
+			}
+			pairs += dups
+			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
+			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+				return nil, err
+			}
 		}
 	}
 
+	stat.KeyDone = true
+	stat.LastPrunedKey = nil
+
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	valLen := uint64(0)
-	txNumBytes, val := common.Copy(startKey), common.Copy(startVal)
-
-	isDone := true
+	txNumBytes, val := common.Copy(startVal.StartKey), common.Copy(startVal.StartVal)
 
 	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
 		switch mode {
@@ -249,9 +271,8 @@ func TableScanningPrune(
 		valLen += dups
 		if time.Since(start) > timeOut {
 			logger.Info("prune val timed out", "name", filenameBase)
-			lastPrunedVal = val
-			isDone = false
-			break
+			stat.LastPrunedValue = val
+			return stat, nil
 		}
 		txNum := txNumGetter(val, txNumBytes)
 		//println("txnum first", txNum, txFrom, txTo)
@@ -301,9 +322,9 @@ func TableScanningPrune(
 					break
 				}
 				if time.Since(start) > timeOut {
-					lastPrunedVal = val
-					isDone = false
-					break
+					logger.Info("prune val timed out", "name", filenameBase)
+					stat.LastPrunedValue = val
+					return stat, nil
 				}
 				//println("txnum passed checks loop", txNumDup)
 
@@ -315,9 +336,6 @@ func TableScanningPrune(
 				}
 				mxPruneSizeIndex.Inc()
 				stat.PruneCountValues++
-			}
-			if !isDone {
-				break
 			}
 		}
 
@@ -335,11 +353,8 @@ func TableScanningPrune(
 		}
 	}
 
-	if isDone {
-		lastPrunedVal = nil
-	}
-
-	logger.Info("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds(), "prune ended", lastPrunedVal == nil)
+	stat.LastPrunedValue = nil
+	stat.ValueDone = true
 
 	return stat, err
 }
