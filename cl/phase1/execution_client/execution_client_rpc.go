@@ -136,7 +136,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	args := []interface{}{request}
+	args := []any{request}
 	if versionedHashes != nil {
 		args = append(args, versionedHashes, *beaconParentRoot)
 	}
@@ -162,7 +162,7 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized, s
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
-	args := []interface{}{forkChoiceRequest}
+	args := []any{forkChoiceRequest}
 	if attributes != nil {
 		args = append(args, attributes)
 	}

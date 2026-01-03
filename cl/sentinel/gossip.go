@@ -157,7 +157,7 @@ func (s *GossipManager) Recv() <-chan *GossipMessage {
 
 func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
 	var sub *GossipSubscription
-	s.subscriptions.Range(func(topic, value interface{}) bool {
+	s.subscriptions.Range(func(topic, value any) bool {
 		topicStr := topic.(string)
 		// take out third part of the topic by splitting on "/"
 		// reference: /eth2/d31f6191/beacon_attestation_45/ssz_snappy
@@ -205,7 +205,7 @@ func (s *Sentinel) forkWatcher() {
 			}
 			if prevDigest != digest {
 				// unsubscribe and resubscribe to all topics
-				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
+				s.subManager.subscriptions.Range(func(key, value any) bool {
 					sub := value.(*GossipSubscription)
 					s.subManager.unsubscribe(key.(string))
 					_, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
@@ -487,7 +487,7 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 }
 
 func (g *GossipManager) Close() {
-	g.subscriptions.Range(func(key, value interface{}) bool {
+	g.subscriptions.Range(func(key, value any) bool {
 		if value != nil {
 			value.(*GossipSubscription).Close()
 		}
@@ -510,7 +510,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 					return true
 				})
 			case <-dbgLogInterval.C:
-				logArgs := []interface{}{}
+				logArgs := []any{}
 				g.subscriptions.Range(func(key, value any) bool {
 					sub := value.(*GossipSubscription)
 					sub.lock.Lock()

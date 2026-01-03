@@ -51,7 +51,7 @@ func (o *OperationPool[K, T]) Insert(k K, operation T) {
 	o.pool.Add(k, operation)
 	o.recentlySeen.Store(k, time.Now())
 	if time.Since(o.lastPruned) > lifeSpan {
-		o.recentlySeen.Range(func(k, v interface{}) bool {
+		o.recentlySeen.Range(func(k, v any) bool {
 			if time.Since(v.(time.Time)) > lifeSpan {
 				o.recentlySeen.Delete(k)
 			}
