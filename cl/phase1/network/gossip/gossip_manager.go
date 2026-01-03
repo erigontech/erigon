@@ -379,7 +379,11 @@ func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficP
 			// define rate cap
 			maxRateIn := float64(max(maxInboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
 			maxRateOut := float64(max(maxOutboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
-			peers := g.p2p.Host().Network().Peers()
+			host := g.p2p.Host()
+			if host == nil {
+				continue
+			}
+			peers := host.Network().Peers()
 			maxPeersToBan := 16
 			// do not ban peers if we have less than 1/8 of max peer count
 			if len(peers) <= maxPeersToBan {
@@ -404,8 +408,8 @@ func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficP
 			// ban hammer
 			for _, p := range peersToBan {
 				//g.p2p.Peers().SetBanStatus(p, true)
-				g.p2p.Host().Peerstore().RemovePeer(p)
-				g.p2p.Host().Network().ClosePeer(p)
+				host.Peerstore().RemovePeer(p)
+				host.Network().ClosePeer(p)
 			}
 		}
 	}

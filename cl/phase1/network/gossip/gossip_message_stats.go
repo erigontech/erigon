@@ -66,17 +66,18 @@ func (s *gossipMessageStats) goPrintStats() {
 		duration := time.Minute
 		ticker := time.NewTicker(duration)
 		defer ticker.Stop()
-		times := int64(0)
+		times := int64(1) // Start at 1 to avoid division by zero
 		for range ticker.C {
 			s.statsMutex.Lock()
+			totalSeconds := float64(times * int64(duration.Seconds()))
 			for name, count := range s.accepts {
-				log.Debug("Gossip Message Accepts Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
+				log.Debug("Gossip Message Accepts Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
 			}
 			for name, count := range s.rejects {
-				log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
+				log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
 			}
 			for name, count := range s.ignores {
-				log.Debug("Gossip Message Ignores Stats", "name", name, "count", count, "rate_sec", float64(count)/float64(times*int64(duration.Seconds())))
+				log.Debug("Gossip Message Ignores Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
 			}
 			s.statsMutex.Unlock()
 			times++

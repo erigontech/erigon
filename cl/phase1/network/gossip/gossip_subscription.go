@@ -144,6 +144,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 
 func (t *TopicSubscriptions) expireCheck() {
 	ticker := time.NewTicker(12 * time.Second)
+	defer ticker.Stop()
 	for range ticker.C {
 		t.mutex.Lock()
 		for _, sub := range t.subs {
