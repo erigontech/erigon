@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -961,6 +963,13 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
 	//}()
 
+	stat, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
+	if err != nil {
+		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+	}
+
+	pruneInProgress := !stat.KeyDone || !stat.ValueDone
+
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
 			return false, 0
@@ -984,7 +993,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	case "commitment":
 		mxPrunableHComm.Set(float64(txTo - minIdxTx))
 	}
-	return minIdxTx < txTo, txTo
+	return minIdxTx < txTo || pruneInProgress, txTo
 }
 
 // Prune [txFrom; txTo)
@@ -1011,10 +1020,12 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (
-		seek     = make([]byte, 8, 256)
+		//	seek     = make([]byte, 8, 256)
 		valsCDup kv.RwCursorDupSort
 		valsC    kv.RwCursor
+		valsCP   kv.PseudoDupSortRwCursor
 		err      error
+		mode     prune.StorageMode
 	)
 
 	if !ht.h.HistoryLargeValues {
@@ -1023,52 +1034,31 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			return nil, err
 		}
 		defer valsCDup.Close()
+		valsCP = valsCDup
+		mode = prune.SmallHistoryMode
 	} else {
 		valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
 		if err != nil {
 			return nil, err
 		}
 		defer valsC.Close()
-	}
+		mode = prune.KeyStorageMode
 
-	var pruned int
-	pruneValue := func(k, txnm []byte) error {
-		txNum := binary.BigEndian.Uint64(txnm)
-		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
-			return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
+		switch c := valsC.(type) {
+		case *mdbx2.MdbxCursor:
+			valsCP = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
+		case *mdbx2.MdbxDupSortCursor:
+			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
+		default:
+			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
 		}
-
-		if ht.h.HistoryLargeValues {
-			seek = append(bytes.Clone(k), txnm...)
-			if err := valsC.Delete(seek); err != nil {
-				return err
-			}
-		} else {
-			vv, err := valsCDup.SeekBothRange(k, txnm)
-			if err != nil {
-				return err
-			}
-			if len(vv) < 8 {
-				return fmt.Errorf("prune history %s got invalid value length: %d < 8", ht.h.FilenameBase, len(vv))
-			}
-			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
-				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.FilenameBase, vtx, txNum)
-			}
-			if err = valsCDup.DeleteCurrent(); err != nil {
-				return err
-			}
-		}
-
-		pruned++
-		return nil
 	}
-	mxPruneSizeHistory.AddInt(pruned)
 
 	if !forced && ht.h.SnapshotsDisabled {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
-	return ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
+	return ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, &ht.h.ValuesTable, mxPruneSizeHistory, mode)
 }
 
 func (ht *HistoryRoTx) Close() {

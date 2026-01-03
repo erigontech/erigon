@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/db/kv/prune"
 	rand2 "golang.org/x/exp/rand"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
@@ -1053,7 +1054,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
 		//     can't interrupt by ctrl+c and leave dirt in DB
-		stat, err := at.prune(context.Background(), tx, pruneLimit, furiousPrune || aggressivePrune, aggLogEvery)
+		stat, err := at.prune(context.Background(), tx, pruneLimit /*pruneLimit*/, furiousPrune || aggressivePrune, aggLogEvery)
 		if err != nil {
 			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
@@ -1112,7 +1113,11 @@ func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
 	}
 	for _, iit := range at.iis {
 		a1, a2 := iit.stepsRangeInDB(tx)
-		steps = append(steps, fmt.Sprintf("%s:%.1f", iit.ii.FilenameBase, a2-a1))
+		valPruneFinished := "prune finished"
+		if v, _ := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable)); !v.ValueDone || !v.KeyDone {
+			valPruneFinished = "prune in progress"
+		}
+		steps = append(steps, fmt.Sprintf("%s:%.1f %s", iit.ii.FilenameBase, a2-a1, valPruneFinished))
 	}
 	return strings.Join(steps, ", ")
 }
@@ -1260,7 +1265,8 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 
 	stats := make([]*InvertedIndexPruneStat, len(at.a.iis))
 	for iikey := range at.a.iis {
-		stat, err := at.iis[iikey].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+		stat, err := at.iis[iikey].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil,
+			nil, nil, prune.DefaultStorageMode)
 		if err != nil {
 			return nil, err
 		}
@@ -1891,7 +1897,7 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 		}
 	}
 	for _, ii := range at.iis {
-		if err := ii.unwind(ctx, tx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
+		if err := ii.unwind(ctx, tx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true); err != nil {
 			return err
 		}
 	}
