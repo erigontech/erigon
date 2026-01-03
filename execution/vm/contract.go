@@ -26,6 +26,11 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// globalJumpDestCache is a global thread-safe LRU cache for JUMPDEST analysis.
+// Since contract code is immutable once deployed, the analysis can be cached permanently.
+// This cache persists across blocks and transactions.
+var globalJumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](256)
+
 // AccountRef is a reference to an account address.
 //
 // Account references are used during EVM initialisation and

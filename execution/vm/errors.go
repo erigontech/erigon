@@ -50,7 +50,15 @@ var (
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
 	errStopToken = errors.New("stop token")
-	//
+
+	// errSuspendForCall is an internal token indicating the interpreter should
+	// suspend current frame and start a nested call. Never returned to outside callers.
+	errSuspendForCall = errors.New("suspend for call")
+
+	// errSuspendForCreate is an internal token indicating the interpreter should
+	// suspend current frame and start a CREATE/CREATE2. Never returned to outside callers.
+	errSuspendForCreate = errors.New("suspend for create")
+
 	// ErrIntraBlockStateFailed indicates a fatal error when processing IBS
 	// requests
 	ErrIntraBlockStateFailed = errors.New("ibs fatal error")
