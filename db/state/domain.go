@@ -21,12 +21,12 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	btree2 "github.com/tidwall/btree"
@@ -94,9 +94,27 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files  []visibleFile
-	name   kv.Domain
-	caches *sync.Pool
+	files []visibleFile
+	name  kv.Domain
+	cache *DomainGetFromFileCache
+}
+
+func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
+	limit := domainGetFromFileCacheLimit
+	if flag.Lookup("test.v") != nil {
+		limit = 10_000
+	}
+	if name == kv.CommitmentDomain {
+		return nil
+	}
+	if name == kv.CodeDomain || name == kv.RCacheDomain {
+		limit = limit / 100 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	if limit == 0 {
+		domainGetFromFileCacheEnabled = false
+		return nil
+	}
+	return NewDomainGetFromFileCache(limit)
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -110,7 +128,7 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 	d := &Domain{
 		DomainCfg:  cfg,
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newDomainVisible(cfg.Name, []visibleFile{}),
+		_visible:   newDomainVisible(cfg.Name, []visibleFile{}, false),
 	}
 
 	var err error
@@ -323,7 +341,7 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum), true)
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
@@ -576,6 +594,10 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		}
 	}
 
+	if d._visible.cache == nil {
+		d._visible.cache = newDomainCache(d.Name)
+	}
+
 	return &DomainRoTx{
 		name:              d.Name,
 		stepSize:          d.stepSize,
@@ -585,6 +607,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		visible:           d._visible,
 		files:             d._visible.files,
 		salt:              d.salt.Load(),
+		getFromFileCache:  d._visible.cache,
 	}
 }
 
@@ -1355,11 +1378,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 
 	getFromFileCache := dt.getFromFileCache
 
-	if useCache && getFromFileCache == nil {
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = dt.visible.newGetFromFileCache()
-		}
-		getFromFileCache = dt.getFromFileCache
+	if !useCache {
+		getFromFileCache = nil
 	}
 	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
 		if cv, ok := getFromFileCache.Get(hi); ok {
@@ -1480,6 +1500,8 @@ func (dt *DomainRoTx) Close() {
 	dt.closeValsCursor()
 	files := dt.files
 	dt.files = nil
+	dt.getFromFileCache.LogStats(dt.name)
+	dt.getFromFileCache = nil
 	for i := range files {
 		src := files[i].src
 		if src == nil || src.frozen {
@@ -1495,8 +1517,6 @@ func (dt *DomainRoTx) Close() {
 		}
 	}
 	dt.ht.Close()
-
-	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
 // reusableReader - for short read-and-forget operations. Must Reset this reader before use
