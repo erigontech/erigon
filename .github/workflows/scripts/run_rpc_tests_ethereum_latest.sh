@@ -24,7 +24,6 @@ DISABLED_TEST_LIST=(
    debug_traceCall/test_38.json # see https://github.com/erigontech/erigon-qa/issues/274
    debug_traceCallMany
    erigon_
-   eth_blobBaseFee/test_01.json # debug mismatch
    eth_callBundle
    ots_
    parity_
