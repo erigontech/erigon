@@ -65,7 +65,7 @@ func (a *Allocator) Get() Buffer {
 	b := a.p.Get().(Buffer)
 	b.Reset()
 
-	fmt.Printf("[etl] get from pool: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d, b.SizeLimit=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil, b.SizeLimit())
+	fmt.Printf("[etl] attempt get from pool: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d, b.SizeLimit=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil, b.SizeLimit())
 	return b
 }
 
