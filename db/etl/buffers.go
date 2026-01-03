@@ -49,19 +49,29 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
-var SmallSortableBuffers = NewAllocator(&sync.Pool{
-	New: func() any {
-		allocatorInit++
-		fmt.Printf("[etl] alloc new: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil)
-		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
-	},
-}, allocatorSmall)
+var SmallSortableBuffers *Allocator
+var LargeSortableBuffers *Allocator
+
 var etlLargeBufRAM = BufferOptimalSize
-var LargeSortableBuffers = NewAllocator(&sync.Pool{
-	New: func() any {
-		return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
-	},
-}, allocatorBig)
+
+func init() {
+	SmallSortableBuffers = NewAllocator(&sync.Pool{
+		New: func() any {
+			SmallSortableBuffers.allocatorInit++
+			fmt.Printf("[etl] alloc new: lbl,%d allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", SmallSortableBuffers.lable, SmallSortableBuffers.allocatorInit, SmallSortableBuffers.allocatorGet, SmallSortableBuffers.allocatorPut, SmallSortableBuffers.allocatorPutNil)
+			return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
+		},
+	}, allocatorSmall)
+	LargeSortableBuffers = NewAllocator(&sync.Pool{
+		New: func() any {
+			LargeSortableBuffers.allocatorInit++
+
+			fmt.Printf("[etl] alloc new: lbl,%d allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", LargeSortableBuffers.lable, LargeSortableBuffers.allocatorInit, LargeSortableBuffers.allocatorGet, LargeSortableBuffers.allocatorPut, LargeSortableBuffers.allocatorPutNil)
+			return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
+		},
+	}, allocatorBig)
+
+}
 
 type Buffer interface {
 	// Put does copy `k` and `v`
