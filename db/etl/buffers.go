@@ -26,6 +26,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common/dbg"
 
 	"github.com/erigontech/erigon/common"
@@ -50,6 +51,7 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
+		fmt.Printf("[etl] alloc new\n")
 		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
 	},
 })
@@ -168,6 +170,7 @@ func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
 }
 
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
+	fmt.Printf("[etl] Prealloc called\n")
 	b.lens = make([]int, 0, predictKeysAmount)
 	b.offsets = make([]int, 0, predictKeysAmount)
 	b.data = make([]byte, 0, predictDataSize)

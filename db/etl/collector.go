@@ -42,8 +42,10 @@ type Allocator struct {
 func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
+		fmt.Printf("[etl] Put nil!\n")
 		return
 	}
+	fmt.Printf("[etl] Put to bool\n")
 	//if cast, ok := b.(*sortableBuffer); ok {
 	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
 	//}
@@ -52,6 +54,9 @@ func (a *Allocator) Put(b Buffer) {
 func (a *Allocator) Get() Buffer {
 	b := a.p.Get().(Buffer)
 	b.Reset()
+
+	fmt.Printf("[etl] get from pool: %d\n", b.SizeLimit())
+
 	return b
 }
 
