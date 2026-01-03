@@ -58,7 +58,7 @@ func init() {
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
 			SmallSortableBuffers.allocatorInit++
-			fmt.Printf("[etl] alloc new: lbl,%d allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", SmallSortableBuffers.lable, SmallSortableBuffers.allocatorInit, SmallSortableBuffers.allocatorGet, SmallSortableBuffers.allocatorPut, SmallSortableBuffers.allocatorPutNil)
+			fmt.Printf("[etl] alloc new: lbl=%d allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", SmallSortableBuffers.lable, SmallSortableBuffers.allocatorInit, SmallSortableBuffers.allocatorGet, SmallSortableBuffers.allocatorPut, SmallSortableBuffers.allocatorPutNil)
 			return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
 		},
 	}, allocatorSmall)
@@ -66,7 +66,7 @@ func init() {
 		New: func() any {
 			LargeSortableBuffers.allocatorInit++
 
-			fmt.Printf("[etl] alloc new: lbl,%d allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", LargeSortableBuffers.lable, LargeSortableBuffers.allocatorInit, LargeSortableBuffers.allocatorGet, LargeSortableBuffers.allocatorPut, LargeSortableBuffers.allocatorPutNil)
+			fmt.Printf("[etl] alloc new: lbl=%d allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", LargeSortableBuffers.lable, LargeSortableBuffers.allocatorInit, LargeSortableBuffers.allocatorGet, LargeSortableBuffers.allocatorPut, LargeSortableBuffers.allocatorPutNil)
 			return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
 		},
 	}, allocatorBig)
