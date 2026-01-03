@@ -48,10 +48,12 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
-var SmallSortableBuffers = NewAllocator(etlSmallBufRAM, allocatorSmall)
+
+//var SmallSortableBuffers = NewAllocator(etlSmallBufRAM, allocatorSmall)
 
 var etlLargeBufRAM = BufferOptimalSize
 var LargeSortableBuffers = NewAllocator(etlLargeBufRAM, allocatorBig)
+var SmallSortableBuffers = LargeSortableBuffers
 
 type Buffer interface {
 	// Put does copy `k` and `v`
