@@ -366,7 +366,6 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					// Non-optimised key originating from a database record
 					auxBuf = append(auxBuf[:0], key...)
 				} else {
-					fmt.Println("before")
 					// Optimised key referencing a state file record (file number and offset within the file)
 					auxBuf, found = storage.lookupByShortenedKey(key, sig)
 					if !found {
@@ -377,10 +376,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 						)
 						return nil, fmt.Errorf("lookup lost storage full key %x", key)
 					}
-					fmt.Println("after")
 				}
 
-				fmt.Println("before1")
 				shortened, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
 				if !found {
 					if len(auxBuf) == length.Addr+length.Hash {
@@ -393,7 +390,6 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 					return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 				}
-				fmt.Println("after1")
 				return shortened, nil
 			}
 
