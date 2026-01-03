@@ -50,9 +50,19 @@ type Allocator struct {
 	allocatorInit   int
 }
 
-func NewAllocator(p *sync.Pool, lable allocatorLable) *Allocator {
-	return &Allocator{p: p, lable: lable}
+func NewAllocator(bufRam datasize.ByteSize, lable allocatorLable) *Allocator {
+	var a *Allocator
+	a = &Allocator{lable: lable}
+	a.p = &sync.Pool{
+		New: func() any {
+			a.allocatorInit++
+			fmt.Printf("[etl] alloc new: lbl=%d allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", a.lable, a.allocatorInit, a.allocatorGet, a.allocatorPut, a.allocatorPutNil)
+			return NewSortableBuffer(bufRam).Prealloc(1_024, int(bufRam/32))
+		},
+	}
+	return a
 }
+
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		a.allocatorPutNil++
