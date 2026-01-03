@@ -391,7 +391,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 		return err
 	}
 	if len(headers) == 0 {
-		return feed.consumeData(ctx, nil)
+		return nil
 	}
 	// make sure to download blocks for the remaining incomplete header batch after the etl collector has been loaded
 	return bbd.downloadBlocksForHeaders(ctx, headers, peers, config, logProgressTicker, feed)
