@@ -135,7 +135,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 	collectorSenders := etl.NewCollectorWithAllocator(logPrefix, cfg.tmpdir, etl.SmallSortableBuffers, logger)
 	defer collectorSenders.Close()
-	collectorSenders.SortAndFlushInBackground(true)
+	collectorSenders.SortAndFlushInBackground(false)
 	collectorSenders.LogLvl(log.LvlDebug)
 
 	// pendingBlocks tracks blocks that are being processed
