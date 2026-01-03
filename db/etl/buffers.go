@@ -51,7 +51,8 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
-		fmt.Printf("[etl] alloc new\n")
+		allocatorInit++
+		fmt.Printf("[etl] alloc new: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil)
 		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
 	},
 })

@@ -42,20 +42,30 @@ type Allocator struct {
 func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
-		fmt.Printf("[etl] Put nil!\n")
+		allocatorPutNil++
+
+		fmt.Printf("[etl] Put nil!: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil)
 		return
 	}
-	fmt.Printf("[etl] Put to bool\n")
+	allocatorPut++
+	fmt.Printf("[etl] Put to bool: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil)
 	//if cast, ok := b.(*sortableBuffer); ok {
 	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
 	//}
 	a.p.Put(b)
 }
+
+var allocatorGet int
+var allocatorPut int
+var allocatorPutNil int
+var allocatorInit int
+
 func (a *Allocator) Get() Buffer {
+	allocatorGet++
 	b := a.p.Get().(Buffer)
 	b.Reset()
 
-	fmt.Printf("[etl] get from pool: %d\n", b.SizeLimit())
+	fmt.Printf("[etl] get from pool: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d, b.SizeLimit=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil, b.SizeLimit())
 
 	return b
 }
