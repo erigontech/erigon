@@ -15,7 +15,7 @@ import (
 
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
-	sentinelproto "github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -44,18 +44,18 @@ func (m *MockBlockService) EXPECT() *MockBlockServiceMockRecorder {
 }
 
 // DecodeGossipMessage mocks base method.
-func (m *MockBlockService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
+func (m *MockBlockService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DecodeGossipMessage", data, version)
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", pid, data, version)
 	ret0, _ := ret[0].(*cltypes.SignedBeaconBlock)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
-func (mr *MockBlockServiceMockRecorder) DecodeGossipMessage(data, version any) *MockBlockServiceDecodeGossipMessageCall {
+func (mr *MockBlockServiceMockRecorder) DecodeGossipMessage(pid, data, version any) *MockBlockServiceDecodeGossipMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockBlockService)(nil).DecodeGossipMessage), data, version)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockBlockService)(nil).DecodeGossipMessage), pid, data, version)
 	return &MockBlockServiceDecodeGossipMessageCall{Call: call}
 }
 
@@ -71,51 +71,51 @@ func (c *MockBlockServiceDecodeGossipMessageCall) Return(arg0 *cltypes.SignedBea
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBlockServiceDecodeGossipMessageCall) Do(f func(*sentinelproto.GossipData, clparams.StateVersion) (*cltypes.SignedBeaconBlock, error)) *MockBlockServiceDecodeGossipMessageCall {
+func (c *MockBlockServiceDecodeGossipMessageCall) Do(f func(peer.ID, []byte, clparams.StateVersion) (*cltypes.SignedBeaconBlock, error)) *MockBlockServiceDecodeGossipMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBlockServiceDecodeGossipMessageCall) DoAndReturn(f func(*sentinelproto.GossipData, clparams.StateVersion) (*cltypes.SignedBeaconBlock, error)) *MockBlockServiceDecodeGossipMessageCall {
+func (c *MockBlockServiceDecodeGossipMessageCall) DoAndReturn(f func(peer.ID, []byte, clparams.StateVersion) (*cltypes.SignedBeaconBlock, error)) *MockBlockServiceDecodeGossipMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
-// IsMyGossipMessage mocks base method.
-func (m *MockBlockService) IsMyGossipMessage(name string) bool {
+// Names mocks base method.
+func (m *MockBlockService) Names() []string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsMyGossipMessage", name)
-	ret0, _ := ret[0].(bool)
+	ret := m.ctrl.Call(m, "Names")
+	ret0, _ := ret[0].([]string)
 	return ret0
 }
 
-// IsMyGossipMessage indicates an expected call of IsMyGossipMessage.
-func (mr *MockBlockServiceMockRecorder) IsMyGossipMessage(name any) *MockBlockServiceIsMyGossipMessageCall {
+// Names indicates an expected call of Names.
+func (mr *MockBlockServiceMockRecorder) Names() *MockBlockServiceNamesCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMyGossipMessage", reflect.TypeOf((*MockBlockService)(nil).IsMyGossipMessage), name)
-	return &MockBlockServiceIsMyGossipMessageCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Names", reflect.TypeOf((*MockBlockService)(nil).Names))
+	return &MockBlockServiceNamesCall{Call: call}
 }
 
-// MockBlockServiceIsMyGossipMessageCall wrap *gomock.Call
-type MockBlockServiceIsMyGossipMessageCall struct {
+// MockBlockServiceNamesCall wrap *gomock.Call
+type MockBlockServiceNamesCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBlockServiceIsMyGossipMessageCall) Return(arg0 bool) *MockBlockServiceIsMyGossipMessageCall {
+func (c *MockBlockServiceNamesCall) Return(arg0 []string) *MockBlockServiceNamesCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBlockServiceIsMyGossipMessageCall) Do(f func(string) bool) *MockBlockServiceIsMyGossipMessageCall {
+func (c *MockBlockServiceNamesCall) Do(f func() []string) *MockBlockServiceNamesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBlockServiceIsMyGossipMessageCall) DoAndReturn(f func(string) bool) *MockBlockServiceIsMyGossipMessageCall {
+func (c *MockBlockServiceNamesCall) DoAndReturn(f func() []string) *MockBlockServiceNamesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
