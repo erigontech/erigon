@@ -42,10 +42,10 @@ var Command = cli.Command{
 }
 
 type Flag struct {
-	Name    string      `json:"name"`
-	Value   interface{} `json:"value"`
-	Usage   string      `json:"usage"`
-	Default bool        `json:"default"`
+	Name    string `json:"name"`
+	Value   any    `json:"value"`
+	Usage   string `json:"usage"`
+	Default bool   `json:"default"`
 }
 
 type SortType int
@@ -181,7 +181,7 @@ func getData(cliCtx *cli.Context) (diaglib.HardwareInfo, error) {
 }
 
 func getFlagsData(cliCtx *cli.Context) ([]Flag, error) {
-	var rawData map[string]map[string]interface{}
+	var rawData map[string]map[string]any
 	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/flags"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &rawData)
