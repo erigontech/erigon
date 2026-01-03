@@ -331,6 +331,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getPayloadBodiesByRangeV1           | Yes     |                                                       |
 | engine_getClientVersionV1                  | Yes     |                                                       |
 | engine_getBlobsV1                          | Yes     |                                                       |
+| engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
+| engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
 |                                            |         |                                                       |
 | debug_getRawReceipts                       | Yes     | `debug_` expected to be private                       |
 | debug_accountRange                         | Yes     |                                                       |
