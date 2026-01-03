@@ -55,13 +55,13 @@ var SmallSortableBuffers = NewAllocator(&sync.Pool{
 		fmt.Printf("[etl] alloc new: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil)
 		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
 	},
-})
+}, allocatorSmall)
 var etlLargeBufRAM = BufferOptimalSize
 var LargeSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
 		return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
 	},
-})
+}, allocatorBig)
 
 type Buffer interface {
 	// Put does copy `k` and `v`

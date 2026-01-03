@@ -35,37 +35,45 @@ type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 type simpleLoadFunc func(k, v []byte) error
 
+type allocatorLable int
+
+var allocatorSmall allocatorLable = 0
+var allocatorBig allocatorLable = 1
+
 type Allocator struct {
-	p *sync.Pool
+	p     *sync.Pool
+	lable allocatorLable
+
+	allocatorGet    int
+	allocatorPut    int
+	allocatorPutNil int
+	allocatorInit   int
 }
 
-func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
+func NewAllocator(p *sync.Pool, lable allocatorLable) *Allocator {
+	return &Allocator{p: p, lable: lable}
+}
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
-		allocatorPutNil++
+		a.allocatorPutNil++
 
-		fmt.Printf("[etl] Put nil!: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil)
+		fmt.Printf("[etl] Put nil!: lbl=%d, allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", a.lable, a.allocatorInit, a.allocatorGet, a.allocatorPut, a.allocatorPutNil)
 		return
 	}
-	allocatorPut++
-	fmt.Printf("[etl] Put to bool: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil)
+	a.allocatorPut++
+	fmt.Printf("[etl] Put to bool: lbl=%d,  allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d\n", a.lable, a.allocatorInit, a.allocatorGet, a.allocatorPut, a.allocatorPutNil)
 	//if cast, ok := b.(*sortableBuffer); ok {
 	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
 	//}
 	a.p.Put(b)
 }
 
-var allocatorGet int
-var allocatorPut int
-var allocatorPutNil int
-var allocatorInit int
-
 func (a *Allocator) Get() Buffer {
-	allocatorGet++
+	a.allocatorGet++
 	b := a.p.Get().(Buffer)
 	b.Reset()
 
-	fmt.Printf("[etl] attempt get from pool: allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d, b.SizeLimit=%d\n", allocatorInit, allocatorGet, allocatorPut, allocatorPutNil, b.SizeLimit())
+	fmt.Printf("[etl] attempt get from pool: lbl=%d, allocatorInit=%d, allocatorGet=%d, allocatorPut=%d, allocatorPutNil=%d, b.SizeLimit=%d\n", a.lable, a.allocatorInit, a.allocatorGet, a.allocatorPut, a.allocatorPutNil, b.SizeLimit())
 	return b
 }
 
