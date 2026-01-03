@@ -1,76 +1,49 @@
 package caches
 
 import (
-	"math"
-	"sync"
-
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
 )
 
-var ActiveValidatorsCacheGlobal = NewActiveValidatorsCache(MaxActiveValidatorsCacheSize)
-
 const MaxActiveValidatorsCacheSize = 8
 
+type activeValidatorsCacheKey struct {
+	epoch uint64
+	root  common.Hash
+}
+
 type activeValidatorsCacheVal struct {
-	epoch              uint64
-	root               common.Hash
 	activeValidators   []uint64
 	totalActiveBalance uint64
 }
 
 type ActiveValidatorsCache struct {
-	list []*activeValidatorsCacheVal
-
-	cap int
-	mu  sync.Mutex
+	cache *lru.Cache[activeValidatorsCacheKey, activeValidatorsCacheVal]
 }
 
-func NewActiveValidatorsCache(cap int) *ActiveValidatorsCache {
+var ActiveValidatorsCacheGlobal = NewActiveValidatorsCache(MaxActiveValidatorsCacheSize)
+
+func NewActiveValidatorsCache(size int) *ActiveValidatorsCache {
+	cache, err := lru.New[activeValidatorsCacheKey, activeValidatorsCacheVal]("active_validators", size)
+	if err != nil {
+		panic(err)
+	}
 	return &ActiveValidatorsCache{
-		list: make([]*activeValidatorsCacheVal, MaxActiveValidatorsCacheSize),
-		cap:  cap,
+		cache: cache,
 	}
 }
 
 func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint64, uint64, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for i := 0; i < len(c.list); i++ {
-		if c.list[i] != nil && c.list[i].epoch == epoch && c.list[i].root == root {
-			return c.list[i].activeValidators, c.list[i].totalActiveBalance, true
-		}
+	val, ok := c.cache.Get(activeValidatorsCacheKey{epoch: epoch, root: root})
+	if !ok {
+		return nil, 0, false
 	}
-	return nil, 0, false
+	return val.activeValidators, val.totalActiveBalance, true
 }
 
 func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint64, totalActiveBalance uint64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.list) == 0 {
-		return
-	}
-	minEpochIdx := 0
-	minEpoch := uint64(math.MaxUint64)
-
-	for i := 0; i < len(c.list); i++ {
-		if c.list[i] == nil {
-			c.list[i] = &activeValidatorsCacheVal{
-				epoch:              epoch,
-				root:               root,
-				activeValidators:   activeValidators,
-				totalActiveBalance: totalActiveBalance,
-			}
-			return
-		}
-		if minEpoch > c.list[i].epoch {
-			minEpoch = c.list[i].epoch
-			minEpochIdx = i
-		}
-	}
-	c.list[minEpochIdx] = &activeValidatorsCacheVal{
-		epoch:              epoch,
-		root:               root,
+	c.cache.Add(activeValidatorsCacheKey{epoch: epoch, root: root}, activeValidatorsCacheVal{
 		activeValidators:   activeValidators,
 		totalActiveBalance: totalActiveBalance,
-	}
+	})
 }
