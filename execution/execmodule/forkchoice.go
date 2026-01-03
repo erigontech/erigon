@@ -597,11 +597,12 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(sd *state.Execut
 				return err
 			}
 			timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
-			sd.ClearRam(true)
 			commitStart := time.Now()
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+			// don't clear the local updates before the DB is commited
+			sd.ClearRam(true)
 			timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
 			if e.hook != nil {
 				if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
