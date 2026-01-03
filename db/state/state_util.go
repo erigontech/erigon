@@ -77,58 +77,6 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step kv.Step, err erro
 	return kv.Step(binary.BigEndian.Uint64(v)), nil
 }
 
-//func SavePruneValProgress(db kv.Putter, prunedTblName string, prunedStat *prune.Stat) error {
-//	doneKey := make([]byte, 1)
-//	if prunedStat.KeyDone {
-//		doneKey[0] = 1
-//	}
-//	doneVal := make([]byte, 1)
-//	if prunedStat.ValueDone {
-//		doneVal[0] = 1
-//	}
-//	err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"keys"), append(doneKey, prunedStat.LastPrunedKey...))
-//	if err != nil {
-//		return err
-//	}
-//	err = db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"vals"), append(doneVal, prunedStat.LastPrunedValue...))
-//	if err != nil {
-//		return err
-//	}
-//	return nil
-//}
-//
-//func GetPruneValProgress(db kv.Getter, tbl []byte) (stat *prune.Stat, err error) {
-//	stat = &prune.Stat{}
-//	v, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "vals"...))
-//	if err != nil {
-//		return nil, err
-//	}
-//	switch len(v) {
-//	case 0:
-//	case 1:
-//		if v[0] == 1 {
-//			stat.ValueDone = true
-//		}
-//	default:
-//		stat.LastPrunedValue = v[1:]
-//	}
-//	k, err := db.GetOne(kv.TblPruningValsProg, append(tbl, "keys"...))
-//	if err != nil {
-//		return nil, err
-//	}
-//	switch len(v) {
-//	case 0:
-//	case 1:
-//		if k[0] == 1 {
-//			stat.KeyDone = true
-//		}
-//	default:
-//		stat.LastPrunedKey = k[1:]
-//	}
-//
-//	return stat, nil
-//}
-
 func encodeRange(txFrom, txTo uint64) []byte {
 	b := make([]byte, 16)
 	binary.BigEndian.PutUint64(b[0:8], txFrom)

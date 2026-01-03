@@ -194,26 +194,26 @@ func TableScanningPrune(
 		timeOut = 100 * time.Millisecond
 	}
 
-	var startKey, startVal = &StartPos{}, &StartPos{}
+	var keyCursorPosition, valCursorPosition = &StartPos{}, &StartPos{}
 	// invalidate progress if new params here
 	if !(prevStat.TxFrom == txFrom && prevStat.TxTo == txTo) {
 		prevStat.ValueDone = false
 		prevStat.KeyDone = false
 	}
 	if !prevStat.ValueDone {
-		startVal.StartVal, startVal.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
+		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
 	} else {
-		startVal.StartVal, startVal.StartKey, err = valDelCursor.First()
+		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.First()
 	}
 	if !prevStat.KeyDone {
-		startKey.StartKey, startKey.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey)
+		keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey)
 	} else {
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], txFrom)
-		startKey.StartKey, _, err = keysCursor.Seek(txKey[:])
+		keyCursorPosition.StartKey, _, err = keysCursor.Seek(txKey[:])
 	}
 
-	txnb := common.Copy(startKey.StartKey)
+	txnb := common.Copy(keyCursorPosition.StartKey)
 
 	var pairs, valLen uint64
 
@@ -229,7 +229,7 @@ func TableScanningPrune(
 			}
 			if time.Since(start) > timeOut {
 				logger.Info("prune key timed out", "name", filenameBase)
-				stat.LastPrunedKey = txnb
+				stat.LastPrunedKey = common.Copy(txnb)
 				return stat, nil
 			}
 			txNum := binary.BigEndian.Uint64(txnb)
@@ -254,7 +254,7 @@ func TableScanningPrune(
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	txNumBytes, val := common.Copy(startVal.StartKey), common.Copy(startVal.StartVal)
+	txNumBytes, val := common.Copy(valCursorPosition.StartKey), common.Copy(valCursorPosition.StartVal)
 
 	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
 		switch mode {
@@ -280,7 +280,7 @@ func TableScanningPrune(
 		valLen += dups
 		if time.Since(start) > timeOut {
 			logger.Info("prune val timed out", "name", filenameBase)
-			stat.LastPrunedValue = val
+			stat.LastPrunedValue = common.Copy(val)
 			return stat, nil
 		}
 		txNum := txNumGetter(val, txNumBytes)
@@ -332,7 +332,7 @@ func TableScanningPrune(
 				}
 				if time.Since(start) > timeOut {
 					logger.Info("prune val timed out", "name", filenameBase)
-					stat.LastPrunedValue = val
+					stat.LastPrunedValue = common.Copy(val)
 					return stat, nil
 				}
 				//println("txnum passed checks loop", txNumDup)
