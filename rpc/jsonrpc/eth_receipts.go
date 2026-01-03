@@ -210,7 +210,9 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		if fromTxNum < state.StateHistoryStartTxNum(tx) {
+		r := state.NewHistoryReaderV3()
+		r.SetTx(tx)
+		if fromTxNum < r.StateHistoryStartFrom() {
 			return out, state.PrunedError
 		}
 	}

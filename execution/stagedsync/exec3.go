@@ -188,15 +188,20 @@ func ExecV3(ctx context.Context,
 		maxTxNum                 uint64
 	)
 
-	if inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
-		return err
+	if applyTx != nil {
+		if inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
+			return err
+		}
+	} else {
+		if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
+			inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, tx, doms, maxBlockNum)
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 
 	if maxTxNum == 0 {
-		// nothing to exec, make sure the stage is in sync with the sd
-		if execStage.BlockNumber < blockNum {
-			return execStage.Update(rwTx, blockNum)
-		}
 		return nil
 	}
 

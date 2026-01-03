@@ -118,12 +118,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			"inMem", pe.inMemExec)
 	}
 
-	executorContext, executorCancel, err := pe.run(ctx)
-	defer executorCancel()
+	executorContext, executorCancel := pe.run(ctx)
 
-	if err != nil {
-		return nil, rwTx, err
-	}
+	defer executorCancel()
 
 	if err := pe.resetWorkers(ctx, pe.rs, rwTx); err != nil {
 		return nil, rwTx, err
@@ -376,6 +373,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							uncommittedGas = 0
 							uncommittedTransactions = 0
 						}
+
+						if flushPending {
+							return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+						}
 					}
 
 					blockUpdateCount = 0
@@ -394,9 +395,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
 						changeSet = &changeset.StateChangeSet{}
 						pe.domains().SetChangesetAccumulator(changeSet)
-					}
-					if flushPending {
-						return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
 					}
 				}
 
@@ -438,7 +436,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		return nil, rwTx, err
 	}
 
-	if err = execStage.Update(rwTx, pe.lastCommittedBlockNum); err != nil {
+	err := execStage.Update(rwTx, pe.lastCommittedBlockNum)
+	if err != nil {
 		return nil, rwTx, err
 	}
 
@@ -601,12 +600,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						pe.RLock()
 						defer pe.RUnlock()
 
-						var reader state.StateReader
-						if finalTask.IsHistoric() {
-							reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
-						} else {
-							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
-						}
+						reader := state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
@@ -826,7 +820,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	return blockResult, nil
 }
 
-func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelFunc, error) {
+func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelFunc) {
 	pe.execRequests = make(chan *execRequest, 100_000)
 	pe.in = exec.NewQueueWithRetry(100_000)
 
@@ -836,15 +830,10 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
 
-	var err error
-	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
+	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec.NewWorkersPool(
 		execLoopCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
-
-	if err != nil {
-		return execLoopCtx, execLoopCtxCancel, err
-	}
 
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
@@ -861,7 +850,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		if err := pe.wait(ctx); err != nil {
 			pe.logger.Debug("exec loop cancel failed", "err", err)
 		}
-	}, nil
+	}
 }
 
 func (pe *parallelExecutor) wait(ctx context.Context) error {
@@ -986,7 +975,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	}
 
 	if task.shouldDelayFeeCalc {
-		if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
+		if txTask.Config.IsLondon(blockNum) {
 			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
 				return nil, nil, nil, err
 			}
@@ -1319,7 +1308,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.txIncarnations[tx]++
 			be.cntAbort++
 		} else {
-			return nil, fmt.Errorf("unexpected exec error: %w", res.Err)
+			return nil, fmt.Errorf("unexptected exec error: %w", res.Err)
 		}
 	} else {
 		txVersion := res.Version()
@@ -1455,11 +1444,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if stateReader == nil {
-					if txTask.IsHistoric() {
-						stateReader = state.NewBufferedReader(pe.rs, state.NewHistoryReaderV3(applyTx, txTask.Version().TxNum))
-					} else {
-						stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
-					}
+					stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
 				}
 
 				stateWriter := state.NewBufferedWriter(pe.rs, nil)

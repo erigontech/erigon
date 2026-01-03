@@ -59,7 +59,6 @@ func (a Address) String() string {
 func (a Address) Format(s fmt.State, c rune) {
 	if a == NilAddress {
 		s.Write([]byte("<nil>"))
-		return
 	}
 	a.Value().Format(s, c)
 }
@@ -135,7 +134,6 @@ func (k StorageKey) String() string {
 func (k StorageKey) Format(s fmt.State, c rune) {
 	if k == NilKey {
 		s.Write([]byte("<nil>"))
-		return
 	}
 	k.Value().Format(s, c)
 }
@@ -192,7 +190,6 @@ func (h CodeHash) String() string {
 func (h CodeHash) Format(s fmt.State, c rune) {
 	if h == NilCodeHash {
 		s.Write([]byte("<nil>"))
-		return
 	}
 	h.Value().Format(s, c)
 }
