@@ -249,6 +249,10 @@ func ExecV3(ctx context.Context,
 	// Do it only for chain-tip blocks!
 	fmt.Println("enable", maxBlockNum == startBlockNum)
 	doms.SetEnableWarmupCache(maxBlockNum == startBlockNum)
+	postValidator := newBlockPostExecutionValidator()
+	if maxBlockNum == startBlockNum {
+		postValidator = newParallelBlockPostExecutionValidator()
+	}
 
 	if parallel {
 		if !inMemExec { //nolint:staticcheck
@@ -274,6 +278,7 @@ func ExecV3(ctx context.Context,
 				hooks:                 hooks,
 				lastCommittedTxNum:    doms.TxNum(),
 				lastCommittedBlockNum: blockNum,
+				postValidator:         postValidator,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
@@ -305,6 +310,7 @@ func ExecV3(ctx context.Context,
 				hooks:                 hooks,
 				lastCommittedTxNum:    doms.TxNum(),
 				lastCommittedBlockNum: blockNum,
+				postValidator:         postValidator,
 			}}
 
 		defer func() {
@@ -320,6 +326,10 @@ func ExecV3(ctx context.Context,
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
 					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, inMemExec)
 					if err != nil {
+						return err
+					}
+
+					if err := se.getPostValidator().Wait(); err != nil {
 						return err
 					}
 
@@ -469,10 +479,18 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
+	postValidator     BlockPostExecutionValidator
 }
 
 func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
+}
+
+func (te *txExecutor) getPostValidator() BlockPostExecutionValidator {
+	if te.postValidator == nil {
+		return newBlockPostExecutionValidator()
+	}
+	return te.postValidator
 }
 
 func (te *txExecutor) domains() *execctx.SharedDomains {
