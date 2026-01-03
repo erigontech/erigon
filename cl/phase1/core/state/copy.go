@@ -19,19 +19,16 @@ package state
 import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
-	if bs.BeaconState == nil {
-		bs.BeaconState = raw.New(b.BeaconConfig())
-	}
 	err = b.BeaconState.CopyInto(bs.BeaconState)
 	if err != nil {
 		return err
 	}
+
 	err = bs.reinitCaches()
 	if err != nil {
 		return err
@@ -44,12 +41,14 @@ func (bs *CachingBeaconState) reinitCaches() error {
 		return bs.InitBeaconState()
 	}
 
-	// Always create a new map (maphash.Map doesn't have a Clear method)
-	bs.publicKeyIndicies = maphash.NewMap[uint64]()
+	if bs.publicKeyIndicies == nil {
+		bs.publicKeyIndicies = maphash.NewMap[uint64]()
+	} else {
+		bs.publicKeyIndicies.Clear()
+	}
 
 	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		pk := v.PublicKey()
-		bs.publicKeyIndicies.Set(pk[:], uint64(idx))
+		bs.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
 		return true
 	})
 
