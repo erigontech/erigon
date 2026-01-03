@@ -329,6 +329,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
+		dt.comBuf = dt.comBuf[:0]
+
 		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, keyFromTxNum, keyEndTxNum) {
 			return valBuf, nil
 		}
@@ -421,7 +423,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return shortened, nil
 		}
 
-		return commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		dt.comBuf, err = commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		if err != nil {
+			return nil, err
+		}
+		return dt.comBuf, nil
 	}
 
 	return vt, nil
