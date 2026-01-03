@@ -24,9 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/valyala/fastjson"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/valyala/fastjson"
 )
 
 type CallResult struct {
@@ -301,7 +302,6 @@ func (g *RequestGenerator) ethCall(from common.Address, to *common.Address, gas 
 	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
-
 
 func (g *RequestGenerator) ethEstimateGas(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes) string {
 	var sb strings.Builder
