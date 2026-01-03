@@ -19,61 +19,38 @@ package state
 import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
-	// If we are copying into our parent state, we can optimize some stuff
-	// aka we can unwind less of the public key indices cache
-	var fixedCachesUnwind bool
-	if bs.BeaconState == nil {
-		bs.BeaconState = raw.New(b.BeaconConfig())
-	}
-
-	// if the state we are copying into is the parent state, we can optimize some stuff
-	blockRoot, _ := bs.BlockRoot()
-	fixedCachesUnwind = blockRoot == b.LatestBlockHeader().ParentRoot
-
 	err = b.BeaconState.CopyInto(bs.BeaconState)
 	if err != nil {
 		return err
 	}
 
-	err = bs.reinitCaches(fixedCachesUnwind)
+	err = bs.reinitCaches()
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (bs *CachingBeaconState) reinitCaches(fixedCachesUnwind bool) error {
+func (bs *CachingBeaconState) reinitCaches() error {
 	if bs.Version() == clparams.Phase0Version {
 		return bs.InitBeaconState()
 	}
 
-	if bs.publicKeyIndicies != nil && fixedCachesUnwind {
-		const opsCount = 256
-		startIdx := bs.publicKeyIndicies.Len() - opsCount
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		for i := startIdx; i < bs.ValidatorLength(); i++ {
-			bs.publicKeyIndicies.Set(bs.Validators().Get(i).PublicKeyBytes(), uint64(i))
-		}
+	if bs.publicKeyIndicies == nil {
+		bs.publicKeyIndicies = maphash.NewMap[uint64]()
 	} else {
-		if bs.publicKeyIndicies == nil {
-			bs.publicKeyIndicies = maphash.NewMap[uint64]()
-		} else {
-			bs.publicKeyIndicies.Clear()
-		}
-
-		bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-			bs.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
-			return true
-		})
+		bs.publicKeyIndicies.Clear()
 	}
+
+	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+		bs.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
+		return true
+	})
 
 	bs.totalActiveBalanceCache = nil
 	bs._refreshActiveBalancesIfNeeded()
