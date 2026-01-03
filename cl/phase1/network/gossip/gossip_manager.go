@@ -238,7 +238,7 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 
 func (g *GossipManager) goCheckForkAndResubscribe() {
 	// check upcoming fork digest every slot
-	ticker := time.NewTicker(time.Duration(g.beaconConfig.SecondsPerSlot))
+	ticker := time.NewTicker(time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
@@ -344,7 +344,8 @@ func extractSubnetIndexByGossipTopic(name string) int {
 }
 
 func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficPerPeer datasize.ByteSize, maxOutboundTrafficPerPeer datasize.ByteSize, adaptableTrafficRequirements bool) {
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		topics := g.subscriptions.AllTopics()
 		countAttSubnetsSubscribed := 0
@@ -367,7 +368,11 @@ func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficP
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			totals := g.p2p.BandwidthCounter().GetBandwidthTotals()
+			bandwidthCounter := g.p2p.BandwidthCounter()
+			if bandwidthCounter == nil {
+				continue
+			}
+			totals := bandwidthCounter.GetBandwidthTotals()
 			monitor.ObserveTotalInBytes(totals.TotalIn)
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
 			minBound := datasize.KB

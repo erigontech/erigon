@@ -105,6 +105,8 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 		return slot / beaconConfig.SlotsPerEpoch
 	}).AnyTimes()
 	s.mockClock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	s.mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+	s.mockP2P.EXPECT().Host().Return(nil).AnyTimes()
 
 	s.gm = NewGossipManager(
 		s.mockP2P,
