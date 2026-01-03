@@ -21,7 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/common"
-	"golang.org/x/exp/maps"
+	"github.com/erigontech/erigon/common/maphash"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
@@ -55,23 +55,22 @@ func (bs *CachingBeaconState) reinitCaches(fixedCachesUnwind bool) error {
 
 	if bs.publicKeyIndicies != nil && fixedCachesUnwind {
 		const opsCount = 256
-		startIdx := len(bs.publicKeyIndicies) - opsCount
+		startIdx := bs.publicKeyIndicies.Len() - opsCount
 		if startIdx < 0 {
 			startIdx = 0
 		}
 		for i := startIdx; i < bs.ValidatorLength(); i++ {
-			v := bs.Validators().Get(i)
-			bs.publicKeyIndicies[v.PublicKey()] = uint64(i)
+			bs.publicKeyIndicies.Set(bs.Validators().Get(i).PublicKeyBytes(), uint64(i))
 		}
 	} else {
 		if bs.publicKeyIndicies == nil {
-			bs.publicKeyIndicies = make(map[[48]byte]uint64)
+			bs.publicKeyIndicies = maphash.NewMap[uint64]()
 		} else {
-			maps.Clear(bs.publicKeyIndicies)
+			bs.publicKeyIndicies.Clear()
 		}
 
 		bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-			bs.publicKeyIndicies[v.PublicKey()] = uint64(idx)
+			bs.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
 			return true
 		})
 	}

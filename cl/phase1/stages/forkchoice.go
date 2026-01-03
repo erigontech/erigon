@@ -420,6 +420,10 @@ func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.Beaco
 		logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
 		return
 	}
+
+	// Pre-cache active validators if not already cached
+	preCacheActiveValidatorsForEpoch(b, epoch, blockRootAtBegginingPrevEpoch)
+
 	// Skip if the shuffled set is already pre-cached
 	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok {
 		return
@@ -437,4 +441,19 @@ func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.Beaco
 
 	caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
 	log.Info("Pre-cached shuffled set", "epoch", epoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+}
+
+func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot common.Hash) {
+	// Skip if already fully cached (both active validators and total balance)
+	if indicies, totalBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok && len(indicies) > 0 && totalBalance > 0 {
+		return
+	}
+	if epoch != state.Epoch(b) {
+		return
+	}
+
+	// GetActiveValidatorsIndices and GetTotalActiveBalance will compute and cache the results
+	indicies := b.GetActiveValidatorsIndices(epoch)
+	totalBalance := b.GetTotalActiveBalance()
+	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, totalBalance)
 }

@@ -749,7 +749,12 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 				continue
 			}
 			getter.Reset(offset)
-			getter.Next(ht.efbuf[:0]) // skip key
+			gkey, _ := getter.Next(ht.efbuf[:0]) // skip key
+			if !bytes.Equal(gkey, ht.key) {
+				ht.logger.Debug("weird thing - key mismatch for %s in file %s", hexutil.Encode(ht.key), item.src.decompressor.FileName())
+				moveToNextFileFn()
+				continue
+			}
 			ht.efbuf, _ = getter.Next(ht.efbuf[:0])
 			currSeq := multiencseq.ReadMultiEncSeq(item.startTxNum, ht.efbuf)
 			ht.seqItr = currSeq.Iterator(int(ht.fromTxNum))

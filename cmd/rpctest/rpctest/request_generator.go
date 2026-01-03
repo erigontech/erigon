@@ -24,9 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/valyala/fastjson"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/valyala/fastjson"
 )
 
 type CallResult struct {
@@ -299,6 +300,28 @@ func (g *RequestGenerator) ethCall(from common.Address, to *common.Address, gas 
 		fmt.Fprintf(&sb, `,"value":"%s"`, value)
 	}
 	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
+	return sb.String()
+}
+
+func (g *RequestGenerator) ethEstimateGas(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_estimateGas", "params": [{"from":"0x%x"`, from)
+	if to != nil {
+		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
+	}
+	if gas != nil {
+		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
+	}
+	if gasPrice != nil {
+		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
+	}
+	if len(data) > 0 {
+		fmt.Fprintf(&sb, `,"data":"%s"`, data)
+	}
+	if value != nil {
+		fmt.Fprintf(&sb, `,"value":"%s"`, value)
+	}
+	fmt.Fprintf(&sb, `}], "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
 
