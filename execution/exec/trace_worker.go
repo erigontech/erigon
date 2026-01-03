@@ -65,7 +65,8 @@ type TraceWorker struct {
 }
 
 func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReader, br services.HeaderReader, tracer GenericTracer) *TraceWorker {
-	stateReader := state.NewHistoryReaderV3(tx, 0)
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(tx)
 
 	ie := &TraceWorker{
 		tx:           tx,

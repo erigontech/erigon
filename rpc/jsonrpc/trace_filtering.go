@@ -392,6 +392,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
 
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
 	isPos := false
 	for it.HasNext() {
@@ -581,9 +583,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 
+		stateReader.SetTxNum(txNum)
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
+		cachedReader := state.NewCachedReader(stateReader, stateCache)
+		//cachedReader := stateReader
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
+		//cachedWriter := noop
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer

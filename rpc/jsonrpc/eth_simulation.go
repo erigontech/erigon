@@ -423,10 +423,13 @@ func (s *simulator) simulateBlock(
 	if latest {
 		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
 	} else {
-		if minTxNum < state.StateHistoryStartTxNum(tx) {
+		historyStateReader := state.NewHistoryReaderV3()
+		historyStateReader.SetTx(tx)
+		if minTxNum < historyStateReader.StateHistoryStartFrom() {
 			return nil, nil, state.PrunedError
 		}
-		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
+		historyStateReader.SetTxNum(minTxNum)
+		stateReader = historyStateReader
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {

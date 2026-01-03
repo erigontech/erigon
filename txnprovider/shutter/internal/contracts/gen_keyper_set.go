@@ -4,14 +4,11 @@
 package contracts
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"reflect"
 	"strings"
-	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
@@ -46,25 +43,11 @@ func DeployKeyperSet(auth *bind.TransactOpts, backend bind.ContractBackend) (com
 		return common.Address{}, nil, nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
-	defer cancel()
-	type binding struct {
-		address  common.Address
-		tx       types.Transaction
-		contract *bind.BoundContract
-	}
-	b, err := backoff.RetryWithData(func() (binding, error) {
-		address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(KeyperSetBin), backend)
-		if err != nil {
-			return binding{}, err
-		}
-		return binding{address, tx, contract}, nil
-	}, backOff)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(KeyperSetBin), backend)
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
-	return b.address, b.tx, &KeyperSet{KeyperSetCaller: KeyperSetCaller{contract: b.contract}, KeyperSetTransactor: KeyperSetTransactor{contract: b.contract}, KeyperSetFilterer: KeyperSetFilterer{contract: b.contract}}, nil
+	return address, tx, &KeyperSet{KeyperSetCaller: KeyperSetCaller{contract: contract}, KeyperSetTransactor: KeyperSetTransactor{contract: contract}, KeyperSetFilterer: KeyperSetFilterer{contract: contract}}, nil
 }
 
 // KeyperSet is an auto generated Go binding around an Ethereum contract.

@@ -128,19 +128,8 @@ func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum
 func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
-
-func (sd *SharedDomains) Merge(other *SharedDomains) error {
-	if sd.txNum > other.txNum {
-		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
-	}
-
-	if err := sd.mem.Merge(other.mem); err != nil {
-		return err
-	}
-
-	sd.txNum = other.txNum
-	sd.blockNum.Store(other.blockNum.Load())
-	return nil
+func (sd *SharedDomains) TrieCtxForTests() *commitmentdb.SharedDomainsCommitmentContext {
+	return sd.sdCtx
 }
 
 type temporalGetter struct {
@@ -208,7 +197,7 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	if resetCommitment && sd.sdCtx != nil {
+	if resetCommitment {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
