@@ -158,6 +158,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MinerGasLimitFlag,
 	&utils.MinerEtherbaseFlag,
 	&utils.MinerExtraDataFlag,
+	&utils.BuilderMaxBlobsFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
