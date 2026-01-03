@@ -704,6 +704,8 @@ func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key acc
 		return sd.DelAll(ctx, addr, roTx, txNum)
 	}
 
+	sd.commitCtx.TouchStorage(addr, key, uint256.Int{})
+
 	var pv *ValueWithStep[uint256.Int]
 
 	if len(prev) != 0 {
