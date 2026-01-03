@@ -245,6 +245,10 @@ func ExecV3(ctx context.Context,
 	var lastCommittedTxNum uint64
 	var lastCommittedBlockNum uint64
 
+	doms.SetWarmupDB(cfg.db)
+	// Do it only for chain-tip blocks!
+	fmt.Println("enable", maxBlockNum == startBlockNum)
+	doms.SetEnableWarmupCache(maxBlockNum == startBlockNum)
 	postValidator := newBlockPostExecutionValidator()
 	if maxBlockNum == startBlockNum {
 		postValidator = newParallelBlockPostExecutionValidator()
@@ -278,7 +282,6 @@ func ExecV3(ctx context.Context,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
-		pe.doms.SetWarmupDB(cfg.db)
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
@@ -309,7 +312,6 @@ func ExecV3(ctx context.Context,
 				lastCommittedBlockNum: blockNum,
 				postValidator:         postValidator,
 			}}
-		se.doms.SetWarmupDB(cfg.db)
 
 		defer func() {
 			se.LogComplete(stepsInDb)
