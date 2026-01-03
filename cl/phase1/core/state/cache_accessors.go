@@ -64,9 +64,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 	// Store in both caches (totalActiveBalance will be set by _refreshActiveBalancesIfNeeded)
 	b.activeValidatorsCache.Add(epoch, indicies)
-	if err == nil {
-		caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, indicies, 0)
-	}
+
 	return indicies
 }
 
