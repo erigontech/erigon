@@ -72,6 +72,13 @@ func (m *Map[V]) Len() int {
 	return len(m.m)
 }
 
+// Clear removes all entries from the map.
+func (m *Map[V]) Clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	clear(m.m)
+}
+
 // LRU is a thread-safe LRU cache that uses maphash to hash []byte keys.
 type LRU[V any] struct {
 	cache *lru.Cache[uint64, V]
