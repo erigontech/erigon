@@ -28,7 +28,9 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/holiman/uint256"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -173,4 +175,104 @@ func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, bloc
 
 func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx) state.StateReader {
 	return state.NewCachedReader3(cache, tx)
+}
+
+type asOfView interface {
+	GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error)
+}
+
+func CreateHistoryCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	asOfView, ok := cache.(asOfView)
+
+	if !ok {
+		fmt.Println("CreateHistoryCachedStateReader err", fmt.Errorf("%T does not implement GetAsOf", cache))
+		return nil, fmt.Errorf("%T does not implement GetAsOf", cache)
+	}
+	minTxNum, err := txNumsReader.Min(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+	if txNum < state.StateHistoryStartTxNum(tx) {
+		return nil, state.PrunedError
+	}
+	return &cachedHistoryReaderV3{asOfView, state.NewHistoryReaderV3(tx, txNum)}, nil
+}
+
+type cachedHistoryReaderV3 struct {
+	cache  asOfView
+	reader *state.HistoryReaderV3
+}
+
+func (hr *cachedHistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
+	hr.reader.SetTrace(trace, tracePrefix)
+}
+
+func (hr *cachedHistoryReaderV3) Trace() bool {
+	return hr.reader.Trace()
+}
+
+func (hr *cachedHistoryReaderV3) TracePrefix() string {
+	return hr.reader.TracePrefix()
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	fmt.Println("ReadAccountData", address)
+	addressValue := address.Value()
+	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+
+	if err != nil {
+		return nil, err
+	}
+
+	if ok {
+		fmt.Println("ReadAccountData", address, "ok")
+		var a accounts.Account
+		if err := accounts.DeserialiseV3(&a, enc); err != nil {
+			return nil, fmt.Errorf("%sread account data (cache)(%x): %w", hr.TracePrefix(), address, err)
+		}
+		return &a, nil
+	}
+
+	fmt.Println("ReadAccountData", address, "hist")
+	return hr.reader.ReadAccountData(address)
+}
+
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (hr *cachedHistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return hr.ReadAccountData(address)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	addressValue := address.Value()
+	keyValue := key.Value()
+	enc, ok, err := hr.cache.GetAsOf(append(addressValue[:], keyValue[:]...), hr.reader.GetTxNum())
+	if err != nil {
+		return uint256.Int{}, false, err
+	}
+	if ok {
+		var res uint256.Int
+		if ok {
+			(&res).SetBytes(enc)
+		}
+		return res, ok, err
+	}
+	return hr.reader.ReadAccountStorage(address, key)
+}
+
+func (hr *cachedHistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
+	return hr.reader.HasStorage(address)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	return hr.reader.ReadAccountCode(address)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	return hr.reader.ReadAccountCodeSize(address)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	return 0, nil
 }

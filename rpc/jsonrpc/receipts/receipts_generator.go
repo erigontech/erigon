@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -28,10 +29,12 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type Generator struct {
+	stateCache    kvcache.Cache
 	receiptsCache *lru.Cache[common.Hash, types.Receipts]
 	receiptCache  *lru.Cache[common.Hash, *types.Receipt]
 
@@ -65,7 +68,7 @@ var (
 	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
 )
 
-func NewGenerator(blockReader services.FullBlockReader, engine rules.EngineReader, evmTimeout time.Duration) *Generator {
+func NewGenerator(blockReader services.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
@@ -79,6 +82,7 @@ func NewGenerator(blockReader services.FullBlockReader, engine rules.EngineReade
 	txNumReader := blockReader.TxnumReader(context.Background())
 
 	return &Generator{
+		stateCache:         stateCache,
 		receiptsCache:      receiptsCache,
 		blockReader:        blockReader,
 		txNumReader:        txNumReader,
@@ -111,7 +115,8 @@ var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader(ctx)
-	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, txNumsReader, tx, txIndex)
+	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, g.stateCache, txNumsReader, tx, txIndex)
+
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
 	}
@@ -150,7 +155,7 @@ func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) 
 	g.receiptCache.Add(hash, receipt)
 }
 
-func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, txsForPostState *types.Transactions) (*types.Receipt, error) {
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, txsForPostState *types.Transactions) (_ *types.Receipt, err error) {
 	blockHash := header.Hash()
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
@@ -163,15 +168,17 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	var cumGasUsed uint64
 
 	defer func() {
-		if dbg.Enabled(ctx) {
-			log.Info("[dbg] ReceiptGenerator.GetReceipt",
-				"txNum", txNum,
-				"txHash", txnHash.String(),
-				"blockNum", blockNum,
-				"firstLogIndex", firstLogIndex,
-				"logIdxAfterTx", logIdxAfterTx,
-				"nil receipt in db", receiptFromDB == nil)
-		}
+		//if dbg.Enabled(ctx) {
+		log.Info("[dbg] ReceiptGenerator.GetReceipt",
+			"txNum", txNum,
+			"txHash", txnHash.String(),
+			"blockNum", blockNum,
+			"firstLogIndex", firstLogIndex,
+			"logIdxAfterTx", logIdxAfterTx,
+			"nil receipt in db", receiptFromDB == nil,
+			"err", err,
+			"stack", dbg.StackSkip(1))
+		//}
 	}()
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
@@ -211,7 +218,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 	}
 
-	var err error
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
 
@@ -281,6 +287,14 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 
+			if g.stateCache != nil {
+				cacheView, err := g.stateCache.View(ctx, tx)
+				if err != nil {
+					return nil, err
+				}
+				genEnv.ibs = state.New(rpchelper.CreateLatestCachedStateReader(cacheView, tx))
+			}
+
 			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 			defer cancel()
@@ -313,7 +327,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
-
 			stateWriter = genEnv.noopWriter
 		}
 
@@ -327,7 +340,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 		receipt, _, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
 		if err != nil {
-			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
+			if err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
+			}
 		}
 
 		if calculatePostState {

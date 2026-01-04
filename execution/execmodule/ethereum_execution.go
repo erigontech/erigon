@@ -100,19 +100,31 @@ var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
 func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
-	return &CacheView{cache: c, tx: tx}, nil
+	var context *execctx.SharedDomains
+	if c.execModule != nil {
+		c.execModule.lock.RLock()
+		defer c.execModule.lock.RUnlock()
+		context = c.execModule.currentContext
+	}
+
+	return &CacheView{context: context, tx: tx}, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
 func (c *Cache) Evict() int                                  { return 0 }
 func (c *Cache) Len() int                                    { return 0 }
-func (c *Cache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
-	var getter kv.TemporalGetter = tx
-	if c.execModule != nil {
-		c.execModule.lock.RLock()
-		if c.execModule.currentContext != nil {
-			getter = c.execModule.currentContext.AsGetter(tx)
-		}
-		c.execModule.lock.RUnlock()
+func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcache.CacheValidationResult, error) {
+	return &kvcache.CacheValidationResult{Enabled: false}, nil
+}
+
+type CacheView struct {
+	context *execctx.SharedDomains
+	tx      kv.TemporalTx
+}
+
+func (c *CacheView) Get(k []byte) ([]byte, error) {
+	var getter kv.TemporalGetter = c.tx
+	if c.context != nil {
+		getter = c.context.AsGetter(c.tx)
 	}
 	if len(k) == 20 {
 		v, _, err := getter.GetLatest(kv.AccountsDomain, k)
@@ -121,37 +133,29 @@ func (c *Cache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	v, _, err := getter.GetLatest(kv.StorageDomain, k)
 	return v, err
 }
-func (c *Cache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
-	var getter kv.TemporalGetter = tx
-	if c.execModule != nil {
-		c.execModule.lock.RLock()
-		if c.execModule.currentContext != nil {
-			getter = c.execModule.currentContext.AsGetter(tx)
-		}
-		c.execModule.lock.RUnlock()
+func (c *CacheView) GetCode(k []byte) ([]byte, error) {
+	var getter kv.TemporalGetter = c.tx
+	if c.context != nil {
+		getter = c.context.AsGetter(c.tx)
 	}
 	v, _, err := getter.GetLatest(kv.CodeDomain, k)
 	return v, err
 }
-func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcache.CacheValidationResult, error) {
-	return &kvcache.CacheValidationResult{Enabled: false}, nil
+
+func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	if c.context != nil {
+		if len(key) == 20 {
+			return c.context.GetAsOf(kv.AccountsDomain, key, ts)
+		}
+		return c.context.GetAsOf(kv.StorageDomain, key, ts)
+	}
+	return nil, false, nil
 }
 
-type CacheView struct {
-	cache *Cache
-	tx    kv.TemporalTx
-}
-
-func (c *CacheView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
-func (c *CacheView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
 func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 	var getter kv.TemporalGetter = c.tx
-	if c.cache.execModule != nil {
-		c.cache.execModule.lock.RLock()
-		if c.cache.execModule.currentContext != nil {
-			getter = c.cache.execModule.currentContext.AsGetter(c.tx)
-		}
-		c.cache.execModule.lock.RUnlock()
+	if c.context != nil {
+		getter = c.context.AsGetter(c.tx)
 	}
 	_, _, hasStorage, err := getter.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err

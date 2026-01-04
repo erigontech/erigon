@@ -483,6 +483,7 @@ type TemporalMemBatch interface {
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
+	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 }
 
 type WithFreezeInfo interface {

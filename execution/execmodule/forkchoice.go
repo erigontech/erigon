@@ -595,12 +595,11 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(finishProgressBe
 				}
 				timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
 
-				e.currentContext.ClearRam(true)
 				e.lock.Lock()
 				e.currentContext = nil
 				e.lock.Unlock()
 			}
-			
+
 			if e.hook != nil {
 				if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
 					return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
