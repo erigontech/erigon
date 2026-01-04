@@ -109,7 +109,7 @@ func encodeProgress(done bool, last []byte) []byte {
 
 func decodeProgress(v []byte) (done bool, last []byte, err error) {
 	if len(v) == 0 {
-		return false, nil, nil
+		return true, nil, nil
 	}
 	done = (v[0] & flagDone) != 0
 	if len(v) > 1 {

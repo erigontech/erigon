@@ -769,7 +769,7 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 }
 
 func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, _ bool) error {
-	_, err := iit.oldPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, nil, nil, prune.DefaultStorageMode)
+	_, err := iit.hashSeekingPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, nil, nil, prune.DefaultStorageMode)
 	if err != nil {
 		return err
 	}
@@ -778,7 +778,7 @@ func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
 		if iit.files.EndTxNum() > 0 {
 			txTo = min(txTo, iit.files.EndTxNum())
@@ -788,12 +788,12 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txT
 		}
 	}
 	if txTo == MaxUint64 {
-		return iit.oldPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
+		return iit.hashSeekingPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
 	}
-	return iit.prune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, valTable, pruneSizeMetric, mode)
+	return iit.tableScanningPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, valTable, pruneSizeMetric, mode)
 }
 
-func (iit *InvertedIndexRoTx) OldPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) HashSeekingPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
 		if iit.files.EndTxNum() > 0 {
 			txTo = min(txTo, iit.files.EndTxNum())
@@ -802,10 +802,13 @@ func (iit *InvertedIndexRoTx) OldPrune(ctx context.Context, tx kv.RwTx, txFrom, 
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
 		}
 	}
-	return iit.oldPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
+	return iit.hashSeekingPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
 }
 
-func (iit *InvertedIndexRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) hashSeekingPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+	mxPruneInProgress.Inc()
+	defer mxPruneInProgress.Dec()
+	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
@@ -822,15 +825,15 @@ func (iit *InvertedIndexRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom
 	if pruneSizeMetric == nil {
 		pruneSizeMetric = mxPruneSizeIndex
 	}
-
 	pruneStat, err := prune.HashSeekingPrune(ctx, iit.name.String(), iit.ii.FilenameBase, iit.ii.dirs.Tmp, txFrom, txTo, limit, iit.stepSize,
-		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, mxPruneInProgress, mxPruneTookIndex, pruneSizeMetric, mode)
+		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, mode)
 	if err != nil {
 		return nil, err
 	}
 	if pruneStat == nil {
 		return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, errors.New("prune stat is nil")
 	}
+	pruneSizeMetric.AddUint64(pruneStat.PruneCountValues)
 	return &InvertedIndexPruneStat{
 		MinTxNum:         pruneStat.MinTxNum,
 		MaxTxNum:         pruneStat.MaxTxNum,
@@ -840,7 +843,10 @@ func (iit *InvertedIndexRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom
 	}, nil
 }
 
-func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+	mxPruneInProgress.Inc()
+	defer mxPruneInProgress.Dec()
+	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
@@ -871,8 +877,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 
 	pruneStat, err := prune.TableScanningPrune(ctx, iit.name.String(), iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
-		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, mxPruneInProgress, mxPruneTookIndex, pruneSizeMetric,
-		mxDupsPruneSizeIndex, prs, mode)
+		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -886,6 +891,8 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if pruneStat == nil {
 		return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, errors.New("prune stat is nil")
 	}
+	pruneSizeMetric.AddUint64(pruneStat.PruneCountValues)
+	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
 	return &InvertedIndexPruneStat{
 		MinTxNum:         pruneStat.MinTxNum,
 		MaxTxNum:         pruneStat.MaxTxNum,

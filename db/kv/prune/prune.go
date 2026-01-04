@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 type Stat struct {
@@ -45,14 +44,10 @@ func HashSeekingPrune(
 	logger log.Logger,
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
 	asserts bool,
-	mxPruneInProgress metrics.Gauge, mxPruneTookIndex metrics.Histogram, mxPruneSizeIndex metrics.Counter,
 	mode StorageMode,
 ) (stat *Stat, err error) {
 	stat = &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
-	mxPruneInProgress.Inc()
-	defer mxPruneInProgress.Dec()
-	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 
 	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
@@ -126,7 +121,6 @@ func HashSeekingPrune(
 				return err
 			}
 		}
-		mxPruneSizeIndex.Inc()
 		stat.PruneCountValues++
 
 		select {
@@ -175,15 +169,11 @@ func TableScanningPrune(
 	logger log.Logger,
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
 	asserts bool,
-	mxPruneInProgress metrics.Gauge, mxPruneTookIndex metrics.Histogram, mxPruneSizeIndex, mxDupsPruneSizeIndex metrics.Counter,
 	prevStat *Stat,
 	mode StorageMode,
 ) (stat *Stat, err error) {
 	stat = &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
-	mxPruneInProgress.Inc()
-	defer mxPruneInProgress.Dec()
-	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 
 	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
@@ -312,10 +302,8 @@ func TableScanningPrune(
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
 			if dups > 1 {
-				mxDupsPruneSizeIndex.AddUint64(dups)
 				stat.DupsDeleted += dups
 			}
-			mxPruneSizeIndex.AddUint64(dups)
 			stat.PruneCountValues += dups
 		} else {
 			for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
@@ -343,7 +331,6 @@ func TableScanningPrune(
 				if err = valDelCursor.DeleteCurrent(); err != nil {
 					return nil, err
 				}
-				mxPruneSizeIndex.Inc()
 				stat.PruneCountValues++
 			}
 		}
