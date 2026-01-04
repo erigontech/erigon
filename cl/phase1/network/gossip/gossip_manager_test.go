@@ -109,6 +109,7 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 	s.mockP2P.EXPECT().Host().Return(nil).AnyTimes()
 
 	s.gm = NewGossipManager(
+		context.Background(),
 		s.mockP2P,
 		beaconConfig,
 		networkConfig,
@@ -123,6 +124,9 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 
 // TearDownTest is called after each test method
 func (s *newPubsubValidatorTestSuite) TearDownTest() {
+	if s.gm != nil {
+		s.gm.Close()
+	}
 	if s.ctrl != nil {
 		s.ctrl.Finish()
 	}
@@ -410,6 +414,7 @@ func (s *subscribeUpcomingTopicsTestSuite) SetupTest() {
 	mockP2P.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
 
 	s.gm = NewGossipManager(
+		context.Background(),
 		mockP2P,
 		beaconConfig,
 		networkConfig,
@@ -424,6 +429,9 @@ func (s *subscribeUpcomingTopicsTestSuite) SetupTest() {
 
 // TearDownTest is called after each test method
 func (s *subscribeUpcomingTopicsTestSuite) TearDownTest() {
+	if s.gm != nil {
+		s.gm.Close()
+	}
 	if s.host != nil {
 		s.host.Close()
 	}

@@ -38,6 +38,7 @@ type TopicSubscriptionsTestSuite struct {
 	host    host.Host
 	ps      *pubsub.PubSub
 	ts      *TopicSubscriptions
+	cancel  context.CancelFunc
 }
 
 func (s *TopicSubscriptionsTestSuite) SetupTest() {
@@ -61,10 +62,14 @@ func (s *TopicSubscriptionsTestSuite) SetupTest() {
 	s.mockP2P.EXPECT().UpdateENRAttSubnets(gomock.Any(), gomock.Any()).AnyTimes()
 	s.mockP2P.EXPECT().UpdateENRSyncNets(gomock.Any(), gomock.Any()).AnyTimes()
 
-	s.ts = NewTopicSubscriptions(s.mockP2P)
+	ctx, s.cancel = context.WithCancel(context.Background())
+	s.ts = NewTopicSubscriptions(ctx, s.mockP2P)
 }
 
 func (s *TopicSubscriptionsTestSuite) TearDownTest() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	if s.host != nil {
 		s.host.Close()
 	}
@@ -74,7 +79,7 @@ func (s *TopicSubscriptionsTestSuite) TearDownTest() {
 }
 
 func (s *TopicSubscriptionsTestSuite) TestNewTopicSubscriptions() {
-	ts := NewTopicSubscriptions(s.mockP2P)
+	ts := NewTopicSubscriptions(context.Background(), s.mockP2P)
 	s.NotNil(ts)
 	s.NotNil(ts.subs)
 	s.NotNil(ts.toSubscribes)

@@ -56,9 +56,13 @@ type GossipManager struct {
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
 	subscribeAll   bool
+
+	// For graceful shutdown
+	cancel context.CancelFunc
 }
 
 func NewGossipManager(
+	ctx context.Context,
 	p2p p2p.P2PManager,
 	beaconConfig *clparams.BeaconChainConfig,
 	networkConfig *clparams.NetworkConfig,
@@ -69,22 +73,31 @@ func NewGossipManager(
 	maxOutboundTrafficPerPeer datasize.ByteSize,
 	adaptableTrafficRequirements bool,
 ) *GossipManager {
+	cctx, cancel := context.WithCancel(ctx)
+
 	gm := &GossipManager{
 		p2p:                p2p,
 		beaconConfig:       beaconConfig,
 		networkConfig:      networkConfig,
 		ethClock:           ethClock,
 		registeredServices: []GossipService{},
-		stats:              &gossipMessageStats{},
-		subscriptions:      NewTopicSubscriptions(p2p),
+		stats:              newGossipMessageStats(),
+		subscriptions:      NewTopicSubscriptions(cctx, p2p),
 		subscribeAll:       subscribeAll,
 		activeIndicies:     activeIndicies,
+		cancel:             cancel,
 	}
 
-	go gm.observeBandwidth(context.Background(), maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
-	gm.goCheckForkAndResubscribe()
-	gm.stats.goPrintStats()
+	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
+	go gm.goCheckForkAndResubscribe(cctx)
+	gm.stats.goPrintStats(cctx)
 	return gm
+}
+
+// Close gracefully shuts down the GossipManager and all its goroutines
+func (g *GossipManager) Close() error {
+	g.cancel()
+	return nil
 }
 
 func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], conditions ...ConditionFunc) pubsub.ValidatorEx {
@@ -236,31 +249,39 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
 }
 
-func (g *GossipManager) goCheckForkAndResubscribe() {
+func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 	// check upcoming fork digest every slot
 	ticker := time.NewTicker(time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
+
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		log.Error("[GossipManager] failed to get current fork digest", "err", err)
 		panic(err)
 	}
-	go func() {
-		slotLookahead := uint64(8)
-		for {
-			// compute upcoming ForkDigest immediately
-			epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
-			upcomingForkDigest, err := g.ethClock.ComputeForkDigest(epoch)
-			if err != nil {
-				log.Warn("[GossipManager] failed to compute upcoming fork digest", "err", err)
-				continue
-			}
-			if upcomingForkDigest != forkDigest {
-				log.Debug("[GossipManager] upcoming fork digest", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
-				oldForkDigest := fmt.Sprintf("%x", forkDigest)
-				go func(oldForkDigest string) {
-					// unsubscribe old topics after 2 slots
-					time.Sleep(2 * time.Duration(slotLookahead) * time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second)
+
+	slotLookahead := uint64(8)
+	for {
+		// compute upcoming ForkDigest
+		epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
+		upcomingForkDigest, err := g.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			log.Warn("[GossipManager] failed to compute upcoming fork digest", "err", err)
+			continue
+		}
+		if upcomingForkDigest != forkDigest {
+			log.Debug("[GossipManager] upcoming fork digest", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
+			oldForkDigest := fmt.Sprintf("%x", forkDigest)
+
+			// Start goroutine to unsubscribe old topics after delay
+			go func(oldForkDigest string) {
+				timer := time.NewTimer(2 * time.Duration(slotLookahead) * time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second)
+				defer timer.Stop()
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-timer.C:
 					allTopics := g.subscriptions.AllTopics()
 					for _, topic := range allTopics {
 						if strings.Contains(topic, oldForkDigest) {
@@ -270,16 +291,19 @@ func (g *GossipManager) goCheckForkAndResubscribe() {
 							}
 						}
 					}
-				}(oldForkDigest)
+				}
+			}(oldForkDigest)
 
-				// subscribe new topics immediately
-				g.subscribeUpcomingTopics(upcomingForkDigest)
-				forkDigest = upcomingForkDigest
-			}
-
-			<-ticker.C
+			// subscribe new topics immediately
+			g.subscribeUpcomingTopics(upcomingForkDigest)
+			forkDigest = upcomingForkDigest
 		}
-	}()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
