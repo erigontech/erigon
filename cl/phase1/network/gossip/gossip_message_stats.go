@@ -1,6 +1,7 @@
 package gossip
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +15,10 @@ type gossipMessageStats struct {
 	rejects    map[string]int64
 	ignores    map[string]int64
 	statsMutex sync.Mutex
+}
+
+func newGossipMessageStats() *gossipMessageStats {
+	return &gossipMessageStats{}
 }
 
 func (s *gossipMessageStats) addAccept(name string) {
@@ -61,26 +66,32 @@ func (s *gossipMessageStats) addIgnore(name string) {
 	s.ignores[name]++
 }
 
-func (s *gossipMessageStats) goPrintStats() {
+func (s *gossipMessageStats) goPrintStats(ctx context.Context) {
 	go func() {
 		duration := time.Minute
 		ticker := time.NewTicker(duration)
 		defer ticker.Stop()
 		times := int64(1) // Start at 1 to avoid division by zero
-		for range ticker.C {
-			s.statsMutex.Lock()
-			totalSeconds := float64(times * int64(duration.Seconds()))
-			for name, count := range s.accepts {
-				log.Debug("Gossip Message Accepts Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.statsMutex.Lock()
+				totalSeconds := float64(times * int64(duration.Seconds()))
+				for name, count := range s.accepts {
+					log.Debug("Gossip Message Accepts Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
+				}
+				for name, count := range s.rejects {
+					log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
+				}
+				for name, count := range s.ignores {
+					log.Debug("Gossip Message Ignores Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
+				}
+				s.statsMutex.Unlock()
+				times++
 			}
-			for name, count := range s.rejects {
-				log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
-			}
-			for name, count := range s.ignores {
-				log.Debug("Gossip Message Ignores Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
-			}
-			s.statsMutex.Unlock()
-			times++
 		}
 	}()
 }

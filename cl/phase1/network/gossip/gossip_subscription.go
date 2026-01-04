@@ -1,6 +1,7 @@
 package gossip
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -29,14 +30,14 @@ type TopicSubscriptions struct {
 	toSubscribes map[string]time.Time // this indicates the topics that probably need to be subscribed later
 }
 
-func NewTopicSubscriptions(p2p p2p.P2PManager) *TopicSubscriptions {
+func NewTopicSubscriptions(ctx context.Context, p2p p2p.P2PManager) *TopicSubscriptions {
 	s := &TopicSubscriptions{
 		p2p:          p2p,
 		subs:         make(map[string]*TopicSubscription),
 		mutex:        sync.RWMutex{},
 		toSubscribes: make(map[string]time.Time),
 	}
-	go s.expireCheck()
+	go s.expireCheck(ctx)
 	return s
 }
 
@@ -142,24 +143,36 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 	return nil
 }
 
-func (t *TopicSubscriptions) expireCheck() {
+func (t *TopicSubscriptions) expireCheck(ctx context.Context) {
 	ticker := time.NewTicker(12 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		t.mutex.Lock()
-		for _, sub := range t.subs {
-			if time.Now().After(sub.expiry) && sub.sub != nil {
-				sub.sub.Cancel()
-				sub.sub = nil
-				topic := sub.topic.String()
-				name := extractTopicName(topic)
-				if gossip.IsTopicBeaconAttestation(name) {
-					t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), false)
-				} else if gossip.IsTopicSyncCommittee(name) {
-					t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
-				}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			t.checkExpiredSubscriptions()
+		}
+	}
+}
+
+func (t *TopicSubscriptions) checkExpiredSubscriptions() {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	now := time.Now()
+	for _, sub := range t.subs {
+		if now.After(sub.expiry) && sub.sub != nil {
+			sub.sub.Cancel()
+			sub.sub = nil
+			topic := sub.topic.String()
+			name := extractTopicName(topic)
+			if gossip.IsTopicBeaconAttestation(name) {
+				t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), false)
+			} else if gossip.IsTopicSyncCommittee(name) {
+				t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
 			}
 		}
-		t.mutex.Unlock()
 	}
 }
