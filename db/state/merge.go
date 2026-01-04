@@ -499,10 +499,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if keyBuf != nil {
 			if vt != nil {
 				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-					valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
+					valBuf = append(valBuf[:0], valBufRet...)
 				}
 			}
 			if _, err = kvWriter.Write(keyBuf); err != nil {
