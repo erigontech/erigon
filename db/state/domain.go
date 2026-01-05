@@ -380,9 +380,15 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		largeVals: dt.d.LargeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
 	}
+
+	// this avoids us spilling too much data during hot-path.
+	collectorAllocator := etl.SmallSortableBuffers
+	if dt.d.LargeCollector {
+		collectorAllocator = etl.LargeSortableBuffers
+	}
 	if !discard {
-		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, collectorAllocator, dt.d.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(false)
 	}
 	return w
 }
