@@ -156,6 +156,10 @@ func (c *CoherentView) HasStorage(address common.Address) (bool, error) {
 	return hasStorage, err
 }
 
+func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return nil, false, fmt.Errorf("%T does not implement GetAsOf", c)
+}
+
 var _ Cache = (*Coherent)(nil)         // compile-time interface check
 var _ CacheView = (*CoherentView)(nil) // compile-time interface check
 
