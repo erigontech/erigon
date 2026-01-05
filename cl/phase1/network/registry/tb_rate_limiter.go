@@ -1,4 +1,4 @@
-package network
+package registry
 
 import (
 	"sync"

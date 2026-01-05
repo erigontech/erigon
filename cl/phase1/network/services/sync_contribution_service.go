@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeContribution struct {
@@ -99,6 +100,10 @@ func NewSyncContributionService(
 	}
 }
 
+func (s *syncContributionService) Names() []string {
+	return []string{gossip.TopicNameSyncCommitteeContributionAndProof}
+}
+
 func (s *syncContributionService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameSyncCommitteeContributionAndProof
 }
@@ -138,12 +143,12 @@ func (s *syncContributionService) isLocalValidatorProposer(headState *state.Cach
 	return false
 }
 
-func (s *syncContributionService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedContributionAndProofForGossip, error) {
+func (s *syncContributionService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedContributionAndProofForGossip, error) {
 	obj := &SignedContributionAndProofForGossip{
-		Receiver:                   copyOfPeerData(data),
+		Receiver:                   &sentinelproto.Peer{Pid: pid.String()},
 		SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
 	}
-	if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SignedContributionAndProof.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil

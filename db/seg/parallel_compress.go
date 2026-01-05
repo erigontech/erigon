@@ -950,7 +950,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	t := time.Now()
 	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.LargeSortableBuffers, logger)
 	defer dictCollector.Close()
-	dictCollector.SortAndFlushInBackground(true)
+	dictCollector.SortAndFlushInBackground(false)
 	dictCollector.LogLvl(lvl)
 
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
