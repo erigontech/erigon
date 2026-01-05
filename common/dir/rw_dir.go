@@ -17,6 +17,7 @@
 package dir
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -157,6 +158,10 @@ func DeleteFiles(dirs ...string) error {
 	g := errgroup.Group{}
 	for _, dir := range dirs {
 		files, err := ListFiles(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			log.Debug("directory does not exist, skipping deletion", "dir", dir)
+			continue
+		}
 		if err != nil {
 			return err
 		}

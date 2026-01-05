@@ -89,11 +89,11 @@ func (ch *CursorHeap) Swap(i, j int) {
 	(*ch)[i], (*ch)[j] = (*ch)[j], (*ch)[i]
 }
 
-func (ch *CursorHeap) Push(x interface{}) {
+func (ch *CursorHeap) Push(x any) {
 	*ch = append(*ch, x.(*CursorItem))
 }
 
-func (ch *CursorHeap) Pop() interface{} {
+func (ch *CursorHeap) Pop() any {
 	old := *ch
 	n := len(old)
 	x := old[n-1]

@@ -873,7 +873,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	t.Parallel()
 
-	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, nil)
+	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, WarmupConfig{})
 	var s state
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))

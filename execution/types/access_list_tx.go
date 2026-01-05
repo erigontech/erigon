@@ -447,7 +447,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccessListTxType, []interface{}{
+	hash := prefixedRlpHash(AccessListTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
@@ -465,7 +465,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
-		[]interface{}{
+		[]any{
 			chainID,
 			tx.Nonce,
 			tx.GasPrice,

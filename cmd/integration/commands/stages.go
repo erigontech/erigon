@@ -912,28 +912,34 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	for {
-		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, block, ctx, cfg, logger); err != nil {
+		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
 			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 				return err
 			}
-			if !noCommit {
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
-				doms.ClearRam(true)
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				if tx, err = db.BeginTemporalRw(ctx); err != nil {
-					return err
-				}
-			}
 		}
+
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
 		doms.ClearRam(true)
+		if !noCommit {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+		}
+
+		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+			return err
+		}
+		if execProgress >= block {
+			break
+		}
 	}
+
+	return nil
 }
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -1131,7 +1137,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		}
 
 		_allSnapshotsSingleton.LogStat("blocks")
-		_allBorSnapshotsSingleton.LogStat("bor")
+		//_allBorSnapshotsSingleton.LogStat("bor")
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()

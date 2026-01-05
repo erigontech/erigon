@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
@@ -52,7 +53,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
-	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/phase1/network/gossip"
+	"github.com/erigontech/erigon/cl/phase1/network/registry"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/pool"
@@ -292,7 +294,24 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
-
+	p2p, err := p2p.NewP2Pmanager(ctx, &p2p.P2PConfig{
+		IpAddr:     config.CaplinDiscoveryAddr,
+		Port:       int(config.CaplinDiscoveryPort),
+		TCPPort:    uint(config.CaplinDiscoveryTCPPort),
+		EnableUPnP: config.EnableUPnP,
+		//MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
+		//MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
+		//AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
+		NetworkConfig: networkConfig,
+		BeaconConfig:  beaconConfig,
+		TmpDir:        dirs.Tmp,
+		//EnableBlocks:                 true,
+		//ActiveIndicies: uint64(len(activeIndicies)),
+		MaxPeerCount: config.MaxPeerCount,
+	}, logger, ethClock)
+	if err != nil {
+		return err
+	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
 	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
@@ -321,15 +340,18 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconConfig.SlotsPerEpoch,
 			HeadRoot:       state.FinalizedCheckpoint().Root,
 		},
-	}, ethClock, forkChoice, columnStorage, peerDasState, logger)
+	}, ethClock, forkChoice, columnStorage, peerDasState, p2p, logger)
 	if err != nil {
 		return err
 	}
+	// Create the gossip manager
+	gossipManager := gossip.NewGossipManager(ctx, p2p, beaconConfig, networkConfig, ethClock, config.SubscribeAllTopics, uint64(len(activeIndicies)), config.MaxInboundTrafficPerPeer, config.MaxOutboundTrafficPerPeer, config.AdptableTrafficRequirements)
+
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
-	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState)
+	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager)
 	forkChoice.InitPeerDas(peerDas) // hack init
-	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, aggregationPool, syncedDataManager)
+	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, aggregationPool, syncedDataManager, gossipManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
@@ -337,20 +359,33 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	dataColumnSidecarService := services.NewDataColumnSidecarService(beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
-	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, false)
-	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, pool, false, batchSignatureVerifier)
+	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, validatorParameters, false)
+	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, pool, false, batchSignatureVerifier, validatorParameters)
 	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock, batchSignatureVerifier)
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
+	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
+	registry.RegisterGossipServices(
+		gossipManager,
+		forkChoice,
+		ethClock,
+		blockService,
+		attesterSlashingService,
+		blobService,
+		dataColumnSidecarService,
+		syncCommitteeMessagesService,
+		syncContributionService,
+		aggregateAndProofService,
+		attestationService,
+		voluntaryExitService,
+		blsToExecutionChangeService,
+		proposerSlashingService,
+	)
 
 	{
 		go batchSignatureVerifier.Start()
 	}
 
-	// Create the gossip manager
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, networkConfig, ethClock, emitters, committeeSub,
-		blockService, blobService, dataColumnSidecarService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
-		attestationService, voluntaryExitService, blsToExecutionChangeService, proposerSlashingService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)
@@ -365,10 +400,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}()
 	}
 
-	{ // start the gossip manager
-		go gossipManager.Start(ctx)
-		logger.Info("Started Ethereum 2.0 Gossip Service")
-	}
+	logger.Info("Started Ethereum 2.0 Gossip Service")
 
 	{ // start logging peers
 		go func() {
@@ -377,7 +409,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				select {
 				case <-logIntervalPeers.C:
 					if peerCount, err := beaconRpc.Peers(); err == nil {
-						logger.Info("Caplin P2P", "peers", peerCount)
+						logger.Info("Caplin P2P", "peers_count", peerCount)
 					} else {
 						logger.Error("Caplin P2P", "err", err)
 					}
@@ -463,6 +495,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			proposerSlashingService,
 			option.builderClient,
 			stateSnapshots,
+			gossipManager,
 			true,
 			peerDas,
 		)
@@ -480,7 +513,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		beaconConfig,
 		state,
 		engine,
-		gossipManager,
+		//gossipManager,
 		forkChoice,
 		indexDB,
 		csn,

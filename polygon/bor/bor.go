@@ -146,7 +146,7 @@ func SealHash(header *types.Header, c *borcfg.BorConfig) (hash common.Hash) {
 }
 
 func encodeSigHeader(w io.Writer, header *types.Header, c *borcfg.BorConfig) {
-	enc := []interface{}{
+	enc := []any{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,

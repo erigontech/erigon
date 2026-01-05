@@ -51,7 +51,7 @@ type TemporalMemBatch struct {
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 }
 
-func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		aggTx:         AggTx(tx),
 		unwindToTxNum: math.MaxUint64,

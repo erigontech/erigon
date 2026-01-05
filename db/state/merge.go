@@ -503,6 +503,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
+					valBuf = append(valBuf[:0], valBufRet...)
 				}
 			}
 			if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -524,6 +525,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 				}
+				valBuf = append(valBuf[:0], valBuf...)
 			}
 		}
 		if _, err = kvWriter.Write(keyBuf); err != nil {

@@ -739,7 +739,7 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if hasTerm(key) {
+	if HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
@@ -766,7 +766,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if hasTerm(key) {
+	if HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
@@ -1042,18 +1042,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			hashedKeyOffset = depth - 64
 		}
 		singleton := depth <= 64
-		koffset := hph.accountKeyLen
-		if depth == 0 && cell.accountAddrLen == 0 {
-			// if account key is empty, then we need to hash storage key from the key beginning
-			koffset = 0
-		}
-		if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset); err != nil {
-			return nil, err
-		}
-		cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 
+		// Check cached stateHash BEFORE hashing key (optimization: skip key hash if using cache)
 		if cell.stateHashLen > 0 {
-			hph.keccak.Reset()
 			if hph.trace {
 				fmt.Printf("REUSED stateHash %x spk %x\n", cell.stateHash[:cell.stateHashLen], cell.storageAddr[:cell.storageAddrLen])
 			}
@@ -1065,6 +1056,15 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			storageRootHashIsSet = true
 			storageRootHash = *(*common.Hash)(cell.stateHash[:cell.stateHashLen])
 		} else {
+			koffset := hph.accountKeyLen
+			if depth == 0 && cell.accountAddrLen == 0 {
+				// if account key is empty, then we need to hash storage key from the key beginning
+				koffset = 0
+			}
+			if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset); err != nil {
+				return nil, err
+			}
+			cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 			if !cell.loaded.storage() {
 				return nil, fmt.Errorf("storage %x was not loaded as expected: cell %v", cell.storageAddr[:cell.storageAddrLen], cell.String())
 				// update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
@@ -1663,10 +1663,12 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
+
 	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
 		return err
 	}
+
 	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 
@@ -2068,7 +2070,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
 					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 					if err != nil {
-						return fmt.Errorf("failed to get account: %w", err)
+						return err
 					}
 					cell.setFromUpdate(upd)
 					// if update is empty, loaded flag was not updated so do it manually
@@ -2079,7 +2081,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
 					upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 					if err != nil {
-						return fmt.Errorf("failed to get storage: %w", err)
+						return err
 					}
 					cell.setFromUpdate(upd)
 					// if update is empty, loaded flag was not updated so do it manually
@@ -2348,7 +2350,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
-	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -2469,7 +2471,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		defer warmuper.Close()
 	}
 
-	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			if progress != nil {

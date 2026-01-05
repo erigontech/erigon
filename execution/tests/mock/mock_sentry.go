@@ -782,7 +782,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 				return nil
 			}
 			if streamCtx.Err() != nil {
-				fmt.Errorf("block insert recv timed out: %d remaining", len(insertedBlocks))
+				return fmt.Errorf("block insert recv timed out: %d remaining", len(insertedBlocks))
 			}
 			return fmt.Errorf("block insert recv failed: %w, %d remaining", err, len(insertedBlocks))
 		}

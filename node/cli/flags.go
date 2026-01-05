@@ -372,7 +372,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		cfg.ExperimentalBAL = *v
 	}
 
-	if v := f.Bool(utils.ChaosMonkeyFlag.Name, true, utils.ChaosMonkeyFlag.Usage); v != nil {
+	if v, _ := f.GetBool(utils.ChaosMonkeyFlag.Name); v {
 		cfg.ChaosMonkey = true
 	}
 }
@@ -426,7 +426,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AuthRpcTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(AuthRpcReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
-			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
+			IdleTimeout:  ctx.Duration(AuthRpcIdleTimeoutFlag.Name),
 		},
 		EvmCallTimeout:            ctx.Duration(EvmCallTimeoutFlag.Name),
 		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),

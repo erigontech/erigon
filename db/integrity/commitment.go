@@ -244,7 +244,7 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 		return err
 	}
 	logger.Info("recomputing commitment root after", "touches", touches, "file", filepath.Base(f.Fullpath()))
-	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil)
+	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}

@@ -230,7 +230,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 						}
 
-						if err := protocol.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
+						if err := pe.getPostValidator().Process(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
@@ -339,6 +339,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								lastExecutedLog = time.Now()
 							}
 
+							// Warmup is enabled via SetWarmupDB at executor init
 							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
 							captured := pe.doms.SetTrace(false, false)
@@ -375,10 +376,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							uncommittedGas = 0
 							uncommittedTransactions = 0
 						}
-
-						if flushPending {
-							return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
-						}
 					}
 
 					blockUpdateCount = 0
@@ -397,6 +394,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
 						changeSet = &changeset.StateChangeSet{}
 						pe.domains().SetChangesetAccumulator(changeSet)
+					}
+					if flushPending {
+						return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
 					}
 				}
 
@@ -889,8 +889,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 	}
 }
 
-type applyResult interface {
-}
+type applyResult any
 
 type blockResult struct {
 	BlockNum    uint64

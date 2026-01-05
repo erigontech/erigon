@@ -377,10 +377,11 @@ var snapshotCommand = cli.Command{
 				log.Info("[integrity] snapshots are publishable")
 				return nil
 			},
-			Description: "run slow validation of files. use --check to run single",
+			Description: "run slow validation of files. use --check to run multiple/single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("one of: %s", integrity.AllChecks)},
+				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
+				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 			}),
@@ -1018,6 +1019,26 @@ func doIntegrity(cliCtx *cli.Context) error {
 		requestedChecks = integrity.AllChecks
 	}
 
+	skipChecks := cliCtx.String("skip-check")
+	if len(skipChecks) > 0 {
+		var finalChecks []integrity.Check
+		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
+			found := false
+			for _, chk := range requestedChecks {
+				if chk == integrity.Check(skipCheck) {
+					found = true
+					logger.Info("[integrity] skipping check", "check", chk)
+					break
+				}
+			}
+			if !found {
+				finalChecks = append(finalChecks, integrity.Check(skipCheck))
+			}
+		}
+
+		requestedChecks = finalChecks
+	}
+
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -1192,23 +1213,30 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
 	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
-	to := int64(-1)
+	//to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
-		uto, empty, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), to, emptyOk)
+		_, _, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), CheckFilesParams{
+			checkLastFileTo: -1,
+			emptyOk:         emptyOk,
+			doesntStartAt0:  snapt.Enum() == snaptype.BlobSidecars.Enum(),
+		})
 		if err != nil {
 			return err
 		}
-		if empty {
-			continue
-		}
+		// if empty {
+		// 	continue
+		// }
 
-		to = int64(uto)
+		// to = int64(uto)
 	}
 
-	to = int64(-1)
+	to := int64(-1)
 	somethingPresent, somethingEmpty := false, false
 	for table := range stateSnapTypes.KeyValueGetters {
-		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), to, emptyOk)
+		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
+			checkLastFileTo: to,
+			emptyOk:         emptyOk,
+		})
 		if err != nil {
 			return err
 		}
@@ -2043,7 +2071,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, beaconConfig, dirs, snTypes, logger)
 	}
 
-	res.BorSnaps.LogStat("bor")
+	//res.BorSnaps.LogStat("bor")
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
 	if chainConfig.Bor != nil {

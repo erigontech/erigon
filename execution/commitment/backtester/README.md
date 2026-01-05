@@ -22,10 +22,10 @@ There are two main ways a backtest can be started:
 erigon backtest-commitment --from 1000000 --to 2000000 --datadir <datadir> --output-dir <output-dir>
 ```
 
-* using `--tMinusN 1,000,000` to specify the number of blocks prior to the current tip:
+* using `--tMinusN 1000000` to specify the number of blocks prior to the current tip:
 
 ```
-erigon backtest-commitment --tMinusN 1,000,000 --datadir <datadir> --output-dir <output-dir>
+erigon backtest-commitment --tMinusN 1000000 --datadir <datadir> --output-dir <output-dir>
 ```
 
 To explore other available flags run:
@@ -92,6 +92,8 @@ be extracted.
 
 ![](examples/overview_page1.png)
 ![](examples/overview_page2.png)
+![](examples/overview_page3.png)
+![](examples/overview_page4.png)
 
 ### Detailed timeseries page
 

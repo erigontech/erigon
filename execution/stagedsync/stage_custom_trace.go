@@ -206,6 +206,10 @@ Loop:
 	return nil
 }
 
+// stage_custom_trace input range is block based, and not txNum based.
+// it doesn't need to account for "half-block execution" case, because it
+// must have some stage_exec progress, which means it resumes from full blocks.
+// also, it appends/puts to db blockResults and not "txResult".
 func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		if err := tx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
@@ -242,7 +246,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 
 		//asserts
 		if produce.ReceiptDomain {
-			if err = AssertReceipts(ctx, cfg, tx, fromBlock, toBlock); err != nil {
+			if err = AssertReceipts(ctx, cfg, db, fromBlock, toBlock); err != nil {
 				return err
 			}
 		}
@@ -283,14 +287,14 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	return nil
 }
 
-func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, tx kv.TemporalTx, fromBlock, toBlock uint64) (err error) {
+func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, db kv.TemporalRoDB, fromBlock, toBlock uint64) (err error) {
 	if !dbg.AssertEnabled {
 		return
 	}
 	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
-	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
+	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, db, cfg.BlockReader, true)
 }
 
 func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, tx kv.TemporalRwTx, doms *state.ExecutionContext, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
@@ -337,13 +341,11 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 						}
 					}
 				} else {
-					{
-						if txTask.TxIndex >= 0 {
-							receipt := blockResult.Receipts[txTask.TxIndex]
-							if receipt != nil {
-								logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(result.Logs))
-								cumGasUsed = receipt.CumulativeGasUsed
-							}
+					if txTask.TxIndex >= 0 {
+						receipt := blockResult.Receipts[txTask.TxIndex]
+						if receipt != nil {
+							logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(result.Logs))
+							cumGasUsed = receipt.CumulativeGasUsed
 						}
 					}
 				}
@@ -363,6 +365,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 					receipt = result.Receipt
 				} else {
 					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+						// issue: https://github.com/erigontech/erigon/issues/16037
 						receipt = blockResult.Receipts[txTask.TxIndex-1]
 						if receipt == nil {
 							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())

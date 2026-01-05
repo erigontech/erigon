@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"strconv"
 	"time"
@@ -424,6 +425,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				Status:          executionproto.ExecutionStatus_Success,
 				ValidationError: validationError,
 			}, false)
+			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
 		if err := e.forkValidator.MergeExtendingFork(ctx, sd, tx, e.accumulator, e.recentReceipts); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
@@ -646,4 +648,51 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(sd *state.Execut
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 		}
 	}()
+}
+
+func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, debug bool) {
+	if e.logger == nil {
+		return
+	}
+
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	blockTimings := e.forkValidator.GetTimings(blockHash)
+
+	logArgs := []any{"hash", blockHash, "number", fcuHeader.Number.Uint64()}
+	if txnum != 0 {
+		logArgs = append(logArgs, "txnum", txnum)
+	}
+	logArgs = append(logArgs, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)),
+		"execution", common.Round(blockTimings[engine_helpers.BlockTimingsValidationIndex], 0))
+
+	if !debug {
+		totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
+		if !e.syncCfg.ParallelStateFlushing {
+			totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
+		}
+		gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
+		mgasPerSec := gasUsedMgas / totalTime.Seconds()
+		metrics.ChainTipMgasPerSec.Add(mgasPerSec)
+
+		const blockRange = 30 // ~1 hour
+		const alpha = 2.0 / (blockRange + 1)
+
+		if e.avgMgasSec == 0 || e.avgMgasSec == math.Inf(1) {
+			e.avgMgasSec = mgasPerSec
+		}
+		e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
+		// if mgasPerSec or avgMgasPerSec are 0, Inf or -Inf, do not log it but dont return either
+		if mgasPerSec > 0 && mgasPerSec != math.Inf(1) && e.avgMgasSec > 0 && e.avgMgasSec != math.Inf(1) {
+			logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "avg mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+		}
+	}
+
+	logArgs = append(logArgs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+	dbgLevel := log.LvlInfo
+	if debug {
+		dbgLevel = log.LvlDebug
+	}
+	e.logger.Log(dbgLevel, msg, logArgs...)
 }
