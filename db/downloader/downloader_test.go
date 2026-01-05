@@ -196,17 +196,22 @@ func TestAddDel(t *testing.T) {
 	_, _ = os.Create(f1Abs)
 	require.NoError(os.WriteFile(f2Abs, []byte("a.kv"), 0o666))
 
+	// Create a second datadir, not relative to the one the Downloader expects.
+	invalidDirs := datadir.New(t.TempDir())
+	// Mixed and matched with f1Abs, which is now allowed but heavily warned against.
+	f1BadAbs := filepath.Join(invalidDirs.Snap, "a.seg")
+
+	const absPathErrorContents = "assert"
+
 	server, _ := NewGrpcServer(d)
 	// Add: expect relative paths
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1Abs}})
-	require.Error(err)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2Abs}})
-	require.Error(err)
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1BadAbs}})
+	require.ErrorContains(err, absPathErrorContents)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	f1, _ := filepath.Rel(dirs.Snap, f1Abs)
 	f2, _ := filepath.Rel(dirs.Snap, f2Abs)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1}})
+	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1Abs}})
 	require.NoError(err)
 	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2}})
 	require.NoError(err)
@@ -220,14 +225,12 @@ func TestAddDel(t *testing.T) {
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// Del: expect relative paths
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs}})
-	require.Error(err)
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2Abs}})
-	require.Error(err)
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1BadAbs}})
+	require.ErrorContains(err, absPathErrorContents)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// Del: idempotency
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs}})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
 	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
@@ -245,7 +248,7 @@ func TestAddDel(t *testing.T) {
 	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1, f2}})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1, f2}})
+	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs, f2}})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
