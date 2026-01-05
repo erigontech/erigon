@@ -736,7 +736,7 @@ func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
-	streamCtx, cancel := context.WithTimeout(ms.Ctx, 10*time.Second)
+	streamCtx, cancel := context.WithTimeout(ms.Ctx, 30*time.Second)
 	defer cancel()
 	stream, err := ms.stateChangesClient.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
 	if err != nil {
