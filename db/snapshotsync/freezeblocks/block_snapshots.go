@@ -444,7 +444,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			return
 		}
 		if err != nil {
-			br.logger.Warn("[snapshots] retire blocks", "err", err)
+			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}
 	}()

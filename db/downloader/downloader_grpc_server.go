@@ -44,6 +44,10 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 	return svr, nil
 }
 
+type errRpcSnapName struct {
+	error
+}
+
 type GrpcServer struct {
 	downloaderproto.UnimplementedDownloaderServer
 	d *Downloader
@@ -61,7 +65,7 @@ func (s *GrpcServer) fixNamesAndLogCall(names []string, callName string) error {
 			debug.PrintStack()
 			rel, err := filepath.Rel(s.d.snapDir(), name)
 			if err != nil || !filepath.IsLocal(rel) {
-				return fmt.Errorf("assert: Downloader.GrpcServer called with absolute path %q, please use path relative to snap dir", name)
+				return errRpcSnapName{fmt.Errorf("assert: Downloader.GrpcServer called with absolute path %q, please use path relative to snap dir", name)}
 			}
 			names[i] = rel
 		}

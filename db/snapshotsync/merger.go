@@ -85,7 +85,15 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
-func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileInfo, toMerge []*DirtySegment, snapDir string, doIndex bool, indexBuilder snaptype.IndexBuilder, onMerge func(mergedFiles []string) error) (newDirtySegment *DirtySegment, err error) {
+func (m *Merger) mergeSubSegment(
+	ctx context.Context,
+	v *View,
+	sn snaptype.FileInfo,
+	toMerge []*DirtySegment,
+	snapDir string,
+	doIndex bool,
+	indexBuilder snaptype.IndexBuilder,
+) (newDirtySegment *DirtySegment, err error) {
 	defer func() {
 		if err == nil {
 			if rec := recover(); rec != nil {
@@ -140,7 +148,16 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.I
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(mergedFileNames []string) error, onDelete func(l []string) error) (err error) {
+func (m *Merger) Merge(
+	ctx context.Context,
+	snapshots *RoSnapshots,
+	snapTypes []snaptype.Type,
+	mergeRanges []Range,
+	snapDir string,
+	doIndex bool,
+	onMerge func(mergedFileNames []string) error,
+	onDelete func(l []string) error,
+) (err error) {
 	v := snapshots.View()
 	defer v.Close()
 
@@ -169,7 +186,15 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 		}
 
 		for _, t := range snapTypes {
-			newDirtySegment, err := m.mergeSubSegment(ctx, v, t.FileInfo(snapDir, r.From(), r.To()), toMerge[t.Enum()], snapDir, doIndex, snapshots.IndexBuilder(t), onMerge)
+			newDirtySegment, err := m.mergeSubSegment(
+				ctx,
+				v,
+				t.FileInfo(snapDir, r.From(), r.To()),
+				toMerge[t.Enum()],
+				snapDir,
+				doIndex,
+				snapshots.IndexBuilder(t),
+			)
 			if err != nil {
 				return err
 			}
@@ -188,7 +213,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			}
 		}
 
-		//TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earliear can make sense.
+		//TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earlier can make sense.
 		toMergeFileNames := make([]string, 0, 16)
 		for _, segments := range toMerge {
 			for _, segment := range segments {

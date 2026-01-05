@@ -195,7 +195,7 @@ type Ethereum struct {
 	syncUnwindOrder    stagedsync.UnwindOrder
 	syncPruneOrder     stagedsync.PruneOrder
 
-	downloaderClient downloaderproto.DownloaderClient
+	downloaderClient downloader.Client
 
 	notifications *shards.Notifications
 
@@ -1284,7 +1284,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		if _, err := s.downloaderClient.Seed(ctx, &downloaderproto.SeedRequest{Paths: frozenFileNames}); err != nil {
+		if err := s.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
 			s.logger.Warn("[snapshots] downloader.Seed", "err", err)
 		}
 	}, func(deletedFiles []string) {
@@ -1295,7 +1295,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		if _, err := s.downloaderClient.Delete(ctx, &downloaderproto.DeleteRequest{Paths: deletedFiles}); err != nil {
+		if err := s.downloaderClient.Delete(ctx, deletedFiles); err != nil {
 			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
 		}
 	})
@@ -1310,9 +1310,10 @@ func (s *Ethereum) setUpSnapDownloader(
 		}
 	}
 
+	var grpcClient downloaderproto.DownloaderClient
 	if s.config.Snapshot.DownloaderAddr != "" {
 		// connect to external Downloader
-		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
+		grpcClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
 		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
 			return nil
@@ -1339,8 +1340,9 @@ func (s *Ethereum) setUpSnapDownloader(
 		}
 		s.downloader.InitBackgroundLogger(true)
 
-		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
+		grpcClient = downloader.NewDirectGrpcServerClient(bittorrentServer)
 	}
+	s.downloaderClient = downloader.NewGrpcClient(grpcClient, s.config.Dirs.Snap)
 	return err
 }
 

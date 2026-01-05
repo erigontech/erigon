@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func TestConcurrentDownload(t *testing.T) {
@@ -201,54 +200,58 @@ func TestAddDel(t *testing.T) {
 	// Mixed and matched with f1Abs, which is now allowed but heavily warned against.
 	f1BadAbs := filepath.Join(invalidDirs.Snap, "a.seg")
 
-	const absPathErrorContents = "assert"
+	grpcServer, _ := NewGrpcServer(d)
 
-	server, _ := NewGrpcServer(d)
+	server := NewGrpcClient(NewDirectGrpcServerClient(grpcServer), dirs.Snap)
+
+	// So... errors.AsType is coming.
+	var errRpcSnapName errRpcSnapName
+
 	// Add: expect relative paths
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1BadAbs}})
-	require.ErrorContains(err, absPathErrorContents)
+	err = server.Seed(ctx, []string{f1BadAbs})
+	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	f1, _ := filepath.Rel(dirs.Snap, f1Abs)
 	f2, _ := filepath.Rel(dirs.Snap, f2Abs)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1Abs}})
+	err = server.Seed(ctx, []string{f1Abs})
 	require.NoError(err)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2}})
+	err = server.Seed(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// add idempotency
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1}})
+	err = server.Seed(ctx, []string{f1})
 	require.NoError(err)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2}})
+	err = server.Seed(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// Del: expect relative paths
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1BadAbs}})
-	require.ErrorContains(err, absPathErrorContents)
+	err = server.Delete(ctx, []string{f1BadAbs})
+	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// Del: idempotency
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs}})
+	err = server.Delete(ctx, []string{f1Abs})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
+	err = server.Delete(ctx, []string{f1})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
 
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
+	err = server.Delete(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
+	err = server.Delete(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	// Batch
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1, f2}})
+	err = server.Seed(ctx, []string{f1, f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs, f2}})
+	err = server.Delete(ctx, []string{f1Abs, f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
