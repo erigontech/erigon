@@ -55,19 +55,12 @@ type GrpcServer struct {
 }
 
 func (s *GrpcServer) checkNamesAndLogCall(names []string, callName string) error {
-	for i, name := range names {
+	for _, name := range names {
 		if name == "" {
 			return errors.New("field 'path' is required")
 		}
 		if filepath.IsAbs(name) {
-			s.d.log(log.LvlWarn, "Unexpected absolute path provided to Downloader.GrpcServer. Please use relative paths",
-				"name", name,
-				"snapDir", s.d.snapDir())
-			rel, err := filepath.Rel(s.d.snapDir(), name)
-			if err != nil || !filepath.IsLocal(rel) {
-				return errRpcSnapName{fmt.Errorf("assert: Downloader.GrpcServer called with absolute path %q, please use path relative to snap dir", name)}
-			}
-			names[i] = rel
+			return fmt.Errorf("assert: Downloader.GrpcServer called with absolute path %q, please use filepath.Rel(dirs.Snap, filePath) before RPC", name)
 		}
 	}
 	s.d.log(log.LvlDebug, fmt.Sprintf("Downloader.%s", callName), "files", names)
