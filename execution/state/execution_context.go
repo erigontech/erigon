@@ -556,3 +556,8 @@ func (sd *ExecutionContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx
 func (sd *ExecutionContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	return sd.sdCtx.ComputeCommitment(ctx, sd, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
 }
+
+// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
+func (sd *ExecutionContext) SetWarmupDB(db kv.TemporalRoDB) {
+	sd.sdCtx.SetWarmupDB(db)
+}
