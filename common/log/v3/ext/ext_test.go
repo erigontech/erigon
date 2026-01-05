@@ -61,6 +61,7 @@ func TestSpeculativeHandler(t *testing.T) {
 
 		go func() {
 			defer close(done)
+			defer close(recs)
 			expectedCount := int(math.Min(float64(count), float64(100)))
 			expectedIdx := count - expectedCount
 			for r := range recs {
@@ -90,7 +91,7 @@ func TestSpeculativeHandler(t *testing.T) {
 			lg.Debug("test speculative", "i", i)
 		}
 
-		go spec.Flush()
+		spec.Flush()
 
 		// wait for the go routine to finish
 		<-done
