@@ -137,14 +137,14 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	cacheView, err := stateCache.View(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if latest {
-		cacheView, err := stateCache.View(ctx, tx)
-		if err != nil {
-			return nil, err
-		}
 		return CreateLatestCachedStateReader(cacheView, tx), nil
 	}
-	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, txNumsReader)
+	return CreateHistoryCachedStateReader(cacheView, tx, blockNumber+1, txnIndex, txNumsReader)
 }
 
 func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
@@ -153,8 +153,8 @@ func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64, txnIndex int
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if txNum < state.StateHistoryStartTxNum(tx) {
-		return nil, state.PrunedError
+	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
 	}
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
@@ -193,8 +193,8 @@ func CreateHistoryCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx, b
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if txNum < state.StateHistoryStartTxNum(tx) {
-		return nil, state.PrunedError
+	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
 	}
 	return &cachedHistoryReaderV3{asOfView, state.NewHistoryReaderV3(tx, txNum)}, nil
 }
@@ -217,7 +217,6 @@ func (hr *cachedHistoryReaderV3) TracePrefix() string {
 }
 
 func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	fmt.Println("ReadAccountData", address)
 	addressValue := address.Value()
 	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
 
@@ -234,7 +233,6 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 		return &a, nil
 	}
 
-	fmt.Println("ReadAccountData", address, "hist")
 	return hr.reader.ReadAccountData(address)
 }
 

@@ -1177,9 +1177,9 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ii.KeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		return min(fstInDb, math.MaxUint64)
+		return min(fstInDb, 0)
 	}
-	return math.MaxUint64
+	return 0
 }
 
 func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
