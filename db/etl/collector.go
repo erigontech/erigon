@@ -35,12 +35,17 @@ type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 type simpleLoadFunc func(k, v []byte) error
 
-type Allocator struct {
+type Allocator interface {
+	Put(b Buffer)
+	Get() Buffer
+}
+
+type SyncPoolAllocator struct {
 	p *sync.Pool
 }
 
-func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
-func (a *Allocator) Put(b Buffer) {
+func NewSyncPoolAllocator(p *sync.Pool) *SyncPoolAllocator { return &SyncPoolAllocator{p: p} }
+func (a *SyncPoolAllocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
@@ -49,9 +54,41 @@ func (a *Allocator) Put(b Buffer) {
 	//}
 	a.p.Put(b)
 }
-func (a *Allocator) Get() Buffer {
+func (a *SyncPoolAllocator) Get() Buffer {
 	b := a.p.Get().(Buffer)
 	b.Reset()
+	return b
+}
+
+type PersistentAllocator struct {
+	buffers []Buffer
+	mu      sync.Mutex
+
+	createFn func() Buffer
+}
+
+func NewPersistentAllocator(createFn func() Buffer) *PersistentAllocator {
+	return &PersistentAllocator{createFn: createFn}
+}
+
+func (a *PersistentAllocator) Put(b Buffer) {
+	if b == nil {
+		return
+	}
+	a.mu.Lock()
+	a.buffers = append(a.buffers, b)
+	a.mu.Unlock()
+}
+
+func (a *PersistentAllocator) Get() Buffer {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := len(a.buffers)
+	if n == 0 {
+		return a.createFn()
+	}
+	b := a.buffers[n-1]
+	a.buffers = a.buffers[:n-1]
 	return b
 }
 
@@ -71,10 +108,10 @@ type Collector struct {
 	//   - if disk is over-loaded - app may have much background threads which waiting for flush - and each thread whill hold own `buf` (can't free RAM until flush is done)
 	//   - enable it only when writing to `etl` is a bottleneck and unlikely to have many parallel collectors (to not overload CPU/Disk)
 	sortAndFlushInBackground bool
-	allocator                *Allocator
+	allocator                Allocator
 }
 
-func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
+func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator Allocator, logger log.Logger) *Collector {
 	c := NewCollector(logPrefix, tmpdir, allocator.Get(), logger)
 	c.Allocator(allocator)
 	return c
@@ -108,7 +145,7 @@ func (c *Collector) LogLvl(v log.Lvl) *Collector {
 	c.logLvl = v
 	return c
 }
-func (c *Collector) Allocator(a *Allocator) *Collector {
+func (c *Collector) Allocator(a Allocator) *Collector {
 	c.allocator = a
 	return c
 }
