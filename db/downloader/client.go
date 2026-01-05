@@ -9,12 +9,14 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
+// Localizes paths to the provided directory for translation on the receiver side on a different
+// host.
 type RpcClient struct {
 	inner   downloaderproto.DownloaderClient
 	rootDir string
 }
 
-func (me RpcClient) fixPath(path string) (string, error) {
+func (me *RpcClient) fixPath(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return path, nil
 	}
@@ -28,7 +30,7 @@ func (me RpcClient) fixPath(path string) (string, error) {
 	return rel, nil
 }
 
-func (me RpcClient) fixPaths(paths iter.Seq[*string]) (err error) {
+func (me *RpcClient) fixPaths(paths iter.Seq[*string]) (err error) {
 	for p := range paths {
 		*p, err = me.fixPath(*p)
 		if err != nil {
@@ -49,17 +51,17 @@ func mutSlice[T any](sl []T) iter.Seq[*T] {
 	}
 }
 
-func (g RpcClient) Seed(ctx context.Context, paths []string) (err error) {
-	err = g.fixPaths(mutSlice(paths))
+func (me *RpcClient) Seed(ctx context.Context, paths []string) (err error) {
+	err = me.fixPaths(mutSlice(paths))
 	if err != nil {
 		return
 	}
-	_, err = g.inner.Seed(ctx, &downloaderproto.SeedRequest{Paths: paths})
+	_, err = me.inner.Seed(ctx, &downloaderproto.SeedRequest{Paths: paths})
 	return
 }
 
-func (g RpcClient) Download(ctx context.Context, request *downloaderproto.DownloadRequest) (err error) {
-	err = g.fixPaths(func(yield func(*string) bool) {
+func (me *RpcClient) Download(ctx context.Context, request *downloaderproto.DownloadRequest) (err error) {
+	err = me.fixPaths(func(yield func(*string) bool) {
 		for i := range request.Items {
 			if !yield(&request.Items[i].Path) {
 				return
@@ -69,23 +71,21 @@ func (g RpcClient) Download(ctx context.Context, request *downloaderproto.Downlo
 	if err != nil {
 		return
 	}
-	_, err = g.inner.Download(ctx, request)
+	_, err = me.inner.Download(ctx, request)
 	return
 }
 
-func (g RpcClient) Delete(ctx context.Context, paths []string) (err error) {
-	err = g.fixPaths(mutSlice(paths))
+func (me *RpcClient) Delete(ctx context.Context, paths []string) (err error) {
+	err = me.fixPaths(mutSlice(paths))
 	if err != nil {
 		return
 	}
-	_, err = g.inner.Delete(ctx, &downloaderproto.DeleteRequest{Paths: paths})
+	_, err = me.inner.Delete(ctx, &downloaderproto.DeleteRequest{Paths: paths})
 	return
 }
 
-// Returns a Downloader client for RPC, which means paths localized to the provided directory for
-// translation on the receiver side on a different host.
-func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) RpcClient {
-	return RpcClient{inner: inner, rootDir: rootDir}
+func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) *RpcClient {
+	return &RpcClient{inner: inner, rootDir: rootDir}
 }
 
 var _ Client = (*RpcClient)(nil)
@@ -93,7 +93,9 @@ var _ Client = (*RpcClient)(nil)
 // Full Client also allowing blocking on downloads. Simplified interface rather than using GRPC directly.
 type Client interface {
 	SeederClient
-	// Request files be downloaded. Returns when the download is complete. Downloader seeds.
+	// Request files be downloaded. Returns when the download is complete. Downloader seeds. Note
+	// that we have services.DownloadRequest per path, but haven't yet incorporated the download
+	// "target name" into the API here.
 	Download(context.Context, *downloaderproto.DownloadRequest) error
 }
 
@@ -108,6 +110,6 @@ type SeederClient interface {
 // A Seeder client that does nothing when delete or seed is requested, a common configuration pattern.
 type NoopSeederClient struct{}
 
-func (NoopSeederClient) Seed(_ context.Context, paths []string) error { return nil }
+func (NoopSeederClient) Seed(context.Context, []string) error { return nil }
 
-func (NoopSeederClient) Delete(_ context.Context, paths []string) error { return nil }
+func (NoopSeederClient) Delete(context.Context, []string) error { return nil }

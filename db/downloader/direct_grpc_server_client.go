@@ -25,24 +25,24 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
-// DirectGrpcServerClient wraps a downloaderproto.DownloaderServer to implement
-// the downloaderproto.DownloaderClient interface for direct in-process calls.
-type DirectGrpcServerClient struct {
+// directGrpcServerClient wraps a downloaderproto.DownloaderServer to implement
+// the downloaderproto.DownloaderClient interface for direct in-process calls to GRPC methods.
+type directGrpcServerClient struct {
 	server downloaderproto.DownloaderServer
 }
 
-func NewDirectGrpcServerClient(server downloaderproto.DownloaderServer) *DirectGrpcServerClient {
-	return &DirectGrpcServerClient{server: server}
+func DirectGrpcServerClient(server downloaderproto.DownloaderServer) downloaderproto.DownloaderClient {
+	return directGrpcServerClient{server: server}
 }
 
-func (c *DirectGrpcServerClient) Download(ctx context.Context, in *downloaderproto.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c directGrpcServerClient) Download(ctx context.Context, in *downloaderproto.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Download(ctx, in)
 }
 
-func (c *DirectGrpcServerClient) Seed(ctx context.Context, in *downloaderproto.SeedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c directGrpcServerClient) Seed(ctx context.Context, in *downloaderproto.SeedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Seed(ctx, in)
 }
 
-func (c *DirectGrpcServerClient) Delete(ctx context.Context, in *downloaderproto.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c directGrpcServerClient) Delete(ctx context.Context, in *downloaderproto.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)
 }

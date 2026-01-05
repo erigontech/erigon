@@ -67,6 +67,7 @@ type SnapshotsCfg struct {
 	prune       prune.Mode
 }
 
+// Returns a seeder client for block management, a noop implementation if no downloader is attached.
 func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
 	if me.snapshotDownloader == nil {
 		return downloader.NoopSeederClient{}

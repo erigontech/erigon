@@ -190,6 +190,10 @@ func TestAddDel(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 
+	// In the following tests we use combinations of f1Abs, f1, f2, and f1BadAbs. Absolute file
+	// paths are allowed to calls to RpcClient if they're local to the SnapDir, it does the required
+	// conversion. This is the behaviour consumers will see.
+
 	f1Abs := filepath.Join(dirs.Snap, "a.seg")      // block file
 	f2Abs := filepath.Join(dirs.SnapDomain, "a.kv") // state file
 	_, _ = os.Create(f1Abs)
@@ -202,7 +206,7 @@ func TestAddDel(t *testing.T) {
 
 	grpcServer, _ := NewGrpcServer(d)
 
-	server := NewRpcClient(NewDirectGrpcServerClient(grpcServer), dirs.Snap)
+	server := NewRpcClient(DirectGrpcServerClient(grpcServer), dirs.Snap)
 
 	// So... errors.AsType is coming.
 	var errRpcSnapName errRpcSnapName

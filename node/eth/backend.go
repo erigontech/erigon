@@ -414,7 +414,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainDB = temporalDb
 
 	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader, chainConfig); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
 		return nil, err
 	}
 
@@ -1271,7 +1271,6 @@ func (s *Ethereum) setUpSnapDownloader(
 	ctx context.Context,
 	nodeCfg *nodecfg.Config,
 	downloaderCfg *downloadercfg.Cfg,
-	cc *chain.Config,
 ) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		s.logger.Debug("files changed...sending notification")
@@ -1310,40 +1309,55 @@ func (s *Ethereum) setUpSnapDownloader(
 		}
 	}
 
-	var grpcClient downloaderproto.DownloaderClient
+	client, err := s.initDownloader(ctx, nodeCfg, downloaderCfg)
+	if err != nil {
+		return
+	}
+	if client != nil {
+		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
+	}
+	return err
+}
+
+// Init s.downloader, and return suitable client for it.
+func (s *Ethereum) initDownloader(
+	ctx context.Context,
+	nodeCfg *nodecfg.Config,
+	downloaderCfg *downloadercfg.Cfg,
+) (client downloaderproto.DownloaderClient, err error) {
 	if s.config.Snapshot.DownloaderAddr != "" {
 		// connect to external Downloader
-		grpcClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
-	} else {
-		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
-			return nil
-		}
-
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
-		if err != nil {
-			return err
-		}
-		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
-
-		// start embedded Downloader
-		// TODO: Not sure if we want to add only the completed here, or add after we finish initial
-		// sync checks. Looks like we'd need to pass this or a callback all the way up into the sync
-		// stage somewhere?
-		err = s.downloader.AddTorrentsFromDisk(ctx)
-		if err != nil {
-			return fmt.Errorf("adding torrents from disk: %w", err)
-		}
-
-		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
-		if err != nil {
-			return fmt.Errorf("new server: %w", err)
-		}
-		s.downloader.InitBackgroundLogger(true)
-
-		grpcClient = downloader.NewDirectGrpcServerClient(bittorrentServer)
+		return downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	}
-	s.downloaderClient = downloader.NewRpcClient(grpcClient, s.config.Dirs.Snap)
-	return err
+	if downloaderCfg == nil || downloaderCfg.ChainName == "" {
+		return
+	}
+
+	s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
+	if err != nil {
+		return
+	}
+	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+
+	// start embedded Downloader
+	// TODO: Not sure if we want to add only the completed here, or add after we finish initial
+	// sync checks. Looks like we'd need to pass this or a callback all the way up into the sync
+	// stage somewhere?
+	err = s.downloader.AddTorrentsFromDisk(ctx)
+	if err != nil {
+		err = fmt.Errorf("adding torrents from disk: %w", err)
+		return
+	}
+
+	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+	if err != nil {
+		err = fmt.Errorf("new server: %w", err)
+		return
+	}
+	s.downloader.InitBackgroundLogger(true)
+
+	client = downloader.DirectGrpcServerClient(bittorrentServer)
+	return
 }
 
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
