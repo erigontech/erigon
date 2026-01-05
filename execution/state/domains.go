@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"iter"
@@ -187,7 +186,7 @@ type domain[K comparable, V any] struct {
 
 func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serializer func(k K) []byte, deserializer func(b []byte) (V, error)) (v V, step kv.Step, ok bool, err error) {
 	if tx == nil {
-		return v, 0, false, errors.New("sd.GetAccount: unexpected nil tx")
+		return v, 0, false, errors.New("domain get: unexpected nil tx")
 	}
 
 	start := time.Now()
@@ -817,6 +816,11 @@ func (sd *StorageDomain) IterateStorage(ctx context.Context, addr accounts.Addre
 
 type codeWithHash struct {
 	hash accounts.CodeHash
+	code []byte
+}
+
+type weakCodeWithHash struct {
+	hash accounts.CodeHash
 	code weak.Pointer[[]byte]
 }
 
@@ -843,6 +847,7 @@ func (u codeUpdates) Get(k accounts.Address) (ValueWithStep[codeWithHash], bool)
 	}
 
 	c, ok := u.code[h]
+
 	return c, ok
 }
 
@@ -881,7 +886,7 @@ func (u codeUpdates) Clear() updates[accounts.Address, codeWithHash] {
 
 type codeCache struct {
 	hashes *freelru.ShardedLRU[accounts.Address, accounts.CodeHash]
-	code   *freelru.ShardedLRU[accounts.CodeHash, ValueWithStep[codeWithHash]]
+	code   *freelru.ShardedLRU[accounts.CodeHash, ValueWithStep[weakCodeWithHash]]
 	limit  uint32
 }
 
@@ -900,7 +905,7 @@ func newCodeCache(limit uint32) (*codeCache, error) {
 		return nil, err
 	}
 
-	code, err := freelru.NewSharded[accounts.CodeHash, ValueWithStep[codeWithHash]](limit, func(k accounts.CodeHash) uint32 {
+	code, err := freelru.NewSharded[accounts.CodeHash, ValueWithStep[weakCodeWithHash]](limit, func(k accounts.CodeHash) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k)).value)))
 	})
 
@@ -929,10 +934,11 @@ func (c *codeCache) Get(key accounts.Address) (value ValueWithStep[codeWithHash]
 	pc, ok := c.code.Get(h)
 
 	if !ok || pc.Value.code.Value() == nil {
+		c.code.Remove(h)
 		return ValueWithStep[codeWithHash]{}, false
 	}
 
-	return pc, true
+	return ValueWithStep[codeWithHash]{Value: codeWithHash{code: *pc.Value.code.Value(), hash: h}}, true
 }
 
 func (c *codeCache) Add(k accounts.Address, v codeWithHash, s kv.Step) (evicted bool) {
@@ -944,7 +950,7 @@ func (c *codeCache) Add(k accounts.Address, v codeWithHash, s kv.Step) (evicted 
 
 	if !v.hash.IsEmpty() {
 		if pv, ok := c.code.Get(h); !ok || pv.Value.code.Value() == nil {
-			return c.code.Add(v.hash, ValueWithStep[codeWithHash]{Value: v, Step: s})
+			return c.code.Add(v.hash, ValueWithStep[weakCodeWithHash]{Value: weakCodeWithHash{code: weak.Make(&v.code), hash: v.hash}, Step: s})
 		}
 	}
 
@@ -998,10 +1004,18 @@ func (cd *CodeDomain) Get(ctx context.Context, k accounts.Address, tx kv.Tempora
 			return av[:]
 		},
 		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: weak.Make(&b), hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
+			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
 		})
 
-	return v.hash, *v.code.Value(), step, ok, err
+	if !ok {
+		return accounts.EmptyCodeHash, nil, step, ok, err
+	}
+
+	if v.hash.IsEmpty() {
+		return v.hash, nil, step, ok, err
+	}
+
+	return v.hash, v.code, step, ok, err
 }
 
 func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.CodeHash, c []byte, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithStep) error {
@@ -1014,12 +1028,12 @@ func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.Co
 	var pv *ValueWithStep[codeWithHash]
 	if len(prev) != 0 {
 		pv = &ValueWithStep[codeWithHash]{
-			Value: codeWithHash{code: weak.Make(&prev[0].Code), hash: prev[0].Hash},
+			Value: codeWithHash{code: prev[0].Code, hash: prev[0].Hash},
 			Step:  prev[0].Step,
 		}
 	}
 
-	if pv != nil && pv.Value.code.Value() != nil && bytes.Equal(c, *pv.Value.code.Value()) {
+	if pv != nil && bytes.Equal(c, pv.Value.code) {
 		return nil
 	}
 
@@ -1027,19 +1041,19 @@ func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.Co
 		h = accounts.InternCodeHash(crypto.Keccak256Hash(c))
 	}
 
-	return cd.domain.put(ctx, k, codeWithHash{code: weak.Make(&c), hash: h},
+	return cd.domain.put(ctx, k, codeWithHash{code: c, hash: h},
 		func(k accounts.Address) []byte {
 			kv := k.Value()
 			return kv[:]
 		},
 		func(v0 codeWithHash, v1 codeWithHash) bool {
-			return bytes.Equal(*v0.code.Value(), *v1.code.Value())
+			return bytes.Equal(v0.code, v1.code)
 		},
 		func(v codeWithHash) []byte {
-			return *v.code.Value()
+			return v.code
 		},
 		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: weak.Make(&b), hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
+			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
 		},
 		roTx, txNum, pv)
 }
@@ -1050,7 +1064,7 @@ func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.Tempo
 	var pv *ValueWithStep[codeWithHash]
 	if len(prev) != 0 {
 		pv = &ValueWithStep[codeWithHash]{
-			Value: codeWithHash{code: weak.Make(&prev[0].Code), hash: prev[0].Hash},
+			Value: codeWithHash{code: prev[0].Code, hash: prev[0].Hash},
 			Step:  prev[0].Step,
 		}
 	}
@@ -1061,10 +1075,10 @@ func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.Tempo
 			return kv[:]
 		},
 		func(v codeWithHash) []byte {
-			return *v.code.Value()
+			return v.code
 		},
 		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: weak.Make(&b), hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
+			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
 		},
 		roTx, txNum, pv)
 }
@@ -1075,8 +1089,11 @@ type CommitmentDomain struct {
 
 type branchCache struct {
 	state       ValueWithStep[commitment.Branch]
-	root        ValueWithStep[commitment.Branch]
-	trunk       map[uint16]ValueWithStep[commitment.Branch]
+	t0          ValueWithStep[commitment.Branch]
+	t1          [16]ValueWithStep[commitment.Branch]
+	t2          [256]ValueWithStep[commitment.Branch]
+	t3          [4096]ValueWithStep[commitment.Branch]
+	t4          [65536]ValueWithStep[commitment.Branch]
 	branches    *lruValueCache[commitment.Path, string, commitment.Branch]
 	branchLimit uint32
 }
@@ -1089,7 +1106,6 @@ func newBranchCache(branchLimit uint32) (*branchCache, error) {
 	}
 
 	return &branchCache{
-		trunk:       map[uint16]ValueWithStep[commitment.Branch]{},
 		branches:    c,
 		branchLimit: branchLimit,
 	}, nil
@@ -1102,26 +1118,37 @@ func (c *branchCache) Name() kv.Domain {
 var statePath = commitment.InternPath([]byte("state"))
 
 func (c *branchCache) Get(key commitment.Path) (ValueWithStep[commitment.Branch], bool) {
+	// see: HexNibblesToCompactBytes for encoding spec
 	switch {
 	case key == statePath:
 		if len(c.state.Value) == 0 {
 			return ValueWithStep[commitment.Branch]{}, false
 		}
 		return c.state, true
-	case len(key.Value()) < 3:
+	case len(key.Value()) < 4:
 		keyValue := key.Value()
 		switch len(keyValue) {
 		case 0:
-			if len(c.root.Value) > 0 {
-				return c.root, true
+			if len(c.t0.Value) > 0 {
+				return c.t0, true
 			}
 			return ValueWithStep[commitment.Branch]{}, false
 		case 1:
-			value, ok := c.trunk[uint16(keyValue[0])<<8]
-			return value, ok
+			value := c.t1[keyValue[0]&0x0f]
+			return value, len(value.Value) > 0
+		case 2:
+			if keyValue[0]&0x10 == 0 {
+				value := c.t2[keyValue[1]]
+				return value, len(value.Value) > 0
+			} else {
+				value := c.t3[uint16(keyValue[0]&0x0f)<<8|uint16(keyValue[1])]
+				return value, len(value.Value) > 0
+			}
 		default:
-			value, ok := c.trunk[binary.BigEndian.Uint16(keyValue)]
-			return value, ok
+			if keyValue[0]&0x10 == 0 {
+				value := c.t4[uint16(keyValue[1])<<8|uint16(keyValue[2])]
+				return value, len(value.Value) > 0
+			}
 		}
 	}
 
@@ -1129,53 +1156,78 @@ func (c *branchCache) Get(key commitment.Path) (ValueWithStep[commitment.Branch]
 }
 
 func (c *branchCache) Add(k commitment.Path, v commitment.Branch, s kv.Step) (evicted bool) {
+	// see: HexNibblesToCompactBytes for encoding spec
 	switch {
 	case k == statePath:
 		c.state = ValueWithStep[commitment.Branch]{Value: v, Step: s}
 		return false
-	case len(k.Value()) < 3:
+	case len(k.Value()) < 4:
 		keyValue := k.Value()
 		switch len(keyValue) {
 		case 0:
-			c.root = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+			c.t0 = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+			return false
 		case 1:
-			c.trunk[uint16(keyValue[0])<<8] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+			c.t1[keyValue[0]&0x0f] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+			return false
+		case 2:
+			if keyValue[0]&0x10 == 0 {
+				c.t2[keyValue[1]] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+			} else {
+				c.t3[uint16(keyValue[0]&0x0f)<<8|uint16(keyValue[1])] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+			}
+			return false
 		default:
-			c.trunk[binary.BigEndian.Uint16(keyValue)] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+			if keyValue[0]&0x10 == 0 {
+				c.t4[uint16(keyValue[1])<<8|uint16(keyValue[2])] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+				return false
+			}
 		}
-		return false
+
 	}
 
 	return c.branches.Add(k, v, s)
 }
 
 func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
+	// see: HexNibblesToCompactBytes for encoding spec
 	switch {
 	case k == statePath:
 		evicted = len(c.state.Value) > 0
 		c.state = ValueWithStep[commitment.Branch]{}
 		return evicted
-	case len(k.Value()) < 3:
+	case len(k.Value()) < 4:
 		keyValue := k.Value()
-		var kv uint16
 		switch len(keyValue) {
 		case 0:
-			evicted = len(c.root.Value) > 0
-			c.root = ValueWithStep[commitment.Branch]{}
+			evicted = len(c.t0.Value) > 0
+			c.t0 = ValueWithStep[commitment.Branch]{}
 			return evicted
 		case 1:
-			kv = uint16(keyValue[0]) << 8
+			evicted := len(c.t1[keyValue[0]&0x0f].Value) > 0
+			c.t1[keyValue[0]&0x0f] = ValueWithStep[commitment.Branch]{}
+			return evicted
+		case 2:
+			if keyValue[0]&0x10 == 0 {
+				kv := keyValue[1]
+				evicted := len(c.t2[kv].Value) > 0
+				c.t2[kv] = ValueWithStep[commitment.Branch]{}
+				return evicted
+			} else {
+				kv := uint16(keyValue[0]&0x0f)<<8 | uint16(keyValue[1])
+				evicted := len(c.t3[kv].Value) > 0
+				c.t3[kv] = ValueWithStep[commitment.Branch]{}
+				return evicted
+			}
 		default:
-			kv = binary.BigEndian.Uint16(keyValue)
+			if keyValue[0]&0x10 == 0 {
+				kv := uint16(keyValue[1])<<8 | uint16(keyValue[2])
+				evicted := len(c.t4[kv].Value) > 0
+				c.t4[kv] = ValueWithStep[commitment.Branch]{}
+				return evicted
+			}
 		}
-		if _, ok := c.trunk[kv]; ok {
-			delete(c.trunk, kv)
-			return true
-		}
-		return false
 	}
-	// note we're making the hash inaccessable, the code will get evicted
-	// if its not accessed or its gc'd
 	return c.branches.Remove(k)
 }
 

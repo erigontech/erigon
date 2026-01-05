@@ -193,7 +193,7 @@ func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum
 		return pd.sd.DelStorage(context.Background(), accounts.BytesToAddress(prefix), accounts.NilKey, pd.tx, txNum)
 	}
 
-	return fmt.Errorf("unsupported domain: %s, for del prefix")
+	return fmt.Errorf("unsupported domain: %s, for del prefix", domain)
 }
 
 func (sd *ExecutionContext) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {

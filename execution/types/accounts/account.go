@@ -610,10 +610,17 @@ func (a *Account) SetIncarnation(v uint64) {
 }
 
 func (a *Account) Equals(acc *Account) bool {
-	return a.Nonce == acc.Nonce &&
-		a.CodeHash == acc.CodeHash &&
-		a.Balance.Cmp(&acc.Balance) == 0 &&
-		a.Incarnation == acc.Incarnation
+	switch {
+	case a == nil:
+		return acc == nil
+	case acc == nil:
+		return false
+	default:
+		return a.Nonce == acc.Nonce &&
+			a.CodeHash == acc.CodeHash &&
+			a.Balance.Cmp(&acc.Balance) == 0 &&
+			a.Incarnation == acc.Incarnation
+	}
 }
 
 func ConvertV3toV2(v []byte) ([]byte, error) {
