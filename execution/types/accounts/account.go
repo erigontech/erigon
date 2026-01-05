@@ -81,17 +81,8 @@ func (a *Account) EncodingLengthForStorage() uint {
 }
 
 func (a *Account) EncodingLengthForHashing() uint {
-	balanceBytes := 0
-	if !a.Balance.LtUint64(128) {
-		balanceBytes = a.Balance.ByteLen()
-	}
-
-	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
-
-	structLength := balanceBytes + nonceBytes + 2
-
+	structLength := rlp.Uint256Len(a.Balance) + rlp.U64Len(a.Nonce)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
-
 	return uint(rlp.ListPrefixLen(structLength) + structLength)
 }
 
@@ -171,7 +162,7 @@ func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool,
 }
 
 var rlpEncodingBufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, 0, 128)
 		return &buf
 	},
@@ -201,13 +192,14 @@ func (a *Account) RLP() []byte {
 	return accRlp
 }
 
+// TODO(yperbasis): simplify
 func (a *Account) EncodeForHashing(buffer []byte) {
 	balanceBytes := 0
 	if !a.Balance.LtUint64(128) {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
+	nonceBytes := rlp.U64Len(a.Nonce) - 1
 
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes

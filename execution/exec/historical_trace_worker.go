@@ -109,10 +109,10 @@ func NewHistoricalTraceWorker(
 		execArgs: execArgs,
 
 		background:  background,
-		stateReader: state.NewHistoryReaderV3(),
+		stateReader: state.NewHistoryReaderV3(nil, 0),
 
 		taskGasPool: new(protocol.GasPool),
-		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
+		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
 	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
@@ -120,9 +120,7 @@ func NewHistoricalTraceWorker(
 	return ie
 }
 
-func (rw *HistoricalTraceWorker) LogStats() {
-	rw.evm.Config().JumpDestCache.LogStats()
-}
+func (rw *HistoricalTraceWorker) LogStats() {}
 
 func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
@@ -195,8 +193,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			ret, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
 			return ret, err
 		}
-		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
-		result.Err = ibs.FinalizeTx(rules, noop)
+		result.Err = rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
+		if result.Err == nil {
+			result.Err = ibs.FinalizeTx(rules, noop)
+		}
 	case txTask.IsBlockEnd():
 		// this is handled by the reducer in process results
 	default:
@@ -361,7 +361,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	g.Go(func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+				err = fmt.Errorf("'map worker' paniced: %s, %s", rec, dbg.Stack())
+				logger.Error("map worker panic", "error", err)
 			}
 		}()
 		defer func() {
@@ -373,6 +374,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+				logger.Error("reduce worker panic", "error", err)
 			}
 		}()
 		return doHistoryReduce(ctx, consumer, cfg, toTxNum, outputTxNum, out, logger)
@@ -483,9 +485,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 			if result.BlockNumber() > 0 {
 				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 				// End of block transaction in a block
-				reader := state.NewHistoryReaderV3()
-				reader.SetTx(tx)
-				reader.SetTxNum(outputTxNum)
+				reader := state.NewHistoryReaderV3(tx, outputTxNum)
 				ibs := state.New(reader)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -600,10 +600,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	readAhead, clean := BlocksReadAhead(ctx, 2, cfg.ChainDB, cfg.Engine, cfg.BlockReader)
 	defer clean()
 
-	inputTxNum, err := txNumsReader.Min(tx, fromBlock)
-	if err != nil {
-		return err
-	}
+	inputTxNum := fromTxNum
 	for blockNum := fromBlock; blockNum <= toBlock && !workersExited.Load(); blockNum++ {
 		select {
 		case readAhead <- blockNum:
@@ -691,7 +688,7 @@ func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader r
 	if err != nil {
 		return 0, 0, err
 	}
-	toTxNum, err := txNumsReader.Min(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return 0, 0, err
 	}

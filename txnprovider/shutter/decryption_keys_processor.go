@@ -346,7 +346,7 @@ func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEve
 
 	for _, mark := range cleanUpMarks {
 		dkp.processed.Remove(mark)
-		dkp.encryptedTxnsPool.DeleteUpTo(mark.Eon, mark.To+1)
+		dkp.encryptedTxnsPool.DeleteUpTo(mark.Eon, mark.To)
 	}
 
 	return nil

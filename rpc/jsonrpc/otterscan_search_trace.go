@@ -55,7 +55,7 @@ func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.A
 
 func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context, blockNum uint64, searchAddr common.Address, chainConfig *chain.Config) (bool, *TransactionsWithReceipts, error) {
 	rpcTxs := make([]*ethapi.RPCTransaction, 0)
-	receipts := make([]map[string]interface{}, 0)
+	receipts := make([]map[string]any, 0)
 
 	// Retrieve the transaction and assemble its EVM context
 	blockHash, ok, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)

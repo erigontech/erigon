@@ -37,7 +37,7 @@ type TraceAPI interface {
 	ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) (*TraceCallResult, error)
 	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error)
 	CallMany(ctx context.Context, calls json.RawMessage, blockNr *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error)
-	RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error)
+	RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]any, error)
 
 	// Filtering (see ./trace_filtering.go)
 

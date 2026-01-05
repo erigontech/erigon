@@ -56,7 +56,6 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 	if dbg.EnvBool("CHECK_KVIS_SEQUENTIAL", false) {
 		eg.SetLimit(1)
 	}
-	var integrityErr error
 	var keyCount atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
@@ -94,7 +93,7 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 		return err
 	}
 	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files), "keys", keyCount.Load())
-	return integrityErr
+	return nil
 }
 
 func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {

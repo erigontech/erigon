@@ -54,7 +54,7 @@ func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx
 }
 
 func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
-	bn, bh, latest, _, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
+	bn, bh, latest, _, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
 	return bn, bh, latest, err
 }
 
@@ -146,20 +146,15 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blo
 }
 
 func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	r := state.NewHistoryReaderV3()
-	r.SetTx(tx)
-	//r.SetTrace(true)
 	minTxNum, err := txNumsReader.Min(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-
-	if txNum < r.StateHistoryStartFrom() {
-		return r, state.PrunedError
+	if txNum < state.StateHistoryStartTxNum(tx) {
+		return nil, state.PrunedError
 	}
-	r.SetTxNum(txNum)
-	return r, nil
+	return state.NewHistoryReaderV3(tx, txNum), nil
 }
 
 func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {

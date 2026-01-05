@@ -132,7 +132,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to retrieve trace result: %v", err)
 	}
-	ret := make(map[string]interface{})
+	ret := make(map[string]any)
 	if err := json.Unmarshal(res, &ret); err != nil {
 		t.Fatalf("failed to unmarshal trace result: %v", err)
 	}

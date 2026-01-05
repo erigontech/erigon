@@ -25,8 +25,7 @@ import (
 	"sync"
 	"time"
 
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -54,7 +53,7 @@ type txPool interface {
 	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, availableRlpSpace int) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
-	deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
+	deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
@@ -136,7 +135,7 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpoolproto.AllRequest) (*txpoo
 	defer tx.Rollback()
 	reply := &txpoolproto.AllReply{}
 	reply.Txs = make([]*txpoolproto.AllReply_Tx, 0, 32)
-	s.txPool.deprecatedForEach(ctx, func(rlp []byte, sender common.Address, t SubPoolType) {
+	s.txPool.deprecatedForEach(func(rlp []byte, sender common.Address, t SubPoolType) {
 		reply.Txs = append(reply.Txs, &txpoolproto.AllReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			TxnType: convertSubPoolType(t),
@@ -382,8 +381,8 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
 
 	//if metrics.Enabled {
 	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
@@ -401,8 +400,8 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 	}
 	if creds == nil {
 		// no specific opts

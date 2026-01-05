@@ -30,10 +30,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-type All struct {
-	BlockReader FullBlockReader
-}
-
 type BlockReader interface {
 	BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error)
 	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)

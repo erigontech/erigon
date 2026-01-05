@@ -56,7 +56,6 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
@@ -380,7 +379,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -992,7 +991,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentLogs, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
+	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
@@ -1145,7 +1144,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
+		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
 			return err
 		}
 	}
@@ -1201,6 +1200,10 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 
 func (s *Ethereum) APIs() []rpc.API {
 	return s.apiList
+}
+
+func (s *Ethereum) StateDiffClient() *direct.StateDiffClientDirect {
+	return s.stateDiffClient
 }
 
 func (s *Ethereum) Etherbase() (eb common.Address, err error) {
@@ -1271,7 +1274,7 @@ func (s *Ethereum) setUpSnapDownloader(
 	cc *chain.Config,
 ) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		s.logger.Warn("files changed...sending notification")
+		s.logger.Debug("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
@@ -1315,7 +1318,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return nil
 		}
 
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
 		if err != nil {
 			return err
 		}
@@ -1361,18 +1364,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	if snConfig.ErigonDBStepSize == config3.DefaultStepSize {
-		logger.Info("Using default step size", "size", snConfig.ErigonDBStepSize)
-	} else {
-		logger.Warn("OVERRIDING STEP SIZE; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "size", snConfig.ErigonDBStepSize, "default", config3.DefaultStepSize)
-	}
-	if snConfig.ErigonDBStepsInFrozenFile == config3.DefaultStepsInFrozenFile {
-		logger.Info("Using default number of steps in frozen files", "steps", snConfig.ErigonDBStepsInFrozenFile)
-	} else {
-		logger.Warn("OVERRIDING NUMBER OF STEPS IN FROZEN FILES; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", snConfig.ErigonDBStepsInFrozenFile, "default", config3.DefaultStepsInFrozenFile)
-	}
-
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).StepSize(uint64(snConfig.ErigonDBStepSize)).StepsInFrozenFile(uint64(snConfig.ErigonDBStepsInFrozenFile)).Open(ctx, db)
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1629,6 +1621,10 @@ func (s *Ethereum) Stop() error {
 		s.logger.Error("background component error", "err", err)
 	}
 
+	if s.config.Downloader != nil {
+		_ = s.config.Downloader.CloseTorrentLogFile()
+	}
+
 	return nil
 }
 
@@ -1659,6 +1655,7 @@ func (s *Ethereum) SentryCtx() context.Context {
 func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
 	return s.sentriesClient
 }
+
 func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
 }
@@ -1749,15 +1746,4 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config *txpoolcfg.
 
 func sentryMux(sentries []sentryproto.SentryClient) sentryproto.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
-}
-
-type engineAPISwitcher struct {
-	backend *Ethereum
-}
-
-func (e *engineAPISwitcher) SetConsuming(consuming bool) {
-	if e.backend.engineBackendRPC == nil {
-		return
-	}
-	e.backend.engineBackendRPC.SetConsuming(consuming)
 }

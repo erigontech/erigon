@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -82,6 +81,7 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	var chainConfig chain.Config
 	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
 	require.NoError(t, err)
+	chainConfig.AmsterdamTime = nil // test uses osaka spec, unset amsterdam config to prevent "unsupported fork" error
 	genesis := &types.Genesis{
 		Config:     &chainConfig,
 		Coinbase:   coinbaseAddr,
@@ -165,9 +165,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		Miner: buildercfg.MiningConfig{
 			EnabledPOS: true,
 		},
-		KeepStoredChainConfig:     true,
-		ErigonDBStepSize:          config3.DefaultStepSize,
-		ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		KeepStoredChainConfig: true,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -224,9 +222,9 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	require.NoError(t, err)
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(logger, engineApiClient, genesisBlock)
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock)
 	}
 	_, err = mockCl.BuildCanonicalBlock(ctx) // build 1 empty block before proceeding to properly initialise everything
 	require.NoError(t, err)
