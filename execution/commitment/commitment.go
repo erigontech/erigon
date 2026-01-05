@@ -252,6 +252,9 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
+	if be.cache != nil {
+		be.cache.EvictKey(prefix)
+	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	prefixCopy := common.Copy(prefix)

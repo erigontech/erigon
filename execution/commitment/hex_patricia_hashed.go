@@ -2023,9 +2023,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
-			if hph.cache != nil {
-				hph.cache.EvictKey(updateKey)
-			}
 		}
 		hph.activeRows--
 		hph.currentKeyLen = max(upDepth-1, 0)
@@ -2119,9 +2116,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
-		}
-		if hph.cache != nil {
-			hph.cache.EvictKey(updateKey)
 		}
 
 		for i := lastNibble; i < 17; i++ {
