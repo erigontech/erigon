@@ -176,7 +176,7 @@ func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	headSlot := s.syncedDataManager.HeadSlot()
 
 	entriesToRemove := []seenSyncCommitteeMessage{}
-	s.seenSyncCommitteeMessages.Range(func(key, value interface{}) bool {
+	s.seenSyncCommitteeMessages.Range(func(key, value any) bool {
 		k := key.(seenSyncCommitteeMessage)
 		if headSlot > k.slot+1 {
 			entriesToRemove = append(entriesToRemove, k)
