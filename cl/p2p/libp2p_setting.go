@@ -1,37 +1,45 @@
-// Copyright 2024 The Erigon Authors
-// This file is part of Erigon.
-//
-// Erigon is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Erigon is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
-package sentinel
+package p2p
 
 import (
 	"math"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+const (
+	// overlay parameters
+	gossipSubD    = 4 // topic stable mesh target count
+	gossipSubDlo  = 2 // topic stable mesh low watermark
+	gossipSubDhi  = 6 // topic stable mesh high watermark
+	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
+
+	// gossip parameters
+	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
+	gossipSubMcacheGossip = 3   // number of windows to gossip about
+	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
+	// heartbeat interval
+	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
+
+	// decayToZero specifies the terminal value that we will use when decaying
+	// a value.
+	decayToZero = 0.01
+)
+
 // determines the decay rate from the provided time period till
 // the decayToZero value. Ex: ( 1 -> 0.01)
-func (s *Sentinel) scoreDecay(totalDurationDecay time.Duration) float64 {
-	numOfTimes := totalDurationDecay / s.oneSlotDuration()
+func scoreDecay(totalDurationDecay time.Duration, beaconConfig *clparams.BeaconChainConfig) float64 {
+	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
+	numOfTimes := totalDurationDecay / oneSlotDuration
 	return math.Pow(decayToZero, 1/float64(numOfTimes))
 }
 
-func (s *Sentinel) pubsubOptions() []pubsub.Option {
+func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
+	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
+	oneEpochDuration := time.Duration(beaconConfig.SlotsPerEpoch) * oneSlotDuration
+
 	thresholds := &pubsub.PeerScoreThresholds{
 		GossipThreshold:             -4000,
 		PublishThreshold:            -8000,
@@ -51,10 +59,10 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 		IPColocationFactorWhitelist: nil,
 		BehaviourPenaltyWeight:      -15.92,
 		BehaviourPenaltyThreshold:   6,
-		BehaviourPenaltyDecay:       s.scoreDecay(10 * s.oneEpochDuration()), // 10 epochs
-		DecayInterval:               s.oneSlotDuration(),
+		BehaviourPenaltyDecay:       scoreDecay(10*oneEpochDuration, beaconConfig), // 10 epochs
+		DecayInterval:               oneSlotDuration,
 		DecayToZero:                 decayToZero,
-		RetainScore:                 100 * s.oneEpochDuration(), // Retain for 100 epochs
+		RetainScore:                 100 * oneEpochDuration, // Retain for 100 epochs
 	}
 	pubsubQueueSize := 600
 	psOpts := []pubsub.Option{
