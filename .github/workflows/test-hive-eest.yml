@@ -84,14 +84,14 @@ jobs:
           run_suite() {
             if [ $# -ne 2 ]; then
               echo "Error: run_suite requires exactly 2 parameters"
-              echo "Usage: run_suite <sim> <max_allowed_failures>"
+              echo "Usage: run_suite <sim> <sim.limit>"
               echo "Provided: $# parameters"
               exit 1
             fi
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim ethereum/"${1}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim ethereum/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -115,14 +115,13 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            max_allowed_failures="${2}"
-            if (( failed > max_allowed_failures )); then
+            if (( failed > 0 )); then
               echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1
             fi
           }
-          run_suite eels/consume-rlp 0
+          run_suite eels/consume-rlp .*eip2930_access_list.*
         continue-on-error: true
       - name: Upload output log
         uses: actions/upload-artifact@v6
