@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"runtime/debug"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -44,6 +43,8 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 	return svr, nil
 }
 
+// Error relating to using a snap name for RPC. Such as it is absolute or non-local to the
+// client-side.
 type errRpcSnapName struct {
 	error
 }
@@ -53,7 +54,7 @@ type GrpcServer struct {
 	d *Downloader
 }
 
-func (s *GrpcServer) fixNamesAndLogCall(names []string, callName string) error {
+func (s *GrpcServer) checkNamesAndLogCall(names []string, callName string) error {
 	for i, name := range names {
 		if name == "" {
 			return errors.New("field 'path' is required")
@@ -62,7 +63,6 @@ func (s *GrpcServer) fixNamesAndLogCall(names []string, callName string) error {
 			s.d.log(log.LvlWarn, "Unexpected absolute path provided to Downloader.GrpcServer. Please use relative paths",
 				"name", name,
 				"snapDir", s.d.snapDir())
-			debug.PrintStack()
 			rel, err := filepath.Rel(s.d.snapDir(), name)
 			if err != nil || !filepath.IsLocal(rel) {
 				return errRpcSnapName{fmt.Errorf("assert: Downloader.GrpcServer called with absolute path %q, please use path relative to snap dir", name)}
@@ -91,7 +91,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *downloaderproto.Down
 		})
 		names = append(names, it.Path)
 	}
-	err = s.fixNamesAndLogCall(names, "Download")
+	err = s.checkNamesAndLogCall(names, "Download")
 	if err != nil {
 		return
 	}
@@ -103,7 +103,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *downloaderproto.Down
 // Downloader will be able: seed new files (already existing on FS).
 func (s *GrpcServer) Seed(ctx context.Context, request *downloaderproto.SeedRequest) (_ *emptypb.Empty, err error) {
 	names := request.Paths
-	err = s.fixNamesAndLogCall(names, "Seed")
+	err = s.checkNamesAndLogCall(names, "Seed")
 	if err != nil {
 		return
 	}
@@ -119,7 +119,7 @@ func (s *GrpcServer) Seed(ctx context.Context, request *downloaderproto.SeedRequ
 
 // Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *downloaderproto.DeleteRequest) (_ *emptypb.Empty, err error) {
-	err = s.fixNamesAndLogCall(request.Paths, "Delete")
+	err = s.checkNamesAndLogCall(request.Paths, "Delete")
 	for _, name := range request.Paths {
 		err = errors.Join(err, s.d.Delete(name))
 	}

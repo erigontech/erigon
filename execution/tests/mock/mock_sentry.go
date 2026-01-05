@@ -627,7 +627,7 @@ func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client 
 		Return(&emptypb.Empty{}, nil).
 		AnyTimes()
 
-	return downloader.NewGrpcClient(snapDownloader, snapRoot)
+	return downloader.NewRpcClient(snapDownloader, snapRoot)
 }
 
 // Mock is convenience function to create a mock with some pre-set values

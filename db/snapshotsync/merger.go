@@ -156,7 +156,7 @@ func (m *Merger) Merge(
 	snapDir string,
 	doIndex bool,
 	onMerge func(mergedFileNames []string) error,
-	onDelete func(l []string) error,
+	onDelete func(context.Context, []string) error,
 ) (err error) {
 	v := snapshots.View()
 	defer v.Close()
@@ -221,7 +221,7 @@ func (m *Merger) Merge(
 			}
 		}
 		if onDelete != nil {
-			if err := onDelete(toMergeFileNames); err != nil {
+			if err := onDelete(ctx, toMergeFileNames); err != nil {
 				return fmt.Errorf("merger.Merge: onDelete: %w", err)
 			}
 		}

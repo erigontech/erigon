@@ -1342,7 +1342,7 @@ func (s *Ethereum) setUpSnapDownloader(
 
 		grpcClient = downloader.NewDirectGrpcServerClient(bittorrentServer)
 	}
-	s.downloaderClient = downloader.NewGrpcClient(grpcClient, s.config.Dirs.Snap)
+	s.downloaderClient = downloader.NewRpcClient(grpcClient, s.config.Dirs.Snap)
 	return err
 }
 

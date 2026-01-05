@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"time"
 
@@ -67,6 +65,13 @@ type SnapshotsCfg struct {
 	silkworm    *silkworm.Silkworm
 	syncConfig  ethconfig.Sync
 	prune       prune.Mode
+}
+
+func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
+	if me.snapshotDownloader == nil {
+		return downloader.NoopSeederClient{}
+	}
+	return me.snapshotDownloader
 }
 
 func StageSnapshotsCfg(db kv.TemporalRwDB,
@@ -397,39 +402,20 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		noDl := cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()
 		started := cfg.blockRetire.RetireBlocksInBackground(
 			ctx,
 			minBlockNumber,
 			s.ForwardProgress,
 			log.LvlDebug,
-			// Not sure why we include the possibility to download new items here. We should only be
-			// seeding? Changing this interface would require a lot of refactoring.
-			func(downloadRequest []services.DownloadRequest) error {
-				if noDl {
-					return nil
-				}
-				paths := make([]string, 0, len(downloadRequest))
-				for _, req := range downloadRequest {
-					paths = append(paths, req.Path)
-				}
-				err := cfg.snapshotDownloader.Seed(ctx, paths)
-				return err
-			}, func(l []string) error {
-				if noDl {
-					return nil
-				}
-				if err := cfg.snapshotDownloader.Delete(ctx, l); err != nil {
-					return err
-				}
-				return nil
-			}, func() error {
+			cfg.getSeederClient(),
+			func() error {
 				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
 				return err
-			}, func() {
+			},
+			func() {
 				if cfg.notifier != nil {
 					cfg.notifier.Events.OnRetirementDone()
 				}
@@ -437,8 +423,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
-
-		//	cfg.agg.BuildFilesInBackground()
 	}
 
 	pruneLimit := 10
@@ -507,14 +491,9 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		if info.To-info.From != snaptype.Erigon2MergeLimit {
 			continue
 		}
-		if cfg.snapshotDownloader != nil {
-			relativePathToFile := file
-			if filepath.IsAbs(file) {
-				relativePathToFile, _ = filepath.Rel(cfg.dirs.Snap, file)
-			}
-			if err := cfg.snapshotDownloader.Delete(ctx, []string{relativePathToFile}); err != nil {
-				return filesDeleted, err
-			}
+		err = cfg.getSeederClient().Delete(ctx, []string{file})
+		if err != nil {
+			return filesDeleted, err
 		}
 		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
 			return filesDeleted, err

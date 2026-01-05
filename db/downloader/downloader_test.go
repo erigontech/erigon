@@ -202,7 +202,7 @@ func TestAddDel(t *testing.T) {
 
 	grpcServer, _ := NewGrpcServer(d)
 
-	server := NewGrpcClient(NewDirectGrpcServerClient(grpcServer), dirs.Snap)
+	server := NewRpcClient(NewDirectGrpcServerClient(grpcServer), dirs.Snap)
 
 	// So... errors.AsType is coming.
 	var errRpcSnapName errRpcSnapName
