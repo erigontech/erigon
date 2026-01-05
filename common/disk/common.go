@@ -23,6 +23,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+// UpdateDiskStats periodically updates Prometheus disk statistics.
+// It runs in a loop, updating stats every 5 seconds until the context is cancelled.
+// The function blocks until ctx is done, so it should typically be called in a goroutine.
+// ctx controls the lifetime of the update loop.
+// logger is used to log warnings if disk stat updates fail.
 func UpdateDiskStats(ctx context.Context, logger log.Logger) {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
