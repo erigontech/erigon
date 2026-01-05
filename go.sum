@@ -59,8 +59,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/FastFilter/xorfilter v0.2.1 h1:lbdeLG9BdpquK64ZsleBS8B4xO/QW1IM0gMzF7KaBKc=
 github.com/FastFilter/xorfilter v0.2.1/go.mod h1:aumvdkhscz6YBZF9ZA/6O4fIoNod4YR50kIVGGZ7l9I=
-github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105031745-df735af93792 h1:jUi71YwvhMy504BBOfXhixVAaZ+MD3pA9eOyhbnfCrU=
-github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105031745-df735af93792/go.mod h1:J9/u5sWfznSObptgfa92Jq8rTswn6ahQWEuiLHOjCUI=
+github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105033855-78572c48d5b6 h1:54f4p+0wS+Ahpzi0o24jOeqpMimRU8eZA1q/Rrq4/qo=
+github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105033855-78572c48d5b6/go.mod h1:J9/u5sWfznSObptgfa92Jq8rTswn6ahQWEuiLHOjCUI=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.2.0 h1:3MEsd0SM6jqZojhjLWWeBY+Kcjy9i6MQAeY7YgDP83g=
