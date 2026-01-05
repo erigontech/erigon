@@ -227,7 +227,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	defer sd.latestStateLock.RUnlock()
 
 	keyS := toStringZeroCopy(key)
-	fmt.Println("GetAsOf", domain, hex.EncodeToString(key), ts)
+	fmt.Println("GetAsOf", domain, hex.EncodeToString(key), ts, dbg.Stack())
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
