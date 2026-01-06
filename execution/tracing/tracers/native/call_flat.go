@@ -201,12 +201,15 @@ func (t *flatCallTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 	if t.config.IncludePrecompiles {
 		return
 	}
+	parent := t.tracer.callstack[len(t.tracer.callstack)-1]
+	if len(parent.Calls) == 0 {
+		return
+	}
 	var (
 		// call has been nested in parent
-		parent = t.tracer.callstack[len(t.tracer.callstack)-1]
-		call   = parent.Calls[len(parent.Calls)-1]
-		typ    = call.Type
-		to     = call.To
+		call = parent.Calls[len(parent.Calls)-1]
+		typ  = call.Type
+		to   = call.To
 	)
 	if typ == vm.CALL || typ == vm.STATICCALL {
 		if t.isPrecompiled(to) {
