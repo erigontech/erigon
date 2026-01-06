@@ -1,18 +1,18 @@
-// Copyright 2023 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package native
 
@@ -122,8 +122,8 @@ type flatCallTracer struct {
 	tracer            *callTracer
 	config            flatCallTracerConfig
 	chainConfig       *chain.Config
-	ctx               *tracers.Context // Holds tracer context data
-	interrupt         atomic.Bool      // Atomic flag to signal execution interruption
+	ctx               *tracers.Context   // Holds tracer context data
+	interrupt         atomic.Bool        // Atomic flag to signal execution interruption
 	activePrecompiles []accounts.Address // Updated on tx start based on given rules
 }
 
@@ -133,13 +133,13 @@ type flatCallTracerConfig struct {
 }
 
 func newCallTracerObject(ctx *tracers.Context, cfg json.RawMessage) (*callTracer, error) {
-        var config callTracerConfig
-        if err := json.Unmarshal(cfg, &config); err != nil {
-                return nil, err
-        }
-        // First callframe contains tx context info
-        // and is populated on start and end.
-        return &callTracer{callstack: make([]callFrame, 0, 1), config: config}, nil
+	var config callTracerConfig
+	if err := json.Unmarshal(cfg, &config); err != nil {
+		return nil, err
+	}
+	// First callframe contains tx context info
+	// and is populated on start and end.
+	return &callTracer{callstack: make([]callFrame, 0, 1), config: config}, nil
 }
 
 // newFlatCallTracer returns a new flatCallTracer.
@@ -169,9 +169,7 @@ func newFlatCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	}, nil
 }
 
-
 // CaptureEnter is clled when EVM enters a new scope (via call, create or selfdestruct).
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if t.interrupt.Load() {
 		return
@@ -188,8 +186,7 @@ func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to 
 	}
 }
 
-// OnExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
+// OnExit is called when EVM exits a scope, even if the scope didn't execute any code.
 func (t *flatCallTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 	if t.interrupt.Load() {
 		return
@@ -218,19 +215,18 @@ func (t *flatCallTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 	}
 }
 
-
 func (t *flatCallTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	if t.interrupt.Load() {
 		return
 	}
 	t.tracer.OnTxStart(env, tx, from)
 	blockContext := evmtypes.BlockContext{
-                BlockNumber: env.BlockNumber,
-                Time:        env.Time,
-    }
+		BlockNumber: env.BlockNumber,
+		Time:        env.Time,
+	}
 	// Update list of precompiles based on current block
-    rules := blockContext.Rules(env.ChainConfig)
-    t.activePrecompiles = vm.ActivePrecompiles(rules)
+	rules := blockContext.Rules(env.ChainConfig)
+	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
 func (t *flatCallTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -267,7 +263,7 @@ func (t *flatCallTracer) Stop(err error) {
 // isPrecompiled returns whether the addr is a precompile.
 func (t *flatCallTracer) isPrecompiled(addr common.Address) bool {
 	addr1 := accounts.InternAddress(addr)
-    return slices.Contains(t.activePrecompiles, addr1)
+	return slices.Contains(t.activePrecompiles, addr1)
 }
 
 func flatFromNested(input *callFrame, traceAddress []int, convertErrs bool, ctx *tracers.Context) (output []flatCallFrame, err error) {
@@ -312,8 +308,8 @@ func flatFromNested(input *callFrame, traceAddress []int, convertErrs bool, ctx 
 }
 
 func toHexUint64Ptr(v uint64) *hexutil.Uint64 {
-    h := hexutil.Uint64(v)
-    return &h
+	h := hexutil.Uint64(v)
+	return &h
 }
 
 func newFlatCreate(input *callFrame) *flatCallFrame {
@@ -377,6 +373,7 @@ func fillCallFrameFromContext(callFrame *flatCallFrame, ctx *tracers.Context) {
 	if ctx == nil {
 		return
 	}
+	// insert info of the block if the txn reference a real txn present on the chain
 	if ctx.BlockHash != (common.Hash{}) {
 		callFrame.BlockHash = &ctx.BlockHash
 	}

@@ -35,7 +35,7 @@ type Context struct {
 	BlockHash   common.Hash // Hash of the block the txn is contained within (zero if dangling txn or call)
 	TxIndex     int         // Index of the transaction within a block (zero if dangling txn or call)
 	TxHash      common.Hash // Hash of the transaction being traced (zero if dangling call)
-	BlockNumber *big.Int    // Number of the block
+	BlockNumber *big.Int    // Number of the block (nil if dangling txn or call)
 }
 
 // Tracer interface extends vm.EVMLogger and additionally
