@@ -101,8 +101,8 @@ func (ti SenderInfoUpdate) Type() Type {
 }
 
 type TxpoolDiagMessage struct {
-	Type    string      `json:"type"`
-	Message interface{} `json:"message"`
+	Type    string `json:"type"`
+	Message any    `json:"message"`
 }
 
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {

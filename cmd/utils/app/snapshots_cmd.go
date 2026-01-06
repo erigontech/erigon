@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -2506,7 +2507,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	if err := br.RetireBlocks(ctx, blocksInSnapshots, to, log.LvlInfo, nil, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, blocksInSnapshots, to, log.LvlInfo, downloader.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 

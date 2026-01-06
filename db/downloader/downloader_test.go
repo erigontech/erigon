@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func TestConcurrentDownload(t *testing.T) {
@@ -191,61 +190,72 @@ func TestAddDel(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 
+	// In the following tests we use combinations of f1Abs, f1, f2, and f1BadAbs. Absolute file
+	// paths are allowed to calls to RpcClient if they're local to the SnapDir, it does the required
+	// conversion. This is the behaviour consumers will see.
+
 	f1Abs := filepath.Join(dirs.Snap, "a.seg")      // block file
 	f2Abs := filepath.Join(dirs.SnapDomain, "a.kv") // state file
 	_, _ = os.Create(f1Abs)
 	require.NoError(os.WriteFile(f2Abs, []byte("a.kv"), 0o666))
 
-	server, _ := NewGrpcServer(d)
+	// Create a second datadir, not relative to the one the Downloader expects.
+	invalidDirs := datadir.New(t.TempDir())
+	// Mixed and matched with f1Abs, which is now allowed but heavily warned against.
+	f1BadAbs := filepath.Join(invalidDirs.Snap, "a.seg")
+
+	grpcServer, _ := NewGrpcServer(d)
+
+	server := NewRpcClient(DirectGrpcServerClient(grpcServer), dirs.Snap)
+
+	// So... errors.AsType is coming.
+	var errRpcSnapName errRpcSnapName
+
 	// Add: expect relative paths
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1Abs}})
-	require.Error(err)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2Abs}})
-	require.Error(err)
+	err = server.Seed(ctx, []string{f1BadAbs})
+	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	f1, _ := filepath.Rel(dirs.Snap, f1Abs)
 	f2, _ := filepath.Rel(dirs.Snap, f2Abs)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1}})
+	err = server.Seed(ctx, []string{f1Abs})
 	require.NoError(err)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2}})
+	err = server.Seed(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// add idempotency
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1}})
+	err = server.Seed(ctx, []string{f1})
 	require.NoError(err)
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f2}})
+	err = server.Seed(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// Del: expect relative paths
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs}})
-	require.Error(err)
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2Abs}})
-	require.Error(err)
+	err = server.Delete(ctx, []string{f1BadAbs})
+	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// Del: idempotency
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
+	err = server.Delete(ctx, []string{f1Abs})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
+	err = server.Delete(ctx, []string{f1})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
 
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
+	err = server.Delete(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
+	err = server.Delete(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	// Batch
-	_, err = server.Seed(ctx, &downloaderproto.SeedRequest{Paths: []string{f1, f2}})
+	err = server.Seed(ctx, []string{f1, f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
-	_, err = server.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1, f2}})
+	err = server.Delete(ctx, []string{f1Abs, f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
