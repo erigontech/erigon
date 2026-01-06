@@ -19,6 +19,14 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sim: eels/consume-engine
+            sim-limit: .*
+          - sim: eels/consume-rlp
+            sim-limit: .*eip2930_access_list.* # all tests take too long
     steps:
       - name: Clean docker system
         run: |
@@ -121,7 +129,7 @@ jobs:
               exit 1
             fi
           }
-          run_suite eels/consume-rlp .*eip2930_access_list.*
+          run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }}
         continue-on-error: true
       - name: Upload output log
         uses: actions/upload-artifact@v6
