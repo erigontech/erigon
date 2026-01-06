@@ -499,6 +499,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
 		}
+		e.lock.Lock()
+		e.currentContext = nil
+		e.lock.Unlock()
 	} else {
 		status = executionproto.ExecutionStatus_Success
 		// Update forks...
@@ -590,14 +593,11 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(finishProgressBe
 				}
 				timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
 				commitStart := time.Now()
+
 				if err := tx.Commit(); err != nil {
 					return err
 				}
 				timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
-
-				e.lock.Lock()
-				e.currentContext = nil
-				e.lock.Unlock()
 			}
 
 			if e.hook != nil {
