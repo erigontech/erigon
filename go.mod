@@ -4,6 +4,8 @@ go 1.24.0
 
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
+replace github.com/crate-crypto/go-eth-kzg => github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105034637-43cb6f34f8e0
+
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
