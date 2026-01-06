@@ -24,9 +24,9 @@ jobs:
       matrix:
         include:
           - sim: eels/consume-engine
-            sim-limit: '.*'
+            sim-limit: ""
           - sim: eels/consume-rlp
-            sim-limit: '.*eip2930_access_list.*' # all tests take too long
+            sim-limit: ".*eip2930_access_list.*" # all tests take too long
     steps:
       - name: Clean docker system
         run: |
