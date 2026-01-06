@@ -22,6 +22,7 @@ package p2p
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
@@ -697,9 +698,7 @@ func (srv *Server) setupDialScheduler() {
 		dialer:         srv.Dialer,
 		clock:          srv.clock,
 	}
-	if srv.ntab != nil {
-		config.resolver = srv.ntab
-	}
+	config.resolver = cmp.Or[nodeResolver](srv.discv5, srv.discv4)
 	if config.dialer == nil {
 		config.dialer = tcpDialer{&net.Dialer{Timeout: defaultDialTimeout}}
 	}
