@@ -19,7 +19,6 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"sync"
@@ -28,7 +27,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -227,7 +225,6 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	defer sd.latestStateLock.RUnlock()
 
 	keyS := toStringZeroCopy(key)
-	fmt.Println("GetAsOf", domain, hex.EncodeToString(key), ts, dbg.Stack())
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
@@ -235,7 +232,6 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 			return nil, false, nil
 		}
 		for i, dataWithTxNum := range dataWithTxNums {
-			fmt.Println(i, dataWithTxNum.txNum, ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum))
 			if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
 				return dataWithTxNum.data, true, nil
 			}
@@ -245,11 +241,9 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 
 	dataWithTxNums, ok = sd.domains[domain][keyS]
 	if !ok {
-		fmt.Println("NOT FOUND", hex.EncodeToString(key), len(sd.domains[domain]), dbg.Stack())
 		return nil, false, nil
 	}
 	for i, dataWithTxNum := range dataWithTxNums {
-		fmt.Println(i, dataWithTxNum.txNum, ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum))
 		if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
 			return dataWithTxNum.data, true, nil
 		}
