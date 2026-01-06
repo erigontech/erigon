@@ -29,14 +29,18 @@ import (
 
 // Stack returns stack-trace in logger-friendly compact formatting
 func Stack() string {
-	if TrimStackToCaller {
-		return stack2.Trace().TrimBelow(stack2.Caller(1)).TrimAbove(stack2.Caller(1)).String()
-	} else {
-		return stack2.Trace().TrimBelow(stack2.Caller(1)).String()
+	stack := stack2.Trace().TrimBelow(stack2.Caller(1))
+	if len(stack) > 1 {
+		return stack[:len(stack)-1].String()
 	}
+	return stack.String()
 }
 func StackSkip(skip int) string {
-	return stack2.Trace().TrimBelow(stack2.Caller(skip)).TrimAbove(stack2.Caller(1)).String()
+	stack := stack2.Trace().TrimBelow(stack2.Caller(skip))
+	if len(stack) > 1 {
+		return stack[:len(stack)-1].String()
+	}
+	return stack.String()
 }
 
 var sigc atomic.Value
