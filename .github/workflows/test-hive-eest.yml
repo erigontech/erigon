@@ -23,9 +23,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - sim: eels/consume-engine
+          - sim: consume-engine
             sim-limit: ""
-          - sim: eels/consume-rlp
+          - sim: consume-rlp
             sim-limit: ".*eip2930_access_list.*" # all tests take too long
     steps:
       - name: Clean docker system
@@ -93,7 +93,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim ethereum/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
