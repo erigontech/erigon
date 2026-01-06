@@ -221,8 +221,8 @@ type Server struct {
 	nodedb             *enode.DB
 	localnode          *enode.LocalNode
 	localnodeAddrCache atomic.Pointer[string]
-	ntab               *discover.UDPv4
-	DiscV5             *discover.UDPv5
+	discv4             *discover.UDPv4
+	discv5             *discover.UDPv5
 	discmix            *enode.FairMix
 	dialsched          *dialScheduler
 
@@ -661,7 +661,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		srv.ntab = ntab
+		srv.discv4 = ntab
 		srv.discmix.AddSource(ntab.RandomNodes())
 	}
 
@@ -676,9 +676,9 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 		version := uint64(srv.Config.Protocols[0].Version)
 		var err error
 		if sconn != nil {
-			srv.DiscV5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), sconn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), sconn, srv.localnode, cfg)
 		} else {
-			srv.DiscV5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), conn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), conn, srv.localnode, cfg)
 		}
 		if err != nil {
 			return err
@@ -873,11 +873,11 @@ running:
 	srv.logger.Trace("P2P networking is spinning down")
 
 	// Terminate discovery. If there is a running lookup it will terminate soon.
-	if srv.ntab != nil {
-		srv.ntab.Close()
+	if srv.discv4 != nil {
+		srv.discv4.Close()
 	}
-	if srv.DiscV5 != nil {
-		srv.DiscV5.Close()
+	if srv.discv5 != nil {
+		srv.discv5.Close()
 	}
 	// Disconnect all peers.
 	for _, p := range peers {
