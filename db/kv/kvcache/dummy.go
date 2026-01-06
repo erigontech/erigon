@@ -46,9 +46,6 @@ func (c *DummyCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) 
 	v, _, err := tx.GetLatest(kv.StorageDomain, k)
 	return v, err
 }
-func (c *DummyCache) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return nil, false, nil
-}
 func (c *DummyCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	v, _, err := tx.GetLatest(kv.CodeDomain, k)
 	return v, err
@@ -62,7 +59,10 @@ type DummyView struct {
 	tx    kv.TemporalTx
 }
 
-func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
+func (c *DummyView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
+func (c *DummyView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return nil, false, nil
+}
 func (c *DummyView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
 func (c *DummyView) HasStorage(address common.Address) (bool, error) {
 	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
