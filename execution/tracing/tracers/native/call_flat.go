@@ -317,8 +317,8 @@ func toHexUint64Ptr(v uint64) *hexutil.Uint64 {
 
 func newFlatCreate(input *callFrame) *flatCallFrame {
 	var (
-		actionInit = input.Input[:]
-		resultCode = input.Output[:]
+		actionInit = input.Input
+		resultCode = input.Output
 	)
 
 	return &flatCallFrame{
@@ -340,8 +340,8 @@ func newFlatCreate(input *callFrame) *flatCallFrame {
 
 func newFlatCall(input *callFrame) *flatCallFrame {
 	var (
-		actionInput  = input.Input[:]
-		resultOutput = input.Output[:]
+		actionInput  = input.Input
+		resultOutput = input.Output
 	)
 
 	return &flatCallFrame{
