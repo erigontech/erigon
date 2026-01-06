@@ -90,12 +90,6 @@ jobs:
           cd hive
           docker ps
           run_suite() {
-            if [ $# -ne 2 ]; then
-              echo "Error: run_suite requires exactly 2 parameters"
-              echo "Usage: run_suite <sim> <sim.limit>"
-              echo "Provided: $# parameters"
-              exit 1
-            fi
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
