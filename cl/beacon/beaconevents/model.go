@@ -8,8 +8,8 @@ import (
 )
 
 type EventStream struct {
-	Event EventTopic  `json:"event"`
-	Data  interface{} `json:"data"`
+	Event EventTopic `json:"event"`
+	Data  any        `json:"data"`
 }
 
 type EventTopic string

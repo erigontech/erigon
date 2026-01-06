@@ -64,7 +64,7 @@ func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err 
 }
 
 func (g *GossipManager) Close() {
-	g.subscriptions.Range(func(key, value interface{}) bool {
+	g.subscriptions.Range(func(key, value any) bool {
 		if value != nil {
 			value.(*GossipSubscription).Close()
 		}
