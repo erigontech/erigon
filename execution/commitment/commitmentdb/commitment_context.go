@@ -303,6 +303,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	trieContext := sdc.trieContext(tx)
+	sdc.Reset() // REMOVE ME
 
 	var warmupConfig commitment.WarmupConfig
 	if sdc.warmupDB != nil {
