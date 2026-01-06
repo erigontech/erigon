@@ -39,8 +39,7 @@ import (
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	return NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
+	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 }
 
 func TestGetBalanceChangesInBlock(t *testing.T) {

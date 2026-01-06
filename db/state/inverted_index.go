@@ -715,7 +715,10 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+	if min := iit.ii.minTxNumInDB(tx); min == 0 || min < iit.files.EndTxNum() {
+		return true
+	}
+	return false
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
@@ -1177,7 +1180,7 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ii.KeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		return min(fstInDb, 0)
+		return max(fstInDb, 0)
 	}
 	return 0
 }

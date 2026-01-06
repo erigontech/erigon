@@ -216,6 +216,14 @@ func (hr *cachedHistoryReaderV3) TracePrefix() string {
 	return hr.reader.TracePrefix()
 }
 
+func (hr *cachedHistoryReaderV3) GetTxNum() uint64 {
+	return hr.reader.GetTxNum()
+}
+
+func (hr *cachedHistoryReaderV3) SetTxNum(txNum uint64) {
+	hr.reader.SetTxNum(txNum)
+}
+
 func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addressValue := address.Value()
 	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
@@ -225,7 +233,6 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 	}
 
 	if ok {
-		fmt.Println("ReadAccountData", address, "ok")
 		var a accounts.Account
 		if err := accounts.DeserialiseV3(&a, enc); err != nil {
 			return nil, fmt.Errorf("%sread account data (cache)(%x): %w", hr.TracePrefix(), address, err)

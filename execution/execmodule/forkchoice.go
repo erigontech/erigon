@@ -593,7 +593,6 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(finishProgressBe
 				}
 				timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
 				commitStart := time.Now()
-
 				if err := tx.Commit(); err != nil {
 					return err
 				}

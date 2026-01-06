@@ -141,6 +141,9 @@ type CoherentView struct {
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
 	return c.cache.Get(k, c.tx, c.stateVersionID)
 }
+func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return nil, false, nil
+}
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
@@ -154,10 +157,6 @@ func (c *CoherentView) HasStorage(address common.Address) (bool, error) {
 	// check in the DB to be absolutely sure anyway (this deems such an "optimisation" useless)
 	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
-}
-
-func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return nil, false, nil
 }
 
 var _ Cache = (*Coherent)(nil)         // compile-time interface check
