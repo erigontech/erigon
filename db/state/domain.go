@@ -128,7 +128,7 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 	d := &Domain{
 		DomainCfg:  cfg,
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newDomainVisible(cfg.Name, []visibleFile{}, false),
+		_visible:   newDomainVisible(cfg.Name, []visibleFile{}),
 	}
 
 	var err error
@@ -341,7 +341,7 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum), true)
+	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
