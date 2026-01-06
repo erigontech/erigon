@@ -121,7 +121,7 @@ jobs:
               exit 1
             fi
           }
-          run_suite eels/consume-rlp .*eip2930_access_list.*
+          run_suite eels/consume-rlp .*test_tx_intrinsic_gas.*
         continue-on-error: true
       - name: Upload output log
         uses: actions/upload-artifact@v6
