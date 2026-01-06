@@ -1029,17 +1029,36 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		return nil, nil
 	}
 
-	if version == clparams.FuluVersion {
+	switch version {
+	case clparams.FuluVersion: // GetBlobsV3
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
 		for i, bwp := range res.BlobsWithProofs {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
 			if len(bwp.Blob) == 0 {
-				// engine_getblobsv2 MUST return null in case of any missing or older version blobs
+				logLine = append(logLine, logHead, "nil")
+			} else if len(bwp.Proofs) != int(params.CellsPerExtBlob) {
+				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
+			} else {
+				ret[i] = &engine_types.BlobAndProofV2{Blob: bwp.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
+				for c := range params.CellsPerExtBlob {
+					ret[i].CellProofs[c] = bwp.Proofs[c]
+				}
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d", len(bwp.Blob)))
+			}
+		}
+		e.logger.Debug("[GetBlobsV3]", "Responses", logLine)
+		return ret, nil
+	case clparams.ElectraVersion: // GetBlobsV2
+		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
+		for i, bwp := range res.BlobsWithProofs {
+			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
+			if len(bwp.Blob) == 0 {
+				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, "nil")
 				break
 			} else if len(bwp.Proofs) != int(params.CellsPerExtBlob) {
-				// engine_getblobsv2 MUST return null in case of any missing or older version blobs
+				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
 				break
@@ -1053,7 +1072,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
 		return ret, nil
-	} else if version == clparams.DenebVersion {
+	case clparams.DenebVersion: // GetBlobsV1
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
 		for i, bwp := range res.BlobsWithProofs {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
@@ -1068,8 +1087,9 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		}
 		e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
 		return ret, nil
+	default:
+		return nil, nil
 	}
-	return nil, nil
 }
 
 func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
