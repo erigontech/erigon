@@ -46,6 +46,9 @@ func (c *DummyCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) 
 	v, _, err := tx.GetLatest(kv.StorageDomain, k)
 	return v, err
 }
+func (c *DummyCache) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return nil, false, nil
+}
 func (c *DummyCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	v, _, err := tx.GetLatest(kv.CodeDomain, k)
 	return v, err
