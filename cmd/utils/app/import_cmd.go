@@ -239,7 +239,7 @@ type stateChangesClient interface {
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
-	streamCtx, cancel := context.WithTimeout(ethereum.SentryCtx(), 1*time.Minute)
+	streamCtx, cancel := context.WithCancel(ethereum.SentryCtx())
 	defer cancel()
 	stream, err := ethereum.StateDiffClient().StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
 	if err != nil {
