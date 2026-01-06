@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -186,7 +187,7 @@ func CreateHistoryCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx, b
 
 	if !ok {
 		fmt.Println("CreateHistoryCachedStateReader err", fmt.Errorf("%T does not implement GetAsOf", cache))
-		return nil, fmt.Errorf("%T does not implement GetAsOf", cache)
+		return nil, fmt.Errorf("%T does not implement GetAsOf at: %s", cache, dbg.Stack())
 	}
 	minTxNum, err := txNumsReader.Min(tx, blockNumber)
 	if err != nil {
