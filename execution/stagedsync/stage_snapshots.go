@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"time"
 
@@ -29,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -46,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/node/silkworm"
 )
@@ -57,7 +55,7 @@ type SnapshotsCfg struct {
 	dirs        datadir.Dirs
 
 	blockRetire        services.BlockRetire
-	snapshotDownloader downloaderproto.DownloaderClient
+	snapshotDownloader downloader.Client
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
 
@@ -69,12 +67,20 @@ type SnapshotsCfg struct {
 	prune       prune.Mode
 }
 
+// Returns a seeder client for block management, a noop implementation if no downloader is attached.
+func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
+	if me.snapshotDownloader == nil {
+		return downloader.NoopSeederClient{}
+	}
+	return me.snapshotDownloader
+}
+
 func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
-	snapshotDownloader downloaderproto.DownloaderClient,
+	snapshotDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
 	caplin bool,
@@ -397,41 +403,20 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		noDl := cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()
 		started := cfg.blockRetire.RetireBlocksInBackground(
 			ctx,
 			minBlockNumber,
 			s.ForwardProgress,
 			log.LvlDebug,
-			// Not sure why we include the possibility to download new items here. We should only be
-			// seeding? Changing this interface would require a lot of refactoring.
-			func(downloadRequest []services.DownloadRequest) error {
-				if noDl {
-					return nil
-				}
-				paths := make([]string, 0, len(downloadRequest))
-				for _, req := range downloadRequest {
-					paths = append(paths, req.Path)
-				}
-				_, err := cfg.snapshotDownloader.Seed(ctx, &downloaderproto.SeedRequest{
-					Paths: paths,
-				})
-				return err
-			}, func(l []string) error {
-				if noDl {
-					return nil
-				}
-				if _, err := cfg.snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: l}); err != nil {
-					return err
-				}
-				return nil
-			}, func() error {
+			cfg.getSeederClient(),
+			func() error {
 				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
 				return err
-			}, func() {
+			},
+			func() {
 				if cfg.notifier != nil {
 					cfg.notifier.Events.OnRetirementDone()
 				}
@@ -439,8 +424,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
-
-		//	cfg.agg.BuildFilesInBackground()
 	}
 
 	pruneLimit := 10
@@ -509,14 +492,9 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		if info.To-info.From != snaptype.Erigon2MergeLimit {
 			continue
 		}
-		if cfg.snapshotDownloader != nil {
-			relativePathToFile := file
-			if filepath.IsAbs(file) {
-				relativePathToFile, _ = filepath.Rel(cfg.dirs.Snap, file)
-			}
-			if _, err := cfg.snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{relativePathToFile}}); err != nil {
-				return filesDeleted, err
-			}
+		err = cfg.getSeederClient().Delete(ctx, []string{file})
+		if err != nil {
+			return filesDeleted, err
 		}
 		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
 			return filesDeleted, err
