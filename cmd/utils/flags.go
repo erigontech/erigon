@@ -571,8 +571,10 @@ var (
 		Usage: "Disables the peer discovery mechanism (manual peer addition)",
 	}
 	DiscoveryV5Flag = cli.BoolFlag{
-		Name:  "v5disc",
+		Name: "v5disc",
+		// Remove if sync with Geth.
 		Usage: "Enables the experimental RLPx V5 (Topic Discovery) mechanism",
+		Value: true,
 	}
 	NetrestrictFlag = cli.StringFlag{
 		Name:  "netrestrict",
