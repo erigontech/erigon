@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+
 	//nolint:gosec
 	"errors"
 	"fmt"
@@ -172,6 +173,7 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return false, fmt.Errorf("createTorrentFileFromSegment: %w", err)
 	}
+	// Really need to check this is "slash"-style. I suspect it will do the wrong thing on Windows.
 	info.Name = fName
 
 	return torrentFiles.CreateWithMetaInfo(info, nil)

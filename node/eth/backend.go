@@ -195,7 +195,7 @@ type Ethereum struct {
 	syncUnwindOrder    stagedsync.UnwindOrder
 	syncPruneOrder     stagedsync.PruneOrder
 
-	downloaderClient downloaderproto.DownloaderClient
+	downloaderClient downloader.Client
 
 	notifications *shards.Notifications
 
@@ -414,7 +414,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainDB = temporalDb
 
 	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader, chainConfig); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
 		return nil, err
 	}
 
@@ -544,7 +544,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logEvery := time.NewTicker(90 * time.Second)
 			defer logEvery.Stop()
 
-			var logItems []interface{}
+			var logItems []any
 
 			for {
 				select {
@@ -592,7 +592,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
-	var rulesConfig interface{}
+	var rulesConfig any
 
 	if chainConfig.Clique != nil {
 		rulesConfig = &config.Clique
@@ -1273,7 +1273,6 @@ func (s *Ethereum) setUpSnapDownloader(
 	ctx context.Context,
 	nodeCfg *nodecfg.Config,
 	downloaderCfg *downloadercfg.Cfg,
-	cc *chain.Config,
 ) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		s.logger.Debug("files changed...sending notification")
@@ -1286,7 +1285,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		if _, err := s.downloaderClient.Seed(ctx, &downloaderproto.SeedRequest{Paths: frozenFileNames}); err != nil {
+		if err := s.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
 			s.logger.Warn("[snapshots] downloader.Seed", "err", err)
 		}
 	}, func(deletedFiles []string) {
@@ -1297,7 +1296,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		if _, err := s.downloaderClient.Delete(ctx, &downloaderproto.DeleteRequest{Paths: deletedFiles}); err != nil {
+		if err := s.downloaderClient.Delete(ctx, deletedFiles); err != nil {
 			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
 		}
 	})
@@ -1312,38 +1311,55 @@ func (s *Ethereum) setUpSnapDownloader(
 		}
 	}
 
-	if s.config.Snapshot.DownloaderAddr != "" {
-		// connect to external Downloader
-		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
-	} else {
-		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
-			return nil
-		}
-
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
-		if err != nil {
-			return err
-		}
-		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
-
-		// start embedded Downloader
-		// TODO: Not sure if we want to add only the completed here, or add after we finish initial
-		// sync checks. Looks like we'd need to pass this or a callback all the way up into the sync
-		// stage somewhere?
-		err = s.downloader.AddTorrentsFromDisk(ctx)
-		if err != nil {
-			return fmt.Errorf("adding torrents from disk: %w", err)
-		}
-
-		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
-		if err != nil {
-			return fmt.Errorf("new server: %w", err)
-		}
-		s.downloader.InitBackgroundLogger(true)
-
-		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
+	client, err := s.initDownloader(ctx, nodeCfg, downloaderCfg)
+	if err != nil {
+		return
+	}
+	if client != nil {
+		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
 	}
 	return err
+}
+
+// Init s.downloader, and return suitable client for it.
+func (s *Ethereum) initDownloader(
+	ctx context.Context,
+	nodeCfg *nodecfg.Config,
+	downloaderCfg *downloadercfg.Cfg,
+) (client downloaderproto.DownloaderClient, err error) {
+	if s.config.Snapshot.DownloaderAddr != "" {
+		// connect to external Downloader
+		return downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
+	}
+	if downloaderCfg == nil || downloaderCfg.ChainName == "" {
+		return
+	}
+
+	s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
+	if err != nil {
+		return
+	}
+	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+
+	// start embedded Downloader
+	// TODO: Not sure if we want to add only the completed here, or add after we finish initial
+	// sync checks. Looks like we'd need to pass this or a callback all the way up into the sync
+	// stage somewhere?
+	err = s.downloader.AddTorrentsFromDisk(ctx)
+	if err != nil {
+		err = fmt.Errorf("adding torrents from disk: %w", err)
+		return
+	}
+
+	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+	if err != nil {
+		err = fmt.Errorf("new server: %w", err)
+		return
+	}
+	s.downloader.InitBackgroundLogger(true)
+
+	client = downloader.DirectGrpcServerClient(bittorrentServer)
+	return
 }
 
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {

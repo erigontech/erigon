@@ -155,7 +155,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
 		collector := etl.NewCollectorWithAllocator(logPrefix+"_dict", tmpDir, etl.SmallSortableBuffers, logger) //nolint:gocritic
-		collector.SortAndFlushInBackground(true)
+		collector.SortAndFlushInBackground(false)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector

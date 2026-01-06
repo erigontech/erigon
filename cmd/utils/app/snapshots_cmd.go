@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -1213,23 +1214,30 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
 	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
-	to := int64(-1)
+	//to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
-		uto, empty, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), to, emptyOk)
+		_, _, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), CheckFilesParams{
+			checkLastFileTo: -1,
+			emptyOk:         emptyOk,
+			doesntStartAt0:  snapt.Enum() == snaptype.BlobSidecars.Enum(),
+		})
 		if err != nil {
 			return err
 		}
-		if empty {
-			continue
-		}
+		// if empty {
+		// 	continue
+		// }
 
-		to = int64(uto)
+		// to = int64(uto)
 	}
 
-	to = int64(-1)
+	to := int64(-1)
 	somethingPresent, somethingEmpty := false, false
 	for table := range stateSnapTypes.KeyValueGetters {
-		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), to, emptyOk)
+		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
+			checkLastFileTo: to,
+			emptyOk:         emptyOk,
+		})
 		if err != nil {
 			return err
 		}
@@ -2499,7 +2507,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	if err := br.RetireBlocks(ctx, blocksInSnapshots, to, log.LvlInfo, nil, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, blocksInSnapshots, to, log.LvlInfo, downloader.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 

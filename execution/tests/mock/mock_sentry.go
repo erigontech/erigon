@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -462,7 +463,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	mock.sentriesClient.IsMock = true
 
-	snapDownloader := mockDownloader(ctrl)
+	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
 	miningConfig := cfg.Miner
 	miningConfig.Etherbase = mock.Address
@@ -620,7 +621,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller) *downloaderproto.MockDownloaderClient {
+func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client {
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
@@ -628,7 +629,7 @@ func mockDownloader(ctrl *gomock.Controller) *downloaderproto.MockDownloaderClie
 		Return(&emptypb.Empty{}, nil).
 		AnyTimes()
 
-	return snapDownloader
+	return downloader.NewRpcClient(snapDownloader, snapRoot)
 }
 
 // Mock is convenience function to create a mock with some pre-set values

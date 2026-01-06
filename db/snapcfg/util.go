@@ -28,6 +28,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
 	snapshothashes "github.com/erigontech/erigon-snapshot"
@@ -43,6 +44,8 @@ import (
 )
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
+
+var cachedCfg sync.Map
 
 var (
 	Mainnet    = fromEmbeddedToml(snapshothashes.Mainnet)
@@ -481,11 +484,16 @@ func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uin
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) (*Cfg, bool) {
+	if v, ok := cachedCfg.Load(networkName); ok {
+		return v.(*Cfg), true
+	}
 	c, ok := knownPreverified[networkName]
 	if !ok {
 		return newCfg(networkName, Preverified{}), false
 	}
-	return newCfg(networkName, c.Typed(knownTypes[networkName])), true
+	cfg := newCfg(networkName, c.Typed(knownTypes[networkName]))
+	cachedCfg.Store(networkName, cfg)
+	return cfg, true
 }
 
 var KnownWebseeds = map[string][]string{

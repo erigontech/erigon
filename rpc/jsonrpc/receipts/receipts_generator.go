@@ -111,6 +111,7 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*ty
 }
 
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
+var rpcDisableRLRU = dbg.EnvBool("RPC_DISABLE_RLRU", false)
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader(ctx)
@@ -145,11 +146,17 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 }
 
 func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Receipts) {
+	if rpcDisableRLRU {
+		return
+	}
 	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
 func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) {
+	if rpcDisableRLRU {
+		return
+	}
 	//g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptCache.Add(hash, receipt)
 }
