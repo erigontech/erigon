@@ -128,7 +128,7 @@ jobs:
       - name: Upload output log
         uses: actions/upload-artifact@v6
         with:
-          name: hive-workspace-log
+          name: hive-workspace-log-${{ matrix.sim }}
           path: hive/workspace/logs
       - name: Test Results
         run: |
