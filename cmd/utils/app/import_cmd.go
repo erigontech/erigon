@@ -295,6 +295,9 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 				delete(insertedBlocks, lastSeenBlock)
 				lastSeenBlock++
 			}
+			if len(insertedBlocks)==0 {
+				break
+			}
 		}
 	}
 
