@@ -98,6 +98,8 @@ var (
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+
+	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

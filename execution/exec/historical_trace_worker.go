@@ -600,10 +600,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	readAhead, clean := BlocksReadAhead(ctx, 2, cfg.ChainDB, cfg.Engine, cfg.BlockReader)
 	defer clean()
 
-	inputTxNum, err := txNumsReader.Min(tx, fromBlock)
-	if err != nil {
-		return err
-	}
+	inputTxNum := fromTxNum
 	for blockNum := fromBlock; blockNum <= toBlock && !workersExited.Load(); blockNum++ {
 		select {
 		case readAhead <- blockNum:

@@ -748,7 +748,7 @@ func benchmarkHashimotoFullMmap(b *testing.B, name string, lock bool) {
 		d.generate(tmpdir, 1, lock, false)
 		var hash [length.Hash]byte
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := 0; b.Loop(); i++ {
 			binary.PutVarint(hash[:], int64(i))
 			hashimotoFull(d.dataset, hash[:], 0)
 		}

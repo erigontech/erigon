@@ -1,20 +1,4 @@
-// Copyright 2024 The Erigon Authors
-// This file is part of Erigon.
-//
-// Erigon is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Erigon is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
-package sentinel
+package p2p
 
 import (
 	"github.com/erigontech/erigon/cl/utils"
@@ -32,7 +16,7 @@ import (
 // + message.topic + snappy_decompress(message.data))[:20]. Otherwise, set message-id to the first 20 bytes of the SHA256 hash of the concatenation
 // of the following data: MESSAGE_DOMAIN_INVALID_SNAPPY, the length of the topic byte string (encoded as little-endian uint64),
 // the topic byte string, and the raw message data: i.e. SHA256(MESSAGE_DOMAIN_INVALID_SNAPPY + uint_to_bytes(uint64(len(message.topic))) + message.topic + message.data)[:20].
-func (s *Sentinel) msgId(pmsg *pubsubpb.Message) string {
+func (s *p2pManager) msgId(pmsg *pubsubpb.Message) string {
 	topic := *pmsg.Topic
 	topicLen := len(topic)
 	topicLenBytes := utils.Uint64ToLE(uint64(topicLen)) // topicLen cannot be negative

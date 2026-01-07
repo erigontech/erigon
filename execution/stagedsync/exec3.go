@@ -245,6 +245,11 @@ func ExecV3(ctx context.Context,
 	var lastCommittedTxNum uint64
 	var lastCommittedBlockNum uint64
 
+	postValidator := newBlockPostExecutionValidator()
+	if maxBlockNum == startBlockNum {
+		postValidator = newParallelBlockPostExecutionValidator()
+	}
+
 	if parallel {
 		if !inMemExec { //nolint:staticcheck
 			// this is becuase for parallel execution the shared domain needs to
@@ -269,6 +274,7 @@ func ExecV3(ctx context.Context,
 				hooks:                 hooks,
 				lastCommittedTxNum:    doms.TxNum(),
 				lastCommittedBlockNum: blockNum,
+				postValidator:         postValidator,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
@@ -301,6 +307,7 @@ func ExecV3(ctx context.Context,
 				hooks:                 hooks,
 				lastCommittedTxNum:    doms.TxNum(),
 				lastCommittedBlockNum: blockNum,
+				postValidator:         postValidator,
 			}}
 		se.doms.SetWarmupDB(cfg.db)
 
@@ -317,6 +324,10 @@ func ExecV3(ctx context.Context,
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
 					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, inMemExec)
 					if err != nil {
+						return err
+					}
+
+					if err := se.getPostValidator().Wait(); err != nil {
 						return err
 					}
 
@@ -466,10 +477,18 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
+	postValidator     BlockPostExecutionValidator
 }
 
 func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
+}
+
+func (te *txExecutor) getPostValidator() BlockPostExecutionValidator {
+	if te.postValidator == nil {
+		return newBlockPostExecutionValidator()
+	}
+	return te.postValidator
 }
 
 func (te *txExecutor) domains() *execctx.SharedDomains {

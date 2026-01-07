@@ -75,6 +75,8 @@ func (e *Events) AddHeaderSubscription() (chan [][]byte, func()) {
 	id := e.id
 	e.headerSubscriptions[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.headerSubscriptions, id)
 		close(ch)
 	}
