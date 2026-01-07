@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -120,8 +121,7 @@ type BlockRetire interface {
 		miBlockNum uint64,
 		maxBlockNum uint64,
 		lvl log.Lvl,
-		seedNewSnapshots func(downloadRequest []DownloadRequest) error,
-		onDelete func(l []string) error,
+		seeder downloader.SeederClient,
 		onFinishRetire func() error,
 		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error

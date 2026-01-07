@@ -122,7 +122,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 
 	if !notRegenerateGethData {
 		err = gethKV.Update(context.Background(), func(tx kv.RwTx) error {
-			return f(erigonURL, tx)
+			return f(gethURL, tx)
 		})
 		if err != nil {
 			log.Error(err.Error())

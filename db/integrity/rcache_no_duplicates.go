@@ -20,9 +20,6 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 		log.Info("[integrity] RCacheNoDups: done", "err", err)
 	}()
 
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
 	txNumsReader := blockReader.TxnumReader(ctx)
 
 	tx, err := db.BeginTemporalRo(ctx)

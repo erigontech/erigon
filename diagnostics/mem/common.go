@@ -37,11 +37,11 @@ type VirtualMemStat struct {
 }
 
 // Fields converts VirtualMemStat to slice
-func (m VirtualMemStat) Fields() []interface{} {
+func (m VirtualMemStat) Fields() []any {
 	typ := reflect.TypeFor[process.MemoryMapsStat]()
 	val := reflect.ValueOf(m.MemoryMapsStat)
 
-	var s []interface{}
+	var s []any
 	for i := 0; i < typ.NumField(); i++ {
 		t := typ.Field(i).Name
 		if t == "Path" { // always empty for aggregated smap statistics

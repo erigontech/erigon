@@ -336,7 +336,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 	d.logTorrentClientParams()
 
 	if len(cfg.WebSeedUrls) == 0 {
-		d.log(log.LvlWarn, "downloader has no webseed urls configured")
+		d.log(log.LvlInfo, "downloader has no webseed urls configured")
 	}
 
 	requestHandler.downloader = d
