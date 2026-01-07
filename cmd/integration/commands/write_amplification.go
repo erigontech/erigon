@@ -263,11 +263,10 @@ func calculateDomainWriteAmplification(
 		}
 
 		getter := dec.MakeGetter()
-		var buf []byte
 		fileKeyCount := uint64(0)
 
 		for getter.HasNext() {
-			buf, _ = getter.Next(buf[:0])
+			_, _ = getter.Next(nil)
 			fileKeyCount++
 			// Skip value
 			getter.Skip()
