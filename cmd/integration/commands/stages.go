@@ -922,6 +922,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
+		fmt.Printf("[dbg] doms.size: %d\n", doms.SizeEstimate())
 		if !noCommit {
 			if err := tx.Commit(); err != nil {
 				return err
