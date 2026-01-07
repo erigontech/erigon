@@ -258,9 +258,7 @@ func (hr *cachedHistoryReaderV3) ReadAccountStorage(address accounts.Address, ke
 	}
 	if ok {
 		var res uint256.Int
-		if ok {
-			(&res).SetBytes(enc)
-		}
+		(&res).SetBytes(enc)
 		return res, ok, err
 	}
 	return hr.reader.ReadAccountStorage(address, key)
