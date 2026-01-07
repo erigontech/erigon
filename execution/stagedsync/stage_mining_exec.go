@@ -99,12 +99,8 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
-	preparedTxns := current.PreparedTxns
 
-	var (
-		stateReader state.StateReader
-	)
-	stateReader = state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
@@ -135,59 +131,47 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	coinbase := accounts.InternAddress(cfg.miningState.MiningConfig.Etherbase)
 
-	if len(preparedTxns) > 0 {
-		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, coinbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+	yielded := mapset.NewSet[[32]byte]()
+	simStateWriter := state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
+	simStateReader := state.NewReaderV3(simSd.AsGetter(tx))
+
+	executionAt, err := s.ExecutionAt(tx)
+	if err != nil {
+		return err
+	}
+
+	interrupt := cfg.interrupt
+	const amount = 50
+	for {
+		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
 		if err != nil {
 			return err
 		}
-		NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-	} else {
 
-		yielded := mapset.NewSet[[32]byte]()
-		var simStateReader state.StateReader
-		var simStateWriter state.StateWriter
-
-		simStateWriter = state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
-		simStateReader = state.NewReaderV3(simSd.AsGetter(tx))
-
-		executionAt, err := s.ExecutionAt(tx)
-		if err != nil {
-			return err
-		}
-
-		interrupt := cfg.interrupt
-		const amount = 50
-		for {
-			txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
+		if len(txns) > 0 {
+			logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, interrupt, cfg.payloadId, logger)
 			if err != nil {
 				return err
 			}
-
-			if len(txns) > 0 {
-				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, interrupt, cfg.payloadId, logger)
-				if err != nil {
-					return err
-				}
-				NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-				if stop {
-					break
-				}
-			}
-
-			// if we yielded less than the count we wanted, assume the txpool has run dry now
-			if len(txns) < amount {
-				if interrupt != nil && !interrupt.Load() {
-					// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
-					// since there may be new txns that can arrive
-					time.Sleep(50 * time.Millisecond)
-				} else {
-					break
-				}
+			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+			if stop {
+				break
 			}
 		}
 
-		metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
+		// if we yielded less than the count we wanted, assume the txpool has run dry now
+		if len(txns) < amount {
+			if interrupt != nil && !interrupt.Load() {
+				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
+				// since there may be new txns that can arrive
+				time.Sleep(50 * time.Millisecond)
+			} else {
+				break
+			}
+		}
 	}
+
+	metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
 
 	logger.Debug("SpawnMiningExecStage", "block", current.Header.Number, "txn", current.Txns.Len(), "payload", cfg.payloadId)
 	if current.Uncles == nil {
@@ -275,7 +259,11 @@ func getNextTransactions(
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
-		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
+		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
+		if cfg.miningState.MiningConfig.MaxBlobsPerBlock != nil {
+			maxBlobs = min(maxBlobs, *cfg.miningState.MiningConfig.MaxBlobsPerBlock)
+		}
+		remainingBlobGas = maxBlobs*params.GasPerBlob - *header.BlobGasUsed
 	}
 
 	provideOpts := []txnprovider.ProvideOption{

@@ -224,7 +224,7 @@ var (
 		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
 
-	// Miner settings
+	// Block builder/proposer settings
 	ProposingDisableFlag = cli.BoolFlag{
 		Name:  "proposer.disable",
 		Usage: "Disables PoS proposer",
@@ -241,6 +241,10 @@ var (
 	MinerExtraDataFlag = cli.StringFlag{
 		Name:  "miner.extradata",
 		Usage: "Block extra data set by the miner (default = client version)",
+	}
+	BuilderMaxBlobsFlag = cli.Uint64Flag{
+		Name:  "builder.maxblobs",
+		Usage: "Cap the number of blob transactions included in a built block",
 	}
 
 	VMEnableDebugFlag = cli.BoolFlag{
@@ -1473,19 +1477,6 @@ func setGPO(ctx *cli.Context, cfg *gaspricecfg.Config) {
 	}
 }
 
-// nolint
-func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
-	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
-		cfg.Blocks = *v
-	}
-	if v := f.Int(GpoPercentileFlag.Name, GpoPercentileFlag.Value, GpoPercentileFlag.Usage); v != nil {
-		cfg.Percentile = *v
-	}
-	if v := f.Int64(GpoMaxGasPriceFlag.Name, GpoMaxGasPriceFlag.Value, GpoMaxGasPriceFlag.Usage); v != nil {
-		cfg.MaxPrice = big.NewInt(*v)
-	}
-}
-
 func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 	cfg := txpoolcfg.DefaultConfig
 	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
@@ -1660,6 +1651,11 @@ func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
 		if gasLimit := ctx.Uint64(MinerGasLimitFlag.Name); gasLimit != 0 {
 			cfg.GasLimit = &gasLimit
 		}
+	}
+
+	if ctx.IsSet(BuilderMaxBlobsFlag.Name) {
+		maxBlobs := ctx.Uint64(BuilderMaxBlobsFlag.Name)
+		cfg.MaxBlobsPerBlock = &maxBlobs
 	}
 }
 
