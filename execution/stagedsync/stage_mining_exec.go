@@ -157,11 +157,9 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 			if stop {
 				break
 			}
-		} else {
-			break
 		}
 
-		// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
+		// if we yielded less than the count we wanted, assume the txpool has run dry now
 		if len(txns) < amount {
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
