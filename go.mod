@@ -16,7 +16,7 @@ require (
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
-	github.com/99designs/gqlgen v0.17.83
+	github.com/99designs/gqlgen v0.17.85
 	github.com/FastFilter/xorfilter v0.2.1
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.14.4
@@ -108,7 +108,7 @@ require (
 	github.com/tidwall/btree v1.8.1
 	github.com/ugorji/go/codec v1.2.13
 	github.com/urfave/cli/v2 v2.27.7
-	github.com/valyala/fastjson v1.6.4
+	github.com/valyala/fastjson v1.6.7
 	github.com/vektah/gqlparser/v2 v2.5.31
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.6.0
@@ -189,6 +189,7 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
+	github.com/goccy/go-yaml v1.19.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
@@ -289,7 +290,7 @@ require (
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
-	github.com/urfave/cli/v3 v3.6.0 // indirect
+	github.com/urfave/cli/v3 v3.6.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
