@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/common/maphash"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
@@ -44,7 +45,7 @@ type CachingBeaconState struct {
 	*raw.BeaconState
 
 	// Internals
-	publicKeyIndicies map[[48]byte]uint64
+	publicKeyIndicies *maphash.Map[uint64]
 	// Caches
 	activeValidatorsCache *lru.Cache[uint64, []uint64]
 	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
@@ -252,10 +253,10 @@ func (b *CachingBeaconState) initCaches() error {
 
 func (b *CachingBeaconState) InitBeaconState() error {
 
-	b.publicKeyIndicies = make(map[[48]byte]uint64)
+	b.publicKeyIndicies = maphash.NewMap[uint64]()
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
-
+		pk := validator.PublicKey()
+		b.publicKeyIndicies.Set(pk[:], uint64(i))
 		return true
 	})
 

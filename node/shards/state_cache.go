@@ -345,7 +345,7 @@ func (rh ReadHeap) Swap(i, j int) {
 	rh.items[i], rh.items[j] = rh.items[j], rh.items[i]
 }
 
-func (rh *ReadHeap) Push(x interface{}) {
+func (rh *ReadHeap) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	cacheItem := x.(CacheItem)
@@ -353,7 +353,7 @@ func (rh *ReadHeap) Push(x interface{}) {
 	rh.items = append(rh.items, cacheItem)
 }
 
-func (rh *ReadHeap) Pop() interface{} {
+func (rh *ReadHeap) Pop() any {
 	cacheItem := rh.items[len(rh.items)-1]
 	rh.items = rh.items[:len(rh.items)-1]
 	return cacheItem
@@ -370,7 +370,7 @@ type StateCache struct {
 	sequence   int // Current sequence assigned to any item that has been "touched" (created, deleted, read). Incremented after every touch
 }
 
-func id(a interface{}) uint8 {
+func id(a any) uint8 {
 	switch a.(type) {
 	case *AccountItem, *AccountWriteItem, *AccountSeek:
 		return 0

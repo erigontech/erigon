@@ -47,6 +47,7 @@ var ourCapabilities = []string{
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
+	"engine_getBlobsV3",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -224,6 +225,20 @@ func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash)
 
 func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
 	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
+	// GetBlobsV2 was actually introduced in Fusaka,
+	// but here we're using the Pectra version to differentiate it from GetBlobsV3.
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.ElectraVersion)
+	if err != nil {
+		return nil, err
+	}
+	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
+		return ret, err
+	}
+	return nil, err
+}
+
+func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
+	e.logger.Debug("[GetBlobsV3] Received Request", "hashes", len(blobHashes))
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
 	if err != nil {
 		return nil, err
