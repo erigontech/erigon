@@ -121,6 +121,9 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 		branchEncoder: NewBranchEncoder(1024),
 	}
 
+	if dbg.TraceTrie {
+		hph.trace = true
+	}
 	hph.branchEncoder.setMetrics(hph.metrics)
 	return hph
 }
