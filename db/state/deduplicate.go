@@ -202,16 +202,12 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 
 	var outItem *FilesItem
 	var comp *seg.Compressor
-	var decomp *seg.Decompressor
 	var err error
 	var closeItem = true
 	defer func() {
 		if closeItem {
 			if comp != nil {
 				comp.Close()
-			}
-			if decomp != nil {
-				decomp.Close()
 			}
 			if outItem != nil {
 				outItem.closeFilesAndRemove()
