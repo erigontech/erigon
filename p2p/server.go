@@ -413,6 +413,7 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	if err := srv.setupDiscovery(srv.quitCtx); err != nil {
 		return err
 	}
+	srv.logger.Info("Setup P2P discovery", "v4", srv.discv4 != nil, "v5", srv.discv5 != nil)
 	srv.setupDialScheduler()
 
 	srv.running.Store(true)
@@ -482,10 +483,6 @@ func (srv *Server) setupLocalNode() error {
 
 func (srv *Server) setupDiscovery(ctx context.Context) error {
 	srv.discmix = enode.NewFairMix(discmixTimeout)
-
-	srv.NoDiscovery = false
-	srv.DiscoveryV4 = false
-	srv.DiscoveryV5 = true
 
 	// Don't listen on UDP endpoint if DHT is disabled.
 	if srv.NoDiscovery {

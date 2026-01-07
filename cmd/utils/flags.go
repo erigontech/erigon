@@ -570,11 +570,15 @@ var (
 		Name:  "nodiscover",
 		Usage: "Disables the peer discovery mechanism (manual peer addition)",
 	}
+	DiscoveryV4Flag = cli.BoolFlag{
+		Name:    "discovery.v4",
+		Aliases: []string{"discv4"},
+		Usage:   "Enables the V4 discovery mechanism",
+	}
 	DiscoveryV5Flag = cli.BoolFlag{
-		Name: "v5disc",
-		// Remove if sync with Geth.
-		Usage: "Enables the experimental RLPx V5 (Topic Discovery) mechanism",
-		Value: true,
+		Name:    "discovery.v5",
+		Aliases: []string{"discv5"},
+		Usage:   "Enables the V5 discovery mechanism",
 	}
 	NetrestrictFlag = cli.StringFlag{
 		Name:  "netrestrict",
@@ -1369,21 +1373,20 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 	if ctx.IsSet(MaxPendingPeersFlag.Name) {
 		cfg.MaxPendingPeers = ctx.Int(MaxPendingPeersFlag.Name)
 	}
-	if ctx.IsSet(NoDiscoverFlag.Name) {
-		cfg.NoDiscovery = true
+
+	setBoolIfSet := func(set *bool, flag *cli.BoolFlag) {
+		if ctx.IsSet(flag.Name) {
+			*set = ctx.Bool(flag.Name)
+		}
 	}
 
-	if ctx.IsSet(DiscoveryV5Flag.Name) {
-		cfg.DiscoveryV5 = ctx.Bool(DiscoveryV5Flag.Name)
-	}
-
-	if ctx.IsSet(MetricsEnabledFlag.Name) {
-		cfg.MetricsEnabled = ctx.Bool(MetricsEnabledFlag.Name)
-	}
-
-	if ctx.IsSet(PolygonPosWitProtocolFlag.Name) {
-		cfg.EnableWitProtocol = ctx.Bool(PolygonPosWitProtocolFlag.Name)
-	}
+	CheckExclusive(ctx, &DiscoveryV4Flag, &NoDiscoverFlag)
+	CheckExclusive(ctx, &DiscoveryV5Flag, &NoDiscoverFlag)
+	setBoolIfSet(&cfg.NoDiscovery, &NoDiscoverFlag)
+	setBoolIfSet(&cfg.DiscoveryV4, &DiscoveryV4Flag)
+	setBoolIfSet(&cfg.DiscoveryV5, &DiscoveryV5Flag)
+	setBoolIfSet(&cfg.MetricsEnabled, &MetricsEnabledFlag)
+	setBoolIfSet(&cfg.EnableWitProtocol, &PolygonPosWitProtocolFlag)
 
 	logger.Info("Maximum peer count", "total", cfg.MaxPeers)
 
@@ -1402,6 +1405,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 			cfg.ListenAddr = ":0"
 		}
 		cfg.NoDiscovery = true
+		cfg.DiscoveryV4 = false
 		cfg.DiscoveryV5 = false
 		logger.Info("Development chain flags set", "--nodiscover", cfg.NoDiscovery, "--v5disc", cfg.DiscoveryV5, "--port", cfg.ListenAddr)
 	}
