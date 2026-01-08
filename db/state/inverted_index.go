@@ -723,7 +723,7 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
 		return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
 	}
-	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum() || !stat.KeyDone || !stat.ValueDone
+	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum() || stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint

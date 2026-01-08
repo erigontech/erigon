@@ -1114,7 +1114,7 @@ func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
 	for _, iit := range at.iis {
 		a1, a2 := iit.stepsRangeInDB(tx)
 		valPruneFinished := "prune finished"
-		if v, _ := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable)); !v.ValueDone || !v.KeyDone {
+		if v, _ := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable)); v.ValueProgress != prune.Done || v.KeyProgress != prune.Done {
 			valPruneFinished = "prune in progress"
 		}
 		steps = append(steps, fmt.Sprintf("%s:%.1f %s", iit.ii.FilenameBase, a2-a1, valPruneFinished))

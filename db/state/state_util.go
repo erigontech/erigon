@@ -98,24 +98,29 @@ const (
 	flagDone = 1 << 0
 )
 
-func encodeProgress(done bool, last []byte) []byte {
+func encodeProgress(prg prune.Progress, last []byte) []byte {
 	b := make([]byte, 1+len(last))
-	if done {
+	if prg == prune.Done {
 		b[0] = flagDone
 	}
 	copy(b[1:], last)
 	return b
 }
 
-func decodeProgress(v []byte) (done bool, last []byte, err error) {
+func decodeProgress(v []byte) (prg prune.Progress, last []byte, err error) {
 	if len(v) == 0 {
-		return false, nil, nil
+		return prune.First, nil, nil
 	}
-	done = (v[0] & flagDone) != 0
+	done := (v[0] & flagDone) != 0
 	if len(v) > 1 {
 		last = v[1:]
 	}
-	return done, last, nil
+	if done {
+		prg = prune.Done
+	} else {
+		prg = prune.InProgress
+	}
+	return prg, last, nil
 }
 
 func SavePruneValProgress(db kv.Putter, prunedTblName string, st *prune.Stat) error {
@@ -123,11 +128,11 @@ func SavePruneValProgress(db kv.Putter, prunedTblName string, st *prune.Stat) er
 		return err
 	}
 
-	if err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"keys"), encodeProgress(st.KeyDone, st.LastPrunedKey)); err != nil {
+	if err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"keys"), encodeProgress(st.KeyProgress, st.LastPrunedKey)); err != nil {
 		return err
 	}
 
-	if err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"vals"), encodeProgress(st.ValueDone, st.LastPrunedValue)); err != nil {
+	if err := db.Put(kv.TblPruningValsProg, []byte(prunedTblName+"vals"), encodeProgress(st.ValueProgress, st.LastPrunedValue)); err != nil {
 		return err
 	}
 
@@ -150,7 +155,7 @@ func GetPruneValProgress(db kv.Getter, tbl []byte) (*prune.Stat, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.ValueDone, st.LastPrunedValue, err = decodeProgress(v)
+	st.ValueProgress, st.LastPrunedValue, err = decodeProgress(v)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +164,7 @@ func GetPruneValProgress(db kv.Getter, tbl []byte) (*prune.Stat, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.KeyDone, st.LastPrunedKey, err = decodeProgress(k)
+	st.KeyProgress, st.LastPrunedKey, err = decodeProgress(k)
 	if err != nil {
 		return nil, err
 	}

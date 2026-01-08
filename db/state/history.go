@@ -968,7 +968,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
 	}
 
-	pruneInProgress := !stat.KeyDone || !stat.ValueDone
+	pruneInProgress := stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {

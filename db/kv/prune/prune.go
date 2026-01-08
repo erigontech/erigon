@@ -22,11 +22,19 @@ type Stat struct {
 	DupsDeleted      uint64
 	LastPrunedValue  []byte
 	LastPrunedKey    []byte
-	KeyDone          bool
-	ValueDone        bool
+	KeyProgress      Progress
+	ValueProgress    Progress
 	TxFrom           uint64
 	TxTo             uint64
 }
+
+type Progress int
+
+const (
+	First Progress = iota
+	InProgress
+	Done
+)
 
 type StorageMode int
 
@@ -187,31 +195,32 @@ func TableScanningPrune(
 	var keyCursorPosition, valCursorPosition = &StartPos{}, &StartPos{}
 	// invalidate progress if new params here
 	if !(prevStat.TxFrom == txFrom && prevStat.TxTo == txTo) {
-		prevStat.ValueDone = false
-		prevStat.KeyDone = false
+		prevStat.ValueProgress = First
+		if keysCursor != nil {
+			prevStat.KeyProgress = First
+		}
 	}
-	if !prevStat.ValueDone {
+	if prevStat.ValueProgress == InProgress {
 		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
-	} else {
+	} else if prevStat.ValueProgress == First {
 		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.First()
 	}
-	if !prevStat.KeyDone {
+
+	if prevStat.KeyProgress == InProgress {
 		keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey)
-	} else {
+	} else if prevStat.KeyProgress == First {
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], txFrom)
 		keyCursorPosition.StartKey, _, err = keysCursor.Seek(txKey[:])
 	}
 
-	txnb := common.Copy(keyCursorPosition.StartKey)
-
 	var pairs, valLen uint64
 
 	defer func() {
-		logger.Info("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds(), "prune ended", stat.KeyDone && stat.ValueDone)
+		logger.Info("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds(), "prune ended", stat.KeyProgress == Done && stat.ValueProgress == Done && !asserts)
 	}()
-
-	if !prevStat.KeyDone {
+	if prevStat.KeyProgress != Done {
+		txnb := common.Copy(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
 		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
 			if err != nil {
@@ -239,7 +248,7 @@ func TableScanningPrune(
 		}
 	}
 
-	stat.KeyDone = true
+	stat.KeyProgress = Done
 	stat.LastPrunedKey = nil
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
@@ -350,7 +359,7 @@ func TableScanningPrune(
 	}
 
 	stat.LastPrunedValue = nil
-	stat.ValueDone = true
+	stat.ValueProgress = Done
 
 	return stat, err
 }
