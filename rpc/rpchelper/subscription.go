@@ -18,18 +18,33 @@ package rpchelper
 
 import (
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // a simple interface for subscriptions for rpc helper
 type Sub[T any] interface {
 	Send(T)
 	Close()
+	// Tracking methods for timeout-based eviction and metrics
+	Touch()                                 // Reset last access time (for HTTP polling filters)
+	SetProtocol(protocol string)            // Set protocol label for metrics
+	EnableTimeout()                         // Enable timeout tracking (HTTP only)
+	ShouldEvict(timeout time.Duration) bool // Check if subscription should be evicted
+	Protocol() string                       // Get protocol label for metrics
 }
 
 type chan_sub[T any] struct {
-	lock   sync.Mutex // protects all fileds of this struct
+	lock   sync.Mutex // protects ch and closed fields
 	ch     chan T
 	closed bool
+
+	// protocol is published once via SetProtocol and read concurrently by the eviction loop.
+	// atomic.Pointer keeps the write/read ordered without a lock.
+	protocol atomic.Pointer[string]
+	// lastAccess tracks last poll time for timeout eviction (atomic for concurrent Touch/ShouldEvict)
+	// lastAccess == 0 means no timeout tracking (WebSocket subscriptions)
+	lastAccess atomic.Int64
 }
 
 // newChanSub - buffered channel
@@ -37,9 +52,9 @@ func newChanSub[T any](size int) *chan_sub[T] {
 	if size < 8 { // set min size to 8
 		size = 8
 	}
-	o := &chan_sub[T]{}
-	o.ch = make(chan T, size)
-	return o
+	return &chan_sub[T]{
+		ch: make(chan T, size),
+	}
 }
 func (s *chan_sub[T]) Send(x T) {
 	s.lock.Lock()
@@ -52,6 +67,12 @@ func (s *chan_sub[T]) Send(x T) {
 	default: // the sub is overloaded, dispose message
 	}
 }
+
+// Close is safe to call concurrently and idempotent — the eviction loop and a
+// client-initiated unsubscribe can both reach Close for the same subscription.
+// The s.closed guard prevents the double channel close panic; the
+// unsubscribe*Internal funcs guard the matching metrics decrement via the
+// SyncMap.Delete result so the gauge is decremented at most once.
 func (s *chan_sub[T]) Close() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -60,4 +81,42 @@ func (s *chan_sub[T]) Close() {
 	}
 	s.closed = true
 	close(s.ch)
+}
+
+// SetProtocol sets the protocol label for metrics tracking.
+// Safe to call concurrently with Protocol(); intended to be called once at subscription setup.
+func (s *chan_sub[T]) SetProtocol(protocol string) {
+	s.protocol.Store(&protocol)
+}
+
+// EnableTimeout enables timeout tracking for this subscription (HTTP polling filters).
+// For WebSocket subscriptions, don't call this - they will never be evicted.
+func (s *chan_sub[T]) EnableTimeout() {
+	s.lastAccess.Store(time.Now().UnixNano())
+}
+
+// Touch resets the last access time, preventing timeout eviction.
+// Only effective if EnableTimeout was called.
+func (s *chan_sub[T]) Touch() {
+	if s.lastAccess.Load() != 0 {
+		s.lastAccess.Store(time.Now().UnixNano())
+	}
+}
+
+// ShouldEvict returns true if the subscription has not been accessed within the timeout.
+// Returns false if tracking is not enabled (lastAccess == 0).
+func (s *chan_sub[T]) ShouldEvict(timeout time.Duration) bool {
+	last := s.lastAccess.Load()
+	if last == 0 {
+		return false // No tracking, never evict (WebSocket)
+	}
+	return time.Since(time.Unix(0, last)) > timeout
+}
+
+// Protocol returns the protocol label for metrics. Returns "" if SetProtocol was never called.
+func (s *chan_sub[T]) Protocol() string {
+	if p := s.protocol.Load(); p != nil {
+		return *p
+	}
+	return ""
 }
