@@ -121,9 +121,6 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 		branchEncoder: NewBranchEncoder(1024),
 	}
 
-	if dbg.TraceTrie {
-		hph.trace = true
-	}
 	hph.branchEncoder.setMetrics(hph.metrics)
 	return hph
 }
@@ -2453,7 +2450,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 
-	//hph.trace = true
+	if dbg.TraceTrie {
+		hph.trace = true
+	}
 
 	if hph.metrics.collectCommitmentMetrics {
 		hph.metrics.Reset()
