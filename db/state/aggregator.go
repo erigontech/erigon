@@ -1264,7 +1264,6 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 					}
 					return nil
 				})
-				return nil
 			})
 		}
 		defer wg.Wait()
