@@ -18,12 +18,11 @@ package freezeblocks
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"path/filepath"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -91,6 +90,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	require.NoError(t, err)
@@ -100,6 +100,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	tx.Rollback()
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	genesisHeader := &types.Header{
 		Number: common.Big0,
