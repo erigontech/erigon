@@ -166,7 +166,7 @@ func TestFindMergeRange(t *testing.T) {
 		require.Equal(t, expect.String(), Ranges(found).String())
 
 		var RangesNew []Range
-		start := uint64(19_000_000)
+		start := uint64(99_000_000)
 		for i := uint64(0); i < 24; i++ {
 			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
@@ -193,7 +193,7 @@ func TestFindMergeRange(t *testing.T) {
 		require.Equal(t, expect.String(), Ranges(found).String())
 
 		var RangesNew Ranges
-		start := uint64(19_000_000)
+		start := uint64(99_000_000)
 		for i := uint64(0); i < 240; i++ {
 			RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 		}

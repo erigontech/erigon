@@ -4,8 +4,10 @@ go 1.24.0
 
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
+replace github.com/crate-crypto/go-eth-kzg => github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105034637-43cb6f34f8e0
+
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20260105114333-2f59a10db72b
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.12
 	github.com/erigontech/secp256k1 v1.2.0
@@ -85,7 +87,6 @@ require (
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.2.4
-	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.6.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
@@ -254,6 +255,7 @@ require (
 	github.com/pion/logging v0.2.3 // indirect
 	github.com/pion/mdns v0.0.12 // indirect
 	github.com/pion/mdns/v2 v2.0.7 // indirect
+	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.15 // indirect
 	github.com/pion/rtp v1.8.18 // indirect
 	github.com/pion/sctp v1.8.33 // indirect

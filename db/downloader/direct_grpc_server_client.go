@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package direct
+package downloader
 
 import (
 	"context"
@@ -25,22 +25,24 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
-type DownloaderClient struct {
+// directGrpcServerClient wraps a downloaderproto.DownloaderServer to implement
+// the downloaderproto.DownloaderClient interface for direct in-process calls to GRPC methods.
+type directGrpcServerClient struct {
 	server downloaderproto.DownloaderServer
 }
 
-func NewDownloaderClient(server downloaderproto.DownloaderServer) *DownloaderClient {
-	return &DownloaderClient{server: server}
+func DirectGrpcServerClient(server downloaderproto.DownloaderServer) downloaderproto.DownloaderClient {
+	return directGrpcServerClient{server: server}
 }
 
-func (c *DownloaderClient) Download(ctx context.Context, in *downloaderproto.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c directGrpcServerClient) Download(ctx context.Context, in *downloaderproto.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Download(ctx, in)
 }
 
-func (c *DownloaderClient) Seed(ctx context.Context, in *downloaderproto.SeedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c directGrpcServerClient) Seed(ctx context.Context, in *downloaderproto.SeedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Seed(ctx, in)
 }
 
-func (c *DownloaderClient) Delete(ctx context.Context, in *downloaderproto.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c directGrpcServerClient) Delete(ctx context.Context, in *downloaderproto.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)
 }
