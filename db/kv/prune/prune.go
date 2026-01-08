@@ -246,6 +246,7 @@ func TableScanningPrune(
 			if time.Since(start) > timeOut {
 				logger.Info("prune key timed out", "name", filenameBase)
 				stat.LastPrunedKey = common.Copy(txnb)
+				stat.KeyProgress = InProgress
 				return stat, nil
 			}
 			txNum := binary.BigEndian.Uint64(txnb)
@@ -295,8 +296,9 @@ func TableScanningPrune(
 		}
 		valLen += dups
 		if time.Since(start) > timeOut {
-			logger.Info("prune val timed out", "name", filenameBase)
+			logger.Info("prune val timed out", "name", filenameBase, "len val", len(val))
 			stat.LastPrunedValue = common.Copy(val)
+			stat.ValueProgress = InProgress
 			return stat, nil
 		}
 		txNum := txNumGetter(val, txNumBytes)
