@@ -45,17 +45,67 @@ import (
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
 
-var cachedCfg sync.Map
+type preverifiedRegistry struct {
+	mu     sync.RWMutex
+	data   map[string]Preverified
+	cached map[string]*Cfg
+}
+
+var registry = &preverifiedRegistry{
+	data: map[string]Preverified{
+		networkname.Mainnet:    fromEmbeddedToml(snapshothashes.Mainnet),
+		networkname.Sepolia:    fromEmbeddedToml(snapshothashes.Sepolia),
+		networkname.Amoy:       fromEmbeddedToml(snapshothashes.Amoy),
+		networkname.BorMainnet: fromEmbeddedToml(snapshothashes.BorMainnet),
+		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
+		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
+		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+	},
+	cached: make(map[string]*Cfg),
+}
+
+func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
+	r.mu.RLock()
+	if cfg, ok := r.cached[networkName]; ok {
+		r.mu.RUnlock()
+		return cfg, true
+	}
+	pv, ok := r.data[networkName]
+	r.mu.RUnlock()
+
+	if !ok {
+		return newCfg(networkName, Preverified{}), false
+	}
+
+	cfg := newCfg(networkName, pv.Typed(knownTypes[networkName]))
+
+	r.mu.Lock()
+	// Double-check after acquiring write lock
+	if existing, ok := r.cached[networkName]; ok {
+		r.mu.Unlock()
+		return existing, true
+	}
+	r.cached[networkName] = cfg
+	r.mu.Unlock()
+
+	return cfg, true
+}
+
+func (r *preverifiedRegistry) Set(networkName string, pv Preverified) {
+	r.mu.Lock()
+	r.data[networkName] = pv
+	delete(r.cached, networkName) // Invalidate cache atomically
+	r.mu.Unlock()
+}
+
+func (r *preverifiedRegistry) Reset(data map[string]Preverified) {
+	r.mu.Lock()
+	r.data = data
+	r.cached = make(map[string]*Cfg) // Clear all cached
+	r.mu.Unlock()
+}
 
 var (
-	Mainnet    = fromEmbeddedToml(snapshothashes.Mainnet)
-	Sepolia    = fromEmbeddedToml(snapshothashes.Sepolia)
-	Amoy       = fromEmbeddedToml(snapshothashes.Amoy)
-	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
-	Gnosis     = fromEmbeddedToml(snapshothashes.Gnosis)
-	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
-	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
-
 	// This belongs in a generic embed.FS or something.
 	allSnapshotHashes = []*[]byte{
 		&snapshothashes.Mainnet,
@@ -428,16 +478,6 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	return c.MergeLimit(snaptype.MinCoreEnum, fromBlock)
 }
 
-var knownPreverified = map[string]Preverified{
-	networkname.Mainnet:    Mainnet,
-	networkname.Sepolia:    Sepolia,
-	networkname.Amoy:       Amoy,
-	networkname.BorMainnet: BorMainnet,
-	networkname.Gnosis:     Gnosis,
-	networkname.Chiado:     Chiado,
-	networkname.Hoodi:      Hoodi,
-}
-
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
 	knownTypes[networkName] = types
 }
@@ -484,16 +524,7 @@ func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uin
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) (*Cfg, bool) {
-	if v, ok := cachedCfg.Load(networkName); ok {
-		return v.(*Cfg), true
-	}
-	c, ok := knownPreverified[networkName]
-	if !ok {
-		return newCfg(networkName, Preverified{}), false
-	}
-	cfg := newCfg(networkName, c.Typed(knownTypes[networkName]))
-	cachedCfg.Store(networkName, cfg)
-	return cfg, true
+	return registry.Get(networkName)
 }
 
 var KnownWebseeds = map[string][]string{
@@ -544,16 +575,6 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		}
 	}
 
-	// Re-load the preverified hashes
-	Mainnet = fromEmbeddedToml(snapshothashes.Mainnet)
-	Sepolia = fromEmbeddedToml(snapshothashes.Sepolia)
-	Amoy = fromEmbeddedToml(snapshothashes.Amoy)
-	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
-	Gnosis = fromEmbeddedToml(snapshothashes.Gnosis)
-	Chiado = fromEmbeddedToml(snapshothashes.Chiado)
-	Hoodi = fromEmbeddedToml(snapshothashes.Hoodi)
-
-	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
 		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
 		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
@@ -564,27 +585,23 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
 	}
 
-	knownPreverified = map[string]Preverified{
-		networkname.Mainnet:    Mainnet,
-		networkname.Sepolia:    Sepolia,
-		networkname.Amoy:       Amoy,
-		networkname.BorMainnet: BorMainnet,
-		networkname.Gnosis:     Gnosis,
-		networkname.Chiado:     Chiado,
-		networkname.Hoodi:      Hoodi,
-	}
+	// Re-load the preverified hashes
+	registry.Reset(map[string]Preverified{
+		networkname.Mainnet:    fromEmbeddedToml(snapshothashes.Mainnet),
+		networkname.Sepolia:    fromEmbeddedToml(snapshothashes.Sepolia),
+		networkname.Amoy:       fromEmbeddedToml(snapshothashes.Amoy),
+		networkname.BorMainnet: fromEmbeddedToml(snapshothashes.BorMainnet),
+		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
+		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
+		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+	})
 	return
 }
 
 func SetToml(networkName string, toml []byte, local bool) {
-	if _, ok := knownPreverified[networkName]; !ok {
-		return
+	if _, ok := registry.Get(networkName); ok {
+		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)})
 	}
-	value := Preverified{
-		Local: local,
-		Items: fromToml(toml),
-	}
-	knownPreverified[networkName] = value
 }
 
 func GetToml(networkName string) []byte {
