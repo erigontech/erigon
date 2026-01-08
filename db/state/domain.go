@@ -1832,6 +1832,14 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	st := time.Now()
 
+	prg, err := GetPruneValProgress(rwTx, []byte(dt.d.ValuesTable))
+	if err != nil {
+		return nil, err
+	}
+	if prg != nil && prg.TxFrom == txFrom && prg.TxTo == txTo && prg.ValueProgress == prune.Done {
+		return stat, nil
+	}
+
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
 	defer func() {
 		dt.d.logger.Info("scan domain pruning res", "name", dt.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "vals", stat.Values, "spent ms", time.Since(st).Milliseconds())

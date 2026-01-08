@@ -1054,7 +1054,6 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
 		//     can't interrupt by ctrl+c and leave dirt in DB
-		println("prune timeout:", timeout.String())
 		stat, err := at.prune(context.Background(), tx, pruneLimit /*pruneLimit*/, furiousPrune || aggressivePrune, aggLogEvery)
 		if err != nil {
 			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
@@ -1080,10 +1079,8 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 
 		select {
 		case <-localTimeout.C: //must be first to improve responsivness
-			println("local timeout:", timeout.String())
 			return true, nil
 		case <-ctx.Done():
-			println("ctx")
 			return false, ctx.Err()
 		case <-logEvery.C:
 			if furiousPrune {
@@ -1131,8 +1128,7 @@ type AggregatorPruneStat struct {
 }
 
 func (as *AggregatorPruneStat) PrunedNothing() bool {
-	for name, d := range as.Domains {
-		println("pruned", name, d.Values)
+	for _, d := range as.Domains {
 		if d != nil && !d.PrunedNothing() {
 			return false
 		}
