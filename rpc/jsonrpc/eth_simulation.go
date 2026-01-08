@@ -79,11 +79,11 @@ type CallResult struct {
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
 	Status     hexutil.Uint64  `json:"status"`
-	Error      interface{}     `json:"error,omitempty"`
+	Error      any             `json:"error,omitempty"`
 }
 
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
-type SimulatedBlockResult map[string]interface{}
+type SimulatedBlockResult map[string]any
 
 // SimulationResult represents the result contained in an eth_simulateV1 response.
 type SimulationResult []SimulatedBlockResult
@@ -423,13 +423,10 @@ func (s *simulator) simulateBlock(
 	if latest {
 		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
 	} else {
-		historyStateReader := state.NewHistoryReaderV3()
-		historyStateReader.SetTx(tx)
-		if minTxNum < historyStateReader.StateHistoryStartFrom() {
+		if minTxNum < state.StateHistoryStartTxNum(tx) {
 			return nil, nil, state.PrunedError
 		}
-		historyStateReader.SetTxNum(minTxNum)
-		stateReader = historyStateReader
+		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
@@ -543,7 +540,7 @@ func (s *simulator) simulateBlock(
 	}
 
 	// Marshal the block in RPC format including the call results in a custom field.
-	additionalFields := make(map[string]interface{})
+	additionalFields := make(map[string]any)
 	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields)
 	if err != nil {
 		return nil, nil, err

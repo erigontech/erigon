@@ -47,7 +47,7 @@ const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
 	Txs       []*ethapi.RPCTransaction `json:"txs"`
-	Receipts  []map[string]interface{} `json:"receipts"`
+	Receipts  []map[string]any         `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`
 }
@@ -57,9 +57,9 @@ type OtterscanAPI interface {
 	GetInternalOperations(ctx context.Context, hash common.Hash) ([]*InternalOperation, error)
 	SearchTransactionsBefore(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error)
 	SearchTransactionsAfter(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error)
-	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error)
-	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
+	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
+	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error)
+	GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]any, error)
 	HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error)
 	TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error)
 	GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
@@ -281,8 +281,8 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 	return results[:totalBlocksTraced], hasMore, nil
 }
 
-func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
-	additionalFields := make(map[string]interface{})
+func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
+	additionalFields := make(map[string]any)
 	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
@@ -383,7 +383,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 	return block, block.Body().SendersFromTxs(), nil
 }
 
-func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -414,7 +414,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
 
-	result := make([]map[string]interface{}, 0, len(receipts))
+	result := make([]map[string]any, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
 		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)
@@ -424,13 +424,13 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 
 	// Pruned block attrs
-	prunedBlock := map[string]interface{}{}
+	prunedBlock := map[string]any{}
 	for _, k := range []string{"timestamp", "miner", "baseFeePerGas"} {
 		prunedBlock[k] = getBlockRes[k]
 	}
 
 	// Crop txn input to 4bytes
-	var txs = getBlockRes["transactions"].([]interface{})
+	var txs = getBlockRes["transactions"].([]any)
 	for _, rawTx := range txs {
 		rpcTx := rawTx.(*ethapi.RPCTransaction)
 		if len(rpcTx.Input) >= 4 {
@@ -448,8 +448,8 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		pageStart = 0
 	}
 
-	response := map[string]interface{}{}
-	getBlockRes["transactions"] = getBlockRes["transactions"].([]interface{})[pageStart:pageEnd]
+	response := map[string]any{}
+	getBlockRes["transactions"] = getBlockRes["transactions"].([]any)[pageStart:pageEnd]
 	response["fullblock"] = getBlockRes
 	response["receipts"] = result[pageStart:pageEnd]
 	return response, nil

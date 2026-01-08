@@ -422,7 +422,7 @@ type ValidationPhaseError struct {
 	frameReverted    bool
 }
 
-func (v *ValidationPhaseError) ErrorData() interface{} {
+func (v *ValidationPhaseError) ErrorData() any {
 	return v.reason
 }
 

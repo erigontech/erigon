@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-func decodeEncode(input []byte, val interface{}) error {
+func decodeEncode(input []byte, val any) error {
 	if err := rlp.DecodeBytes(input, val); err != nil {
 		// not valid rlp, nothing to do
 		return nil
@@ -58,8 +58,8 @@ func fuzzRlp(t *testing.T, input []byte) {
 	if elems, _, err := rlp.SplitList(input); err == nil {
 		rlp.CountValues(elems)
 	}
-	rlp.NewStream(bytes.NewReader(input), 0).Decode(new(interface{}))
-	if err := decodeEncode(input, new(interface{})); err != nil {
+	rlp.NewStream(bytes.NewReader(input), 0).Decode(new(any))
+	if err := decodeEncode(input, new(any)); err != nil {
 		t.Fatal(err)
 	}
 	{
@@ -77,7 +77,7 @@ func fuzzRlp(t *testing.T, input []byte) {
 			Bool  bool
 			Raw   rlp.RawValue
 			Slice []*Types
-			Iface []interface{}
+			Iface []any
 		}
 		var v Types
 		if err := decodeEncode(input, &v); err != nil {
@@ -93,7 +93,7 @@ func fuzzRlp(t *testing.T, input []byte) {
 			Raw    rlp.RawValue
 			Slice  []*AllTypes
 			Array  [3]*AllTypes
-			Iface  []interface{}
+			Iface  []any
 		}
 		var v AllTypes
 		if err := decodeEncode(input, &v); err != nil {

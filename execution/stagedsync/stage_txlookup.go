@@ -169,8 +169,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		Quit:            ctx.Done(),
 		ExtractStartKey: hexutil.EncodeTs(blockFrom),
 		ExtractEndKey:   hexutil.EncodeTs(blockTo),
-		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []any) {
+			return []any{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
 }
@@ -340,8 +340,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		Quit:            ctx.Done(),
 		ExtractStartKey: hexutil.EncodeTs(blockFrom),
 		ExtractEndKey:   hexutil.EncodeTs(blockTo),
-		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []any) {
+			return []any{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
 	if err != nil {

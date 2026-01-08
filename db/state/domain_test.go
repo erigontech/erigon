@@ -2557,7 +2557,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	randfn := func(till uint64) uint64 { return 1 + (rand.Uint64() % till) } // [1,till]
 
 	key := randfn(20) // [1-20] random key
-	//key := uint64(2)
+	// key := uint64(5)
 	t.Logf("using key: %d", key)
 	keyBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(keyBytes, key)
@@ -2566,7 +2566,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 		from, to = randfn(100), randfn(1000)
 	}
 
-	//from, to := uint64(10), uint64(21)
+	// from, to := uint64(18), uint64(19)
 	t.Logf("from: %d, to: %d", from, to)
 	it, err := dc.TraceKey(ctx, keyBytes, from, to, roTx)
 	require.NoError(t, err)

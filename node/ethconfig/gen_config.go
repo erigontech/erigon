@@ -52,6 +52,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Ethstats                            string
 		InternalCL                          bool
 		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
+		OverrideAmsterdamTime               *big.Int `toml:",omitempty"`
 		KeepStoredChainConfig               bool
 		SilkwormExecution                   bool
 		SilkwormRpcDaemon                   bool
@@ -98,6 +99,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
+	enc.OverrideAmsterdamTime = c.OverrideAmsterdamTime
 	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
 	enc.SilkwormExecution = c.SilkwormExecution
 	enc.SilkwormRpcDaemon = c.SilkwormRpcDaemon
@@ -149,6 +151,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Ethstats                            *string
 		InternalCL                          *bool
 		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
+		OverrideAmsterdamTime               *big.Int `toml:",omitempty"`
 		KeepStoredChainConfig               *bool
 		SilkwormExecution                   *bool
 		SilkwormRpcDaemon                   *bool
@@ -256,6 +259,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.OverrideOsakaTime != nil {
 		c.OverrideOsakaTime = dec.OverrideOsakaTime
+	}
+	if dec.OverrideAmsterdamTime != nil {
+		c.OverrideAmsterdamTime = dec.OverrideAmsterdamTime
 	}
 	if dec.KeepStoredChainConfig != nil {
 		c.KeepStoredChainConfig = *dec.KeepStoredChainConfig

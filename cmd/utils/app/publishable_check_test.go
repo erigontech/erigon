@@ -51,6 +51,22 @@ func Test_CheckStartFrom0(t *testing.T) {
 	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
+func Test_CheckAllowedNonStartFrom0(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	touchFiles(t, dirs, []snapRange{
+		{0, 10}, {10, 20}, {20, 30},
+	})
+
+	delFile(t, dirs.Snap, "v1.0-000000-000010-blocksidecars.idx") // blobsidecars start at 1942 step on mainnet after dencun upgrade
+	delFile(t, dirs.Snap, "v1.0-000000-000010-blobsidecars.seg")
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+
+	// but removing other files should still error
+	delFile(t, dirs.Snap, "v1.0-000000-000010-beaconblocks.idx")
+	delFile(t, dirs.Snap, "v1.0-000000-000010-beaconblocks.seg")
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+}
+
 func Test_CheckOverlaps(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	touchFiles(t, dirs, []snapRange{

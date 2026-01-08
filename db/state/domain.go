@@ -1769,7 +1769,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		mxPrunableDComm.Set(delta)
 	}
 	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
-	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
+	return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
 }
 
 type DomainPruneStat struct {
@@ -2004,8 +2004,18 @@ func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endT
 	// then when we actually use this value, we adjust the txNum
 	ds := stream.NewSingleDuo(uint64(math.MaxUint64), v2)
 	dst := stream.Union2(tfht, ds, order.Asc, kv.Unlim)
+	historyValExists := false
 
-	return stream.TransformDuo(dst, func(txNum uint64, v []byte) (uint64, []byte, error) {
+	fdst := stream.FilterDuo(dst, func(txNum uint64, v []byte) bool {
+		if txNum == math.MaxUint64 {
+			// if !historyValExists, need to skip GetAsOf val as well
+			return historyValExists
+		}
+		historyValExists = true
+		return true
+	})
+
+	return stream.TransformDuo(fdst, func(txNum uint64, v []byte) (uint64, []byte, error) {
 		if txNum == math.MaxUint64 {
 			// prevTxNum has the last txNum in the stream
 			txNum = uint64(prevTxNum)
