@@ -1747,6 +1747,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	if m := dt.files.EndTxNum(); m > 0 {
 		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
 	}
+	return true, maxStepToPrune
 	var untilStep kv.Step
 	if untilTx > 0 {
 		untilStep = kv.Step((untilTx - 1) / dt.stepSize)
