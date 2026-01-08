@@ -971,10 +971,10 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	prefixLen := len(prefix)
 	if wordLen == 0 && prefixLen != 0 {
-		return true
+		return false
 	}
 	if prefixLen == 0 {
-		return false
+		return true
 	}
 
 	g.nextPos(true)
@@ -995,6 +995,9 @@ func (g *Getter) MatchCmpUncompressed(buf []byte) int {
 		return 1
 	}
 	if bufLen == 0 {
+		if wordLen == 0 {
+			return 0
+		}
 		return -1
 	}
 
