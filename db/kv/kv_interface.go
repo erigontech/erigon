@@ -436,6 +436,9 @@ type TemporalDebugTx interface {
 	GetLatestFromDB(domain Domain, k []byte) (v []byte, step Step, found bool, err error)
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
+	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
+	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
+
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
@@ -449,7 +452,7 @@ type TemporalDebugTx interface {
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
 
-	NewMemBatch(ioMetrics interface{}) TemporalMemBatch
+	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
 type TemporalDebugDB interface {
@@ -470,6 +473,7 @@ type TemporalMemBatch interface {
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
+	Merge(other TemporalMemBatch) error
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error

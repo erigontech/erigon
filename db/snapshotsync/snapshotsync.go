@@ -25,9 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -112,12 +111,12 @@ func BuildDownloadRequest(
 func RequestSnapshotsDownload(
 	ctx context.Context,
 	downloadRequest []services.DownloadRequest,
-	downloader downloaderproto.DownloaderClient,
+	downloaderClient downloader.Client,
 	logTarget string,
 ) error {
 	// start seed large .seg of large size
 	req := BuildDownloadRequest(downloadRequest, logTarget)
-	if _, err := downloader.Download(ctx, req, grpc.WaitForReady(true)); err != nil {
+	if err := downloaderClient.Download(ctx, req); err != nil {
 		return err
 	}
 	return nil
@@ -341,7 +340,7 @@ func SyncSnapshots(
 	tx kv.RwTx,
 	blockReader blockReader,
 	cc *chain.Config,
-	snapshotDownloader downloaderproto.DownloaderClient,
+	snapshotDownloader downloader.Client,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
 ) error {
@@ -377,7 +376,7 @@ func SyncSnapshots(
 				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
 			}
 			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
-			_, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader})
+			err = snapshotDownloader.Delete(ctx, toDeleteDownloader)
 			if err != nil {
 				return err
 			}
@@ -395,8 +394,9 @@ func SyncSnapshots(
 
 		txNumsReader := blockReader.TxnumReader(ctx)
 
-		// This clause belongs in another function.
-		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
+		// This clause belongs in another function. We can take a long time here to determine what
+		// requests to send to the Downloader. Need to communicate that.
+		log.Info(fmt.Sprintf("[%s] Preparing snapshots request for %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()
 		//Corner cases:

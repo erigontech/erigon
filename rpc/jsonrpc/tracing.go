@@ -187,7 +187,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			gasUsed += _gasUsed
 		} else {
 			var _gasUsed uint64
-			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
+			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
 			gasUsed += _gasUsed
 		}
 		if err == nil {
@@ -341,7 +341,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	_, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
 	return err
 }
 
@@ -397,7 +397,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 
 	if config != nil && config.BlockOverrides != nil {
-		if config.BlockOverrides.BaseFeePerGas != nil {
+		if config.BlockOverrides.BaseFeePerGas != nil && baseFee != nil {
 			overflow := baseFee.SetFromBig(config.BlockOverrides.BaseFeePerGas.ToInt())
 			if overflow {
 				return errors.New("BlockOverrides.BaseFee uint256 overflow")
@@ -418,22 +418,30 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return fmt.Errorf("convert args to msg: %v", err)
 	}
 
+	var precompiles vm.PrecompiledContracts
+
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
-	if config != nil && config.StateOverrides != nil {
-		if err := config.StateOverrides.OverrideAndCommit(ibs, blockCtx.Rules(chainConfig)); err != nil {
-			return fmt.Errorf("override state: %v", err)
+	if config != nil {
+		if config.BlockOverrides != nil {
+			err := config.BlockOverrides.Override(&blockCtx)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Override the state before block execution.
+		if config.StateOverrides != nil {
+			rules := blockCtx.Rules(chainConfig)
+			precompiles = vm.ActivePrecompiledContracts(rules)
+			if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+				return err
+			}
 		}
 	}
 
-	if config != nil && config.BlockOverrides != nil {
-		err := config.BlockOverrides.Override(&blockCtx)
-		if err != nil {
-			return err
-		}
-	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, hash, 0, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, hash, 0, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 	return err
 }
 
@@ -537,7 +545,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		err = config.StateOverrides.OverrideAndCommit(ibs, rules)
+		err = config.StateOverrides.Override(ibs, nil, rules)
 		if err != nil {
 			return err
 		}
@@ -565,7 +573,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			txCtx = protocol.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
 			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
-			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, header.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
+			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, header.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, nil)
 			if err != nil {
 				return err
 			}

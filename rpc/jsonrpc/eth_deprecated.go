@@ -37,6 +37,6 @@ func (api *APIImpl) Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes)
 }
 
 // SignTransaction deprecated
-func (api *APIImpl) SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error) {
+func (api *APIImpl) SignTransaction(_ context.Context, txObject any) (common.Hash, error) {
 	return common.Hash{0}, fmt.Errorf(NotAvailableDeprecated, "eth_signTransaction")
 }

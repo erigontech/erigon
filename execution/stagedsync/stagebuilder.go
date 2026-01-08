@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -32,6 +33,8 @@ type ChainEventNotifier interface {
 	OnNewPendingLogs(types.Logs)
 	OnLogs([]*remoteproto.SubscribeLogsReply)
 	HasLogSubscriptions() bool
+	OnReceipts([]*remoteproto.SubscribeReceiptsReply)
+	HasReceiptSubscriptions() bool
 }
 
 func MiningStages(
@@ -53,7 +56,9 @@ func MiningStages(
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
 			},
-			Prune: func(u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
+				return nil
+			},
 		},
 		{
 			ID:          stages.MiningExecution,
@@ -64,7 +69,9 @@ func MiningStages(
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
 			},
-			Prune: func(u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
+				return nil
+			},
 		},
 		{
 			ID:          stages.MiningFinish,
@@ -75,7 +82,9 @@ func MiningStages(
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
 			},
-			Prune: func(u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
+				return nil
+			},
 		},
 	}
 }

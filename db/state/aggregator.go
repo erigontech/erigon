@@ -1079,6 +1079,8 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		select {
 		case <-localTimeout.C: //must be first to improve responsivness
 			return true, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
 		case <-logEvery.C:
 			if furiousPrune {
 				at.a.logger.Info("[prune] state",
@@ -1097,9 +1099,6 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 					//"pruned", fullStat.String(),
 				)
 			}
-
-		case <-ctx.Done():
-			return false, ctx.Err()
 		default:
 		}
 	}
@@ -1872,6 +1871,13 @@ func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, ma
 		v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	}
 	return
+}
+
+func (at *AggregatorRoTx) DebugTraceKey(ctx context.Context, domain kv.Domain, key []byte, fromTxNum uint64, toTxNum uint64, tx kv.Tx) (stream.U64V, error) {
+	if at.d[domain].d.HistoryDisabled {
+		return nil, fmt.Errorf("domain %s has history disabled; can't do TraceKey", domain)
+	}
+	return at.d[domain].TraceKey(ctx, key, fromTxNum, toTxNum, tx)
 }
 
 func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {

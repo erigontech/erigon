@@ -15,7 +15,7 @@ import (
 
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	services "github.com/erigontech/erigon/cl/phase1/network/services"
-	sentinelproto "github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -44,18 +44,18 @@ func (m *MockSyncCommitteeMessagesService) EXPECT() *MockSyncCommitteeMessagesSe
 }
 
 // DecodeGossipMessage mocks base method.
-func (m *MockSyncCommitteeMessagesService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*services.SyncCommitteeMessageForGossip, error) {
+func (m *MockSyncCommitteeMessagesService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*services.SyncCommitteeMessageForGossip, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DecodeGossipMessage", data, version)
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", pid, data, version)
 	ret0, _ := ret[0].(*services.SyncCommitteeMessageForGossip)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
-func (mr *MockSyncCommitteeMessagesServiceMockRecorder) DecodeGossipMessage(data, version any) *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall {
+func (mr *MockSyncCommitteeMessagesServiceMockRecorder) DecodeGossipMessage(pid, data, version any) *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockSyncCommitteeMessagesService)(nil).DecodeGossipMessage), data, version)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockSyncCommitteeMessagesService)(nil).DecodeGossipMessage), pid, data, version)
 	return &MockSyncCommitteeMessagesServiceDecodeGossipMessageCall{Call: call}
 }
 
@@ -71,51 +71,51 @@ func (c *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall) Return(arg0 *s
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall) Do(f func(*sentinelproto.GossipData, clparams.StateVersion) (*services.SyncCommitteeMessageForGossip, error)) *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall {
+func (c *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall) Do(f func(peer.ID, []byte, clparams.StateVersion) (*services.SyncCommitteeMessageForGossip, error)) *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall) DoAndReturn(f func(*sentinelproto.GossipData, clparams.StateVersion) (*services.SyncCommitteeMessageForGossip, error)) *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall {
+func (c *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall) DoAndReturn(f func(peer.ID, []byte, clparams.StateVersion) (*services.SyncCommitteeMessageForGossip, error)) *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
-// IsMyGossipMessage mocks base method.
-func (m *MockSyncCommitteeMessagesService) IsMyGossipMessage(name string) bool {
+// Names mocks base method.
+func (m *MockSyncCommitteeMessagesService) Names() []string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsMyGossipMessage", name)
-	ret0, _ := ret[0].(bool)
+	ret := m.ctrl.Call(m, "Names")
+	ret0, _ := ret[0].([]string)
 	return ret0
 }
 
-// IsMyGossipMessage indicates an expected call of IsMyGossipMessage.
-func (mr *MockSyncCommitteeMessagesServiceMockRecorder) IsMyGossipMessage(name any) *MockSyncCommitteeMessagesServiceIsMyGossipMessageCall {
+// Names indicates an expected call of Names.
+func (mr *MockSyncCommitteeMessagesServiceMockRecorder) Names() *MockSyncCommitteeMessagesServiceNamesCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMyGossipMessage", reflect.TypeOf((*MockSyncCommitteeMessagesService)(nil).IsMyGossipMessage), name)
-	return &MockSyncCommitteeMessagesServiceIsMyGossipMessageCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Names", reflect.TypeOf((*MockSyncCommitteeMessagesService)(nil).Names))
+	return &MockSyncCommitteeMessagesServiceNamesCall{Call: call}
 }
 
-// MockSyncCommitteeMessagesServiceIsMyGossipMessageCall wrap *gomock.Call
-type MockSyncCommitteeMessagesServiceIsMyGossipMessageCall struct {
+// MockSyncCommitteeMessagesServiceNamesCall wrap *gomock.Call
+type MockSyncCommitteeMessagesServiceNamesCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSyncCommitteeMessagesServiceIsMyGossipMessageCall) Return(arg0 bool) *MockSyncCommitteeMessagesServiceIsMyGossipMessageCall {
+func (c *MockSyncCommitteeMessagesServiceNamesCall) Return(arg0 []string) *MockSyncCommitteeMessagesServiceNamesCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSyncCommitteeMessagesServiceIsMyGossipMessageCall) Do(f func(string) bool) *MockSyncCommitteeMessagesServiceIsMyGossipMessageCall {
+func (c *MockSyncCommitteeMessagesServiceNamesCall) Do(f func() []string) *MockSyncCommitteeMessagesServiceNamesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncCommitteeMessagesServiceIsMyGossipMessageCall) DoAndReturn(f func(string) bool) *MockSyncCommitteeMessagesServiceIsMyGossipMessageCall {
+func (c *MockSyncCommitteeMessagesServiceNamesCall) DoAndReturn(f func() []string) *MockSyncCommitteeMessagesServiceNamesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

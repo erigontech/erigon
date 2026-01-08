@@ -701,7 +701,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
-	info := []interface{}{
+	info := []any{
 		"grpc", cfg.GRPCServerEnabled,
 		"http", cfg.HttpServerEnabled,
 		"ws", cfg.WebsocketEnabled,
@@ -956,7 +956,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	engineInfo := []interface{}{"url", engineAddr}
+	engineInfo := []any{"url", engineAddr}
 	logger.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
 	return engineListener, engineSrv, engineAddr.String(), nil
@@ -1067,12 +1067,11 @@ func (e *remoteRulesEngine) Close() error {
 	return e.engine.Close()
 }
 
-func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
 	if err := e.validateEngineReady(); err != nil {
-		panic(err)
+		return err
 	}
-
-	e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
+	return e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 }
 
 func (e *remoteRulesEngine) GetTransferFunc() evmtypes.TransferFunc {

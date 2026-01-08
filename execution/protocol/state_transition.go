@@ -269,31 +269,33 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
-	if st.evm.ChainRules().IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
-		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, st.msg.From(), len(st.msg.BlobHashes()))
+	rules := st.evm.ChainRules()
+	from := st.msg.From()
+	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
+		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
 	}
 
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
-		stNonce, err := st.state.GetNonce(st.msg.From())
+		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
-				st.msg.From(), msgNonce, stNonce)
+				from, msgNonce, stNonce)
 		} else if stNonce > msgNonce {
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
-				st.msg.From(), msgNonce, stNonce)
+				from, msgNonce, stNonce)
 		} else if stNonce+1 < stNonce {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
-				st.msg.From(), stNonce)
+				from, stNonce)
 		}
 	}
 
 	if st.msg.CheckTransaction() {
 		// Make sure the sender is an EOA (EIP-3607)
-		codeHash, err := st.state.GetCodeHash(st.msg.From())
+		codeHash, err := st.state.GetCodeHash(from)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
@@ -303,39 +305,39 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			// so we have to allow that.
 
 			// eip-7702 allows tx origination from accounts having delegated designation code.
-			_, ok, err := st.state.GetDelegatedDesignation(st.msg.From())
+			_, ok, err := st.state.GetDelegatedDesignation(from)
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if !ok {
 				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-					st.msg.From(), codeHash)
+					from, codeHash)
 			}
 		}
 	}
 
 	// Make sure the transaction feeCap is greater than the block's baseFee.
-	if st.evm.ChainRules().IsLondon {
+	if rules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
-			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+			if err := CheckEip1559TxGasFeeCap(from, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
 				return err
 			}
 		}
 	}
-	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
+	if st.msg.BlobGas() > 0 && rules.IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
 		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
-				ErrMaxFeePerBlobGas, st.msg.From(), st.msg.MaxFeePerBlobGas(), blobGasPrice)
+				ErrMaxFeePerBlobGas, from, st.msg.MaxFeePerBlobGas(), blobGasPrice)
 		}
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
-		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From(), st.msg.Gas())
+	if st.msg.CheckGas() && rules.IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
 	}
 
 	return st.buyGas(gasBailout)

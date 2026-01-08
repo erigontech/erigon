@@ -371,10 +371,9 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.Equal(t, p2, v)
 }
 
-func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
+func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
 	t.Helper()
 	require := require.New(t)
-	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
@@ -413,6 +412,13 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	require.NoError(err)
 	err = tx.Commit()
 	require.NoError(err)
+	return txs
+}
+
+func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
+	t.Helper()
+	db, d := testDbAndDomain(t, logger)
+	txs := fillDomain(t, d, db, logger)
 	return db, d, txs
 }
 
@@ -2517,4 +2523,70 @@ func TestCanBuild(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, canBuild)
 	_ = writer.PutWithPrev(k, hexutil.EncodeTs(d.stepSize*2+1), d.stepSize*2, nil, 0)
+}
+
+func TestTraceKey_SmallVals(t *testing.T) {
+	testTraceKey(t, false)
+}
+
+func TestTraceKey_LargeVals(t *testing.T) {
+	testTraceKey(t, true)
+}
+
+func testTraceKey(t *testing.T, largeVals bool) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	db, d := testDbAndDomain(t, logger)
+	d.HistoryLargeValues = largeVals
+
+	txs := fillDomain(t, d, db, logger)
+	collateAndMerge(t, db, nil, d, txs)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+
+	dc2 := d.BeginFilesRo()
+	defer dc2.Close()                                                        // need to have different HistoryFilesRo for HistorySeek (because it changes internal state)
+	randfn := func(till uint64) uint64 { return 1 + (rand.Uint64() % till) } // [1,till]
+
+	key := randfn(20) // [1-20] random key
+	// key := uint64(5)
+	t.Logf("using key: %d", key)
+	keyBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(keyBytes, key)
+	from, to := uint64(1), uint64(0)
+	for from >= to {
+		from, to = randfn(100), randfn(1000)
+	}
+
+	// from, to := uint64(18), uint64(19)
+	t.Logf("from: %d, to: %d", from, to)
+	it, err := dc.TraceKey(ctx, keyBytes, from, to, roTx)
+	require.NoError(t, err)
+	defer it.Close()
+
+	i := uint64(math.Ceil(float64(from)/float64(key))) * key
+	count := uint64(0)
+	for it.HasNext() {
+		txNum, val, err := it.Next()
+		require.NoError(t, err)
+
+		require.Equal(t, i, txNum)
+		sval, ok, err := dc2.GetAsOf(keyBytes, txNum+1, roTx)
+		require.NoError(t, err)
+		require.True(t, ok)
+		fmt.Println(hexutil.Encode(val), hexutil.Encode(sval))
+		require.Equal(t, sval, val)
+		i += key
+		count++
+	}
+
+	require.Equal(t, (to-1)/key-(from-1)/key, count)
 }

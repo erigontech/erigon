@@ -371,7 +371,7 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := rlpHash([]interface{}{
+	hash := rlpHash([]any{
 		tx.Nonce,
 		tx.GasPrice,
 		tx.GasLimit,
@@ -386,7 +386,7 @@ func (tx *LegacyTx) Hash() common.Hash {
 
 func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
-		return rlpHash([]interface{}{
+		return rlpHash([]any{
 			tx.Nonce,
 			tx.GasPrice,
 			tx.GasLimit,
@@ -396,7 +396,7 @@ func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 			chainID, uint(0), uint(0),
 		})
 	}
-	return rlpHash([]interface{}{
+	return rlpHash([]any{
 		tx.Nonce,
 		tx.GasPrice,
 		tx.GasLimit,

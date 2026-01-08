@@ -35,7 +35,7 @@ type ExecutionBlockReaderByNumber interface {
 }
 
 var buffersPool = sync.Pool{
-	New: func() interface{} { return &bytes.Buffer{} },
+	New: func() any { return &bytes.Buffer{} },
 }
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.

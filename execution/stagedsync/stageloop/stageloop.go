@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon/db/downloader"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon/common"
@@ -52,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/node/silkworm"
 	"github.com/erigontech/erigon/p2p"
@@ -144,7 +144,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 	initialCycle, firstCycle := true, false
 
-	tx, err := db.BeginTemporalRw(ctx)  //nolint
+	tx, err := db.BeginTemporalRw(ctx) //nolint
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			}
 		}
 
-		if err := sync.RunPrune(db, tx, initialCycle); err != nil {
+		if err := sync.RunPrune(ctx, db, tx, initialCycle, 0); err != nil {
 			return err
 		}
 
@@ -342,9 +342,9 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 
 	// -- Prune+commit(sync)
 	if externalTx {
-		err = sync.RunPrune(db, tx, initialCycle)
+		err = sync.RunPrune(ctx, db, tx, initialCycle, 0)
 	} else {
-		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
+		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(ctx, db, tx, initialCycle, 0) })
 	}
 
 	if err != nil {
@@ -512,7 +512,8 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 		if err = stagedsync.NotifyNewHeaders(h.ctx, notifyFrom, notifyTo, h.notifications.Events, tx, h.logger); err != nil {
 			return nil
 		}
-		h.notifications.RecentLogs.Notify(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
+		h.notifications.RecentReceipts.NotifyReceipts(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
+		h.notifications.RecentReceipts.NotifyLogs(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
 	}
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
@@ -743,7 +744,7 @@ func NewDefaultStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader downloaderproto.DownloaderClient,
+	snapDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
@@ -779,7 +780,7 @@ func NewPipelineStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader downloaderproto.DownloaderClient,
+	snapDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,

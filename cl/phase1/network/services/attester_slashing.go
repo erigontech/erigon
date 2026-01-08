@@ -7,7 +7,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type attesterSlashingService struct {
@@ -16,19 +16,23 @@ type attesterSlashingService struct {
 
 func NewAttesterSlashingService(
 	forkchoiceStore *forkchoice.ForkChoiceStore,
-) *attesterSlashingService {
+) AttesterSlashingService {
 	return &attesterSlashingService{
 		forkchoiceStore: forkchoiceStore,
 	}
+}
+
+func (s *attesterSlashingService) Names() []string {
+	return []string{gossip.TopicNameAttesterSlashing}
 }
 
 func (s *attesterSlashingService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameAttesterSlashing
 }
 
-func (s *attesterSlashingService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.AttesterSlashing, error) {
+func (s *attesterSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.AttesterSlashing, error) {
 	obj := &cltypes.AttesterSlashing{}
-	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil

@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -39,7 +38,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -58,12 +56,10 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -216,48 +212,6 @@ var cmdStageCustomTrace = &cobra.Command{
 		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
 
 		if err := stageCustomTrace(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
-var cmdPrintCommitment = &cobra.Command{
-	Use:   "print_commitment",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := printCommitment(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
-var cmdCommitmentRebuild = &cobra.Command{
-	Use:   "commitment_rebuild",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -538,27 +492,6 @@ func init() {
 	withChaosMonkey(cmdStageCustomTrace)
 	withDomain(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
-
-	withConfig(cmdCommitmentRebuild)
-	withDataDir(cmdCommitmentRebuild)
-	withReset(cmdCommitmentRebuild)
-	withSqueeze(cmdCommitmentRebuild)
-	withBlock(cmdCommitmentRebuild)
-	withConcurrentCommitment(cmdCommitmentRebuild)
-	withUnwind(cmdCommitmentRebuild)
-	withPruneTo(cmdCommitmentRebuild)
-	withIntegrityChecks(cmdCommitmentRebuild)
-	withChain(cmdCommitmentRebuild)
-	withHeimdall(cmdCommitmentRebuild)
-	withChaosMonkey(cmdCommitmentRebuild)
-	rootCmd.AddCommand(cmdCommitmentRebuild)
-
-	withConfig(cmdPrintCommitment)
-	withDataDir(cmdPrintCommitment)
-	withChain(cmdPrintCommitment)
-	//withHeimdall(cmdPrintCommitment)
-	//withChaosMonkey(cmdPrintCommitment)
-	rootCmd.AddCommand(cmdPrintCommitment)
 
 	withConfig(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
@@ -918,7 +851,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneExecutionStage(p, tx, cfg, ctx, logger)
+		err = stagedsync.PruneExecutionStage(ctx, p, tx, cfg, 0, logger)
 		if err != nil {
 			return err
 		}
@@ -979,28 +912,34 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	for {
-		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, block, ctx, cfg, logger); err != nil {
+		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
 			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 				return err
 			}
-			if !noCommit {
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
-				doms.ClearRam(true)
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				if tx, err = db.BeginTemporalRw(ctx); err != nil {
-					return err
-				}
-			}
 		}
+
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
 		doms.ClearRam(true)
+		if !noCommit {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+		}
+
+		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+			return err
+		}
+		if execProgress >= block {
+			break
+		}
 	}
+
+	return nil
 }
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -1051,99 +990,6 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		return err
 	}
 
-	return nil
-}
-
-func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	agg.PeriodicalyPrintProcessSet(ctx)
-
-	// disable hard alignment; allowing commitment and storage/account to have
-	// different visibleFiles
-	agg.DisableAllDependencies()
-
-	acRo := agg.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
-	defer acRo.Close()
-	defer acRo.MadvNormal().DisableReadAhead()
-
-	commitmentFiles := acRo.Files(kv.CommitmentDomain)
-	fmt.Printf("Commitment files: %d\n", len(commitmentFiles))
-	for _, f := range commitmentFiles {
-		name := filepath.Base(f.Fullpath())
-		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
-		rootNodePrefix := []byte("state")
-		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
-		if err != nil {
-			return fmt.Errorf("failed to get root node from files: %w", err)
-		}
-		rootString, err := commitment.HexTrieStateToShortString(rootNode)
-		if err != nil {
-			return fmt.Errorf("failed to extract state root from root node: %w", err)
-		}
-		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
-	}
-
-	str, err := dbstate.CheckCommitmentForPrint(ctx, db)
-	if err != nil {
-		return fmt.Errorf("failed to check commitment: %w", err)
-	}
-	fmt.Printf("\n%s", str)
-
-	return nil
-}
-
-func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	dirs := datadir.New(datadirCli)
-	if reset {
-		return rawdbreset.Reset(ctx, db, stages.Execution)
-	}
-
-	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
-
-	rwTx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer rwTx.Rollback()
-
-	// remove all existing state commitment snapshots
-	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
-		return err
-	}
-
-	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
-	sconf := statecfg.Schema.CommitmentDomain
-	for _, tn := range sconf.Tables() {
-		log.Info("Clearing", "table", tn)
-		if err := rwTx.ClearTable(tn); err != nil {
-			return fmt.Errorf("failed to clear table %s: %w", tn, err)
-		}
-	}
-	if err := rwTx.Commit(); err != nil {
-		return err
-	}
-
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	if err = agg.OpenFolder(); err != nil { // reopen after snapshot file deletions
-		return fmt.Errorf("failed to re-open aggregator: %w", err)
-	}
-
-	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	agg.PeriodicalyPrintProcessSet(ctx)
-
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -1291,7 +1137,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		}
 
 		_allSnapshotsSingleton.LogStat("blocks")
-		_allBorSnapshotsSingleton.LogStat("bor")
+		//_allBorSnapshotsSingleton.LogStat("bor")
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
@@ -1449,7 +1295,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	var heimdallService *heimdall.Service
 	var heimdallClient heimdall.Client
 	var bridgeClient bridge.Client
-	var rulesConfig interface{}
+	var rulesConfig any
 	if cc.Clique != nil {
 		rulesConfig = chainspec.CliqueSnapshot
 	} else if cc.Aura != nil {

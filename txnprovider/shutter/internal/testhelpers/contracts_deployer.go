@@ -19,10 +19,12 @@ package testhelpers
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	executiontests "github.com/erigontech/erigon/execution/tests"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
@@ -54,7 +56,12 @@ func NewContractsDeployer(
 	}
 }
 
-func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment, error) {
+func (d ContractsDeployer) DeployCore(ctx context.Context) (_ ContractsDeployment, err error) {
+	defer func() {
+		if err != nil {
+			fmt.Println("DEPLOY ERR", err, dbg.Stack())
+		}
+	}()
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
 		return ContractsDeployment{}, err
