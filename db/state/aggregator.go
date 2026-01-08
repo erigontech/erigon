@@ -1242,6 +1242,35 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		return nil, nil
 	}
 
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		wg, ctx := errgroup.WithContext(ctx)
+		tbls := at.a.DomainTables()
+		for _, tbl := range tbls {
+			wg.Go(func() error {
+				return at.a.db.View(ctx, func(tx kv.Tx) error {
+					err := tx.ForEach(tbl, nil, func(k, v []byte) error {
+						_, _ = k[0], k[len(k)-1]
+						_, _ = v[0], v[len(v)-1]
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						default:
+						}
+						return nil
+					})
+					if err != nil {
+						return err
+					}
+					return nil
+				})
+				return nil
+			})
+		}
+		defer wg.Wait()
+		defer cancel()
+	}
+
 	if logEvery == nil {
 		logEvery = time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
