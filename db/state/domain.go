@@ -1882,6 +1882,8 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prs.KeyProgress = prune.Done
 
+	dt.d.logger.Info("prune started from", "status", prs.ValueProgress.String(), "last val", prs.LastPrunedValue)
+
 	pruneStat, err := prune.TableScanningPrune(ctx, dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prs, mode)
 	if err != nil {
