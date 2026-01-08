@@ -1776,15 +1776,16 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 }
 
 type DomainPruneStat struct {
-	MinStep kv.Step
-	MaxStep kv.Step
-	Values  uint64
-	Dups    uint64
-	History *InvertedIndexPruneStat
+	MinStep  kv.Step
+	MaxStep  kv.Step
+	Values   uint64
+	Dups     uint64
+	Progress prune.Progress
+	History  *InvertedIndexPruneStat
 }
 
 func (dc *DomainPruneStat) PrunedNothing() bool {
-	return dc.Values == 0 && (dc.History == nil || dc.History.PrunedNothing())
+	return dc.Values == 0 && dc.Progress == prune.Done && (dc.History == nil || dc.History.PrunedNothing())
 }
 
 func (dc *DomainPruneStat) String() (kvstr string) {
@@ -1792,7 +1793,7 @@ func (dc *DomainPruneStat) String() (kvstr string) {
 		return ""
 	}
 	if dc.Values > 0 {
-		kvstr = fmt.Sprintf("kv: %s %s from steps %d-%d", common.PrettyCounter(dc.Values), common.PrettyCounter(dc.Dups), dc.MinStep, dc.MaxStep)
+		kvstr = fmt.Sprintf("kv: %s %s from steps %d-%d; status: %s", common.PrettyCounter(dc.Values), common.PrettyCounter(dc.Dups), dc.MinStep, dc.MaxStep, dc.Progress)
 	}
 	if dc.History != nil {
 		if kvstr != "" {
@@ -1810,6 +1811,7 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	dc.MinStep = min(dc.MinStep, other.MinStep)
 	dc.MaxStep = max(dc.MaxStep, other.MaxStep)
 	dc.Values += other.Values
+	dc.Progress = min(dc.Progress, other.Progress)
 	if dc.History == nil {
 		if other.History != nil {
 			dc.History = other.History
@@ -1902,10 +1904,11 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	mxPruneSizeIndex.AddUint64(pruneStat.PruneCountValues)
 	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
 	return &DomainPruneStat{
-		MinStep: kv.Step(pruneStat.MinTxNum / dt.stepSize),
-		MaxStep: kv.Step(pruneStat.MaxTxNum / dt.stepSize),
-		Values:  pruneStat.PruneCountValues,
-		Dups:    pruneStat.DupsDeleted,
+		MinStep:  kv.Step(pruneStat.MinTxNum / dt.stepSize),
+		MaxStep:  kv.Step(pruneStat.MaxTxNum / dt.stepSize),
+		Values:   pruneStat.PruneCountValues,
+		Dups:     pruneStat.DupsDeleted,
+		Progress: pruneStat.ValueProgress,
 	}, nil
 }
 
