@@ -140,17 +140,6 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, txNumReader)
 }
 
-func CreateStateReader2(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	blockNumber, _, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
-	}
-	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, txNumReader)
-}
-
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	if latest {
 		cacheView, err := stateCache.View(ctx, tx)

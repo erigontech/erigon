@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -216,10 +217,13 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	defer tx.Rollback()
 	b, err := api.blockByNumber(ctx, number, tx)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	if b == nil {
-		return nil, nil
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	additionalFields := make(map[string]interface{})
 
@@ -333,6 +337,9 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
