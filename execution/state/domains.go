@@ -1129,13 +1129,17 @@ func (c *branchCache) Get(key commitment.Path) (ValueWithStep[commitment.Branch]
 		keyValue := key.Value()
 		switch len(keyValue) {
 		case 0:
-			if len(c.t0.Value) > 0 {
-				return c.t0, true
-			}
 			return ValueWithStep[commitment.Branch]{}, false
 		case 1:
-			value := c.t1[keyValue[0]&0x0f]
-			return value, len(value.Value) > 0
+			if keyValue[0]&0x10 == 0 {
+				if len(c.t0.Value) > 0 {
+					return c.t0, true
+				}
+				return ValueWithStep[commitment.Branch]{}, false
+			} else {
+				value := c.t1[keyValue[0]&0x0f]
+				return value, len(value.Value) > 0
+			}
 		case 2:
 			if keyValue[0]&0x10 == 0 {
 				value := c.t2[keyValue[1]]
@@ -1165,11 +1169,15 @@ func (c *branchCache) Add(k commitment.Path, v commitment.Branch, s kv.Step) (ev
 		keyValue := k.Value()
 		switch len(keyValue) {
 		case 0:
-			c.t0 = ValueWithStep[commitment.Branch]{Value: v, Step: s}
 			return false
 		case 1:
-			c.t1[keyValue[0]&0x0f] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
-			return false
+			if keyValue[0]&0x10 == 0 {
+				c.t0 = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+				return false
+			} else {
+				c.t1[keyValue[0]&0x0f] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+				return false
+			}
 		case 2:
 			if keyValue[0]&0x10 == 0 {
 				c.t2[keyValue[1]] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
@@ -1200,13 +1208,17 @@ func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
 		keyValue := k.Value()
 		switch len(keyValue) {
 		case 0:
-			evicted = len(c.t0.Value) > 0
-			c.t0 = ValueWithStep[commitment.Branch]{}
-			return evicted
+			return false
 		case 1:
-			evicted := len(c.t1[keyValue[0]&0x0f].Value) > 0
-			c.t1[keyValue[0]&0x0f] = ValueWithStep[commitment.Branch]{}
-			return evicted
+			if keyValue[0]&0x10 == 0 {
+				evicted = len(c.t0.Value) > 0
+				c.t0 = ValueWithStep[commitment.Branch]{}
+				return evicted
+			} else {
+				evicted := len(c.t1[keyValue[0]&0x0f].Value) > 0
+				c.t1[keyValue[0]&0x0f] = ValueWithStep[commitment.Branch]{}
+				return evicted
+			}
 		case 2:
 			if keyValue[0]&0x10 == 0 {
 				kv := keyValue[1]
