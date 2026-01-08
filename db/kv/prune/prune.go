@@ -36,6 +36,19 @@ const (
 	Done
 )
 
+func (p Progress) String() string {
+	switch p {
+	case First:
+		return "First"
+	case InProgress:
+		return "InProgress"
+	case Done:
+		return "Done"
+	default:
+		return "Unknown"
+	}
+}
+
 type StorageMode int
 
 const (
@@ -217,7 +230,11 @@ func TableScanningPrune(
 	var pairs, valLen uint64
 
 	defer func() {
-		logger.Info("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted, "pairs", pairs, "spent ms", time.Since(start).Milliseconds(), "prune ended", stat.KeyProgress == Done && stat.ValueProgress == Done && !asserts)
+		logger.Info("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys",
+			stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted,
+			"spent ms", time.Since(start).Milliseconds(),
+			"key prune status", stat.KeyProgress.String(),
+			"val prune status", stat.ValueProgress.String())
 	}()
 	if prevStat.KeyProgress != Done {
 		txnb := common.Copy(keyCursorPosition.StartKey)
