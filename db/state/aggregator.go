@@ -1044,9 +1044,11 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
 			spaceDirty, _, err := sptx.SpaceDirty()
 			if err != nil {
+				println("dirty1", err.Error())
 				return false, err
 			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
+				println("dirty2", spaceDirty)
 				return false, nil
 			}
 		}
@@ -1080,8 +1082,10 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 
 		select {
 		case <-localTimeout.C: //must be first to improve responsivness
+			println("local timeout:", timeout.String())
 			return true, nil
 		case <-ctx.Done():
+			println("ctx")
 			return false, ctx.Err()
 		case <-logEvery.C:
 			if furiousPrune {
