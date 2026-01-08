@@ -1044,11 +1044,9 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
 			spaceDirty, _, err := sptx.SpaceDirty()
 			if err != nil {
-				println("dirty1", err.Error())
 				return false, err
 			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
-				println("dirty2", spaceDirty)
 				return false, nil
 			}
 		}
@@ -1060,14 +1058,12 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		stat, err := at.prune(context.Background(), tx, pruneLimit /*pruneLimit*/, furiousPrune || aggressivePrune, aggLogEvery)
 		if err != nil {
 			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
-			println("left there")
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
 			if !fullStat.PrunedNothing() {
 				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
 			}
-			println("left here")
 			return false, nil
 		}
 		fullStat.Accumulate(stat)
@@ -1135,7 +1131,8 @@ type AggregatorPruneStat struct {
 }
 
 func (as *AggregatorPruneStat) PrunedNothing() bool {
-	for _, d := range as.Domains {
+	for name, d := range as.Domains {
+		println("pruned", name, d.Values)
 		if d != nil && !d.PrunedNothing() {
 			return false
 		}
