@@ -196,7 +196,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 			}
 		} else if dc.d.Accessors.Has(statecfg.AccessorHashMap) {
 			// For domains without BTree (e.g., commitment with HashMap accessor),
-			// iterate the data file directly using seg.Reader
+			// use binary search over .kv file
 			reader := dc.reusableReader(i)
 			recsplitIdxReader := dc.statelessIdxReader(i)
 			kvCount := reader.Count() / 2
