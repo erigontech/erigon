@@ -44,6 +44,15 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
+// FilterType represents the type of a filter subscription for metrics tracking.
+type FilterType string
+
+const (
+	FilterTypeLogs       FilterType = "logs"
+	FilterTypeHeads      FilterType = "heads"
+	FilterTypePendingTxs FilterType = "pendingTxs"
+)
+
 // Filters holds the state for managing subscriptions to various Ethereum events.
 // It allows for the subscription and management of events such as new blocks, pending transactions,
 // logs, and other Ethereum-related activities.
@@ -74,7 +83,7 @@ type Filters struct {
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
 func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
-	logger.Info("rpc filters: subscribing to Erigon events")
+	logger.Info("[rpc] [filters] subscribing to Erigon events")
 
 	ff := &Filters{
 		headsSubs:          concurrent.NewSyncMap[HeadsSubID, Sub[*types.Header]](),
@@ -89,6 +98,16 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		logger:             logger,
 		config:             config,
+	}
+
+	// Start the timeout loop for filter eviction if timeout is configured
+	if config.RpcSubscriptionFiltersTimeout > 0 {
+		logger.Info("[rpc] [filters] starting timeout loop for idle filter eviction",
+			"timeout", config.RpcSubscriptionFiltersTimeout,
+			"checkInterval", config.RpcSubscriptionFiltersTimeout/2)
+		go ff.timeoutLoop(ctx, config.RpcSubscriptionFiltersTimeout)
+	} else {
+		logger.Info("[rpc] [filters] timeout-based filter eviction disabled")
 	}
 
 	go func() {
@@ -264,6 +283,186 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 	return ff.pendingBlock
 }
 
+// timeoutLoop runs periodically and evicts subscriptions that have not been polled within the timeout duration.
+// This prevents unbounded accumulation of idle subscriptions and matches geth's behavior.
+func (ff *Filters) timeoutLoop(ctx context.Context, timeout time.Duration) {
+	// Check more frequently than the timeout to ensure timely eviction
+	checkInterval := timeout / 2
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	ff.logger.Debug("[rpc] [filters] timeout loop started", "timeout", timeout, "checkInterval", checkInterval)
+
+	for {
+		select {
+		case <-ctx.Done():
+			ff.logger.Debug("[rpc] [filters] timeout loop stopping due to context cancellation")
+			return
+		case <-ticker.C:
+			ff.logger.Trace("[rpc] [filters] running eviction check")
+			ff.evictStaleSubscriptions(timeout)
+		}
+	}
+}
+
+// evictStaleFilters removes filters that haven't been accessed within the timeout duration.
+// It iterates the existing subscription maps and checks each subscription's embedded tracking.
+func (ff *Filters) evictStaleSubscriptions(timeout time.Duration) {
+	var headsChecked, txsChecked, logsChecked int
+	var headsEvicted, txsEvicted, logsEvicted int
+
+	// Collect expired heads subscriptions
+	var headsToEvict []HeadsSubID
+	ff.headsSubs.Range(func(id HeadsSubID, sub Sub[*types.Header]) error {
+		headsChecked++
+		if sub.ShouldEvict(timeout) {
+			ff.logger.Trace("[rpc] [filters] heads filter marked for eviction", "id", id, "protocol", sub.Protocol())
+			headsToEvict = append(headsToEvict, id)
+		}
+		return nil
+	})
+	for _, id := range headsToEvict {
+		if sub, ok := ff.headsSubs.Get(id); ok {
+			protocol := sub.Protocol()
+			if ff.unsubscribeHeadsInternal(id) {
+				headsEvicted++
+				ff.logger.Info("[rpc] [filters] evicted idle heads filter", "id", id, "protocol", protocol, "timeout", timeout)
+				ff.decrementMetrics(FilterTypeHeads, protocol)
+				getReapedCounter(string(FilterTypeHeads)).Inc()
+			}
+		}
+	}
+
+	// Collect expired pending txs subscriptions
+	var txsToEvict []PendingTxsSubID
+	ff.pendingTxsSubs.Range(func(id PendingTxsSubID, sub Sub[[]types.Transaction]) error {
+		txsChecked++
+		if sub.ShouldEvict(timeout) {
+			ff.logger.Trace("[rpc] [filters] pending txs filter marked for eviction", "id", id, "protocol", sub.Protocol())
+			txsToEvict = append(txsToEvict, id)
+		}
+		return nil
+	})
+	for _, id := range txsToEvict {
+		if sub, ok := ff.pendingTxsSubs.Get(id); ok {
+			protocol := sub.Protocol()
+			if ff.unsubscribePendingTxsInternal(id) {
+				txsEvicted++
+				ff.logger.Info("[rpc] [filters] evicted idle pending txs filter", "id", id, "protocol", protocol, "timeout", timeout)
+				ff.decrementMetrics(FilterTypePendingTxs, protocol)
+				getReapedCounter(string(FilterTypePendingTxs)).Inc()
+			}
+		}
+	}
+
+	// Collect expired logs filter subscriptions
+	var logsToEvict []LogsSubID
+	ff.logsSubs.logsFilters.Range(func(id LogsSubID, filter *LogsFilter) error {
+		logsChecked++
+		if filter.sender != nil && filter.sender.ShouldEvict(timeout) {
+			ff.logger.Trace("[rpc] [filters] logs filter marked for eviction", "id", id, "protocol", filter.sender.Protocol())
+			logsToEvict = append(logsToEvict, id)
+		}
+		return nil
+	})
+	for _, id := range logsToEvict {
+		if filter, ok := ff.logsSubs.logsFilters.Get(id); ok && filter.sender != nil {
+			protocol := filter.sender.Protocol()
+			if ff.unsubscribeLogsInternal(id) {
+				logsEvicted++
+				ff.logger.Info("[rpc] [filters] evicted idle logs filter", "id", id, "protocol", protocol, "timeout", timeout)
+				ff.decrementMetrics(FilterTypeLogs, protocol)
+				getReapedCounter(string(FilterTypeLogs)).Inc()
+			}
+		}
+	}
+
+	// Log summary at DEBUG level
+	totalEvicted := headsEvicted + txsEvicted + logsEvicted
+	if totalEvicted > 0 {
+		ff.logger.Debug("[rpc] [filters] eviction cycle complete",
+			"headsChecked", headsChecked, "headsEvicted", headsEvicted,
+			"txsChecked", txsChecked, "txsEvicted", txsEvicted,
+			"logsChecked", logsChecked, "logsEvicted", logsEvicted)
+	} else {
+		ff.logger.Trace("[rpc] [filters] eviction cycle complete, no stale filters",
+			"headsChecked", headsChecked, "txsChecked", txsChecked, "logsChecked", logsChecked)
+	}
+}
+
+// TouchFilter resets the deadline for the given filter, preventing it from being evicted.
+// This should be called whenever a filter is accessed (e.g., via GetFilterChanges).
+func (ff *Filters) TouchSubscription(id SubscriptionID, ft FilterType) {
+	switch ft {
+	case FilterTypeHeads:
+		if sub, ok := ff.headsSubs.Get(HeadsSubID(id)); ok {
+			sub.Touch()
+			ff.logger.Trace("[rpc] [filters] touched heads filter", "id", id)
+		}
+	case FilterTypePendingTxs:
+		if sub, ok := ff.pendingTxsSubs.Get(PendingTxsSubID(id)); ok {
+			sub.Touch()
+			ff.logger.Trace("[rpc] [filters] touched pending txs filter", "id", id)
+		}
+	case FilterTypeLogs:
+		if filter, ok := ff.logsSubs.logsFilters.Get(LogsSubID(id)); ok && filter.sender != nil {
+			filter.sender.Touch()
+			ff.logger.Trace("[rpc] [filters] touched logs filter", "id", id)
+		}
+	}
+}
+
+// TrackSubscription enables timeout tracking and metrics for a subscription.
+// This should be called for HTTP polling filters. For WebSocket subscriptions, call
+// SetSubscriptionProtocol directly without enabling tracking as they are "evicted" once
+// connections are closed.
+func (ff *Filters) TrackSubscription(id SubscriptionID, ft FilterType, protocol string) {
+	switch ft {
+	case FilterTypeHeads:
+		if sub, ok := ff.headsSubs.Get(HeadsSubID(id)); ok {
+			sub.SetProtocol(protocol)
+			sub.EnableTimeout()
+			ff.logger.Debug("[rpc] [filters] registered heads subscription with timeout tracking", "id", id, "protocol", protocol)
+		}
+	case FilterTypePendingTxs:
+		if sub, ok := ff.pendingTxsSubs.Get(PendingTxsSubID(id)); ok {
+			sub.SetProtocol(protocol)
+			sub.EnableTimeout()
+			ff.logger.Debug("[rpc] [filters] registered pending txs subscription with timeout tracking", "id", id, "protocol", protocol)
+		}
+	case FilterTypeLogs:
+		if filter, ok := ff.logsSubs.logsFilters.Get(LogsSubID(id)); ok && filter.sender != nil {
+			filter.sender.SetProtocol(protocol)
+			filter.sender.EnableTimeout()
+			ff.logger.Debug("[rpc] [filters] registered logs subscription with timeout tracking", "id", id, "protocol", protocol)
+		}
+	}
+	ff.incrementMetrics(ft, protocol)
+}
+
+// SetSubscriptionProtocol sets the protocol for metrics tracking without enabling timeout.
+// Use this for WebSocket subscriptions that don't need eviction but need metrics.
+func (ff *Filters) SetSubscriptionProtocol(id SubscriptionID, ft FilterType, protocol string) {
+	switch ft {
+	case FilterTypeHeads:
+		if sub, ok := ff.headsSubs.Get(HeadsSubID(id)); ok {
+			sub.SetProtocol(protocol)
+			ff.logger.Debug("[rpc] [filters] registered heads subscription (no timeout)", "id", id, "protocol", protocol)
+		}
+	case FilterTypePendingTxs:
+		if sub, ok := ff.pendingTxsSubs.Get(PendingTxsSubID(id)); ok {
+			sub.SetProtocol(protocol)
+			ff.logger.Debug("[rpc] [filters] registered pending txs subscription (no timeout)", "id", id, "protocol", protocol)
+		}
+	case FilterTypeLogs:
+		if filter, ok := ff.logsSubs.logsFilters.Get(LogsSubID(id)); ok && filter.sender != nil {
+			filter.sender.SetProtocol(protocol)
+			ff.logger.Debug("[rpc] [filters] registered logs subscription (no timeout)", "id", id, "protocol", protocol)
+		}
+	}
+	ff.incrementMetrics(ft, protocol)
+}
+
 // subscribeToPendingTransactions subscribes to pending transactions using the given transaction pool client.
 // It listens for new transactions and processes them as they arrive.
 func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpoolproto.TxpoolClient) error {
@@ -390,11 +589,28 @@ func (ff *Filters) SubscribeNewHeads(size int) (<-chan *types.Header, HeadsSubID
 // UnsubscribeHeads unsubscribes from new block headers using the given subscription ID.
 // It returns true if the unsubscription was successful, otherwise false.
 func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
-	ch, ok := ff.headsSubs.Get(id)
+	sub, ok := ff.headsSubs.Get(id)
+	if !ok {
+		ff.logger.Debug("[rpc] [filters] unsubscribe heads filter not found", "id", id)
+		return false
+	}
+	protocol := sub.Protocol()
+	if !ff.unsubscribeHeadsInternal(id) {
+		return false
+	}
+	ff.logger.Debug("[rpc] [filters] unsubscribed heads filter", "id", id, "protocol", protocol)
+	ff.decrementMetrics(FilterTypeHeads, protocol)
+	return true
+}
+
+// unsubscribeHeadsInternal performs the actual unsubscription without updating metrics.
+// Used by eviction to avoid double-counting.
+func (ff *Filters) unsubscribeHeadsInternal(id HeadsSubID) bool {
+	sub, ok := ff.headsSubs.Get(id)
 	if !ok {
 		return false
 	}
-	ch.Close()
+	sub.Close()
 	if _, ok = ff.headsSubs.Delete(id); !ok {
 		return false
 	}
@@ -452,11 +668,28 @@ func (ff *Filters) SubscribePendingTxs(size int) (<-chan []types.Transaction, Pe
 // UnsubscribePendingTxs unsubscribes from pending transactions using the given subscription ID.
 // It returns true if the unsubscription was successful, otherwise false.
 func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
-	ch, ok := ff.pendingTxsSubs.Get(id)
+	sub, ok := ff.pendingTxsSubs.Get(id)
+	if !ok {
+		ff.logger.Debug("[rpc] [filters] unsubscribe pending txs filter not found", "id", id)
+		return false
+	}
+	protocol := sub.Protocol()
+	if !ff.unsubscribePendingTxsInternal(id) {
+		return false
+	}
+	ff.logger.Debug("[rpc] [filters] unsubscribed pending txs filter", "id", id, "protocol", protocol)
+	ff.decrementMetrics(FilterTypePendingTxs, protocol)
+	return true
+}
+
+// unsubscribePendingTxsInternal performs the actual unsubscription without updating metrics.
+// Used by eviction to avoid double-counting.
+func (ff *Filters) unsubscribePendingTxsInternal(id PendingTxsSubID) bool {
+	sub, ok := ff.pendingTxsSubs.Get(id)
 	if !ok {
 		return false
 	}
-	ch.Close()
+	sub.Close()
 	if _, ok = ff.pendingTxsSubs.Delete(id); !ok {
 		return false
 	}
@@ -623,7 +856,30 @@ func (ff *Filters) HasPendingTxsSubscription(id PendingTxsSubID) bool {
 // UnsubscribeLogs unsubscribes from logs using the given subscription ID.
 // It returns true if the unsubscription was successful, otherwise false.
 func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
+	// Get protocol before unsubscribing
+	var protocol string
+	filter, ok := ff.logsSubs.logsFilters.Get(id)
+	if ok && filter.sender != nil {
+		protocol = filter.sender.Protocol()
+	}
+	if !ok {
+		ff.logger.Debug("[rpc] [filters] unsubscribe logs filter not found", "id", id)
+	}
+	if !ff.unsubscribeLogsInternal(id) {
+		return false
+	}
+	ff.logger.Debug("[rpc] [filters] unsubscribed logs filter", "id", id, "protocol", protocol)
+	ff.decrementMetrics(FilterTypeLogs, protocol)
+	return true
+}
+
+// unsubscribeLogsInternal performs the actual unsubscription without updating metrics.
+// Used by eviction to avoid double-counting.
+func (ff *Filters) unsubscribeLogsInternal(id LogsSubID) bool {
 	isDeleted := ff.logsSubs.removeLogsFilter(id)
+	if !isDeleted {
+		return false
+	}
 	// if any filters in the aggregate need all addresses or all topics then the request to the central
 	// log subscription needs to honour this
 	lfr := ff.logsSubs.createFilterRequest()
@@ -640,13 +896,13 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	if loaded != nil {
 		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
 			ff.logger.Warn("Could not update remote logs filter", "err", err)
-			return isDeleted || ff.logsSubs.removeLogsFilter(id)
+			return false
 		}
 	}
 
 	ff.deleteLogStore(id)
 
-	return isDeleted
+	return true
 }
 
 // deleteLogStore deletes the log store associated with the given subscription ID.
@@ -889,4 +1145,29 @@ func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bo
 		return res, false
 	}
 	return res, true
+}
+
+func (ff *Filters) incrementMetrics(ft FilterType, protocol string) {
+	activeSubscriptionsGauge.With(prometheus.Labels{
+		filterLabelName:   string(ft),
+		protocolLabelName: protocol,
+	}).Inc()
+	getSubscriptionCounter("created", string(ft), protocol).Inc()
+}
+
+// DecrementMetrics decrements subscription metrics.
+// Called when a subscription is unsubscribed.
+func (ff *Filters) DecrementMetrics(ft FilterType, protocol string) {
+	ff.decrementMetrics(ft, protocol)
+}
+
+func (ff *Filters) decrementMetrics(ft FilterType, protocol string) {
+	if protocol == "" {
+		return // Not tracked
+	}
+	activeSubscriptionsGauge.With(prometheus.Labels{
+		filterLabelName:   string(ft),
+		protocolLabelName: protocol,
+	}).Dec()
+	getSubscriptionCounter("unsubscribed", string(ft), protocol).Inc()
 }
