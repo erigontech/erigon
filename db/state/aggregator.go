@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -1245,9 +1246,11 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		wg, ctx := errgroup.WithContext(ctx)
+		wg.SetLimit(estimate.AlmostAllCPUs())
 		tbls := at.a.DomainTables()
 		for _, tbl := range tbls {
 			wg.Go(func() error {
+				defer func(t time.Time) { log.Warn("[dbg] warmup", "tbl", time.Since(t)) }(time.Now())
 				return at.a.db.View(ctx, func(tx kv.Tx) error {
 					err := tx.ForEach(tbl, nil, func(k, v []byte) error {
 						_, _ = k[0], k[len(k)-1]
@@ -1267,7 +1270,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			})
 		}
 		defer wg.Wait()
-		defer cancel()
+		defer cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
 	}
 
 	if logEvery == nil {
