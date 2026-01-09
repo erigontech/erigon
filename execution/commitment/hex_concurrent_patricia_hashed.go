@@ -223,9 +223,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
-				hk := common.Copy(hashedKey)
-				pk := common.Copy(plainKey)
-				if err := phnib.followAndUpdate(hk, pk, nil); err != nil {
+				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
 				}
 				return nil
