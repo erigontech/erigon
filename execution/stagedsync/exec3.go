@@ -247,7 +247,6 @@ func ExecV3(ctx context.Context,
 
 	doms.SetWarmupDB(cfg.db)
 	// Do it only for chain-tip blocks!
-	fmt.Println("enable", maxBlockNum == startBlockNum)
 	doms.SetEnableWarmupCache(maxBlockNum == startBlockNum)
 	postValidator := newBlockPostExecutionValidator()
 	if maxBlockNum == startBlockNum {
