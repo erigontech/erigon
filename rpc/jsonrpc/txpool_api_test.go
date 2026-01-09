@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -62,7 +61,7 @@ func TestTxPoolContent(t *testing.T) {
 	reply, err := txPool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 	require.NoError(err)
 	for _, res := range reply.Imported {
-		require.Equal(txpoolproto.ImportResult_SUCCESS, res, fmt.Sprintf("%s", reply.Errors))
+		require.Equal(txpoolproto.ImportResult_SUCCESS, res, reply.Errors)
 	}
 
 	content, err := api.Content(ctx)
