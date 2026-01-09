@@ -3,13 +3,18 @@ package cltypes
 import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var (
+	_ ssz.HashableSSZ = (*PayloadAttestationData)(nil)
+	_ ssz.HashableSSZ = (*PayloadAttestation)(nil)
+
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestationData)(nil)
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestation)(nil)
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestationMessage)(nil)
@@ -26,6 +31,15 @@ type PayloadAttestationData struct {
 	Slot              uint64      `json:"slot"`
 	PayloadPresent    bool        `json:"payload_present"`
 	BlobDataAvailable bool        `json:"blob_data_available"`
+}
+
+func (p *PayloadAttestationData) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(
+		p.BeaconBlockRoot[:],
+		p.Slot,
+		ssz.BoolSSZ(p.PayloadPresent),
+		ssz.BoolSSZ(p.BlobDataAvailable),
+	)
 }
 
 func (p *PayloadAttestationData) EncodingSizeSSZ() int {
@@ -58,6 +72,10 @@ type PayloadAttestation struct {
 	AggregationBits *solid.BitVector        `json:"aggregation_bits"`
 	Data            *PayloadAttestationData `json:"data"`
 	Signature       common.Bytes96          `json:"signature"`
+}
+
+func (p *PayloadAttestation) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(p.AggregationBits, p.Data, p.Signature[:])
 }
 
 func (p *PayloadAttestation) EncodingSizeSSZ() int {

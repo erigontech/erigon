@@ -67,7 +67,7 @@ type BeaconState struct {
 	currentSyncCommittee        *solid.SyncCommittee
 	nextSyncCommittee           *solid.SyncCommittee
 	// Bellatrix
-	latestExecutionPayloadHeader *cltypes.Eth1Header
+	latestExecutionPayloadHeader *cltypes.Eth1Header // will be removed after Gloas fork
 	// Capella
 	nextWithdrawalIndex          uint64
 	nextWithdrawalValidatorIndex uint64
@@ -89,6 +89,17 @@ type BeaconState struct {
 
 	// Fulu
 	proposerLookahead solid.Uint64VectorSSZ // Vector[ValidatorIndex, (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH]
+
+	// Gloas
+	latestExecutionPayloadBid *cltypes.ExecutionPayloadBid
+	// [New in Gloas:EIP7732]
+	builders                     *solid.ListSSZ[*cltypes.Builder]                  // List[Builder, BUILDER_REGISTRY_LIMIT]
+	nextWithdrawalBuilderIndex   cltypes.BuilderIndex                              // next_withdrawal_builder_index
+	executionPayloadAvailability *solid.BitVector                                  // Bitvector[SLOTS_PER_HISTORICAL_ROOT]
+	builderPendingPayments       solid.VectorSSZ[*cltypes.BuilderPendingPayment]   // Vector[BuilderPendingPayment, 2 * SLOTS_PER_EPOCH]
+	builderPendingWithdrawals    *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] // List[BuilderPendingWithdrawal, BUILDER_PENDING_WITHDRAWALS_LIMIT]
+	latestBlockHash              common.Hash                                       // latest_block_hash
+	payloadExpectedWithdrawals   *solid.ListSSZ[*cltypes.Withdrawal]               // List[Withdrawal, MAX_WITHDRAWALS_PER_PAYLOAD]
 
 	//  leaves for computing hashes
 	leaves        []byte          // Pre-computed leaves.

@@ -221,13 +221,16 @@ type BeaconBody struct {
 	// A summary of the current state of the beacon chain
 	SyncAggregate *SyncAggregate `json:"sync_aggregate,omitempty"`
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
-	ExecutionPayload *Eth1Block `json:"execution_payload,omitempty"`
+	ExecutionPayload *Eth1Block `json:"execution_payload,omitempty"` // will be removed after Gloas fork for EPBS
 	// Withdrawals Diffs for Execution Layer
 	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"bls_to_execution_changes,omitempty"`
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
-	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments,omitempty"`
-	ExecutionRequests  *ExecutionRequests             `json:"execution_requests,omitempty"`
+	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments,omitempty"` // will be removed after Gloas fork for EPBS
+	ExecutionRequests  *ExecutionRequests             `json:"execution_requests,omitempty"`   // will be removed after Gloas fork for EPBS
+	// Gloas
+	SignedExecutionPayloadBid *SignedExecutionPayloadBid          `json:"signed_execution_payload_bid,omitempty"`
+	PayloadAttestations       *solid.ListSSZ[*PayloadAttestation] `json:"payload_attestations,omitempty"`
 
 	// The version of the beacon chain
 	Version   clparams.StateVersion       `json:"-"`
