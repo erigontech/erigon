@@ -111,7 +111,7 @@ func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadat
 		if err = c.AddWord(v); err != nil {
 			t.Fatal(err)
 		}
-		if err = c.AddWord(bytes.Repeat([]byte(fmt.Sprintf("%d longlongword %d", i, i)), multiplier)); err != nil {
+		if err = c.AddWord(bytes.Repeat(fmt.Appendf(nil, "%d longlongword %d", i, i), multiplier)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -167,7 +167,7 @@ func TestCompressDict1(t *testing.T) {
 		// next word is `longlongword %d`
 		expectPrefix := fmt.Sprintf("%d long", i)
 
-		require.True(t, g.MatchPrefix([]byte(fmt.Sprintf("%d", i))))
+		require.True(t, g.MatchPrefix(fmt.Appendf(nil, "%d", i)))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix)))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix+"long")))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix+"longword ")))
@@ -238,7 +238,7 @@ func TestCompressDictCmp(t *testing.T) {
 		// next word is `longlongword %d`
 		expectPrefix := fmt.Sprintf("%d long", i)
 
-		require.Equal(t, -1, g.MatchCmp([]byte(fmt.Sprintf("%d", i))))
+		require.Equal(t, -1, g.MatchCmp(fmt.Appendf(nil, "%d", i)))
 		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix)))
 		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix+"long")))
 		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix+"longword ")))
@@ -305,7 +305,7 @@ func Test_CompressWithMetadata(t *testing.T) {
 		// next word is `longlongword %d`
 		expectPrefix := fmt.Sprintf("%d long", i)
 
-		require.True(t, g.MatchPrefix([]byte(fmt.Sprintf("%d", i))))
+		require.True(t, g.MatchPrefix(fmt.Appendf(nil, "%d", i)))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix)))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix+"long")))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix+"longword ")))
