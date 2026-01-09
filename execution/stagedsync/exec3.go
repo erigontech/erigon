@@ -256,6 +256,7 @@ func ExecV3(ctx context.Context,
 	}
 	// Do it only for chain-tip blocks!
 	doms.SetEnableWarmupCache(maxBlockNum == startBlockNum && !recentReorg)
+	log.Debug("Warmup Cache", "enabled", maxBlockNum == startBlockNum && !recentReorg, "recentReorg", recentReorg)
 	postValidator := newBlockPostExecutionValidator()
 	if maxBlockNum == startBlockNum {
 		postValidator = newParallelBlockPostExecutionValidator()
