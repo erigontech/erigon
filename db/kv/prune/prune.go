@@ -296,7 +296,6 @@ func TableScanningPrune(
 		}
 		valLen += dups
 		if time.Since(start) > timeOut {
-			logger.Info("prune val timed out", "name", filenameBase, "len val", len(val))
 			stat.LastPrunedValue = common.Copy(val)
 			stat.ValueProgress = InProgress
 			return stat, nil
