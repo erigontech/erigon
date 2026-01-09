@@ -1180,7 +1180,7 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ii.KeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		return max(fstInDb, 0)
+		return fstInDb
 	}
 	return 0
 }
