@@ -1104,7 +1104,7 @@ var (
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
-		Usage: "Allows to override changesets generation logic and always generate them instead",
+		Usage: "Allows to override changesets generation logic",
 	}
 )
 
