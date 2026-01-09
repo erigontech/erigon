@@ -127,3 +127,22 @@ func AllSegmentsDownloadCompleteFromDB(db kv.RoDB) (allSegmentsDownloadComplete 
 	})
 	return allSegmentsDownloadComplete, err
 }
+
+func SetRecentReorgFlag(tx kv.RwTx, recent bool) error {
+	val := []byte{0}
+	if recent {
+		val = []byte{1}
+	}
+	return tx.Put(kv.ConfigTable, kv.RecentReorgKey, val)
+}
+
+func RecentReorgFlag(tx kv.Getter) (bool, error) {
+	val, err := tx.GetOne(kv.ConfigTable, kv.RecentReorgKey)
+	if err != nil {
+		return false, err
+	}
+	if len(val) == 0 {
+		return false, nil
+	}
+	return val[0] != 0, nil
+}
