@@ -129,7 +129,6 @@ func TestResetSymlinkToExternalFile(t *testing.T) {
 			startEntries[0],
 			fsEntry{Name: "jail/snapshots", Mode: fs.ModeDir},
 		)
-		endEntries = append(endEntries)
 		checkFs(t, rootFS, endEntries...)
 	})
 }
@@ -166,6 +165,7 @@ type fsEntry struct {
 func (me fsEntry) readData(fsys fs.FS) (string, error) {
 	switch mt := me.Mode.Type(); mt {
 	case fs.ModeSymlink:
+
 		return fs.ReadLink(fsys, string(me.Name))
 	case 0:
 		b, err := fs.ReadFile(fsys, string(me.Name))
@@ -348,7 +348,6 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 			f.Close()
 		}
 	}
-	return
 }
 
 func makeTestingReset(

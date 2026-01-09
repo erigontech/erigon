@@ -6,6 +6,7 @@ import (
 	"os"
 
 	g "github.com/anacrolix/generics"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir/reset"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -147,7 +148,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 			}
 			logger.Debug("Removing datadir file", "name", osName)
 			//return datadirOsRoot.Remove(string(osName))
-			return os.Remove(string(osName))
+			return dir.RemoveFile(string(osName))
 		},
 	}
 	return r.Run()
