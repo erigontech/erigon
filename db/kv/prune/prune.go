@@ -220,7 +220,7 @@ func TableScanningPrune(
 	}
 
 	if prevStat.KeyProgress == InProgress {
-		keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey)
+		keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
 	} else if prevStat.KeyProgress == First {
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], txFrom)

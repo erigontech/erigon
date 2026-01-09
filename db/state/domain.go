@@ -29,10 +29,11 @@ import (
 	"sync"
 	"time"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -1750,29 +1751,29 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
 	}
 	return true, maxStepToPrune //TODO: remove
-	var untilStep kv.Step
-	if untilTx > 0 {
-		untilStep = kv.Step((untilTx - 1) / dt.stepSize)
-	}
-	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.ValuesTable))
-	if err != nil {
-		dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
-		return false, maxStepToPrune
-	}
-
-	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
-	switch dt.d.FilenameBase {
-	case "account":
-		mxPrunableDAcc.Set(delta)
-	case "storage":
-		mxPrunableDSto.Set(delta)
-	case "code":
-		mxPrunableDCode.Set(delta)
-	case "commitment":
-		mxPrunableDComm.Set(delta)
-	}
-	fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, sm, maxStepToPrune, untilStep)
-	return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
+	//var untilStep kv.Step
+	//if untilTx > 0 {
+	//	untilStep = kv.Step((untilTx - 1) / dt.stepSize)
+	//}
+	//sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.ValuesTable))
+	//if err != nil {
+	//	dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
+	//	return false, maxStepToPrune
+	//}
+	//
+	//delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
+	//switch dt.d.FilenameBase {
+	//case "account":
+	//	mxPrunableDAcc.Set(delta)
+	//case "storage":
+	//	mxPrunableDSto.Set(delta)
+	//case "code":
+	//	mxPrunableDCode.Set(delta)
+	//case "commitment":
+	//	mxPrunableDComm.Set(delta)
+	//}
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, sm, maxStepToPrune, untilStep)
+	//return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
 }
 
 type DomainPruneStat struct {
@@ -1860,6 +1861,8 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
+		defer valsRwCursor.Close()
+
 		switch c := valsRwCursor.(type) {
 		case *mdbx2.MdbxCursor:
 			valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
@@ -1868,14 +1871,15 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		default:
 			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, dt.d.ValuesTable)
 		}
+		defer valsCursor.Close()
 	} else {
 		mode = prune.SmallHistoryMode
 		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
+		defer valsCursor.Close()
 	}
-	defer valsCursor.Close()
 
 	prs, err := GetPruneValProgress(rwTx, []byte(dt.d.ValuesTable))
 	if err != nil {
