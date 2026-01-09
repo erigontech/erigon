@@ -9,6 +9,7 @@ const (
 	BuilderIndexSelfBuild              = math.MaxUint64
 	BuilderPaymentThresholdNumerator   = uint64(6)
 	BuilderPaymentThresholdDenominator = uint64(10)
+	PtcSize                            = uint64(512)
 )
 
 var (
