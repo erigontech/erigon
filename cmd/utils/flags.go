@@ -224,7 +224,7 @@ var (
 		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
 
-	// Miner settings
+	// Block builder/proposer settings
 	ProposingDisableFlag = cli.BoolFlag{
 		Name:  "proposer.disable",
 		Usage: "Disables PoS proposer",
@@ -241,6 +241,10 @@ var (
 	MinerExtraDataFlag = cli.StringFlag{
 		Name:  "miner.extradata",
 		Usage: "Block extra data set by the miner (default = client version)",
+	}
+	BuilderMaxBlobsFlag = cli.Uint64Flag{
+		Name:  "builder.maxblobs",
+		Usage: "Cap the number of blob transactions included in a built block",
 	}
 
 	VMEnableDebugFlag = cli.BoolFlag{
@@ -566,9 +570,15 @@ var (
 		Name:  "nodiscover",
 		Usage: "Disables the peer discovery mechanism (manual peer addition)",
 	}
+	DiscoveryV4Flag = cli.BoolFlag{
+		Name:    "discovery.v4",
+		Aliases: []string{"discv4"},
+		Usage:   "Enables the V4 discovery mechanism",
+	}
 	DiscoveryV5Flag = cli.BoolFlag{
-		Name:  "v5disc",
-		Usage: "Enables the experimental RLPx V5 (Topic Discovery) mechanism",
+		Name:    "discovery.v5",
+		Aliases: []string{"discv5"},
+		Usage:   "Enables the V5 discovery mechanism",
 	}
 	NetrestrictFlag = cli.StringFlag{
 		Name:  "netrestrict",
@@ -1092,6 +1102,10 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
+	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
+		Name:  "experimental.always-generate-changesets",
+		Usage: "Allows to override changesets generation logic",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1363,21 +1377,20 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 	if ctx.IsSet(MaxPendingPeersFlag.Name) {
 		cfg.MaxPendingPeers = ctx.Int(MaxPendingPeersFlag.Name)
 	}
-	if ctx.IsSet(NoDiscoverFlag.Name) {
-		cfg.NoDiscovery = true
+
+	setBoolIfSet := func(set *bool, flag *cli.BoolFlag) {
+		if ctx.IsSet(flag.Name) {
+			*set = ctx.Bool(flag.Name)
+		}
 	}
 
-	if ctx.IsSet(DiscoveryV5Flag.Name) {
-		cfg.DiscoveryV5 = ctx.Bool(DiscoveryV5Flag.Name)
-	}
-
-	if ctx.IsSet(MetricsEnabledFlag.Name) {
-		cfg.MetricsEnabled = ctx.Bool(MetricsEnabledFlag.Name)
-	}
-
-	if ctx.IsSet(PolygonPosWitProtocolFlag.Name) {
-		cfg.EnableWitProtocol = ctx.Bool(PolygonPosWitProtocolFlag.Name)
-	}
+	CheckExclusive(ctx, &DiscoveryV4Flag, &NoDiscoverFlag)
+	CheckExclusive(ctx, &DiscoveryV5Flag, &NoDiscoverFlag)
+	setBoolIfSet(&cfg.NoDiscovery, &NoDiscoverFlag)
+	setBoolIfSet(&cfg.DiscoveryV4, &DiscoveryV4Flag)
+	setBoolIfSet(&cfg.DiscoveryV5, &DiscoveryV5Flag)
+	setBoolIfSet(&cfg.MetricsEnabled, &MetricsEnabledFlag)
+	setBoolIfSet(&cfg.EnableWitProtocol, &PolygonPosWitProtocolFlag)
 
 	logger.Info("Maximum peer count", "total", cfg.MaxPeers)
 
@@ -1396,6 +1409,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 			cfg.ListenAddr = ":0"
 		}
 		cfg.NoDiscovery = true
+		cfg.DiscoveryV4 = false
 		cfg.DiscoveryV5 = false
 		logger.Info("Development chain flags set", "--nodiscover", cfg.NoDiscovery, "--v5disc", cfg.DiscoveryV5, "--port", cfg.ListenAddr)
 	}
@@ -1470,19 +1484,6 @@ func setGPO(ctx *cli.Context, cfg *gaspricecfg.Config) {
 	}
 	if ctx.IsSet(GpoMaxGasPriceFlag.Name) {
 		cfg.MaxPrice = big.NewInt(ctx.Int64(GpoMaxGasPriceFlag.Name))
-	}
-}
-
-// nolint
-func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
-	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
-		cfg.Blocks = *v
-	}
-	if v := f.Int(GpoPercentileFlag.Name, GpoPercentileFlag.Value, GpoPercentileFlag.Usage); v != nil {
-		cfg.Percentile = *v
-	}
-	if v := f.Int64(GpoMaxGasPriceFlag.Name, GpoMaxGasPriceFlag.Value, GpoMaxGasPriceFlag.Usage); v != nil {
-		cfg.MaxPrice = big.NewInt(*v)
 	}
 }
 
@@ -1661,6 +1662,11 @@ func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
 			cfg.GasLimit = &gasLimit
 		}
 	}
+
+	if ctx.IsSet(BuilderMaxBlobsFlag.Name) {
+		maxBlobs := ctx.Uint64(BuilderMaxBlobsFlag.Name)
+		cfg.MaxBlobsPerBlock = &maxBlobs
+	}
 }
 
 func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1813,6 +1819,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		statecfg.EnableHistoricalCommitment()
 	}
 
+	if ctx.IsSet(AlwaysGenerateChangesetsFlag.Name) {
+		cfg.AlwaysGenerateChangesets = ctx.Bool(AlwaysGenerateChangesetsFlag.Name)
+	}
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
