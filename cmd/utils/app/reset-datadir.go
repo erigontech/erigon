@@ -6,6 +6,7 @@ import (
 	"os"
 
 	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir/reset"
 	"github.com/erigontech/erigon/db/kv"
@@ -97,7 +98,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 
 	switch value := preverifiedFlag.Get(cliCtx); value {
 	case "local":
-		os.Setenv(snapcfg.RemotePreverifiedEnvKey, dirs.PreverifiedPath())
+		panicif.Err(os.Setenv(snapcfg.RemotePreverifiedEnvKey, dirs.PreverifiedPath()))
 		fallthrough
 	case "remote":
 		err = snapcfg.LoadRemotePreverified(cliCtx.Context)
@@ -115,7 +116,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 
 	cfg, known := snapcfg.KnownCfg(chainName)
 	if !known {
-		// Wtf does this even mean?
+		// Wtf does this even imply?
 		return fmt.Errorf("config for chain %v is not known", chainName)
 	}
 	// Should we check cfg.Local? We could be resetting to the preverifiedFlag.toml...?
@@ -151,7 +152,14 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 			return dir.RemoveFile(string(osName))
 		},
 	}
-	return r.Run()
+	err = r.Run()
+	if err != nil {
+		return
+	}
+	if !dryRun {
+		logger.Info("Reset complete. Start Erigon as usual, missing files will be downloaded.")
+	}
+	return
 }
 
 func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {

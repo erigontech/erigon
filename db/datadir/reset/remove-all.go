@@ -60,8 +60,8 @@ func (me *removeAll) inner(name OsFilePath, fi fs.FileInfo) error {
 		}
 		// We don't super care if directories fail to get removed.
 		if err := me.remove(name, fi); err != nil {
-			// Should handle the case where it's a mountpoint.
-			me.logger.Warn("Error removing directory", "name", name, "err", err)
+			// Should handle the case where it's a mount point.
+			me.logger.Debug("Error removing directory", "name", name, "err", err)
 		}
 		return nil
 	case fs.ModeSymlink:
