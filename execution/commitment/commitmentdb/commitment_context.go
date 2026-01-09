@@ -120,6 +120,7 @@ func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
 type LimitedHistoryStateReader struct {
 	HistoryStateReader
 	getter kv.TemporalGetter
+	sd     sd
 }
 
 func NewLimitedHistoryStateReader(roTx kv.TemporalTx, sd sd, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
@@ -129,6 +130,7 @@ func NewLimitedHistoryStateReader(roTx kv.TemporalTx, sd sd, limitReadAsOfTxNum 
 			limitReadAsOfTxNum: limitReadAsOfTxNum,
 		},
 		getter: sd.AsGetter(roTx),
+		sd:     sd,
 	}
 }
 
@@ -160,6 +162,10 @@ func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize 
 		}
 	}
 	return enc, step, nil
+}
+
+func (r *LimitedHistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewLimitedHistoryStateReader(tx, r.sd, r.limitReadAsOfTxNum)
 }
 
 type SharedDomainsCommitmentContext struct {
