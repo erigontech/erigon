@@ -117,8 +117,8 @@ func HashSeekingPrune(
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		switch mode {
 		case KeyStorageMode:
-			seek := make([]byte, 8, 256)
-			seek = append(bytes.Clone(key), txnm...)
+			//seek := make([]byte, 8, 256)
+			seek := append(bytes.Clone(key), txnm...)
 			if err := valDelCursor.Delete(seek); err != nil {
 				return err
 			}
