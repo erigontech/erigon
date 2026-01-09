@@ -133,11 +133,11 @@ func SetRecentReorgFlag(tx kv.RwTx, recent bool) error {
 	if recent {
 		val = []byte{1}
 	}
-	return tx.Put(kv.ConfigTable, kv.RecentReorgKey, val)
+	return tx.Put(kv.DatabaseInfo, kv.RecentReorgKey, val)
 }
 
 func RecentReorgFlag(tx kv.Getter) (bool, error) {
-	val, err := tx.GetOne(kv.ConfigTable, kv.RecentReorgKey)
+	val, err := tx.GetOne(kv.DatabaseInfo, kv.RecentReorgKey)
 	if err != nil {
 		return false, err
 	}
