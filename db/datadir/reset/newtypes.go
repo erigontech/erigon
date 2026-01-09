@@ -3,6 +3,7 @@ package reset
 // Type wrappers to ensure valid runtime values.
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -16,9 +17,11 @@ type (
 )
 
 func (me OsFilePath) mustLocalRelSlash(base OsFilePath) slashName {
-	rel, err := filepath.Rel(string(base), string(me))
+	rel, err := filepath.Rel(base.ToString(), me.ToString())
 	panicif.Err(err)
-	panicif.False(filepath.IsLocal(rel))
+	if !filepath.IsLocal(rel) {
+		panic(fmt.Sprintf("not local: %q, obtained from filepath.Rel(%q, %q)", rel, base, me))
+	}
 	return slashName(filepath.ToSlash(rel))
 }
 
