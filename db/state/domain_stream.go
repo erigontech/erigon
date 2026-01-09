@@ -196,20 +196,23 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 			}
 		} else if dc.d.Accessors.Has(statecfg.AccessorHashMap) {
 			// For domains without BTree (e.g., commitment with HashMap accessor),
-			// use binary search over .kv file
+			// iterate the data file directly using linear scan.
+			// RecSplit indices don't support OrdinalLookup (no enums), so we can't binary search.
 			reader := dc.reusableReader(i)
-			recsplitIdxReader := dc.statelessIdxReader(i)
-			kvCount := reader.Count() / 2
-			foundOffset, ok := reader.BinarySearch(key, kvCount, recsplitIdxReader.OrdinalLookup)
-			if !ok {
-				continue // nothing found, skip this file
+			reader.Reset(0)
+
+			// Linear scan to find first key >= hi.from
+			for reader.HasNext() {
+				key, _ = reader.Next(nil)
+				if hi.from == nil || bytes.Compare(key, hi.from) >= 0 {
+					value, _ = reader.Next(nil)
+					break
+				}
+				reader.Skip() // skip value
 			}
-			reader.Reset(foundOffset)
-			key, _ := reader.Next(nil)
-			val, _ := reader.Next(nil)
 
 			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
-				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: common.Copy(key), val: common.Copy(val), kvReader: reader, endTxNum: txNum, reverse: true})
+				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: common.Copy(key), val: common.Copy(value), kvReader: reader, endTxNum: txNum, reverse: true})
 			}
 		}
 	}
