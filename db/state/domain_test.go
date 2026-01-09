@@ -74,13 +74,13 @@ func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } /
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
-	return testDbAndDomainOfStep(t, 16, logger)
+	return testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
 }
 
-func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
-	cfg := statecfg.Schema.AccountsDomain
+	cfg := domainCfg
 
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
@@ -147,7 +147,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, d := testDbAndDomainOfStep(t, 16, logger)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
 	ctx := context.Background()
 
 	if compressDomainVals {
@@ -854,7 +854,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	logger := log.New()
 	keysCount, txCount := uint64(16), uint64(64)
 
-	db, d := testDbAndDomainOfStep(t, 16, logger)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
 	ctx := context.Background()
 
 	tx, err := db.BeginRw(ctx)
@@ -1109,7 +1109,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer logEvery.Stop()
 
 	maxTx := uint64(10000)
-	db, d := testDbAndDomainOfStep(t, maxTx, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, maxTx, log.New())
 	ctx := context.Background()
 	defer d.Close()
 
@@ -1198,7 +1198,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	}
 	t.Parallel()
 
-	db, d := testDbAndDomainOfStep(t, 20, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 20, log.New())
 	defer db.Close()
 	defer d.Close()
 
@@ -1310,7 +1310,7 @@ type upd struct {
 
 func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain, map[uint64][]bool) {
 	t.Helper()
-	db, d := testDbAndDomainOfStep(t, aggStep, logger)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -1443,7 +1443,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		t.Skip()
 	}
 
-	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 25, log.New())
 	require := require.New(t)
 
 	tx, err := db.BeginRw(context.Background())
@@ -1518,7 +1518,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 }
 
 func TestDomainRange(t *testing.T) {
-	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 25, log.New())
 	require, ctx := require.New(t), context.Background()
 
 	tx, err := db.BeginRw(ctx)
@@ -1633,7 +1633,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	t.Parallel()
 
 	aggStep, ctx := uint64(25), context.Background()
-	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -1729,7 +1729,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	t.Parallel()
 
-	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 25, log.New())
 	defer db.Close()
 	defer d.Close()
 
@@ -1808,7 +1808,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 func TestPruneProgress(t *testing.T) {
 	t.Parallel()
 
-	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 25, log.New())
 	defer db.Close()
 	defer d.Close()
 
@@ -1876,7 +1876,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	t.Skip("fails because in domain.Prune progress does not updated")
 
 	stepSize := uint64(1000)
-	db, d := testDbAndDomainOfStep(t, stepSize, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 	defer db.Close()
 	defer d.Close()
 
@@ -1998,7 +1998,7 @@ func TestDomain_Unwind(t *testing.T) {
 
 	t.Parallel()
 
-	db, d := testDbAndDomainOfStep(t, 16, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
 	defer d.Close()
 	defer db.Close()
 	ctx := context.Background()
@@ -2324,7 +2324,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 	t.Run("simple history inside 1step", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(13), uint64(17)
-		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
+		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
@@ -2336,7 +2336,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 	t.Run("simple history between 2 steps", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(8), uint64(17)
-		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
+		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
@@ -2348,7 +2348,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 	t.Run("simple prune whole step", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(10)
-		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
+		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
 		ctx := context.Background()
@@ -2388,7 +2388,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 	t.Run("simple history discard", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(20)
-		db, d := testDbAndDomainOfStep(t, stepSize, log.New())
+		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 		writeOneKey(t, d, db, 2*stepSize, stepSize)
 
 		dc := d.BeginFilesRo()
@@ -2589,4 +2589,119 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	}
 
 	require.Equal(t, (to-1)/key-(from-1)/key, count)
+}
+
+// TestCommitmentDomain_DebugRangeLatest tests the DebugRangeLatest iterator
+// for domains using AccessorHashMap (like CommitmentDomain).
+// This exercises the linear scan code path in DomainLatestIterFile.init()
+// and advanceInFiles() for HashMap-based domains.
+func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	// testDbAndCommitmentDomain creates a test domain with CommitmentDomain configuration.
+	// CommitmentDomain uses AccessorHashMap without enums (i.e. elias fano).
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+	ctx := context.Background()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.Close()
+
+	// Insert test data: keys 1..31, with updates at different txNums
+	txs := uint64(1000)
+	var prev [32][]byte
+	keysLatest := make(map[string][]byte)
+	for txNum := uint64(0); txNum <= txs; txNum++ {
+		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
+			if txNum%keyNum == 0 {
+				valNum := txNum / keyNum
+				var k [8]byte
+				var v [8]byte
+				binary.BigEndian.PutUint64(k[:], keyNum)
+				binary.BigEndian.PutUint64(v[:], valNum)
+				err = writer.PutWithPrev(k[:], v[:], txNum, prev[keyNum], 0)
+				prev[keyNum] = common.Copy(v[:])
+				keysLatest[string(k[:])] = common.Copy(v[:])
+				require.NoError(t, err)
+			}
+		}
+		if txNum%10 == 0 {
+			err = writer.Flush(ctx, tx)
+			require.NoError(t, err)
+		}
+	}
+	err = writer.Flush(ctx, tx)
+	require.NoError(t, err)
+
+	// Collate and merge to create files
+	collateAndMerge(t, db, tx, d, txs)
+	require.NoError(t, tx.Commit())
+
+	// verify iteration
+	tx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	dc.Close()
+	// reopen
+	dc = d.BeginFilesRo()
+	defer dc.Close()
+
+	// Test DebugRangeLatest - this exercises the HashMap iteration path
+	it, err := dc.DebugRangeLatest(tx, nil, nil, -1)
+	require.NoError(t, err)
+	keys, vals, err := stream.ToArrayKV(it)
+	require.NoError(t, err)
+
+	// Verify keys are in ascending order
+	order.Asc.AssertList(keys)
+
+	// Verify we got all expected keys
+	require.Len(t, keys, len(keysLatest), "Expected %d unique keys, got %d", len(keysLatest), len(keys))
+	require.Len(t, vals, len(keysLatest))
+
+	// Verify each key-value pair matches expected
+	for i, k := range keys {
+		expectedVal, ok := keysLatest[string(k)]
+		require.True(t, ok, "Unexpected key returned: %x", k)
+		require.Equal(t, expectedVal, vals[i], "Value mismatch for key %x", k)
+	}
+
+	// Test with range bounds
+	var fromKey, toKey [8]byte
+	binary.BigEndian.PutUint64(fromKey[:], 5)
+	binary.BigEndian.PutUint64(toKey[:], 20)
+
+	it2, err := dc.DebugRangeLatest(tx, fromKey[:], toKey[:], -1)
+	require.NoError(t, err)
+	keys2, _, err := stream.ToArrayKV(it2)
+	require.NoError(t, err)
+
+	// Verify keys are in range and ascending order
+	order.Asc.AssertList(keys2)
+	for _, k := range keys2 {
+		require.True(t, bytes.Compare(k, fromKey[:]) >= 0, "Key %x should be >= %x", k, fromKey)
+		require.True(t, bytes.Compare(k, toKey[:]) < 0, "Key %x should be < %x", k, toKey)
+	}
+
+	// Count expected keys in range [5, 20)
+	expectedInRange := 0
+	for keyNum := uint64(5); keyNum < 20; keyNum++ {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		if _, ok := keysLatest[string(k[:])]; ok {
+			expectedInRange++
+		}
+	}
+	require.Len(t, keys2, expectedInRange, "Expected %d keys in range, got %d", expectedInRange, len(keys2))
 }
