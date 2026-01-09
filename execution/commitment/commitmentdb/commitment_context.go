@@ -54,7 +54,7 @@ type LatestStateReader struct {
 }
 
 func NewLatestStateReader(tx kv.TemporalTx, sd sd) *LatestStateReader {
-	return &LatestStateReader{sd: sd, getter: sd.AsGetter(tx)}
+	return &LatestStateReader{getter: sd.AsGetter(tx), sd: sd}
 }
 
 func (r *LatestStateReader) WithHistory() bool {
