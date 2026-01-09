@@ -30,7 +30,7 @@ import (
 
 // HelpData is a one shot struct to pass to the usage template
 type HelpData struct {
-	App        interface{}
+	App        any
 	FlagGroups []FlagGroup
 }
 
