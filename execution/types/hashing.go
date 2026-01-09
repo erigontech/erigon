@@ -182,8 +182,10 @@ func rlpHash(x any) (h common.Hash) {
 	return h
 }
 
-// prefixSlices holds pre-allocated byte slices for each possible prefix value.
-// This avoids heap allocation when writing the prefix byte to the hasher.
+// prefixSlices contains one-byte slices for all possible prefix values (0–255).
+// Each entry is pre-allocated once during init so we can write a single prefix
+// byte into the hasher without creating a new slice every time.
+// This avoids per-call heap allocations when hashing typed transactions.
 var prefixSlices [256][]byte
 
 func init() {
