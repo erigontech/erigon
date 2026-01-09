@@ -282,8 +282,7 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 }
 
 func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
-	additionalFields := make(map[string]any)
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
+	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, nil)
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
