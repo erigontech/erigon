@@ -51,8 +51,8 @@ import (
 func BenchmarkNodeDBGeometry(b *testing.B) {
 	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
 	for i := range keys {
-		keys[i] = []byte(fmt.Sprintf("key %d", i))
-		vals[i] = []byte(fmt.Sprintf("val %d", i))
+		keys[i] = fmt.Appendf(nil, "key %d", i)
+		vals[i] = fmt.Appendf(nil, "val %d", i)
 	}
 	cfg := mdbx.New(dbcfg.ChainDB, log.New()).
 		PageSize(4 * datasize.KB).
