@@ -506,20 +506,20 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 	globalCount := 0
 	lastLog := time.Now()
 
-	allFiles := acRo.Files(kv.CommitmentDomain)
+	commitmentFiles := acRo.Files(kv.CommitmentDomain)
 
 	// consider .kv files only
-	var commitmentFiles []dbstate.VisibleFile
-	for _, f := range allFiles {
+	var commitmentKVFiles []dbstate.VisibleFile
+	for _, f := range commitmentFiles {
 		if strings.HasSuffix(f.Fullpath(), ".kv") {
-			commitmentFiles = append(commitmentFiles, f)
+			commitmentKVFiles = append(commitmentKVFiles, f)
 		}
 	}
-	logger.Info("Found commitment .kv files", "kvFiles", len(commitmentFiles), "totalFiles", len(allFiles))
+	logger.Info("Found commitment .kv files", "kvFiles", len(commitmentKVFiles), "totalFiles", len(commitmentFiles))
 
-	for fileIdx, f := range commitmentFiles {
+	for fileIdx, f := range commitmentKVFiles {
 		fpath := f.Fullpath()
-		logger.Info("Scanning file...", "file", filepath.Base(fpath), "fileIdx", fileIdx+1, "totalFiles", len(commitmentFiles))
+		logger.Info("Scanning file...", "file", filepath.Base(fpath), "fileIdx", fileIdx+1, "totalFiles", len(commitmentKVFiles))
 
 		dec, err := seg.NewDecompressor(fpath)
 		if err != nil {
