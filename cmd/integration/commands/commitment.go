@@ -530,14 +530,13 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 		fc := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 		getter := seg.NewReader(dec.MakeGetter(), fc)
 
-		var key, val []byte
 		fileKeyCount := 0
 		for getter.HasNext() {
-			key, _ = getter.Next(key[:0])
+			key, _ := getter.Next(nil)
 			if !getter.HasNext() {
 				return nil, 0, fmt.Errorf("invalid key/value pair in %s", fpath)
 			}
-			val, _ = getter.Next(val[:0])
+			getter.Skip() // skip value
 
 			// Skip the "state" key
 			if bytes.Equal(key, []byte("state")) {
