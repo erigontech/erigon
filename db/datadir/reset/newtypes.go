@@ -15,7 +15,7 @@ type (
 	slashName string
 )
 
-func (me OsFilePath) MustLocalRelSlash(base OsFilePath) slashName {
+func (me OsFilePath) mustLocalRelSlash(base OsFilePath) slashName {
 	rel, err := filepath.Rel(string(base), string(me))
 	panicif.Err(err)
 	panicif.False(filepath.IsLocal(rel))

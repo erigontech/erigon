@@ -371,7 +371,7 @@ func makeTestingReset(
 		RemoveUnknown:        true,
 		RemoveLocal:          true,
 		RemoveFunc: func(osFilePath OsFilePath) error {
-			slashName := osFilePath.MustLocalRelSlash(osRootPath)
+			slashName := osFilePath.mustLocalRelSlash(osRootPath)
 			for _, entry := range entries {
 				if entry.Name == slashName && entry.Remove != nil {
 					return entry.Remove()

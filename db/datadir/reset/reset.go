@@ -133,7 +133,7 @@ func (me *Reset) doSnapshots() (err error) {
 	snapDir := me.dataDirOsPath().Join(datadir.SnapDir)
 	ra := me.makeRemoveAll(snapDir)
 	ra.wrapRemove(func(inner removeAllRemoveFunc, filePath OsFilePath, info fs.FileInfo) error {
-		itemName := string(filePath.MustLocalRelSlash(snapDir))
+		itemName := string(filePath.mustLocalRelSlash(snapDir))
 		itemName, _ = strings.CutSuffix(itemName, ".part")
 		itemName, isTorrent := strings.CutSuffix(itemName, ".torrent")
 		item, ok := me.PreverifiedSnapshots.Get(itemName)

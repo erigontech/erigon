@@ -119,7 +119,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		// Wtf does this even imply?
 		return fmt.Errorf("config for chain %v is not known", chainName)
 	}
-	// Should we check cfg.Local? We could be resetting to the preverifiedFlag.toml...?
+	// Should we check cfg.Local? We could be resetting to the preverified.toml...?
 	logger.Info(
 		"Loaded preverified snapshots hashes",
 		"len", len(cfg.Preverified.Items),
