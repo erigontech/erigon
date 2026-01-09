@@ -123,7 +123,7 @@ func init() {
 	withChain(cmdCommitmentBenchLookup)
 	withDataDir(cmdCommitmentBenchLookup)
 	withConfig(cmdCommitmentBenchLookup)
-	cmdCommitmentBenchLookup.Flags().IntVar(&benchSampleSize, "sample-size", 1000000, "number of random keys to sample via reservoir sampling")
+	cmdCommitmentBenchLookup.Flags().IntVar(&benchSampleSize, "sample-size", 10000000, "number of random keys to sample via reservoir sampling")
 	cmdCommitmentBenchLookup.Flags().Int64Var(&benchSeed, "seed", 0, "random seed for sampling (0 = use current time)")
 	commitmentCmd.AddCommand(cmdCommitmentBenchLookup)
 
@@ -392,7 +392,6 @@ Examples:
 	},
 }
 
-// BenchStats holds benchmark statistics
 type BenchStats struct {
 	Count      int
 	TotalTime  time.Duration
@@ -427,14 +426,13 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	}
 	defer chainDb.Close()
 
-	// Get aggregator to access files directly
 	agg := chainDb.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.DisableAllDependencies()
 
 	acRo := agg.BeginFilesRo()
 	defer acRo.Close()
 
-	// Sample keys from all commitment files using reservoir sampling
+	// Sample keys from commtiment domain using reservoir sampling
 	logger.Info("Sampling keys from commitment domain files...", "sampleSize", benchSampleSize)
 
 	keys, totalCount, err := sampleCommitmentKeysFromFiles(ctx, acRo, benchSampleSize, rng, logger)
@@ -502,7 +500,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 }
 
 // sampleCommitmentKeysFromFiles samples keys from all commitment domain .kv files using reservoir sampling.
-// This iterates over ALL key-value pairs in ALL .kv files (similar to how go-ethereum iterates over trie nodes).
+// This iterates over ALL key-value pairs in ALL .kv files
 func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.AggregatorRoTx, sampleSize int, rng *rand.Rand, logger log.Logger) ([][]byte, int, error) {
 	keys := make([][]byte, 0, sampleSize)
 	globalCount := 0
@@ -510,7 +508,7 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 
 	allFiles := acRo.Files(kv.CommitmentDomain)
 
-	// Filter to only .kv files (domain files), not .v files (history files)
+	// consider .kv files only
 	var commitmentFiles []dbstate.VisibleFile
 	for _, f := range allFiles {
 		if strings.HasSuffix(f.Fullpath(), ".kv") {
@@ -527,6 +525,7 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create decompressor for %s: %w", fpath, err)
 		}
+		defer dec.Close()
 
 		fc := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 		getter := seg.NewReader(dec.MakeGetter(), fc)
@@ -536,12 +535,11 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 		for getter.HasNext() {
 			key, _ = getter.Next(key[:0])
 			if !getter.HasNext() {
-				dec.Close()
 				return nil, 0, fmt.Errorf("invalid key/value pair in %s", fpath)
 			}
 			val, _ = getter.Next(val[:0])
 
-			// Skip the "state" key (it's the commitment state, not a branch)
+			// Skip the "state" key
 			if bytes.Equal(key, []byte("state")) {
 				continue
 			}
@@ -576,13 +574,10 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 
 			select {
 			case <-ctx.Done():
-				dec.Close()
 				return nil, 0, ctx.Err()
 			default:
 			}
 		}
-
-		dec.Close()
 		logger.Info("File complete", "file", filepath.Base(fpath), "keysInFile", fileKeyCount)
 	}
 
