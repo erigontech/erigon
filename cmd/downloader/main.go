@@ -203,13 +203,8 @@ var rootCmd = &cobra.Command{
 			logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 		}
 	},
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := Downloader(cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return Downloader(cmd.Context(), logger)
 	},
 }
 
@@ -302,13 +297,17 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	d.HandleTorrentClientStatus(nil)
 
-	err = d.AddTorrentsFromDisk(ctx)
+	incomplete, err := d.AddTorrentsFromDisk(ctx)
 	if err != nil {
 		return fmt.Errorf("adding torrents from disk: %w", err)
 	}
 
+	if incomplete != 0 && manualDataVerification {
+		return fmt.Errorf("%v torrents are incomplete", incomplete)
+	}
+
 	// I think we could use DisableInitialPieceVerification to get the behaviour we want here: One
-	// hash, and fail if it's in the verify files list or we have fail fast on.
+	// hash, and fail if it's in the verify files list, or we have fail fast on.
 
 	if len(_verifyFiles) > 0 {
 		verifyFiles = strings.Split(_verifyFiles, ",")
@@ -322,9 +321,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
-	// This only works if Cfg.ManualDataVerification is held by reference by the Downloader. The
-	// alternative is to pass the value through AddTorrentsFromDisk, do it per Torrent ourselves, or
-	// defer all hashing to the torrent Client in the Downloader and wait for it to complete.
+	// Turn automatic data verification back on (verify incomplete). This only works if
+	// Cfg.ManualDataVerification is held by reference by the Downloader. The alternative is to pass
+	// the value through AddTorrentsFromDisk, do it per Torrent ourselves, or defer all hashing to
+	// the torrent Client in the Downloader and wait for it to complete.
 	cfg.ManualDataVerification = false
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
