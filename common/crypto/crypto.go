@@ -305,7 +305,7 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 
 // hasherPool holds LegacyKeccak hashers.
 var hasherPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return sha3.NewLegacyKeccak256()
 	},
 }

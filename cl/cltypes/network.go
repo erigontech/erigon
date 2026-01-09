@@ -36,7 +36,7 @@ type Metadata struct {
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
-	schema := []interface{}{
+	schema := []any{
 		m.SeqNumber,
 		m.Attnets[:],
 	}
@@ -83,7 +83,7 @@ func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
 }
 
 func (m *Metadata) MarshalJSON() ([]byte, error) {
-	out := map[string]interface{}{
+	out := map[string]any{
 		"seq_number": strconv.FormatUint(m.SeqNumber, 10),
 		"attnets":    hexutil.Bytes(m.Attnets[:]),
 	}
@@ -194,7 +194,7 @@ func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *Status) DecodeSSZ(buf []byte, version int) error {
-	schema := []interface{}{
+	schema := []any{
 		s.ForkDigest[:],
 		s.FinalizedRoot[:],
 		&s.FinalizedEpoch,
@@ -210,8 +210,8 @@ func (s *Status) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, schema...)
 }
 
-func (s *Status) schema() []interface{} {
-	schema := []interface{}{
+func (s *Status) schema() []any {
+	schema := []any{
 		s.ForkDigest[:],
 		s.FinalizedRoot[:],
 		&s.FinalizedEpoch,

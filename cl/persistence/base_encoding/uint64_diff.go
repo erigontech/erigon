@@ -29,7 +29,7 @@ import (
 
 // make a sync.pool of compressors (zstd)
 var compressorPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 		if err != nil {
 			panic(err)
@@ -44,27 +44,27 @@ func putComp(v *zstd.Encoder) {
 }
 
 var bufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &bytes.Buffer{}
 	},
 }
 
 var plainUint64BufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		b := make([]uint64, 1028)
 		return &b
 	},
 }
 
 var plainBytesBufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		b := make([]byte, 1028)
 		return &b
 	},
 }
 
 var repeatedPatternBufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		b := make([]repeatedPatternEntry, 1028)
 		return &b
 	},

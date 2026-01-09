@@ -451,6 +451,10 @@ func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64,
 
 	// GetActiveValidatorsIndices and GetTotalActiveBalance will compute and cache the results
 	indicies := b.GetActiveValidatorsIndices(epoch)
+	if epoch != state.Epoch(b) {
+		caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, 0)
+		return
+	}
 	totalBalance := b.GetTotalActiveBalance()
 	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, totalBalance)
 }

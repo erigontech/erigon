@@ -130,8 +130,8 @@ func memoryMapFile(file *os.File, write bool) (mmap.MMap, []uint32, error) {
 	var view []uint32
 	header := (*reflect.SliceHeader)(unsafe.Pointer(&view))
 	header.Data = (*reflect.SliceHeader)(unsafe.Pointer(&mem)).Data
-	header.Len /= 4
-	header.Cap /= 4
+	header.Len = len(mem) / 4
+	header.Cap = cap(mem) / 4
 
 	return mem, view, nil
 }

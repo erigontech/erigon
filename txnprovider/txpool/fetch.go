@@ -20,17 +20,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"hash/maphash"
 	"sync"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -186,9 +185,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 
 	// LRU cache for deduplication - filters duplicates before they enter the batch
 	// Uses maphash to avoid string allocations
-	var hasher maphash.Hash
-	hasher.Reset() // just to be sure the seed is randomly set.
-	seenLRU, _ := simplelru.NewLRU[uint64, struct{}](4096, nil)
+	seenLRU, _ := maphash.NewLRU[struct{}](1024)
 
 	flushBatch := func() {
 		batchLock.Lock()
@@ -262,16 +259,13 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 
 		// Skip duplicates using LRU cache with maphash to avoid string allocs
-		hasher.Reset()
-		hasher.Write(req.Data)
-		hash := hasher.Sum64()
-		if _, seen := seenLRU.Get(hash); seen {
+		if _, seen := seenLRU.Get(req.Data); seen {
 			if f.wg != nil {
 				f.wg.Done()
 			}
 			continue
 		}
-		seenLRU.Add(hash, struct{}{})
+		seenLRU.Set(req.Data, struct{}{})
 
 		batchLock.Lock()
 		batch = append(batch, req)

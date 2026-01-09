@@ -48,7 +48,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 	// Check global cache using block root at beginning of previous epoch
 	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
 	if err == nil {
-		if cachedIndicies, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok {
+		if cachedIndicies, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && len(cachedIndicies) > 0 {
 			b.activeValidatorsCache.Add(epoch, cachedIndicies)
 			return cachedIndicies
 		}
@@ -64,9 +64,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 	// Store in both caches (totalActiveBalance will be set by _refreshActiveBalancesIfNeeded)
 	b.activeValidatorsCache.Add(epoch, indicies)
-	if err == nil {
-		caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, indicies, 0)
-	}
+
 	return indicies
 }
 
