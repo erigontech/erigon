@@ -49,7 +49,10 @@ func (e BlockNotFoundErr) Error() string {
 }
 
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
-	bn, bh, latest, _, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
+	bn, bh, latest, found, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
+	if !found {
+		return bn, bh, latest, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
+	}
 	return bn, bh, latest, err
 }
 
@@ -102,8 +105,8 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		if err != nil {
 			return 0, common.Hash{}, false, false, err
 		}
-		if !ok { //future blocks must behave as "latest"
-			return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
+		if !ok {
+			return blockNumber, hash, blockNumber == plainStateBlockNumber, false, nil
 		}
 	} else {
 		number, err := br.HeaderNumber(ctx, tx, hash)
@@ -111,7 +114,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, common.Hash{}, false, false, err
 		}
 		if number == nil {
-			return 0, common.Hash{}, false, false, BlockNotFoundErr{Hash: hash}
+			return 0, common.Hash{}, false, false, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
 		}
 		blockNumber = *number
 
@@ -127,9 +130,12 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 }
 
 func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	blockNumber, _, latest, _, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
+	blockNumber, _, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
 	if err != nil {
 		return nil, err
+	}
+	if !found {
+		return nil, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
 	}
 	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, txNumReader)
 }
