@@ -665,6 +665,8 @@ const maxDeferredUpdates = 15_000
 // Cell hashes are already computed during fold() before this is called.
 // Flushes pending updates if a duplicate prefix is detected or if deferred count exceeds maxDeferredUpdates.
 // When cache is enabled but branch is not in cache, the branch read is deferred for parallel processing.
+var loggedCacheNil bool
+
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -673,6 +675,10 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	depth int16,
 	cache *WarmupCache,
 ) error {
+	if !loggedCacheNil {
+		log.Debug("CollectDeferredUpdate cache status", "cache_nil", cache == nil)
+		loggedCacheNil = true
+	}
 	totalStart := time.Now()
 	defer func() {
 		TimingCollectDeferred_total += time.Since(totalStart)
