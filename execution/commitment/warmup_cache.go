@@ -24,18 +24,28 @@ import (
 )
 
 type branchEntry struct {
-	data []byte
-	step kv.Step
+	data      []byte
+	step      kv.Step
+	isEvicted bool
+}
+
+type accountEntry struct {
+	update    *Update
+	isEvicted bool
+}
+
+type storageEntry struct {
+	update    *Update
+	isEvicted bool
 }
 
 // WarmupCache stores pre-fetched data from the warmup phase to avoid
 // repeated DB reads during trie processing. Uses maphash.Map for efficient
 // byte slice key lookups without string allocations.
 type WarmupCache struct {
-	branches    *maphash.Map[branchEntry]
-	accounts    *maphash.Map[*Update]
-	storage     *maphash.Map[*Update]
-	evictedKeys *maphash.Map[struct{}]
+	branches *maphash.Map[*branchEntry]
+	accounts *maphash.Map[*accountEntry]
+	storage  *maphash.Map[*storageEntry]
 
 	enabled atomic.Bool
 }
@@ -43,10 +53,9 @@ type WarmupCache struct {
 // NewWarmupCache creates a new warmup cache instance.
 func NewWarmupCache() *WarmupCache {
 	c := &WarmupCache{
-		branches:    maphash.NewMap[branchEntry](),
-		accounts:    maphash.NewMap[*Update](),
-		storage:     maphash.NewMap[*Update](),
-		evictedKeys: maphash.NewMap[struct{}](),
+		branches: maphash.NewMap[*branchEntry](),
+		accounts: maphash.NewMap[*accountEntry](),
+		storage:  maphash.NewMap[*storageEntry](),
 	}
 	c.enabled.Store(true)
 	return c
@@ -62,17 +71,6 @@ func (c *WarmupCache) IsEnabled() bool {
 	return c.enabled.Load()
 }
 
-// EvictKey permanently evicts a key from the cache.
-func (c *WarmupCache) EvictKey(key []byte) {
-	c.evictedKeys.Set(key, struct{}{})
-}
-
-// IsEvicted returns true if the key has been permanently evicted.
-func (c *WarmupCache) IsEvicted(key []byte) bool {
-	_, evicted := c.evictedKeys.Get(key)
-	return evicted
-}
-
 // PutBranch stores branch data in the cache.
 func (c *WarmupCache) PutBranch(prefix []byte, data []byte, step kv.Step) {
 	if !c.enabled.Load() {
@@ -82,7 +80,7 @@ func (c *WarmupCache) PutBranch(prefix []byte, data []byte, step kv.Step) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
-	c.branches.Set(prefix, branchEntry{data: dataCopy, step: step})
+	c.branches.Set(prefix, &branchEntry{data: dataCopy, step: step})
 }
 
 // GetBranch retrieves branch data from the cache.
@@ -90,11 +88,36 @@ func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
 	if !c.enabled.Load() {
 		return nil, 0, false
 	}
-	if c.IsEvicted(prefix) {
+	entry, found := c.branches.Get(prefix)
+	if !found || entry.isEvicted {
+		return nil, 0, false
+	}
+	return entry.data, entry.step, true
+}
+
+// GetAndEvictBranch retrieves branch data and marks the entry as evicted in one operation.
+// Returns the entry pointer allowing the caller to read the data before it's considered evicted.
+func (c *WarmupCache) GetAndEvictBranch(prefix []byte) ([]byte, kv.Step, bool) {
+	if !c.enabled.Load() {
 		return nil, 0, false
 	}
 	entry, found := c.branches.Get(prefix)
-	return entry.data, entry.step, found
+	if !found || entry.isEvicted {
+		return nil, 0, false
+	}
+	entry.isEvicted = true
+	return entry.data, entry.step, true
+}
+
+// EvictBranch marks a branch entry as evicted without retrieving it.
+func (c *WarmupCache) EvictBranch(prefix []byte) {
+	if !c.enabled.Load() {
+		return
+	}
+	entry, found := c.branches.Get(prefix)
+	if found {
+		entry.isEvicted = true
+	}
 }
 
 // PutAccount stores account data in the cache.
@@ -107,7 +130,7 @@ func (c *WarmupCache) PutAccount(plainKey []byte, update *Update) {
 		updateCopy = update.Copy()
 	}
 
-	c.accounts.Set(plainKey, updateCopy)
+	c.accounts.Set(plainKey, &accountEntry{update: updateCopy})
 }
 
 // GetAccount retrieves account data from the cache.
@@ -115,10 +138,36 @@ func (c *WarmupCache) GetAccount(plainKey []byte) (*Update, bool) {
 	if !c.enabled.Load() {
 		return nil, false
 	}
-	if c.IsEvicted(plainKey) {
+	entry, found := c.accounts.Get(plainKey)
+	if !found || entry.isEvicted {
 		return nil, false
 	}
-	return c.accounts.Get(plainKey)
+	return entry.update, true
+}
+
+// GetAndEvictAccount retrieves account data and marks the entry as evicted in one operation.
+// Returns the entry pointer allowing the caller to read the data before it's considered evicted.
+func (c *WarmupCache) GetAndEvictAccount(plainKey []byte) *accountEntry {
+	if !c.enabled.Load() {
+		return nil
+	}
+	entry, found := c.accounts.Get(plainKey)
+	if !found || entry.isEvicted {
+		return nil
+	}
+	entry.isEvicted = true
+	return entry
+}
+
+// EvictAccount marks an account entry as evicted without retrieving it.
+func (c *WarmupCache) EvictAccount(plainKey []byte) {
+	if !c.enabled.Load() {
+		return
+	}
+	entry, found := c.accounts.Get(plainKey)
+	if found {
+		entry.isEvicted = true
+	}
 }
 
 // PutStorage stores storage data in the cache.
@@ -131,7 +180,7 @@ func (c *WarmupCache) PutStorage(plainKey []byte, update *Update) {
 		updateCopy = update.Copy()
 	}
 
-	c.storage.Set(plainKey, updateCopy)
+	c.storage.Set(plainKey, &storageEntry{update: updateCopy})
 }
 
 // GetStorage retrieves storage data from the cache.
@@ -139,16 +188,55 @@ func (c *WarmupCache) GetStorage(plainKey []byte) (*Update, bool) {
 	if !c.enabled.Load() {
 		return nil, false
 	}
-	if c.IsEvicted(plainKey) {
+	entry, found := c.storage.Get(plainKey)
+	if !found || entry.isEvicted {
 		return nil, false
 	}
-	return c.storage.Get(plainKey)
+	return entry.update, true
+}
+
+// GetAndEvictStorage retrieves storage data and marks the entry as evicted in one operation.
+// Returns the entry pointer allowing the caller to read the data before it's considered evicted.
+func (c *WarmupCache) GetAndEvictStorage(plainKey []byte) *storageEntry {
+	if !c.enabled.Load() {
+		return nil
+	}
+	entry, found := c.storage.Get(plainKey)
+	if !found || entry.isEvicted {
+		return nil
+	}
+	entry.isEvicted = true
+	return entry
+}
+
+// EvictStorage marks a storage entry as evicted without retrieving it.
+func (c *WarmupCache) EvictStorage(plainKey []byte) {
+	if !c.enabled.Load() {
+		return
+	}
+	entry, found := c.storage.Get(plainKey)
+	if found {
+		entry.isEvicted = true
+	}
+}
+
+// EvictPlainKey evicts a key from both accounts and storage caches.
+// Use this when you don't know if the key is an account or storage key.
+func (c *WarmupCache) EvictPlainKey(plainKey []byte) {
+	if !c.enabled.Load() {
+		return
+	}
+	if entry, found := c.accounts.Get(plainKey); found {
+		entry.isEvicted = true
+	}
+	if entry, found := c.storage.Get(plainKey); found {
+		entry.isEvicted = true
+	}
 }
 
 // Clear clears all cached data.
 func (c *WarmupCache) Clear() {
-	c.branches = maphash.NewMap[branchEntry]()
-	c.accounts = maphash.NewMap[*Update]()
-	c.storage = maphash.NewMap[*Update]()
-	c.evictedKeys = maphash.NewMap[struct{}]()
+	c.branches = maphash.NewMap[*branchEntry]()
+	c.accounts = maphash.NewMap[*accountEntry]()
+	c.storage = maphash.NewMap[*storageEntry]()
 }

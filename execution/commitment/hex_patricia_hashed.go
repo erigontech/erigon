@@ -2096,7 +2096,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
 			if hph.cache != nil {
-				hph.cache.EvictKey(updateKey)
+				hph.cache.EvictBranch(updateKey)
 			}
 		}
 		hph.activeRows--
