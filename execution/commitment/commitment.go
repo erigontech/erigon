@@ -213,25 +213,71 @@ type DeferredBranchUpdate struct {
 	encoded BranchData
 }
 
-// Global cell array pool for deferred branch updates.
-// Uses sync.Pool for thread-safe allocation reuse.
-var cellArrayPool = sync.Pool{
+// Global pool for deferred branch updates.
+var deferredUpdatePool = sync.Pool{
 	New: func() any {
-		return new([16]cell)
+		return &DeferredBranchUpdate{
+			cells: new([16]cell),
+		}
 	},
 }
 
-// getCellArray gets a zeroed cell array from the global pool.
-func getCellArray() *[16]cell {
-	arr := cellArrayPool.Get().(*[16]cell)
-	*arr = [16]cell{} // zero it out to avoid stale data
-	return arr
+// copyCellInto deep copies all fields from src cell into dst cell.
+func copyCellInto(dst, src *cell) {
+	copy(dst.hashedExtension[:], src.hashedExtension[:])
+	copy(dst.extension[:], src.extension[:])
+	copy(dst.accountAddr[:], src.accountAddr[:])
+	copy(dst.storageAddr[:], src.storageAddr[:])
+	copy(dst.hash[:], src.hash[:])
+	copy(dst.stateHash[:], src.stateHash[:])
+	dst.hashedExtLen = src.hashedExtLen
+	dst.extLen = src.extLen
+	dst.accountAddrLen = src.accountAddrLen
+	dst.storageAddrLen = src.storageAddrLen
+	dst.hashLen = src.hashLen
+	dst.stateHashLen = src.stateHashLen
+	dst.loaded = src.loaded
+	dst.Update = src.Update
+	copy(dst.hashBuf[:], src.hashBuf[:])
 }
 
-// putCellArray returns a cell array to the global pool.
-func putCellArray(arr *[16]cell) {
-	if arr != nil {
-		cellArrayPool.Put(arr)
+// getDeferredUpdate gets a DeferredBranchUpdate from the global pool
+// and copies all fields directly into existing buffers.
+func getDeferredUpdate(
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	cells *[16]cell,
+	depth int16,
+	prev []byte,
+	prevStep kv.Step,
+) *DeferredBranchUpdate {
+	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
+
+	upd.prefix = append(upd.prefix[:0], prefix...)
+	upd.bitmap = bitmap
+	upd.touchMap = touchMap
+	upd.afterMap = afterMap
+	upd.depth = depth
+
+	// Deep copy only the cells in afterMap
+	for bitset := afterMap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		copyCellInto(&upd.cells[nibble], &cells[nibble])
+		bitset ^= bit
+	}
+
+	upd.prev = append(upd.prev[:0], prev...)
+	upd.prevStep = prevStep
+	upd.encoded = nil
+
+	return upd
+}
+
+// putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
+func putDeferredUpdate(upd *DeferredBranchUpdate) {
+	if upd != nil {
+		deferredUpdatePool.Put(upd)
 	}
 }
 
@@ -243,7 +289,7 @@ type BranchEncoder struct {
 
 	// Deferred updates support
 	deferUpdates bool
-	deferred     []DeferredBranchUpdate
+	deferred     []*DeferredBranchUpdate
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -258,7 +304,7 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
 	if defer_ && be.deferred == nil {
-		be.deferred = make([]DeferredBranchUpdate, 0, 64)
+		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
 	}
 }
 
@@ -268,15 +314,14 @@ func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 }
 
 // DeferredUpdates returns the list of deferred updates.
-func (be *BranchEncoder) DeferredUpdates() []DeferredBranchUpdate {
+func (be *BranchEncoder) DeferredUpdates() []*DeferredBranchUpdate {
 	return be.deferred
 }
 
-// ClearDeferred clears the deferred updates list and returns all cell arrays to the pool.
+// ClearDeferred clears the deferred updates list and returns all objects to the pool.
 func (be *BranchEncoder) ClearDeferred() {
-	for i := range be.deferred {
-		putCellArray(be.deferred[i].cells)
-		be.deferred[i].cells = nil
+	for _, upd := range be.deferred {
+		putDeferredUpdate(upd)
 	}
 	be.deferred = be.deferred[:0]
 }
@@ -285,9 +330,9 @@ func (be *BranchEncoder) ClearDeferred() {
 // Returns the update and true if found, nil and false otherwise.
 // This is useful for lazy evaluation when a branch is read before updates are applied.
 func (be *BranchEncoder) FindDeferred(prefix []byte) (*DeferredBranchUpdate, bool) {
-	for i := range be.deferred {
-		if bytes.Equal(be.deferred[i].prefix, prefix) {
-			return &be.deferred[i], true
+	for _, upd := range be.deferred {
+		if bytes.Equal(upd.prefix, prefix) {
+			return upd, true
 		}
 	}
 	return nil, false
@@ -330,9 +375,7 @@ func encodeDeferredUpdate(
 
 // ApplyDeferredUpdatesSequential encodes and applies all deferred updates sequentially.
 func (be *BranchEncoder) ApplyDeferredUpdatesSequential(ctx PatriciaContext) error {
-	for i := range be.deferred {
-		upd := &be.deferred[i]
-
+	for _, upd := range be.deferred {
 		if err := encodeDeferredUpdate(upd, be, be.merger); err != nil {
 			return err
 		}
@@ -364,8 +407,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 
 	if numWorkers <= 1 {
 		// Sequential fallback
-		for i := range be.deferred {
-			upd := &be.deferred[i]
+		for _, upd := range be.deferred {
 			if err := encodeDeferredUpdate(upd, be, be.merger); err != nil {
 				return err
 			}
@@ -401,8 +443,8 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	}
 
 	// Send work
-	for i := range be.deferred {
-		workCh <- &be.deferred[i]
+	for _, upd := range be.deferred {
+		workCh <- upd
 	}
 	close(workCh)
 
@@ -418,8 +460,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	}
 
 	// Phase 2: Write results
-	for i := range be.deferred {
-		upd := &be.deferred[i]
+	for _, upd := range be.deferred {
 		if upd.encoded == nil {
 			continue // skip unchanged
 		}
@@ -494,27 +535,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		return err
 	}
 
-	// Get a cell array from the global pool
-	pooledCells := getCellArray()
-
-	// Copy only the cells that are in afterMap
-	for bitset := afterMap; bitset != 0; {
-		bit := bitset & -bitset
-		nibble := bits.TrailingZeros16(bit)
-		pooledCells[nibble] = cells[nibble] // struct copy
-		bitset ^= bit
-	}
-
-	be.deferred = append(be.deferred, DeferredBranchUpdate{
-		prefix:   common.Copy(prefix),
-		bitmap:   bitmap,
-		touchMap: touchMap,
-		afterMap: afterMap,
-		cells:    pooledCells,
-		depth:    depth,
-		prev:     common.Copy(prev),
-		prevStep: prevStep,
-	})
+	// Get a pooled DeferredBranchUpdate and copy all fields
+	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev, prevStep)
+	be.deferred = append(be.deferred, upd)
 	return nil
 }
 
