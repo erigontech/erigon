@@ -2681,9 +2681,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		if warmuper.Cache() != nil {
 			hph.cache = warmuper.Cache()
 			hph.branchEncoder.SetCache(hph.cache)
+			// Also set ctxFactory for parallel branch reads
+			if warmup.CtxFactory != nil {
+				hph.branchEncoder.SetCtxFactory(warmup.CtxFactory)
+			}
 			defer func() {
 				hph.cache = nil
 				hph.branchEncoder.SetCache(nil)
+				hph.branchEncoder.SetCtxFactory(nil)
 			}()
 		}
 	}

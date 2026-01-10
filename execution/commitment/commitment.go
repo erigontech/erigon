@@ -249,6 +249,9 @@ type DeferredBranchUpdate struct {
 	prev     []byte
 	prevStep kv.Step
 
+	// If true, prev needs to be read from DB (deferred read for parallel processing)
+	needsBranchRead bool
+
 	// Result after encoding (filled by parallel workers)
 	encoded BranchData
 }
@@ -271,6 +274,7 @@ func getDeferredUpdate(
 	depth int16,
 	prev []byte,
 	prevStep kv.Step,
+	needsBranchRead bool,
 ) *DeferredBranchUpdate {
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
@@ -290,6 +294,7 @@ func getDeferredUpdate(
 
 	upd.prev = append(upd.prev[:0], prev...)
 	upd.prevStep = prevStep
+	upd.needsBranchRead = needsBranchRead
 	upd.encoded = nil
 
 	return upd
@@ -314,6 +319,7 @@ type BranchEncoder struct {
 	pendingPrefixes *maphash.UnsafeMap[struct{}] // tracks pending prefixes to detect duplicates
 	flushFunc       func() error                 // called when duplicate prefix detected, to flush pending updates
 	cache           *WarmupCache
+	ctxFactory      TrieContextFactory // factory for creating contexts for parallel branch reads
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -442,6 +448,63 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		return nil
 	}
 
+	s0 := time.Now()
+
+	// Phase 0: Parallel branch reads for deferred items that need it
+	needsRead := make([]*DeferredBranchUpdate, 0)
+	for _, upd := range be.deferred {
+		if upd.needsBranchRead {
+			needsRead = append(needsRead, upd)
+		}
+	}
+
+	if len(needsRead) > 0 && be.ctxFactory != nil && numWorkers > 1 {
+		// Parallel branch reads
+		readErrCh := make(chan error, numWorkers)
+		readWorkCh := make(chan *DeferredBranchUpdate, len(needsRead))
+
+		for i := 0; i < numWorkers; i++ {
+			go func() {
+				ctx, cleanup := be.ctxFactory()
+				if cleanup != nil {
+					defer cleanup()
+				}
+
+				for upd := range readWorkCh {
+					prev, prevStep, err := ctx.Branch(upd.prefix)
+					if err != nil {
+						readErrCh <- err
+						return
+					}
+					upd.prev = append(upd.prev[:0], prev...)
+					upd.prevStep = prevStep
+					upd.needsBranchRead = false
+				}
+				readErrCh <- nil
+			}()
+		}
+
+		for _, upd := range needsRead {
+			readWorkCh <- upd
+		}
+		close(readWorkCh)
+
+		var firstErr error
+		for i := 0; i < numWorkers; i++ {
+			if err := <-readErrCh; err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if firstErr != nil {
+			return firstErr
+		}
+		log.Debug("deferred branch reads completed", "count", len(needsRead), "spent", time.Since(s0))
+	} else if len(needsRead) > 0 {
+		// Sequential fallback - need a context
+		// This shouldn't happen in practice when ctxFactory is set
+		log.Warn("deferred branch reads require ctxFactory for parallel reads", "count", len(needsRead))
+	}
+
 	s1 := time.Now()
 	if numWorkers <= 1 {
 		// Sequential fallback
@@ -528,6 +591,10 @@ func (be *BranchEncoder) SetCache(cache *WarmupCache) {
 	be.cache = cache
 }
 
+func (be *BranchEncoder) SetCtxFactory(factory TrieContextFactory) {
+	be.ctxFactory = factory
+}
+
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -591,6 +658,7 @@ const maxDeferredUpdates = 15_000
 // and defers encoding for parallel execution later.
 // Cell hashes are already computed during fold() before this is called.
 // Flushes pending updates if a duplicate prefix is detected or if deferred count exceeds maxDeferredUpdates.
+// When cache is enabled but branch is not in cache, the branch read is deferred for parallel processing.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -623,9 +691,10 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	TimingCollectDeferred_flushCheck += time.Since(flushStart)
 
 	var (
-		prev     []byte
-		prevStep kv.Step
-		err      error
+		prev            []byte
+		prevStep        kv.Step
+		err             error
+		needsBranchRead bool
 	)
 
 	branchStart := time.Now()
@@ -633,13 +702,19 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		prev, prevStep, _ = cache.GetBranch(prefix)
 	}
 	if prev == nil {
-		prev, prevStep, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
-		TimingCollectDeferred_cacheMisses++
-		if TimingCollectDeferred_cacheMissLens != nil {
-			TimingCollectDeferred_cacheMissLens[len(prefix)]++
+		if cache != nil {
+			// Cache enabled but miss - defer the read for parallel processing
+			needsBranchRead = true
+			TimingCollectDeferred_cacheMisses++
+			if TimingCollectDeferred_cacheMissLens != nil {
+				TimingCollectDeferred_cacheMissLens[len(prefix)]++
+			}
+		} else {
+			// No cache - read synchronously (old behavior)
+			prev, prevStep, err = ctx.Branch(prefix)
+			if err != nil {
+				return err
+			}
 		}
 	} else {
 		TimingCollectDeferred_cacheHits++
@@ -653,7 +728,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 
 	// Get a pooled DeferredBranchUpdate and copy all fields
 	getDeferredStart := time.Now()
-	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev, prevStep)
+	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev, prevStep, needsBranchRead)
 	be.deferred = append(be.deferred, upd)
 	TimingCollectDeferred_getDeferredUpdate += time.Since(getDeferredStart)
 	return nil
