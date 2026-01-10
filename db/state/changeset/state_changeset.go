@@ -270,7 +270,6 @@ type threadSafeBuf struct {
 var writeDiffsetBuf = &threadSafeBuf{}
 
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
-	return nil
 	writeDiffsetBuf.Lock()
 	defer writeDiffsetBuf.Unlock()
 	if dbg.TraceUnwinds {

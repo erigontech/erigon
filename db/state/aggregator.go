@@ -1243,7 +1243,6 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
 		return nil, nil
 	}
-	fmt.Printf("a2\n")
 
 	{
 		ctx, cancel := context.WithCancel(ctx)
@@ -1252,6 +1251,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		tbls := at.a.DomainTables()
 		for _, tbl := range tbls {
 			wg.Go(func() error {
+				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
 				defer func(t time.Time) {
 					took := time.Since(t)
 					if took < 1*time.Millisecond {
