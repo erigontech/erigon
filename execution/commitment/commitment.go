@@ -228,7 +228,7 @@ func (be *BranchEncoder) CollectUpdate(
 	var foundInCache bool
 
 	if be.cache != nil {
-		prev, prevStep, foundInCache = be.cache.GetBranch(prefix)
+		prev, prevStep, foundInCache = be.cache.GetAndEvictBranch(prefix)
 	}
 	if !foundInCache {
 		prev, prevStep, err = ctx.Branch(prefix)
@@ -251,9 +251,6 @@ func (be *BranchEncoder) CollectUpdate(
 		if err != nil {
 			return 0, err
 		}
-	}
-	if be.cache != nil {
-		be.cache.EvictBranch(prefix)
 	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(

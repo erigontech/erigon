@@ -97,16 +97,16 @@ func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
 
 // GetAndEvictBranch retrieves branch data and marks the entry as evicted in one operation.
 // Returns the entry pointer allowing the caller to read the data before it's considered evicted.
-func (c *WarmupCache) GetAndEvictBranch(prefix []byte) *branchEntry {
+func (c *WarmupCache) GetAndEvictBranch(prefix []byte) ([]byte, kv.Step, bool) {
 	if !c.enabled.Load() {
-		return nil
+		return nil, 0, false
 	}
 	entry, found := c.branches.Get(prefix)
 	if !found || entry.isEvicted {
-		return nil
+		return nil, 0, false
 	}
 	entry.isEvicted = true
-	return entry
+	return entry.data, entry.step, true
 }
 
 // EvictBranch marks a branch entry as evicted without retrieving it.
