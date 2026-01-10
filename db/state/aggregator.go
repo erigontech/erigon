@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -1251,22 +1252,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		for _, tbl := range tbls {
 			wg.Go(func() error {
 				defer func(t time.Time) { log.Warn("[dbg] warmup", "tbl", time.Since(t)) }(time.Now())
-				return at.a.db.View(ctx, func(tx kv.Tx) error {
-					err := tx.ForEach(tbl, nil, func(k, v []byte) error {
-						_, _ = k[0], k[len(k)-1]
-						_, _ = v[0], v[len(v)-1]
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						default:
-						}
-						return nil
-					})
-					if err != nil {
-						return err
-					}
-					return nil
-				})
+				return dbutils.WarmupTable(ctx, at.a.db, tbl)
 			})
 		}
 		defer wg.Wait()
