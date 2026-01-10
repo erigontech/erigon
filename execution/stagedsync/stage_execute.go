@@ -481,6 +481,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		var pruneDiffsLimitOnChainTip = 1_000
 		pruneTimeout := quickPruneTimeout
 		if s.CurrentSyncCycle.IsInitialCycle {
+			panic("[dbg] alex 1")
 			pruneDiffsLimitOnChainTip = math.MaxInt
 			pruneTimeout = time.Hour
 		}
@@ -512,6 +513,8 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
+		panic("[dbg] alex 2")
+
 		pruneTimeout = 12 * time.Hour
 
 		// allow greedy prune on non-chain-tip
