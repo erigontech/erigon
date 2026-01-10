@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -192,11 +193,57 @@ func (p cellFields) String() string {
 	return sb.String()
 }
 
+// DeferredBranchUpdate holds the data needed to perform a branch update later.
+// This allows collecting updates during the fold phase and running EncodeBranch in parallel at the end.
+type DeferredBranchUpdate struct {
+	prefix   []byte
+	bitmap   uint16
+	touchMap uint16
+	afterMap uint16
+
+	// Cells needed for EncodeBranch - pointer to pooled array, only cells in afterMap are populated
+	cells *[16]cell
+	depth int16
+
+	// Previous data from ctx.Branch (for merging)
+	prev     []byte
+	prevStep kv.Step
+
+	// Result after encoding (filled by parallel workers)
+	encoded BranchData
+}
+
+// Global cell array pool for deferred branch updates.
+// Uses sync.Pool for thread-safe allocation reuse.
+var cellArrayPool = sync.Pool{
+	New: func() any {
+		return new([16]cell)
+	},
+}
+
+// getCellArray gets a zeroed cell array from the global pool.
+func getCellArray() *[16]cell {
+	arr := cellArrayPool.Get().(*[16]cell)
+	*arr = [16]cell{} // zero it out to avoid stale data
+	return arr
+}
+
+// putCellArray returns a cell array to the global pool.
+func putCellArray(arr *[16]cell) {
+	if arr != nil {
+		cellArrayPool.Put(arr)
+	}
+}
+
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
 	metrics   *Metrics
+
+	// Deferred updates support
+	deferUpdates bool
+	deferred     []DeferredBranchUpdate
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -204,6 +251,189 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 		buf:    bytes.NewBuffer(make([]byte, sz)),
 		merger: NewHexBranchMerger(sz / 2),
 	}
+}
+
+// SetDeferUpdates enables or disables deferred update collection.
+// When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
+func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
+	be.deferUpdates = defer_
+	if defer_ && be.deferred == nil {
+		be.deferred = make([]DeferredBranchUpdate, 0, 64)
+	}
+}
+
+// DeferUpdatesEnabled returns whether deferred update collection is enabled.
+func (be *BranchEncoder) DeferUpdatesEnabled() bool {
+	return be.deferUpdates
+}
+
+// DeferredUpdates returns the list of deferred updates.
+func (be *BranchEncoder) DeferredUpdates() []DeferredBranchUpdate {
+	return be.deferred
+}
+
+// ClearDeferred clears the deferred updates list and returns all cell arrays to the pool.
+func (be *BranchEncoder) ClearDeferred() {
+	for i := range be.deferred {
+		putCellArray(be.deferred[i].cells)
+		be.deferred[i].cells = nil
+	}
+	be.deferred = be.deferred[:0]
+}
+
+// FindDeferred looks up a deferred update by prefix.
+// Returns the update and true if found, nil and false otherwise.
+// This is useful for lazy evaluation when a branch is read before updates are applied.
+func (be *BranchEncoder) FindDeferred(prefix []byte) (*DeferredBranchUpdate, bool) {
+	for i := range be.deferred {
+		if bytes.Equal(be.deferred[i].prefix, prefix) {
+			return &be.deferred[i], true
+		}
+	}
+	return nil, false
+}
+
+// encodeDeferredUpdate encodes a single deferred update using the provided encoder and merger.
+// The cell hashes should already be computed when the cells were copied.
+func encodeDeferredUpdate(
+	upd *DeferredBranchUpdate,
+	encoder *BranchEncoder,
+	merger *BranchMerger,
+) error {
+	// Create a cell getter that reads from the copied cells
+	readCell := func(nibble int, skip bool) (*cell, error) {
+		if skip {
+			return nil, nil
+		}
+		return &upd.cells[nibble], nil
+	}
+
+	update, _, err := encoder.EncodeBranch(upd.bitmap, upd.touchMap, upd.afterMap, readCell)
+	if err != nil {
+		return err
+	}
+
+	if len(upd.prev) > 0 {
+		if bytes.Equal(upd.prev, update) {
+			upd.encoded = nil // skip unchanged
+			return nil
+		}
+		update, err = merger.Merge(upd.prev, update)
+		if err != nil {
+			return err
+		}
+	}
+
+	upd.encoded = common.Copy(update)
+	return nil
+}
+
+// ApplyDeferredUpdatesSequential encodes and applies all deferred updates sequentially.
+func (be *BranchEncoder) ApplyDeferredUpdatesSequential(ctx PatriciaContext) error {
+	for i := range be.deferred {
+		upd := &be.deferred[i]
+
+		if err := encodeDeferredUpdate(upd, be, be.merger); err != nil {
+			return err
+		}
+
+		if upd.encoded == nil {
+			continue // skip unchanged
+		}
+
+		if err := ctx.PutBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
+			return err
+		}
+		if be.metrics != nil {
+			be.metrics.updateBranch.Add(1)
+		}
+		mxTrieBranchesUpdated.Inc()
+	}
+	return nil
+}
+
+// ApplyDeferredUpdatesParallel encodes deferred updates in parallel, then writes them.
+// The putBranch function must be thread-safe for concurrent writes.
+func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
+	numWorkers int,
+	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
+) error {
+	if len(be.deferred) == 0 {
+		return nil
+	}
+
+	if numWorkers <= 1 {
+		// Sequential fallback
+		for i := range be.deferred {
+			upd := &be.deferred[i]
+			if err := encodeDeferredUpdate(upd, be, be.merger); err != nil {
+				return err
+			}
+			if upd.encoded == nil {
+				continue
+			}
+			if err := putBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
+				return err
+			}
+			mxTrieBranchesUpdated.Inc()
+		}
+		return nil
+	}
+
+	// Phase 1: Parallel encoding
+	errCh := make(chan error, numWorkers)
+	workCh := make(chan *DeferredBranchUpdate, len(be.deferred))
+
+	// Start encoding workers - each with its own encoder and merger
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			encoder := NewBranchEncoder(1024)
+			merger := NewHexBranchMerger(512)
+
+			for upd := range workCh {
+				if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+					errCh <- err
+					return
+				}
+			}
+			errCh <- nil
+		}()
+	}
+
+	// Send work
+	for i := range be.deferred {
+		workCh <- &be.deferred[i]
+	}
+	close(workCh)
+
+	// Wait for encoding to complete
+	var firstErr error
+	for i := 0; i < numWorkers; i++ {
+		if err := <-errCh; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		return firstErr
+	}
+
+	// Phase 2: Write results (can be parallel if putBranch is thread-safe)
+	for i := range be.deferred {
+		upd := &be.deferred[i]
+		if upd.encoded == nil {
+			continue // skip unchanged
+		}
+		if err := putBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
+			return err
+		}
+		mxTrieBranchesUpdated.Inc()
+	}
+
+	if be.metrics != nil {
+		be.metrics.updateBranch.Add(uint64(len(be.deferred)))
+	}
+
+	return nil
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
@@ -236,6 +466,7 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
+
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
@@ -246,6 +477,45 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	mxTrieBranchesUpdated.Inc()
 	return lastNibble, nil
+}
+
+// CollectDeferredUpdate stores a branch update job for later parallel processing.
+// Unlike CollectUpdate, this does NOT call EncodeBranch - it copies the cells needed
+// and defers the encoding work for parallel execution later.
+func (be *BranchEncoder) CollectDeferredUpdate(
+	ctx PatriciaContext,
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	cells *[16]cell,
+	depth int16,
+) error {
+	prev, prevStep, err := ctx.Branch(prefix)
+	if err != nil {
+		return err
+	}
+
+	// Get a cell array from the global pool
+	pooledCells := getCellArray()
+
+	// Copy only the cells that are in afterMap
+	for bitset := afterMap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		pooledCells[nibble] = cells[nibble] // struct copy
+		bitset ^= bit
+	}
+
+	be.deferred = append(be.deferred, DeferredBranchUpdate{
+		prefix:   common.Copy(prefix),
+		bitmap:   bitmap,
+		touchMap: touchMap,
+		afterMap: afterMap,
+		cells:    pooledCells,
+		depth:    depth,
+		prev:     common.Copy(prev),
+		prevStep: prevStep,
+	})
+	return nil
 }
 
 func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
