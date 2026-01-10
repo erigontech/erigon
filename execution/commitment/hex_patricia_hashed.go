@@ -103,6 +103,13 @@ type HexPatriciaHashed struct {
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
+
+	// Timing instrumentation (accumulated during Process)
+	timingFold         time.Duration
+	timingUnfold       time.Duration
+	timingCellHash     time.Duration
+	timingEncodeBranch time.Duration
+	timingDbRead       time.Duration
 }
 
 // Clones current trie state to allow concurrent processing.
@@ -1229,6 +1236,9 @@ func computeCellHash(
 }
 
 func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byte, warmupCache *WarmupCache) ([]byte, error) {
+	cellHashStart := time.Now()
+	defer func() { hph.timingCellHash += time.Since(cellHashStart) }()
+
 	return computeCellHash(cell, depth, buf, hph.keccak, hph.auxBuffer, hph.accountKeyLen, hph.memoizationOff, hph.trace, hph.ctx, hph.metrics, warmupCache)
 }
 
@@ -1781,6 +1791,9 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 }
 
 func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
+	unfoldStart := time.Now()
+	defer func() { hph.timingUnfold += time.Since(unfoldStart) }()
+
 	if hph.trace {
 		fmt.Printf("unfold %d: activeRows: %d\n", unfolding, hph.activeRows)
 	}
@@ -2035,6 +2048,9 @@ func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate in
 // until that current key becomes a prefix of hashedKey that we will process next
 // (in other words until the needFolding function returns 0)
 func (hph *HexPatriciaHashed) fold() (err error) {
+	foldStart := time.Now()
+	defer func() { hph.timingFold += time.Since(foldStart) }()
+
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
 		return errors.New("cannot fold - no active rows")
@@ -2603,7 +2619,19 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		updatesCount = updates.Size()
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
+
+		// Timing instrumentation
+		hashSortTime      time.Duration
+		finalFoldTime     time.Duration
+		applyDeferredTime time.Duration
 	)
+
+	// Reset timing counters
+	hph.timingFold = 0
+	hph.timingUnfold = 0
+	hph.timingCellHash = 0
+	hph.timingEncodeBranch = 0
+	hph.timingDbRead = 0
 
 	//hph.trace = true
 
@@ -2642,6 +2670,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 	}
 
+	hashSortStart := time.Now()
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
@@ -2704,8 +2733,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}
+	hashSortTime = time.Since(hashSortStart)
 
 	// Folding everything up to the root
+	finalFoldStart := time.Now()
 	for hph.activeRows > 0 {
 		foldDone := hph.metrics.StartFolding(nil)
 		if err = hph.fold(); err != nil {
@@ -2713,6 +2744,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		foldDone()
 	}
+	finalFoldTime = time.Since(finalFoldStart)
 
 	rootHash, err = hph.RootHash()
 	if err != nil {
@@ -2721,13 +2753,25 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
-	beforeApplyDefer := time.Now()
+	applyDeferredStart := time.Now()
 	// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
 	if err = hph.branchEncoder.ApplyDeferredUpdatesParallel(16, hph.ctx.PutBranch); err != nil {
 		return nil, fmt.Errorf("apply deferred updates: %w", err)
 	}
 	hph.branchEncoder.ClearDeferred()
-	log.Debug("deferred branch updates applied", "spent", time.Since(beforeApplyDefer))
+	applyDeferredTime = time.Since(applyDeferredStart)
+
+	log.Debug("commitment timing",
+		"total", time.Since(start),
+		"hashSort", hashSortTime,
+		"finalFold", finalFoldTime,
+		"applyDeferred", applyDeferredTime,
+		"fold", hph.timingFold,
+		"unfold", hph.timingUnfold,
+		"cellHash", hph.timingCellHash,
+		"dbRead", hph.timingDbRead,
+		"updates", updatesCount,
+	)
 
 	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 	if dbg.KVReadLevelledMetrics {
@@ -2819,6 +2863,8 @@ func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, er
 			return update, nil
 		}
 	}
+	dbStart := time.Now()
+	defer func() { hph.timingDbRead += time.Since(dbStart) }()
 	return hph.ctx.Account(plainKey)
 }
 
@@ -2829,6 +2875,8 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 			return update, nil
 		}
 	}
+	dbStart := time.Now()
+	defer func() { hph.timingDbRead += time.Since(dbStart) }()
 	return hph.ctx.Storage(plainKey)
 }
 
