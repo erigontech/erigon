@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -425,7 +426,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	// Phase 1: Parallel encoding
 	errCh := make(chan error, numWorkers)
 	workCh := make(chan *DeferredBranchUpdate, len(be.deferred))
-
+	s1 := time.Now()
 	// Start encoding workers - each with its own encoder and merger
 	for i := 0; i < numWorkers; i++ {
 		go func() {
@@ -458,7 +459,9 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	if firstErr != nil {
 		return firstErr
 	}
+	log.Debug("deferred branch updates encoded - phase 1", "spent", time.Since(s1))
 
+	s2 := time.Now()
 	// Phase 2: Write results
 	for _, upd := range be.deferred {
 		if upd.encoded == nil {
@@ -469,6 +472,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		}
 		mxTrieBranchesUpdated.Inc()
 	}
+	log.Debug("deferred branch updates applied - phase 2", "spent", time.Since(s2))
 
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(uint64(len(be.deferred)))
