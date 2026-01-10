@@ -1254,10 +1254,10 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			wg.Go(func() error {
 				defer func(t time.Time) {
 					took := time.Since(t)
-					if took < 10*time.Millisecond {
+					if took < 1*time.Millisecond {
 						return
 					}
-					log.Warn("[dbg] warmup", "tbl", time.Since(t))
+					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
 				}(time.Now())
 				return dbutils.WarmupTable(ctx, at.a.db, tbl)
 			})
