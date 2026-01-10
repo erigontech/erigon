@@ -133,11 +133,8 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		return fmt.Errorf("database not initialized")
 	}
 
-	// Read all blocks from database
-	var blocks []struct {
-		key   []byte
-		value []byte
-	}
+	blocksBatch := []*types.Block{}
+	inserted := uint64(0)
 
 	if err := p.db.View(ctx, func(tx kv.Tx) error {
 		cursor, err := tx.Cursor(kv.Headers)
@@ -150,45 +147,28 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			// Copy the values since cursor data is only valid during iteration
-			blocks = append(blocks, struct {
-				key   []byte
-				value []byte
-			}{key: common.Copy(k), value: common.Copy(v)})
+
+			block, err := p.decodeBlock(v)
+			if err != nil {
+				p.logger.Warn("[BlockCollector] Failed to decode block", "key", common.Bytes2Hex(k), "err", err)
+				continue
+			}
+			if block == nil {
+				continue
+			}
+
+			blocksBatch = append(blocksBatch, block)
+
+			if len(blocksBatch) >= batchSize {
+				if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
+					return err
+				}
+				blocksBatch = []*types.Block{}
+			}
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("failed to read blocks from database: %w", err)
-	}
-
-	if len(blocks) == 0 {
-		return nil
-	}
-
-	p.logger.Info("[BlockCollector] Flushing blocks", "count", len(blocks))
-
-	// Process blocks in batches (blocks are already sorted by key due to MDBX ordering)
-	blocksBatch := []*types.Block{}
-	inserted := uint64(0)
-
-	for _, b := range blocks {
-		block, err := p.decodeBlock(b.value)
-		if err != nil {
-			p.logger.Warn("[BlockCollector] Failed to decode block", "err", err)
-			continue
-		}
-		if block == nil {
-			continue
-		}
-
-		blocksBatch = append(blocksBatch, block)
-
-		if len(blocksBatch) >= batchSize {
-			if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
-				return err
-			}
-			blocksBatch = []*types.Block{}
-		}
+		return fmt.Errorf("failed to flush blocks from database: %w", err)
 	}
 
 	// Insert remaining blocks
