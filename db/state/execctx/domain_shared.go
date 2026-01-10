@@ -516,3 +516,8 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 func (sd *SharedDomains) SetWarmupDB(db kv.TemporalRoDB) {
 	sd.sdCtx.SetWarmupDB(db)
 }
+
+// SetEnableWarmupCache enables/disables warmup cache during commitment processing.
+func (sd *SharedDomains) SetEnableWarmupCache(enable bool) {
+	sd.sdCtx.SetEnableWarmupCache(enable)
+}

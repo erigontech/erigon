@@ -98,6 +98,8 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
+	// SetEnableWarmupCache enables/disables warmup cache during Process (false by default)
+	SetEnableWarmupCache(bool)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -295,6 +297,7 @@ type BranchEncoder struct {
 	deferred        []*DeferredBranchUpdate
 	pendingPrefixes *maphash.UnsafeMap[struct{}] // tracks pending prefixes to detect duplicates
 	flushFunc       func() error                 // called when duplicate prefix detected, to flush pending updates
+	cache           *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -505,17 +508,30 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
+func (be *BranchEncoder) SetCache(cache *WarmupCache) {
+	be.cache = cache
+}
+
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
+	var prev []byte
+	var prevStep kv.Step
+	var foundInCache bool
 
-	prev, prevStep, err := ctx.Branch(prefix)
-	if err != nil {
-		return 0, err
+	if be.cache != nil {
+		prev, prevStep, foundInCache = be.cache.GetBranch(prefix)
 	}
+	if !foundInCache {
+		prev, prevStep, err = ctx.Branch(prefix)
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	update, lastNibble, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
 		return 0, err
@@ -531,11 +547,19 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
-
+	if be.cache != nil {
+		be.cache.EvictKey(prefix)
+	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
-	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
+	prefixCopy := common.Copy(prefix)
+	updateCopy := common.Copy(update)
+	if err = ctx.PutBranch(prefixCopy, updateCopy, prev, prevStep); err != nil {
 		return 0, err
+	}
+	// Update cache with the new branch data
+	if be.cache != nil {
+		be.cache.PutBranch(prefixCopy, updateCopy, prevStep)
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
@@ -1579,6 +1603,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if warmuper != nil && warmuper.Cache() != nil {
+				warmuper.Cache().EvictKey(v)
+			}
 			// Make copies since ETL may reuse buffers
 			hk := common.Copy(k)
 			pk := common.Copy(v)
@@ -1780,6 +1807,22 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+}
+
+// Copy creates a deep copy of the Update.
+func (u *Update) Copy() *Update {
+	if u == nil {
+		return nil
+	}
+	c := &Update{
+		CodeHash:   u.CodeHash,
+		Storage:    u.Storage,
+		StorageLen: u.StorageLen,
+		Flags:      u.Flags,
+		Nonce:      u.Nonce,
+	}
+	c.Balance.Set(&u.Balance)
+	return c
 }
 
 func (u *Update) Merge(b *Update) {

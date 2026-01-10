@@ -245,6 +245,18 @@ func ExecV3(ctx context.Context,
 	var lastCommittedTxNum uint64
 	var lastCommittedBlockNum uint64
 
+	doms.SetWarmupDB(cfg.db)
+
+	// The warmup cache is only useful when executing from the previous state.
+	// if there was a recent reorg, the warmup cache would be polluted with
+	// outdated data. so we limit it to chain tip when there was no recent reorg.
+	recentReorg, err := rawdb.RecentReorgFlag(applyTx)
+	if err != nil {
+		return err
+	}
+	// Do it only for chain-tip blocks!
+	doms.SetEnableWarmupCache(maxBlockNum == startBlockNum && !recentReorg)
+	log.Debug("Warmup Cache", "enabled", maxBlockNum == startBlockNum && !recentReorg, "recentReorg", recentReorg)
 	postValidator := newBlockPostExecutionValidator()
 	if maxBlockNum == startBlockNum {
 		postValidator = newParallelBlockPostExecutionValidator()
@@ -278,7 +290,6 @@ func ExecV3(ctx context.Context,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
-		pe.doms.SetWarmupDB(cfg.db)
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
@@ -309,7 +320,6 @@ func ExecV3(ctx context.Context,
 				lastCommittedBlockNum: blockNum,
 				postValidator:         postValidator,
 			}}
-		se.doms.SetWarmupDB(cfg.db)
 
 		defer func() {
 			se.LogComplete(stepsInDb)
