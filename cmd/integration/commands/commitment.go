@@ -420,7 +420,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	rng := rand.New(rand.NewSource(seed))
 
 	dirs := datadir.New(datadirCli)
-	chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+	chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 	if err != nil {
 		return fmt.Errorf("opening DB: %w", err)
 	}
