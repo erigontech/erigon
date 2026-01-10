@@ -732,12 +732,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		TimingCollectDeferred_cacheHits++
 	}
 
-	evictStart := time.Now()
-	if cache != nil {
-		cache.EvictKey(prefix)
-	}
-	TimingCollectDeferred_cacheEvict += time.Since(evictStart)
-
 	// Track this prefix as pending
 	pendingStart := time.Now()
 	be.pendingPrefixes.Set(prefix, struct{}{})
