@@ -596,7 +596,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(sd *execctx.Shar
 			pruneStart := time.Now()
 			defer UpdateForkChoicePruneDuration(pruneStart)
 			if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-				if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, 2*time.Second); err != nil {
+				if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, 2*time.Second); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
 				return nil
