@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -422,6 +423,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		return nil
 	}
 
+	s1 := time.Now()
 	if numWorkers <= 1 {
 		// Sequential fallback
 		for _, upd := range be.deferred {
@@ -476,6 +478,10 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		return firstErr
 	}
 
+	log.Debug("deferred branch updates encoded", "count", len(be.deferred), "spent", time.Since(s1))
+
+	s2 := time.Now()
+
 	// Phase 2: Write results sequentially
 	for _, upd := range be.deferred {
 		if upd.encoded == nil {
@@ -490,6 +496,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(uint64(len(be.deferred)))
 	}
+	log.Debug("deferred branch updates applied", "count", len(be.deferred), "spent", time.Since(s2))
 
 	return nil
 }
