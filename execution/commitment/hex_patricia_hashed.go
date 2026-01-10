@@ -110,6 +110,11 @@ type HexPatriciaHashed struct {
 	timingCellHash     time.Duration
 	timingEncodeBranch time.Duration
 	timingDbRead       time.Duration
+
+	// Granular fold timing
+	timingFold_keccak        time.Duration
+	timingFold_cellHashLen   time.Duration
+	timingFold_collectUpdate time.Duration
 }
 
 // Clones current trie state to allow concurrent processing.
@@ -2168,6 +2173,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 
 		// Calculate total length of all hashes
+		cellHashLenStart := time.Now()
 		totalBranchLen := int16(17 - nibblesLeftAfterUpdate) // For every empty cell, one byte
 		for bitset, j := hph.afterMap[row], 0; bitset != 0; j++ {
 			bit := bitset & -bitset
@@ -2225,7 +2231,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			totalBranchLen += hph.computeCellHashLen(cell, depth)
 			bitset ^= bit
 		}
+		hph.timingFold_cellHashLen += time.Since(cellHashLenStart)
 
+		keccakStart := time.Now()
 		hph.keccak2.Reset()
 		pt := rlp.GenerateStructLen(hph.hashAuxBuffer[:], int(totalBranchLen))
 		if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
@@ -2266,17 +2274,22 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				}
 				bitset ^= bit
 			}
+			hph.timingFold_keccak += time.Since(keccakStart)
 			// Defer the branch encoding
+			collectStart := time.Now()
 			if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &hph.grid[row], depth, hph.cache); err != nil {
 				return fmt.Errorf("failed to collect deferred branch update: %w", err)
 			}
+			hph.timingFold_collectUpdate += time.Since(collectStart)
 		} else {
 			// Normal path: EncodeBranch with cellGetter that feeds keccak2
 			cellGetter := hph.createCellGetter(b[:], updateKey, row, depth, hph.cache)
+			collectStart := time.Now()
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 			if err != nil {
 				return fmt.Errorf("failed to encode branch update: %w", err)
 			}
+			hph.timingFold_collectUpdate += time.Since(collectStart)
 			// lastNibble is the position after the highest set bit in afterMap
 			lastNibble := bits.Len16(hph.afterMap[row])
 			for i := lastNibble; i < 17; i++ {
@@ -2287,6 +2300,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
 				}
 			}
+			hph.timingFold_keccak += time.Since(keccakStart)
 		}
 		upCell.extLen = depth - upDepth - 1
 		upCell.hashedExtLen = upCell.extLen
@@ -2632,6 +2646,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	hph.timingCellHash = 0
 	hph.timingEncodeBranch = 0
 	hph.timingDbRead = 0
+	hph.timingFold_keccak = 0
+	hph.timingFold_cellHashLen = 0
+	hph.timingFold_collectUpdate = 0
 
 	//hph.trace = true
 
@@ -2767,6 +2784,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		"finalFold", finalFoldTime,
 		"applyDeferred", applyDeferredTime,
 		"fold", hph.timingFold,
+		"fold_keccak", hph.timingFold_keccak,
+		"fold_cellHashLen", hph.timingFold_cellHashLen,
+		"fold_collectUpdate", hph.timingFold_collectUpdate,
 		"unfold", hph.timingUnfold,
 		"cellHash", hph.timingCellHash,
 		"dbRead", hph.timingDbRead,
@@ -2853,7 +2873,10 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, kv.Step, 
 			return data, step, nil
 		}
 	}
-	return hph.ctx.Branch(key)
+	dbReadStart := time.Now()
+	data, step, err := hph.ctx.Branch(key)
+	hph.timingDbRead += time.Since(dbReadStart)
+	return data, step, err
 }
 
 // accountFromCacheOrDB reads account data from cache if available, otherwise from DB.
