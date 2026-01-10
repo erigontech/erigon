@@ -1660,9 +1660,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			if len(batch) >= hashSortBatchSize {
 				// Wait for warmup to complete before final fold (experimental)
 				if warmuper != nil {
-					if err := warmuper.Wait(); err != nil {
-						log.Warn("warmup wait failed", "err", err)
-					}
+					warmuper.WaitPending()
 				}
 				for _, p := range batch {
 					select {
@@ -1686,9 +1684,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 		// Wait for warmup to complete before final fold (experimental)
 		if warmuper != nil {
-			if err := warmuper.Wait(); err != nil {
-				log.Warn("warmup wait failed", "err", err)
-			}
+			warmuper.WaitPending()
 		}
 
 		// Process remaining keys in final batch
