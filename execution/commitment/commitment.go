@@ -1644,14 +1644,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
 		var prevKey []byte
-		var etlIterStart time.Time
 
+		etlLoadStart := time.Now()
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			// Measure ETL overhead (time between callbacks)
-			if !etlIterStart.IsZero() {
-				TimingHashSort_etlOverhead += time.Since(etlIterStart)
-			}
-
 			if warmuper != nil && warmuper.Cache() != nil {
 				warmuper.Cache().EvictKey(v)
 			}
@@ -1694,26 +1689,27 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				}
 				batch = batch[:0]
 			}
-			etlIterStart = time.Now()
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
+		// ETL overhead = total ETL time minus time spent in our code (copy + warmup)
+		TimingHashSort_etlOverhead = time.Since(etlLoadStart) - TimingHashSort_copy - TimingHashSort_warmup
 		if err != nil {
 			return err
 		}
 
 		// Process remaining keys in final batch
+		finalBatchStart := time.Now()
 		for _, p := range batch {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
 			}
-			callbackStart := time.Now()
 			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 				return err
 			}
-			TimingHashSort_callback += time.Since(callbackStart)
 		}
+		TimingHashSort_callback += time.Since(finalBatchStart)
 
 		t.initCollector()
 
