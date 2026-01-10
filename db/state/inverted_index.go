@@ -864,11 +864,13 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 		pruneSizeMetric = mxPruneSizeIndex
 	}
 
-	var vtbl string
+	var vtbl, name string
 	if valTable != nil {
 		vtbl = *valTable
+		name = "history: " + iit.name.String()
 	} else {
 		vtbl = iit.ii.ValuesTable
+		name = "ii: " + iit.name.String()
 	}
 
 	prs, err := GetPruneValProgress(rwTx, []byte(vtbl))
@@ -876,7 +878,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 		return nil, err
 	}
 
-	pruneStat, err := prune.TableScanningPrune(ctx, iit.name.String(), iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
+	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)
 	if err != nil {
 		return nil, err
