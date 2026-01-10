@@ -2584,6 +2584,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.trace = true
 
+	// Set up flush function for deferred updates - called when duplicate prefix is detected
+	hph.branchEncoder.SetFlushFunc(func() error {
+		return hph.branchEncoder.ApplyDeferredUpdatesParallel(16, hph.ctx.PutBranch)
+	})
+
 	if hph.metrics.collectCommitmentMetrics {
 		hph.metrics.Reset()
 		hph.metrics.updates.Store(updatesCount)

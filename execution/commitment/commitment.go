@@ -27,7 +27,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -195,7 +195,7 @@ func (p cellFields) String() string {
 }
 
 // DeferredBranchUpdate holds the data needed to perform a branch update later.
-// This allows collecting updates during the fold phase and running EncodeBranch in parallel at the end.
+// This allows collecting updates during the fold phase and running computeCellHash + EncodeBranch in parallel.
 type DeferredBranchUpdate struct {
 	prefix   []byte
 	bitmap   uint16
@@ -203,6 +203,7 @@ type DeferredBranchUpdate struct {
 	afterMap uint16
 
 	// Cells needed for EncodeBranch - pointer to pooled array, only cells in afterMap are populated
+	// Cell hashes are already computed during fold() before copying
 	cells *[16]cell
 	depth int16
 
@@ -289,8 +290,10 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	// Deferred updates support
-	deferUpdates bool
-	deferred     []*DeferredBranchUpdate
+	deferUpdates    bool
+	deferred        []*DeferredBranchUpdate
+	pendingPrefixes *maphash.Map[struct{}] // tracks pending prefixes to detect duplicates
+	flushFunc       func() error           // called when duplicate prefix detected, to flush pending updates
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -304,9 +307,19 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 // When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
 func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
-	if defer_ && be.deferred == nil {
-		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
+	if defer_ {
+		if be.deferred == nil {
+			be.deferred = make([]*DeferredBranchUpdate, 0, 64)
+		}
+		if be.pendingPrefixes == nil {
+			be.pendingPrefixes = maphash.NewMap[struct{}]()
+		}
 	}
+}
+
+// SetFlushFunc sets the function to call when a duplicate prefix is detected during deferred update collection.
+func (be *BranchEncoder) SetFlushFunc(flushFunc func() error) {
+	be.flushFunc = flushFunc
 }
 
 // DeferUpdatesEnabled returns whether deferred update collection is enabled.
@@ -325,6 +338,9 @@ func (be *BranchEncoder) ClearDeferred() {
 		putDeferredUpdate(upd)
 	}
 	be.deferred = be.deferred[:0]
+	if be.pendingPrefixes != nil {
+		be.pendingPrefixes.Clear()
+	}
 }
 
 // FindDeferred looks up a deferred update by prefix.
@@ -339,14 +355,14 @@ func (be *BranchEncoder) FindDeferred(prefix []byte) (*DeferredBranchUpdate, boo
 	return nil, false
 }
 
-// encodeDeferredUpdate encodes a single deferred update using the provided encoder and merger.
-// The cell hashes should already be computed when the cells were copied.
+// encodeDeferredUpdate encodes a branch update using the provided encoder and merger.
+// Cell hashes are already computed during fold() before cells were copied.
 func encodeDeferredUpdate(
 	upd *DeferredBranchUpdate,
 	encoder *BranchEncoder,
 	merger *BranchMerger,
 ) error {
-	// Create a cell getter that reads from the copied cells
+	// Create a cell getter that reads from the copied cells (hashes already computed)
 	readCell := func(nibble int, skip bool) (*cell, error) {
 		if skip {
 			return nil, nil
@@ -396,7 +412,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesSequential(ctx PatriciaContext) err
 	return nil
 }
 
-// ApplyDeferredUpdatesParallel encodes deferred updates in parallel, then writes them.
+// ApplyDeferredUpdatesParallel computes cell hashes and encodes branch updates in parallel, then writes them.
 // The putBranch function must be thread-safe for concurrent writes.
 func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	numWorkers int,
@@ -423,11 +439,11 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		return nil
 	}
 
-	// Phase 1: Parallel encoding
+	// Phase 1: Parallel hash computation and encoding
 	errCh := make(chan error, numWorkers)
 	workCh := make(chan *DeferredBranchUpdate, len(be.deferred))
-	s1 := time.Now()
-	// Start encoding workers - each with its own encoder and merger
+
+	// Start workers - each with its own encoder and merger
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			encoder := NewBranchEncoder(1024)
@@ -459,10 +475,8 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	if firstErr != nil {
 		return firstErr
 	}
-	log.Debug("deferred branch updates encoded - phase 1", "spent", time.Since(s1))
 
-	s2 := time.Now()
-	// Phase 2: Write results
+	// Phase 2: Write results sequentially
 	for _, upd := range be.deferred {
 		if upd.encoded == nil {
 			continue // skip unchanged
@@ -472,7 +486,6 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		}
 		mxTrieBranchesUpdated.Inc()
 	}
-	log.Debug("deferred branch updates applied - phase 2", "spent", time.Since(s2))
 
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(uint64(len(be.deferred)))
@@ -525,8 +538,10 @@ func (be *BranchEncoder) CollectUpdate(
 }
 
 // CollectDeferredUpdate stores a branch update job for later parallel processing.
-// Unlike CollectUpdate, this does NOT call EncodeBranch - it copies the cells needed
-// and defers the encoding work for parallel execution later.
+// Unlike CollectUpdate, this does NOT call computeCellHash or EncodeBranch - it copies the cells
+// and defers encoding for parallel execution later.
+// Cell hashes are already computed during fold() before this is called.
+// If a duplicate prefix is detected, flushFunc is called to flush pending updates first.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -534,10 +549,24 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	cells *[16]cell,
 	depth int16,
 ) error {
+	// Check for duplicate prefix - if found, flush pending updates first
+	if _, exists := be.pendingPrefixes.Get(prefix); exists {
+		if be.flushFunc != nil {
+			if err := be.flushFunc(); err != nil {
+				return err
+			}
+		}
+		// After flush, clear deferred and pending prefixes
+		be.ClearDeferred()
+	}
+
 	prev, prevStep, err := ctx.Branch(prefix)
 	if err != nil {
 		return err
 	}
+
+	// Track this prefix as pending
+	be.pendingPrefixes.Set(prefix, struct{}{})
 
 	// Get a pooled DeferredBranchUpdate and copy all fields
 	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev, prevStep)
