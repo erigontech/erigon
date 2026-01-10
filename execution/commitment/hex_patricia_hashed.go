@@ -2251,7 +2251,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				bitset ^= bit
 			}
 			// Defer the branch encoding
-			if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &hph.grid[row], depth); err != nil {
+			if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &hph.grid[row], depth, hph.cache); err != nil {
 				return fmt.Errorf("failed to collect deferred branch update: %w", err)
 			}
 		} else {
