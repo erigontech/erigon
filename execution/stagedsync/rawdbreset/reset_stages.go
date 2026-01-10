@@ -125,19 +125,22 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	for _, tbl := range cleanupList {
-		return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			log.Info("Clear", "table", tbl)
 			return tx.ClearTable(tbl)
-		})
-
+		}); err != nil {
+			return nil
+		}
 	}
 
-	db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
