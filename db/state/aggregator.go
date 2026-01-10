@@ -1263,7 +1263,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			return aggStat, ctx.Err()
 		default:
 		}
-		aggStat.Domains[at.d[id].d.FilenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+		aggStat.Domains[at.d[id].d.FilenameBase], err = d.Prune(context.Background(), tx, step, txFrom, txTo, limit, logEvery)
 		if err != nil {
 			return aggStat, err
 		}
@@ -1276,7 +1276,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			return aggStat, ctx.Err()
 		default:
 		}
-		stat, err := at.iis[iikey].TableScanningPrune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil,
+		stat, err := at.iis[iikey].TableScanningPrune(context.Background(), tx, txFrom, txTo, limit, logEvery, false, nil,
 			nil, nil, prune.DefaultStorageMode)
 		if err != nil {
 			return nil, err

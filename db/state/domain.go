@@ -1834,7 +1834,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		limit = math.MaxUint64
 	}
 	st := time.Now()
-
+	defer mxPruneTookDomain.ObserveDuration(st)
 	prg, err := GetPruneValProgress(rwTx, []byte(dt.d.ValuesTable))
 	if err != nil {
 		return nil, err
@@ -1852,7 +1852,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
-	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
+	defer func(t time.Time) { mxPruneTookDomain.ObserveDuration(t) }(time.Now())
 	var valsCursor kv.PseudoDupSortRwCursor
 	var mode prune.StorageMode
 	if dt.d.LargeValues {
@@ -1886,7 +1886,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		return nil, err
 	}
 
-	prs.KeyProgress = prune.Done
+	prs.KeyProgress = prune.Done // domains don't have key tables
 
 	pruneStat, err := prune.TableScanningPrune(ctx, dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prs, mode)
@@ -1903,7 +1903,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	if pruneStat == nil {
 		return &DomainPruneStat{MinStep: math.MaxUint64}, errors.New("prune stat is nil")
 	}
-	mxPruneSizeIndex.AddUint64(pruneStat.PruneCountValues)
+	mxPruneSizeDomain.AddUint64(pruneStat.PruneCountValues)
 	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
 	return &DomainPruneStat{
 		MinStep:  kv.Step(pruneStat.MinTxNum / dt.stepSize),
