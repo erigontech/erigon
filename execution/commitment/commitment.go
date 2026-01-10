@@ -88,11 +88,13 @@ var (
 
 // Global timing for CollectDeferredUpdate breakdown
 var (
-	TimingCollectDeferred_flushCheck   time.Duration
-	TimingCollectDeferred_branchLookup time.Duration
+	TimingCollectDeferred_flushCheck        time.Duration
+	TimingCollectDeferred_branchLookup      time.Duration
 	TimingCollectDeferred_getDeferredUpdate time.Duration
-	TimingCollectDeferred_total        time.Duration
-	TimingCollectDeferred_count        int64
+	TimingCollectDeferred_total             time.Duration
+	TimingCollectDeferred_count             int64
+	TimingCollectDeferred_cacheHits         int64
+	TimingCollectDeferred_cacheMisses       int64
 )
 
 func ResetCollectDeferredTimings() {
@@ -101,6 +103,8 @@ func ResetCollectDeferredTimings() {
 	TimingCollectDeferred_getDeferredUpdate = 0
 	TimingCollectDeferred_total = 0
 	TimingCollectDeferred_count = 0
+	TimingCollectDeferred_cacheHits = 0
+	TimingCollectDeferred_cacheMisses = 0
 }
 
 // Trie represents commitment variant.
@@ -619,6 +623,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		if err != nil {
 			return err
 		}
+		TimingCollectDeferred_cacheMisses++
+	} else {
+		TimingCollectDeferred_cacheHits++
 	}
 	if cache != nil {
 		cache.EvictKey(prefix)
@@ -1651,6 +1658,12 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 			// Process batch when full
 			if len(batch) >= hashSortBatchSize {
+				// Wait for warmup to complete before final fold (experimental)
+				if warmuper != nil {
+					if err := warmuper.Wait(); err != nil {
+						log.Warn("warmup wait failed", "err", err)
+					}
+				}
 				for _, p := range batch {
 					select {
 					case <-ctx.Done():
@@ -1670,6 +1683,12 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
+		}
+		// Wait for warmup to complete before final fold (experimental)
+		if warmuper != nil {
+			if err := warmuper.Wait(); err != nil {
+				log.Warn("warmup wait failed", "err", err)
+			}
 		}
 
 		// Process remaining keys in final batch
