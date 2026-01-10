@@ -95,6 +95,7 @@ var (
 	TimingCollectDeferred_count             int64
 	TimingCollectDeferred_cacheHits         int64
 	TimingCollectDeferred_cacheMisses       int64
+	TimingCollectDeferred_cacheMissLens     map[int]int64 // prefix length -> count
 )
 
 // Global timing for HashSort breakdown
@@ -113,6 +114,7 @@ func ResetCollectDeferredTimings() {
 	TimingCollectDeferred_count = 0
 	TimingCollectDeferred_cacheHits = 0
 	TimingCollectDeferred_cacheMisses = 0
+	TimingCollectDeferred_cacheMissLens = make(map[int]int64)
 	TimingHashSort_etlOverhead = 0
 	TimingHashSort_callback = 0
 	TimingHashSort_warmup = 0
@@ -636,6 +638,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 		TimingCollectDeferred_cacheMisses++
+		if TimingCollectDeferred_cacheMissLens != nil {
+			TimingCollectDeferred_cacheMissLens[len(prefix)]++
+		}
 	} else {
 		TimingCollectDeferred_cacheHits++
 	}

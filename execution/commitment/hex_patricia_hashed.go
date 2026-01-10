@@ -2793,6 +2793,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		"collect_getDeferred", TimingCollectDeferred_getDeferredUpdate,
 		"collect_cacheHits", TimingCollectDeferred_cacheHits,
 		"collect_cacheMisses", TimingCollectDeferred_cacheMisses,
+		"collect_missLens", TimingCollectDeferred_cacheMissLens,
 		"unfold", hph.timingUnfold,
 		"cellHash", hph.timingCellHash,
 		"dbRead", hph.timingDbRead,
