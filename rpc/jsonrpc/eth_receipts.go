@@ -558,9 +558,8 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	defer tx.Rollback()
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		bnh, _ := numberOrHash.Hash()
-		if errors.Is(err, rpchelper.BlockNotFoundErr{Hash: bnh}) {
-			return nil, nil
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
 		}
 		return nil, err
 	}

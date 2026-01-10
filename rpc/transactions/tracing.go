@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -109,6 +110,7 @@ func TraceTx(
 	message protocol.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
+	blockNumber *big.Int,
 	blockHash common.Hash,
 	txnIndex int,
 	ibs *state.IntraBlockState,
@@ -118,7 +120,7 @@ func TraceTx(
 	callTimeout time.Duration,
 	precompiles vm.PrecompiledContracts,
 ) (gasUsed uint64, err error) {
-	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockHash, txnIndex, stream, callTimeout)
+	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockNumber, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
 		return 0, err
@@ -156,6 +158,7 @@ func AssembleTracer(
 	ctx context.Context,
 	config *tracersConfig.TraceConfig,
 	txHash common.Hash,
+	blockNumber *big.Int,
 	blockHash common.Hash,
 	txnIndex int,
 	stream jsonstream.Stream,
@@ -179,7 +182,7 @@ func AssembleTracer(
 		if config.TracerConfig != nil {
 			cfg = *config.TracerConfig
 		}
-		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash}, cfg)
+		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash, BlockNumber: blockNumber}, cfg)
 		if err != nil {
 			return nil, false, func() {}, err
 		}

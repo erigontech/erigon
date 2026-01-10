@@ -177,20 +177,43 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	}
 
 	for i, item := range dc.files {
-		// todo release btcursor when iter over/make it truly stateless
-		btCursor, err := dc.statelessBtree(i).Seek(dc.reusableReader(i), hi.from)
-		if err != nil {
-			return err
-		}
-		if btCursor == nil {
-			continue
-		}
+		txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+		if dc.d.Accessors.Has(statecfg.AccessorBTree) {
+			// Use BTree cursor for domains with BTree accessor
+			btCursor, err := dc.statelessBtree(i).Seek(dc.reusableReader(i), hi.from)
+			if err != nil {
+				return err
+			}
 
-		key := btCursor.Key()
-		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
-			val := btCursor.Value()
-			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
-			heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: txNum, reverse: true})
+			if btCursor == nil {
+				continue
+			}
+
+			key = btCursor.Key()
+			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+				val := btCursor.Value()
+				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: txNum, reverse: true})
+			}
+		} else if dc.d.Accessors.Has(statecfg.AccessorHashMap) {
+			// For domains without BTree (e.g., commitment with HashMap accessor),
+			// iterate the data file directly using linear scan.
+			// RecSplit indices don't support OrdinalLookup (no enums), so we can't binary search.
+			reader := dc.reusableReader(i)
+			reader.Reset(0)
+
+			// Linear scan to find first key >= hi.from
+			for reader.HasNext() {
+				key, _ = reader.Next(nil)
+				if hi.from == nil || bytes.Compare(key, hi.from) >= 0 {
+					value, _ = reader.Next(nil)
+					break
+				}
+				reader.Skip() // skip value
+			}
+
+			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: common.Copy(key), val: common.Copy(value), kvReader: reader, endTxNum: txNum, reverse: true})
+			}
 		}
 	}
 	return hi.advanceInFiles()
@@ -206,14 +229,27 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 			ci1 := heap.Pop(hi.h).(*CursorItem)
 			switch ci1.t {
 			case FILE_CURSOR:
-				if ci1.btCursor.Next() {
-					ci1.key = ci1.btCursor.Key()
-					ci1.val = ci1.btCursor.Value()
-					if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
-						heap.Push(hi.h, ci1)
+				if ci1.btCursor != nil {
+					// BTree cursor iteration
+					if ci1.btCursor.Next() {
+						ci1.key = ci1.btCursor.Key()
+						ci1.val = ci1.btCursor.Value()
+						if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
+							heap.Push(hi.h, ci1)
+						}
+					} else {
+						ci1.btCursor.Close()
 					}
-				} else {
-					ci1.btCursor.Close()
+				} else { // Direct .kv file iteration
+					if ci1.kvReader.HasNext() {
+						k, _ := ci1.kvReader.Next(nil)
+						v, _ := ci1.kvReader.Next(nil)
+						ci1.key = common.Copy(k)
+						ci1.val = common.Copy(v)
+						if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
+							heap.Push(hi.h, ci1)
+						}
+					}
 				}
 			case DB_CURSOR:
 				if hi.largeVals {
@@ -406,17 +442,17 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 					}
 				}
 				if indexList.Has(statecfg.AccessorHashMap) {
-					ci1.idx.Reset(ci1.latestOffset)
-					if !ci1.idx.HasNext() {
+					ci1.kvReader.Reset(ci1.latestOffset)
+					if !ci1.kvReader.HasNext() {
 						break
 					}
-					key, _ := ci1.idx.Next(nil)
+					key, _ := ci1.kvReader.Next(nil)
 					if key != nil && bytes.HasPrefix(key, prefix) {
 						ci1.key = key
-						ci1.val, ci1.latestOffset = ci1.idx.Next(nil)
+						ci1.val, ci1.latestOffset = ci1.kvReader.Next(nil)
 						heap.Push(cpPtr, ci1)
 					} else {
-						ci1.idx = nil
+						ci1.kvReader = nil
 					}
 				}
 			case DB_CURSOR:

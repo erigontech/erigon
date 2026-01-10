@@ -299,6 +299,8 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	start := time.Now()
 	headersChain = append(headersChain, header)
 	bodiesChain = append(bodiesChain, body)
+	hash := header.Hash()
+	number := header.Number.Uint64()
 	if err := fv.validatePayload(sd, tx, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
@@ -307,11 +309,11 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 			return
 		}
 	}
-	fv.timingsCache.Add(header.Hash(), BlockTimings{time.Since(start), 0})
+	fv.timingsCache.Add(hash, BlockTimings{time.Since(start), 0})
 
-	latestValidHash = header.Hash()
-	fv.extendingForkHeadHash = header.Hash()
-	fv.extendingForkNumber = header.Number.Uint64()
+	latestValidHash = hash
+	fv.extendingForkHeadHash = hash
+	fv.extendingForkNumber = number
 	if validationError != nil {
 		var latestValidNumber uint64
 		latestValidNumber, criticalError = stages.GetStageProgress(tx, stages.Execution)
@@ -333,9 +335,9 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		fv.extendingForkNumber = 0
 		return
 	}
-	fv.validHashes.Add(header.Hash(), true)
+	fv.validHashes.Add(hash, true)
 
-	_, criticalError = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), header.Number.Uint64(), body)
+	_, criticalError = rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
 	if criticalError != nil {
 		return //nolint:nilnesserr
 	}

@@ -350,15 +350,10 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 // partial they will be requested soon. We don't add incomplete files in case they are failures from
 // previous sync attempts. These probably should be cleaned up somewhere, we'll assume the node
 // knows to delete or ignore stuff that's not complete.
-func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
+func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrents int, err error) {
 	d.log(log.LvlInfo, "Adding torrents from disk")
-	var incompleteTorrents int
 	var newTorrents []*torrent.Torrent
 	defer func() {
-		if incompleteTorrents != 0 {
-			d.log(log.LvlWarn, "Skipped adding incomplete torrents",
-				"count", incompleteTorrents)
-		}
 		d.log(log.LvlInfo, "Finished adding torrents from disk", "new", len(newTorrents))
 		go func() {
 			for _, t := range newTorrents {
@@ -368,7 +363,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
 	}()
 	// The fs module should use forward slash style paths only. We need this guarantee for how we use
 	// the metainfo.Info.Name field for nested snapshot names.
-	return fs.WalkDir(
+	err = fs.WalkDir(
 		os.DirFS(d.snapDir()),
 		".",
 		func(path string, de fs.DirEntry, err error) error {
@@ -403,6 +398,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (err error) {
 			return nil
 		},
 	)
+	return
 }
 
 // I haven't removed logSeeding yet because I think Alex will want it back at some point.
