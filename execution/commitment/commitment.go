@@ -417,7 +417,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		return firstErr
 	}
 
-	// Phase 2: Write results (can be parallel if putBranch is thread-safe)
+	// Phase 2: Write results
 	for i := range be.deferred {
 		upd := &be.deferred[i]
 		if upd.encoded == nil {
