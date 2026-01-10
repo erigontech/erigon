@@ -110,7 +110,7 @@ func TestWarmupCache_Eviction(t *testing.T) {
 	}
 
 	// Evict the key
-	cache.EvictKey(key)
+	cache.EvictAccount(key)
 
 	// Should not find after eviction
 	_, found = cache.GetAccount(key)

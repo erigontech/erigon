@@ -612,7 +612,7 @@ func (be *BranchEncoder) CollectUpdate(
 	var foundInCache bool
 
 	if be.cache != nil {
-		prev, prevStep, foundInCache = be.cache.GetBranch(prefix)
+		prev, prevStep, foundInCache = be.cache.GetAndEvictBranch(prefix)
 	}
 	if !foundInCache {
 		prev, prevStep, err = ctx.Branch(prefix)
@@ -635,9 +635,6 @@ func (be *BranchEncoder) CollectUpdate(
 		if err != nil {
 			return 0, err
 		}
-	}
-	if be.cache != nil {
-		be.cache.EvictKey(prefix)
 	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
@@ -1750,7 +1747,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		etlLoadStart := time.Now()
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if warmuper != nil && warmuper.Cache() != nil {
-				warmuper.Cache().EvictKey(v)
+				warmuper.Cache().EvictPlainKey(v)
 			}
 			// Make copies since ETL may reuse buffers
 			copyStart := time.Now()

@@ -53,6 +53,23 @@ func (m *Map[V]) Set(key []byte, value V) {
 	m.m[h] = value
 }
 
+// Update atomically retrieves the value for a key and applies an update function to it.
+// If the key exists, the function is called with the value and the result is stored back.
+// Returns the updated value and whether the key was found.
+func (m *Map[V]) Update(key []byte, fn func(V) V) (V, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h := Hash(key)
+	v, ok := m.m[h]
+	if !ok {
+		var zero V
+		return zero, false
+	}
+	v = fn(v)
+	m.m[h] = v
+	return v, true
+}
+
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	m.mu.Lock()
