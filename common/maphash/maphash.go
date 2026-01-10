@@ -23,7 +23,7 @@ func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
 }
 
-// Map is a non-thread-safe map that uses maphash to hash []byte keys.
+// Map is a thread-safe map that uses maphash to hash []byte keys.
 type Map[V any] struct {
 	m  map[uint64]V
 	mu sync.RWMutex
@@ -76,6 +76,52 @@ func (m *Map[V]) Len() int {
 func (m *Map[V]) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	clear(m.m)
+}
+
+// UnsafeMap is a non-thread-safe map that uses maphash to hash []byte keys.
+// Use this when you don't need concurrent access for better performance.
+type UnsafeMap[V any] struct {
+	m map[uint64]V
+}
+
+// NewUnsafeMap creates a new UnsafeMap.
+func NewUnsafeMap[V any]() *UnsafeMap[V] {
+	return &UnsafeMap[V]{
+		m: make(map[uint64]V),
+	}
+}
+
+// Get retrieves a value by key.
+func (m *UnsafeMap[V]) Get(key []byte) (V, bool) {
+	h := Hash(key)
+	e, ok := m.m[h]
+	if !ok {
+		var zero V
+		return zero, false
+	}
+	return e, true
+}
+
+// Set stores a value with the given key.
+func (m *UnsafeMap[V]) Set(key []byte, value V) {
+	h := Hash(key)
+	m.m[h] = value
+}
+
+// Delete removes a key from the map.
+func (m *UnsafeMap[V]) Delete(key []byte) {
+	h := Hash(key)
+	delete(m.m, h)
+}
+
+// Len returns the number of entries in the map.
+func (m *UnsafeMap[V]) Len() int {
+	return len(m.m)
+}
+
+// Clear removes all entries from the map.
+func (m *UnsafeMap[V]) Clear() {
 	clear(m.m)
 }
 
