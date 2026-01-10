@@ -1829,6 +1829,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	st := time.Now()
 	defer mxPruneTookDomain.ObserveDuration(st)
+	stat = &DomainPruneStat{MinStep: math.MaxUint64}
 	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
@@ -1840,7 +1841,6 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		return stat, nil
 	}
 
-	stat = &DomainPruneStat{MinStep: math.MaxUint64}
 	defer func() {
 		dt.d.logger.Info("scan domain pruning res", "name", dt.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "vals", stat.Values, "spent ms", time.Since(st).Milliseconds())
 	}()
