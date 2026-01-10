@@ -1002,15 +1002,6 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	if _, ok := invalidateOnce[fmt.Sprintf("history%s", ht.h.ValuesTable)]; !ok {
-		err := InvalidatePruneProgress(tx, ht.h.ValuesTable)
-		if err != nil {
-			ht.h.logger.Error("invalidate prune progress", "err", err)
-			return nil, err
-		}
-		invalidateOnce[fmt.Sprintf("history%s", ht.h.ValuesTable)] = 1
-		ht.h.logger.Info("invalidated h prune progress", "name", ht.h.Name)
-	}
 	if !forced {
 		if ht.files.EndTxNum() > 0 {
 			txTo = min(txTo, ht.files.EndTxNum())
