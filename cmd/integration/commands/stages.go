@@ -886,7 +886,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	if chainTipMode {
-		//if chainTip = true, forced noCommit = false
+		s.CurrentSyncCycle.IsFirstCycle = false
+		s.CurrentSyncCycle.IsInitialCycle = false
 		for bn := execProgress; bn < block; bn++ {
 			err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger)
 			if err != nil {
