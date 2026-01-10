@@ -1057,7 +1057,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		//     can't interrupt by ctrl+c and leave dirt in DB
 		stat, err := at.prune(ctx, tx, pruneLimit /*pruneLimit*/, furiousPrune || aggressivePrune, aggLogEvery)
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, context.DeadlineExceeded) || err.Error() == "context deadline exceeded" { //TODO: for some reason error.Is doesn't work
 				at.a.logger.Info("[snapshots] PruneSmallBatches timeout", "err", err)
 				fullStat.Accumulate(stat)
 				return true, nil
