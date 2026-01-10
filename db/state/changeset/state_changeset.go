@@ -289,30 +289,30 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
 	}
 	writeDiffsetBuf.b = diffSet.serializeKeys(writeDiffsetBuf.b[:0], blockNumber)
-	keys := writeDiffsetBuf.b
+	//keys := writeDiffsetBuf.b
 
-	chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
+	//chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
 	// dbutils.BlockBodyKey(blockNumber, blockHash) + index -> chunk
 	// Write the chunk count
-	if err := tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash), dbutils.EncodeBlockNumber(uint64(chunkCount))); err != nil {
-		return err
-	}
-
-	key := make([]byte, DiffChunkKeyLen)
-	binary.BigEndian.PutUint64(key, blockNumber)
-	copy(key[8:], blockHash[:])
-
-	for i := 0; i < chunkCount; i++ {
-		start := i * DiffChunkLen
-		end := min((i+1)*DiffChunkLen, len(keys))
-		binary.BigEndian.PutUint64(key[40:], uint64(i))
-
-		if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
-			return err
-		}
-	}
+	//if err := tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash), dbutils.EncodeBlockNumber(uint64(chunkCount))); err != nil {
+	//	return err
+	//}
+	//
+	//key := make([]byte, DiffChunkKeyLen)
+	//binary.BigEndian.PutUint64(key, blockNumber)
+	//copy(key[8:], blockHash[:])
+	//
+	//for i := 0; i < chunkCount; i++ {
+	//	start := i * DiffChunkLen
+	//	end := min((i+1)*DiffChunkLen, len(keys))
+	//	binary.BigEndian.PutUint64(key[40:], uint64(i))
+	//
+	//	if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
+	//		return err
+	//	}
+	//}
 	return nil
 }
 
