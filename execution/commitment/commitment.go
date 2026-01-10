@@ -86,46 +86,6 @@ var (
 	}
 )
 
-// Global timing for CollectDeferredUpdate breakdown
-var (
-	TimingCollectDeferred_flushCheck        time.Duration
-	TimingCollectDeferred_branchLookup      time.Duration
-	TimingCollectDeferred_cacheGet          time.Duration
-	TimingCollectDeferred_cacheEvict        time.Duration
-	TimingCollectDeferred_pendingSet        time.Duration
-	TimingCollectDeferred_getDeferredUpdate time.Duration
-	TimingCollectDeferred_total             time.Duration
-	TimingCollectDeferred_count             int64
-	TimingCollectDeferred_cacheHits         int64
-	TimingCollectDeferred_cacheMisses       int64
-	TimingCollectDeferred_cacheMissLens     map[int]int64 // prefix length -> count
-)
-
-// Global timing for HashSort breakdown
-var (
-	TimingHashSort_etlOverhead time.Duration
-	TimingHashSort_callback    time.Duration
-	TimingHashSort_warmup      time.Duration
-	TimingHashSort_copy        time.Duration
-)
-
-func ResetCollectDeferredTimings() {
-	TimingCollectDeferred_flushCheck = 0
-	TimingCollectDeferred_branchLookup = 0
-	TimingCollectDeferred_cacheGet = 0
-	TimingCollectDeferred_cacheEvict = 0
-	TimingCollectDeferred_pendingSet = 0
-	TimingCollectDeferred_getDeferredUpdate = 0
-	TimingCollectDeferred_total = 0
-	TimingCollectDeferred_count = 0
-	TimingCollectDeferred_cacheHits = 0
-	TimingCollectDeferred_cacheMisses = 0
-	TimingCollectDeferred_cacheMissLens = make(map[int]int64)
-	TimingHashSort_etlOverhead = 0
-	TimingHashSort_callback = 0
-	TimingHashSort_warmup = 0
-	TimingHashSort_copy = 0
-}
 
 // Trie represents commitment variant.
 type Trie interface {
@@ -673,14 +633,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	depth int16,
 	cache *WarmupCache,
 ) error {
-	totalStart := time.Now()
-	defer func() {
-		TimingCollectDeferred_total += time.Since(totalStart)
-		TimingCollectDeferred_count++
-	}()
-
 	// Flush if duplicate prefix or too many deferred updates
-	flushStart := time.Now()
 	needsFlush := len(be.deferred) >= maxDeferredUpdates
 	if !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
@@ -694,7 +647,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		}
 		be.ClearDeferred()
 	}
-	TimingCollectDeferred_flushCheck += time.Since(flushStart)
 
 	var (
 		prev            []byte
@@ -703,21 +655,14 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		needsBranchRead bool
 	)
 
-	branchStart := time.Now()
-	cacheGetStart := time.Now()
 	if cache != nil {
 		prev, prevStep, _ = cache.GetBranch(prefix)
 	}
-	TimingCollectDeferred_cacheGet += time.Since(cacheGetStart)
 
 	if prev == nil {
 		if cache != nil {
 			// Cache enabled but miss - defer the read for parallel processing
 			needsBranchRead = true
-			TimingCollectDeferred_cacheMisses++
-			if TimingCollectDeferred_cacheMissLens != nil {
-				TimingCollectDeferred_cacheMissLens[len(prefix)]++
-			}
 		} else {
 			// No cache - read synchronously (old behavior)
 			prev, prevStep, err = ctx.Branch(prefix)
@@ -725,28 +670,18 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 				return err
 			}
 		}
-	} else {
-		TimingCollectDeferred_cacheHits++
 	}
 
-	evictStart := time.Now()
 	if cache != nil {
 		cache.EvictKey(prefix)
 	}
-	TimingCollectDeferred_cacheEvict += time.Since(evictStart)
 
 	// Track this prefix as pending
-	pendingStart := time.Now()
 	be.pendingPrefixes.Set(prefix, struct{}{})
-	TimingCollectDeferred_pendingSet += time.Since(pendingStart)
-
-	TimingCollectDeferred_branchLookup += time.Since(branchStart)
 
 	// Get a pooled DeferredBranchUpdate and copy all fields
-	getDeferredStart := time.Now()
 	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev, prevStep, needsBranchRead)
 	be.deferred = append(be.deferred, upd)
-	TimingCollectDeferred_getDeferredUpdate += time.Since(getDeferredStart)
 	return nil
 }
 
@@ -1741,21 +1676,17 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
 		var prevKey []byte
 
-		etlLoadStart := time.Now()
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if warmuper != nil && warmuper.Cache() != nil {
 				warmuper.Cache().EvictKey(v)
 			}
 			// Make copies since ETL may reuse buffers
-			copyStart := time.Now()
 			hk := common.Copy(k)
 			pk := common.Copy(v)
 			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
-			TimingHashSort_copy += time.Since(copyStart)
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
-				warmupStart := time.Now()
 				startDepth := 0
 				if prevKey != nil {
 					// Find common prefix length
@@ -1766,7 +1697,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				}
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
-				TimingHashSort_warmup += time.Since(warmupStart)
 			}
 
 			// Process batch when full
@@ -1777,24 +1707,19 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return ctx.Err()
 					default:
 					}
-					callbackStart := time.Now()
 					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 						return err
 					}
-					TimingHashSort_callback += time.Since(callbackStart)
 				}
 				batch = batch[:0]
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
-		// ETL overhead = total ETL time minus time spent in our code (copy + warmup)
-		TimingHashSort_etlOverhead = time.Since(etlLoadStart) - TimingHashSort_copy - TimingHashSort_warmup
 		if err != nil {
 			return err
 		}
 
 		// Process remaining keys in final batch
-		finalBatchStart := time.Now()
 		for _, p := range batch {
 			select {
 			case <-ctx.Done():
@@ -1805,7 +1730,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return err
 			}
 		}
-		TimingHashSort_callback += time.Since(finalBatchStart)
 
 		t.initCollector()
 
