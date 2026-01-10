@@ -86,7 +86,6 @@ var (
 	}
 )
 
-
 // Trie represents commitment variant.
 type Trie interface {
 	// RootHash produces root hash of the trie
@@ -667,10 +666,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 				return err
 			}
 		}
-	}
-
-	if cache != nil {
-		cache.EvictKey(prefix)
 	}
 
 	// Track this prefix as pending
