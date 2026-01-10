@@ -90,6 +90,9 @@ var (
 var (
 	TimingCollectDeferred_flushCheck        time.Duration
 	TimingCollectDeferred_branchLookup      time.Duration
+	TimingCollectDeferred_cacheGet          time.Duration
+	TimingCollectDeferred_cacheEvict        time.Duration
+	TimingCollectDeferred_pendingSet        time.Duration
 	TimingCollectDeferred_getDeferredUpdate time.Duration
 	TimingCollectDeferred_total             time.Duration
 	TimingCollectDeferred_count             int64
@@ -109,6 +112,9 @@ var (
 func ResetCollectDeferredTimings() {
 	TimingCollectDeferred_flushCheck = 0
 	TimingCollectDeferred_branchLookup = 0
+	TimingCollectDeferred_cacheGet = 0
+	TimingCollectDeferred_cacheEvict = 0
+	TimingCollectDeferred_pendingSet = 0
 	TimingCollectDeferred_getDeferredUpdate = 0
 	TimingCollectDeferred_total = 0
 	TimingCollectDeferred_count = 0
@@ -698,9 +704,12 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	)
 
 	branchStart := time.Now()
+	cacheGetStart := time.Now()
 	if cache != nil {
 		prev, prevStep, _ = cache.GetBranch(prefix)
 	}
+	TimingCollectDeferred_cacheGet += time.Since(cacheGetStart)
+
 	if prev == nil {
 		if cache != nil {
 			// Cache enabled but miss - defer the read for parallel processing
@@ -719,11 +728,18 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	} else {
 		TimingCollectDeferred_cacheHits++
 	}
+
+	evictStart := time.Now()
 	if cache != nil {
 		cache.EvictKey(prefix)
 	}
+	TimingCollectDeferred_cacheEvict += time.Since(evictStart)
+
 	// Track this prefix as pending
+	pendingStart := time.Now()
 	be.pendingPrefixes.Set(prefix, struct{}{})
+	TimingCollectDeferred_pendingSet += time.Since(pendingStart)
+
 	TimingCollectDeferred_branchLookup += time.Since(branchStart)
 
 	// Get a pooled DeferredBranchUpdate and copy all fields
