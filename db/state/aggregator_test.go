@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -478,4 +479,31 @@ func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uin
 		SnapshotCreationConfig: &createConfig,
 		Schema:                 schema,
 	}, log.New())
+}
+
+func doWork(ctx context.Context, diskReadThrottling time.Duration) (int, error) {
+	i := 0
+	for {
+		time.Sleep(diskReadThrottling) // 0 in prod. > 0 in tests
+
+		i++ // do the work. use value we read from disk.
+
+		if err := ctx.Err(); err != nil { // exit by timeout
+			return i, err
+		}
+
+	}
+}
+
+func TestName1(t *testing.T) {
+	const expectingDiskReads = 12
+	const diskReadThrottling = 10 * time.Millisecond // slow-down each disk read
+
+	//make sure we reserved time for last iteration (determenism of tests)
+	timeout := expectingDiskReads*diskReadThrottling + diskReadThrottling/2
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	res, _ := doWork(ctx, diskReadThrottling)
+	require.Equal(t, expectingDiskReads, res)
 }
