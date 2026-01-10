@@ -709,7 +709,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	branchStart := time.Now()
 	cacheGetStart := time.Now()
 	if cache != nil {
-		prev, prevStep, _ = cache.GetBranch(prefix)
+		prev, prevStep, _ = cache.GetAndEvictBranch(prefix)
 	}
 	TimingCollectDeferred_cacheGet += time.Since(cacheGetStart)
 
