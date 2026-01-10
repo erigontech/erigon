@@ -136,6 +136,8 @@ func SavePruneValProgress(db kv.Putter, prunedTblName string, st *prune.Stat) er
 		return err
 	}
 
+	println("saved for", prunedTblName, st.KeyProgress.String(), st.ValueProgress.String())
+
 	return nil
 }
 
@@ -184,6 +186,8 @@ func GetPruneValProgress(db kv.Getter, tbl []byte) (*prune.Stat, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	println("got for", string(tbl), st.KeyProgress.String(), st.ValueProgress.String())
 
 	return st, nil
 }
