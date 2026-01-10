@@ -544,11 +544,13 @@ func (be *BranchEncoder) CollectUpdate(
 	return lastNibble, nil
 }
 
+const maxDeferredUpdates = 15_000
+
 // CollectDeferredUpdate stores a branch update job for later parallel processing.
 // Unlike CollectUpdate, this does NOT call computeCellHash or EncodeBranch - it copies the cells
 // and defers encoding for parallel execution later.
 // Cell hashes are already computed during fold() before this is called.
-// If a duplicate prefix is detected, flushFunc is called to flush pending updates first.
+// Flushes pending updates if a duplicate prefix is detected or if deferred count exceeds maxDeferredUpdates.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -556,14 +558,18 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	cells *[16]cell,
 	depth int16,
 ) error {
-	// Check for duplicate prefix - if found, flush pending updates first
-	if _, exists := be.pendingPrefixes.Get(prefix); exists {
+	// Flush if duplicate prefix or too many deferred updates
+	needsFlush := len(be.deferred) >= maxDeferredUpdates
+	if !needsFlush {
+		_, needsFlush = be.pendingPrefixes.Get(prefix)
+	}
+
+	if needsFlush {
 		if be.flushFunc != nil {
 			if err := be.flushFunc(); err != nil {
 				return err
 			}
 		}
-		// After flush, clear deferred and pending prefixes
 		be.ClearDeferred()
 	}
 
