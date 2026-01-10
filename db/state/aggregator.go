@@ -1015,6 +1015,8 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
+	fmt.Printf("a0\n")
+
 	if dbg.NoPrune() {
 		return false, nil
 	}
@@ -1240,9 +1242,11 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		step = kv.Step((txTo - 1) / at.StepSize())
 	}
 
+	fmt.Printf("a1: %d\n", step)
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
 		return nil, nil
 	}
+	fmt.Printf("a2\n")
 
 	{
 		ctx, cancel := context.WithCancel(ctx)

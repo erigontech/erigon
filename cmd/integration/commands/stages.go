@@ -899,10 +899,22 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				if err := tx.Commit(); err != nil {
 					return err
 				}
+
+				if err := db.Update(ctx, func(tx kv.RwTx) error {
+					ps, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, db, s.CurrentSyncCycle.IsInitialCycle)
+					if err != nil {
+						return err
+					}
+					return stagedsync.PruneExecutionStage(ctx, ps, tx, cfg, time.Hour, logger)
+				}); err != nil {
+					return err
+				}
+
 				if tx, err = db.BeginTemporalRw(ctx); err != nil {
 					return err
 				}
 			}
+
 		}
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
