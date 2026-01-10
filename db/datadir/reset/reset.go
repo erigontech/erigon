@@ -92,7 +92,7 @@ func (reset *Reset) dataDirOsPath() OsFilePath {
 }
 
 func (reset *Reset) remove(name OsFilePath) error {
-	return reset.RemoveFunc(reset.dataDirOsPath().Join(name))
+	return reset.RemoveFunc(reset.dataDirOsPath().JoinClobbering(name))
 }
 
 func (reset *Reset) makeRemoveAll(root OsFilePath) removeAll {
