@@ -1829,6 +1829,9 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	st := time.Now()
 	defer mxPruneTookDomain.ObserveDuration(st)
+	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	}
 	prg, err := GetPruneValProgress(rwTx, []byte(dt.d.ValuesTable))
 	if err != nil {
 		return nil, err
@@ -1841,9 +1844,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	defer func() {
 		dt.d.logger.Info("scan domain pruning res", "name", dt.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "vals", stat.Values, "spent ms", time.Since(st).Milliseconds())
 	}()
-	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
-		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
-	}
+
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookDomain.ObserveDuration(t) }(time.Now())
