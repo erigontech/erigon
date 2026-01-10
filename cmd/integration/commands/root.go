@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
@@ -80,7 +81,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 		Path(path).
 		RoTxsLimiter(limiterB).
 		WriteMap(dbWriteMap).
-		//Flags(func(u uint) uint { return mdbx.UtterlyNoSync }).
+		Flags(func(u uint) uint { return mdbx.SafeNoSync }).
 		Accede(true) // integration tool: must not create db. must open db without stoping erigon.
 
 	if databaseVerbosity != -1 {
