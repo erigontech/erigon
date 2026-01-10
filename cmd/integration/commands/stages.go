@@ -913,12 +913,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 
-			doms.Close()
-			doms, err = execctx.NewSharedDomains(ctx, tx, log.New())
-			if err != nil {
-				return err
-			}
-
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
