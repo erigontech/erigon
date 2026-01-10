@@ -1658,10 +1658,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 			// Process batch when full
 			if len(batch) >= hashSortBatchSize {
-				// Wait for warmup to complete before final fold (experimental)
-				if warmuper != nil {
-					warmuper.WaitPending()
-				}
 				for _, p := range batch {
 					select {
 					case <-ctx.Done():
@@ -1671,9 +1667,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 						return err
 					}
-				}
-				if warmuper != nil {
-					warmuper.DrainPending()
 				}
 				batch = batch[:0]
 			}
@@ -1746,9 +1739,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						processErr = err
 						return false
 					}
-				}
-				if warmuper != nil {
-					warmuper.DrainPending()
 				}
 				batch = batch[:0]
 			}

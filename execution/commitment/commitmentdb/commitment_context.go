@@ -351,7 +351,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			Enabled:           true,
 			EnableWarmupCache: sdc.blockLimit > 0 && sdc.blockLimit <= 32, // Enable cache for small batches
 			CtxFactory:        ctxFactory,
-			NumWorkers:        16,
+			NumWorkers:        32, // Increased from 16 for more parallel warmup
 			MaxDepth:          commitment.WarmupMaxDepth,
 			LogPrefix:         logPrefix,
 		}
