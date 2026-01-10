@@ -42,11 +42,7 @@ func (m *Map[V]) Get(key []byte) (V, bool) {
 	defer m.mu.RUnlock()
 	h := Hash(key)
 	e, ok := m.m[h]
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	return e, true
+	return e, ok
 }
 
 // Set stores a value with the given key.
@@ -96,11 +92,7 @@ func NewUnsafeMap[V any]() *UnsafeMap[V] {
 func (m *UnsafeMap[V]) Get(key []byte) (V, bool) {
 	h := Hash(key)
 	e, ok := m.m[h]
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	return e, true
+	return e, ok
 }
 
 // Set stores a value with the given key.
