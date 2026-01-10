@@ -310,18 +310,6 @@ func (w *Warmuper) Stats() WarmupStats {
 	}
 }
 
-// WaitPending waits for all pending work items to be processed by workers.
-// Unlike Wait(), this does not close the channel and allows more keys to be added after.
-func (w *Warmuper) WaitPending() {
-	if !w.started.Load() || w.numWorkers <= 0 {
-		return
-	}
-	// Wait for work channel to be empty (all items picked up by workers)
-	for len(w.work) > 0 {
-		time.Sleep(100 * time.Microsecond)
-	}
-}
-
 // DrainPending drains all pending work items from the work channel without processing them.
 func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {

@@ -2796,6 +2796,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		"unfold", hph.timingUnfold,
 		"cellHash", hph.timingCellHash,
 		"dbRead", hph.timingDbRead,
+		"etl_overhead", TimingHashSort_etlOverhead,
+		"etl_copy", TimingHashSort_copy,
+		"etl_warmup", TimingHashSort_warmup,
+		"etl_callback", TimingHashSort_callback,
 		"updates", updatesCount,
 	)
 

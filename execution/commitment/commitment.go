@@ -97,6 +97,14 @@ var (
 	TimingCollectDeferred_cacheMisses       int64
 )
 
+// Global timing for HashSort breakdown
+var (
+	TimingHashSort_etlOverhead time.Duration
+	TimingHashSort_callback    time.Duration
+	TimingHashSort_warmup      time.Duration
+	TimingHashSort_copy        time.Duration
+)
+
 func ResetCollectDeferredTimings() {
 	TimingCollectDeferred_flushCheck = 0
 	TimingCollectDeferred_branchLookup = 0
@@ -105,6 +113,10 @@ func ResetCollectDeferredTimings() {
 	TimingCollectDeferred_count = 0
 	TimingCollectDeferred_cacheHits = 0
 	TimingCollectDeferred_cacheMisses = 0
+	TimingHashSort_etlOverhead = 0
+	TimingHashSort_callback = 0
+	TimingHashSort_warmup = 0
+	TimingHashSort_copy = 0
 }
 
 // Trie represents commitment variant.
@@ -1632,18 +1644,27 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
 		var prevKey []byte
+		var etlIterStart time.Time
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			// Measure ETL overhead (time between callbacks)
+			if !etlIterStart.IsZero() {
+				TimingHashSort_etlOverhead += time.Since(etlIterStart)
+			}
+
 			if warmuper != nil && warmuper.Cache() != nil {
 				warmuper.Cache().EvictKey(v)
 			}
 			// Make copies since ETL may reuse buffers
+			copyStart := time.Now()
 			hk := common.Copy(k)
 			pk := common.Copy(v)
 			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
+			TimingHashSort_copy += time.Since(copyStart)
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
+				warmupStart := time.Now()
 				startDepth := 0
 				if prevKey != nil {
 					// Find common prefix length
@@ -1654,6 +1675,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				}
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
+				TimingHashSort_warmup += time.Since(warmupStart)
 			}
 
 			// Process batch when full
@@ -1664,20 +1686,19 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return ctx.Err()
 					default:
 					}
+					callbackStart := time.Now()
 					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 						return err
 					}
+					TimingHashSort_callback += time.Since(callbackStart)
 				}
 				batch = batch[:0]
 			}
+			etlIterStart = time.Now()
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
-		}
-		// Wait for warmup to complete before final fold (experimental)
-		if warmuper != nil {
-			warmuper.WaitPending()
 		}
 
 		// Process remaining keys in final batch
@@ -1687,9 +1708,11 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return ctx.Err()
 			default:
 			}
+			callbackStart := time.Now()
 			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
 				return err
 			}
+			TimingHashSort_callback += time.Since(callbackStart)
 		}
 
 		t.initCollector()
