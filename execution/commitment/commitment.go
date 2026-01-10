@@ -227,25 +227,6 @@ var deferredUpdatePool = sync.Pool{
 	},
 }
 
-// copyCellInto deep copies all fields from src cell into dst cell.
-func copyCellInto(dst, src *cell) {
-	copy(dst.hashedExtension[:], src.hashedExtension[:])
-	copy(dst.extension[:], src.extension[:])
-	copy(dst.accountAddr[:], src.accountAddr[:])
-	copy(dst.storageAddr[:], src.storageAddr[:])
-	copy(dst.hash[:], src.hash[:])
-	copy(dst.stateHash[:], src.stateHash[:])
-	dst.hashedExtLen = src.hashedExtLen
-	dst.extLen = src.extLen
-	dst.accountAddrLen = src.accountAddrLen
-	dst.storageAddrLen = src.storageAddrLen
-	dst.hashLen = src.hashLen
-	dst.stateHashLen = src.stateHashLen
-	dst.loaded = src.loaded
-	dst.Update = src.Update
-	copy(dst.hashBuf[:], src.hashBuf[:])
-}
-
 // getDeferredUpdate gets a DeferredBranchUpdate from the global pool
 // and copies all fields directly into existing buffers.
 func getDeferredUpdate(
@@ -268,7 +249,7 @@ func getDeferredUpdate(
 	for bitset := afterMap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		copyCellInto(&upd.cells[nibble], &cells[nibble])
+		upd.cells[nibble] = cells[nibble]
 		bitset ^= bit
 	}
 
