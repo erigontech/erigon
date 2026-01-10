@@ -71,7 +71,7 @@ go run ./cmd/integration write_amplification --datadir=/path/to/db --chain=mainn
 		ctx, _ := common.RootContext()
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
