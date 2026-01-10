@@ -1251,7 +1251,12 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		tbls := at.a.DomainTables()
 		for _, tbl := range tbls {
 			wg.Go(func() error {
-				defer func(t time.Time) { log.Warn("[dbg] warmup", "tbl", time.Since(t)) }(time.Now())
+				defer func(t time.Time) {
+					took := time.Since(t)
+					if took > 10*time.Millisecond {
+						log.Warn("[dbg] warmup", "tbl", time.Since(t))
+					}
+				}(time.Now())
 				return dbutils.WarmupTable(ctx, at.a.db, tbl)
 			})
 		}
