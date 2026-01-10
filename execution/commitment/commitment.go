@@ -86,6 +86,23 @@ var (
 	}
 )
 
+// Global timing for CollectDeferredUpdate breakdown
+var (
+	TimingCollectDeferred_flushCheck   time.Duration
+	TimingCollectDeferred_branchLookup time.Duration
+	TimingCollectDeferred_getDeferredUpdate time.Duration
+	TimingCollectDeferred_total        time.Duration
+	TimingCollectDeferred_count        int64
+)
+
+func ResetCollectDeferredTimings() {
+	TimingCollectDeferred_flushCheck = 0
+	TimingCollectDeferred_branchLookup = 0
+	TimingCollectDeferred_getDeferredUpdate = 0
+	TimingCollectDeferred_total = 0
+	TimingCollectDeferred_count = 0
+}
+
 // Trie represents commitment variant.
 type Trie interface {
 	// RootHash produces root hash of the trie
@@ -564,7 +581,14 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	depth int16,
 	cache *WarmupCache,
 ) error {
+	totalStart := time.Now()
+	defer func() {
+		TimingCollectDeferred_total += time.Since(totalStart)
+		TimingCollectDeferred_count++
+	}()
+
 	// Flush if duplicate prefix or too many deferred updates
+	flushStart := time.Now()
 	needsFlush := len(be.deferred) >= maxDeferredUpdates
 	if !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
@@ -578,6 +602,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		}
 		be.ClearDeferred()
 	}
+	TimingCollectDeferred_flushCheck += time.Since(flushStart)
 
 	var (
 		prev     []byte
@@ -585,6 +610,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		err      error
 	)
 
+	branchStart := time.Now()
 	if cache != nil {
 		prev, prevStep, _ = cache.GetBranch(prefix)
 	}
@@ -599,10 +625,13 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 	// Track this prefix as pending
 	be.pendingPrefixes.Set(prefix, struct{}{})
+	TimingCollectDeferred_branchLookup += time.Since(branchStart)
 
 	// Get a pooled DeferredBranchUpdate and copy all fields
+	getDeferredStart := time.Now()
 	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev, prevStep)
 	be.deferred = append(be.deferred, upd)
+	TimingCollectDeferred_getDeferredUpdate += time.Since(getDeferredStart)
 	return nil
 }
 

@@ -2649,6 +2649,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	hph.timingFold_keccak = 0
 	hph.timingFold_cellHashLen = 0
 	hph.timingFold_collectUpdate = 0
+	ResetCollectDeferredTimings()
 
 	//hph.trace = true
 
@@ -2787,6 +2788,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		"fold_keccak", hph.timingFold_keccak,
 		"fold_cellHashLen", hph.timingFold_cellHashLen,
 		"fold_collectUpdate", hph.timingFold_collectUpdate,
+		"collect_flushCheck", TimingCollectDeferred_flushCheck,
+		"collect_branchLookup", TimingCollectDeferred_branchLookup,
+		"collect_getDeferred", TimingCollectDeferred_getDeferredUpdate,
 		"unfold", hph.timingUnfold,
 		"cellHash", hph.timingCellHash,
 		"dbRead", hph.timingDbRead,
