@@ -613,7 +613,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 	}
-	cache.EvictKey(prefix)
+	if cache != nil {
+		cache.EvictKey(prefix)
+	}
 	// Track this prefix as pending
 	be.pendingPrefixes.Set(prefix, struct{}{})
 
