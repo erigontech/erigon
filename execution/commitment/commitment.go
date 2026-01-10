@@ -26,6 +26,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -192,11 +194,103 @@ func (p cellFields) String() string {
 	return sb.String()
 }
 
+// DeferredBranchUpdate holds the data needed to perform a branch update later.
+// This allows collecting updates during the fold phase and running EncodeBranch in parallel at the end.
+type DeferredBranchUpdate struct {
+	prefix   []byte
+	bitmap   uint16
+	touchMap uint16
+	afterMap uint16
+
+	// Cells needed for EncodeBranch - pointer to pooled array, only cells in afterMap are populated
+	cells *[16]cell
+	depth int16
+
+	// Previous data from ctx.Branch (for merging)
+	prev     []byte
+	prevStep kv.Step
+
+	// Result after encoding (filled by parallel workers)
+	encoded BranchData
+}
+
+// Global pool for deferred branch updates.
+var deferredUpdatePool = sync.Pool{
+	New: func() any {
+		return &DeferredBranchUpdate{
+			cells: new([16]cell),
+		}
+	},
+}
+
+// copyCellInto deep copies all fields from src cell into dst cell.
+func copyCellInto(dst, src *cell) {
+	copy(dst.hashedExtension[:], src.hashedExtension[:])
+	copy(dst.extension[:], src.extension[:])
+	copy(dst.accountAddr[:], src.accountAddr[:])
+	copy(dst.storageAddr[:], src.storageAddr[:])
+	copy(dst.hash[:], src.hash[:])
+	copy(dst.stateHash[:], src.stateHash[:])
+	dst.hashedExtLen = src.hashedExtLen
+	dst.extLen = src.extLen
+	dst.accountAddrLen = src.accountAddrLen
+	dst.storageAddrLen = src.storageAddrLen
+	dst.hashLen = src.hashLen
+	dst.stateHashLen = src.stateHashLen
+	dst.loaded = src.loaded
+	dst.Update = src.Update
+	copy(dst.hashBuf[:], src.hashBuf[:])
+}
+
+// getDeferredUpdate gets a DeferredBranchUpdate from the global pool
+// and copies all fields directly into existing buffers.
+func getDeferredUpdate(
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	cells *[16]cell,
+	depth int16,
+	prev []byte,
+	prevStep kv.Step,
+) *DeferredBranchUpdate {
+	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
+
+	upd.prefix = append(upd.prefix[:0], prefix...)
+	upd.bitmap = bitmap
+	upd.touchMap = touchMap
+	upd.afterMap = afterMap
+	upd.depth = depth
+
+	// Deep copy only the cells in afterMap
+	for bitset := afterMap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		copyCellInto(&upd.cells[nibble], &cells[nibble])
+		bitset ^= bit
+	}
+
+	upd.prev = append(upd.prev[:0], prev...)
+	upd.prevStep = prevStep
+	upd.encoded = nil
+
+	return upd
+}
+
+// putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
+func putDeferredUpdate(upd *DeferredBranchUpdate) {
+	if upd != nil {
+		deferredUpdatePool.Put(upd)
+	}
+}
+
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
 	metrics   *Metrics
+
+	// Deferred updates support
+	deferUpdates bool
+	deferred     []*DeferredBranchUpdate
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -204,6 +298,187 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 		buf:    bytes.NewBuffer(make([]byte, sz)),
 		merger: NewHexBranchMerger(sz / 2),
 	}
+}
+
+// SetDeferUpdates enables or disables deferred update collection.
+// When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
+func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
+	be.deferUpdates = defer_
+	if defer_ && be.deferred == nil {
+		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
+	}
+}
+
+// DeferUpdatesEnabled returns whether deferred update collection is enabled.
+func (be *BranchEncoder) DeferUpdatesEnabled() bool {
+	return be.deferUpdates
+}
+
+// DeferredUpdates returns the list of deferred updates.
+func (be *BranchEncoder) DeferredUpdates() []*DeferredBranchUpdate {
+	return be.deferred
+}
+
+// ClearDeferred clears the deferred updates list and returns all objects to the pool.
+func (be *BranchEncoder) ClearDeferred() {
+	for _, upd := range be.deferred {
+		putDeferredUpdate(upd)
+	}
+	be.deferred = be.deferred[:0]
+}
+
+// FindDeferred looks up a deferred update by prefix.
+// Returns the update and true if found, nil and false otherwise.
+// This is useful for lazy evaluation when a branch is read before updates are applied.
+func (be *BranchEncoder) FindDeferred(prefix []byte) (*DeferredBranchUpdate, bool) {
+	for _, upd := range be.deferred {
+		if bytes.Equal(upd.prefix, prefix) {
+			return upd, true
+		}
+	}
+	return nil, false
+}
+
+// encodeDeferredUpdate encodes a single deferred update using the provided encoder and merger.
+// The cell hashes should already be computed when the cells were copied.
+func encodeDeferredUpdate(
+	upd *DeferredBranchUpdate,
+	encoder *BranchEncoder,
+	merger *BranchMerger,
+) error {
+	// Create a cell getter that reads from the copied cells
+	readCell := func(nibble int, skip bool) (*cell, error) {
+		if skip {
+			return nil, nil
+		}
+		return &upd.cells[nibble], nil
+	}
+
+	update, _, err := encoder.EncodeBranch(upd.bitmap, upd.touchMap, upd.afterMap, readCell)
+	if err != nil {
+		return err
+	}
+
+	if len(upd.prev) > 0 {
+		if bytes.Equal(upd.prev, update) {
+			upd.encoded = nil // skip unchanged
+			return nil
+		}
+		update, err = merger.Merge(upd.prev, update)
+		if err != nil {
+			return err
+		}
+	}
+
+	upd.encoded = common.Copy(update)
+	return nil
+}
+
+// ApplyDeferredUpdatesSequential encodes and applies all deferred updates sequentially.
+func (be *BranchEncoder) ApplyDeferredUpdatesSequential(ctx PatriciaContext) error {
+	for _, upd := range be.deferred {
+		if err := encodeDeferredUpdate(upd, be, be.merger); err != nil {
+			return err
+		}
+
+		if upd.encoded == nil {
+			continue // skip unchanged
+		}
+
+		if err := ctx.PutBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
+			return err
+		}
+		if be.metrics != nil {
+			be.metrics.updateBranch.Add(1)
+		}
+		mxTrieBranchesUpdated.Inc()
+	}
+	return nil
+}
+
+// ApplyDeferredUpdatesParallel encodes deferred updates in parallel, then writes them.
+// The putBranch function must be thread-safe for concurrent writes.
+func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
+	numWorkers int,
+	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
+) error {
+	if len(be.deferred) == 0 {
+		return nil
+	}
+
+	if numWorkers <= 1 {
+		// Sequential fallback
+		for _, upd := range be.deferred {
+			if err := encodeDeferredUpdate(upd, be, be.merger); err != nil {
+				return err
+			}
+			if upd.encoded == nil {
+				continue
+			}
+			if err := putBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
+				return err
+			}
+			mxTrieBranchesUpdated.Inc()
+		}
+		return nil
+	}
+
+	// Phase 1: Parallel encoding
+	errCh := make(chan error, numWorkers)
+	workCh := make(chan *DeferredBranchUpdate, len(be.deferred))
+	s1 := time.Now()
+	// Start encoding workers - each with its own encoder and merger
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			encoder := NewBranchEncoder(1024)
+			merger := NewHexBranchMerger(512)
+
+			for upd := range workCh {
+				if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+					errCh <- err
+					return
+				}
+			}
+			errCh <- nil
+		}()
+	}
+
+	// Send work
+	for _, upd := range be.deferred {
+		workCh <- upd
+	}
+	close(workCh)
+
+	// Wait for encoding to complete
+	var firstErr error
+	for i := 0; i < numWorkers; i++ {
+		if err := <-errCh; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		return firstErr
+	}
+	log.Debug("deferred branch updates encoded - phase 1", "spent", time.Since(s1))
+
+	s2 := time.Now()
+	// Phase 2: Write results
+	for _, upd := range be.deferred {
+		if upd.encoded == nil {
+			continue // skip unchanged
+		}
+		if err := putBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
+			return err
+		}
+		mxTrieBranchesUpdated.Inc()
+	}
+	log.Debug("deferred branch updates applied - phase 2", "spent", time.Since(s2))
+
+	if be.metrics != nil {
+		be.metrics.updateBranch.Add(uint64(len(be.deferred)))
+	}
+
+	return nil
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
@@ -236,6 +511,7 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
+
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
@@ -246,6 +522,27 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	mxTrieBranchesUpdated.Inc()
 	return lastNibble, nil
+}
+
+// CollectDeferredUpdate stores a branch update job for later parallel processing.
+// Unlike CollectUpdate, this does NOT call EncodeBranch - it copies the cells needed
+// and defers the encoding work for parallel execution later.
+func (be *BranchEncoder) CollectDeferredUpdate(
+	ctx PatriciaContext,
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	cells *[16]cell,
+	depth int16,
+) error {
+	prev, prevStep, err := ctx.Branch(prefix)
+	if err != nil {
+		return err
+	}
+
+	// Get a pooled DeferredBranchUpdate and copy all fields
+	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev, prevStep)
+	be.deferred = append(be.deferred, upd)
+	return nil
 }
 
 func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
