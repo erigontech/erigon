@@ -1227,6 +1227,8 @@ func (at *AggregatorRoTx) GreedyPruneHistory(ctx context.Context, domain kv.Doma
 	return nil
 }
 
+var invalidateOnce = map[string]int{}
+
 func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, aggressiveMode bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
 	if !aggressiveMode {
 		defer mxPruneTookAgg.ObserveDuration(time.Now())
@@ -1263,6 +1265,16 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			return aggStat, ctx.Err()
 		default:
 		}
+		if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
+			err = InvalidatePruneProgress(tx, d.d.ValuesTable)
+			if err != nil {
+				d.d.logger.Error("invalidate prune progress", "err", err)
+				return nil, err
+			}
+			invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)] = 1
+			d.d.logger.Info("invalidated d prune progress", "name", d.name)
+		}
+
 		aggStat.Domains[at.d[id].d.FilenameBase], err = d.Prune(context.Background(), tx, step, txFrom, txTo, limit, logEvery)
 		if err != nil {
 			return aggStat, err
@@ -1275,6 +1287,15 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		case <-ctx.Done():
 			return aggStat, ctx.Err()
 		default:
+		}
+		if _, ok := invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)]; !ok {
+			err := InvalidatePruneProgress(tx, at.iis[iikey].ii.ValuesTable)
+			if err != nil {
+				at.iis[iikey].ii.logger.Error("invalidate prune progress", "err", err)
+				return nil, err
+			}
+			invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)] = 1
+			at.iis[iikey].ii.logger.Info("invalidated ii prune progress", "name", at.iis[iikey].ii.Name)
 		}
 		stat, err := at.iis[iikey].TableScanningPrune(context.Background(), tx, txFrom, txTo, limit, logEvery, false, nil,
 			nil, nil, prune.DefaultStorageMode)

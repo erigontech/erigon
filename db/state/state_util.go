@@ -139,6 +139,22 @@ func SavePruneValProgress(db kv.Putter, prunedTblName string, st *prune.Stat) er
 	return nil
 }
 
+func InvalidatePruneProgress(db kv.Putter, prunedTblName string) error {
+	if err := db.Delete(kv.TblPruningValsProg, []byte(prunedTblName+"range")); err != nil {
+		return err
+	}
+
+	if err := db.Delete(kv.TblPruningValsProg, []byte(prunedTblName+"keys")); err != nil {
+		return err
+	}
+
+	if err := db.Delete(kv.TblPruningValsProg, []byte(prunedTblName+"vals")); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func GetPruneValProgress(db kv.Getter, tbl []byte) (*prune.Stat, error) {
 	st := &prune.Stat{}
 
