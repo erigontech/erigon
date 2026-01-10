@@ -1058,6 +1058,8 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		stat, err := at.prune(ctx, tx, pruneLimit /*pruneLimit*/, furiousPrune || aggressivePrune, aggLogEvery)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
+				at.a.logger.Info("[snapshots] PruneSmallBatches timeout", "err", err)
+				fullStat.Accumulate(stat)
 				return true, nil
 			}
 			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
