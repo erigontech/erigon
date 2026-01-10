@@ -124,17 +124,21 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	for _, tbl := range cleanupList {
+		return db.Update(ctx, func(tx kv.RwTx) error {
+			log.Info("Clear", "table", tbl)
+			return tx.ClearTable(tbl)
+		})
+
+	}
+
+	db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
-
-		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
-			return fmt.Errorf("clearing exec state tables: %w", err)
-		}
-		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil
 	})
+	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
