@@ -401,6 +401,9 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 	defer tx.Rollback()
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	header, err := api._blockReader.Header(ctx, tx, h, n)
@@ -422,6 +425,9 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 	defer tx.Rollback()
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	block, err := api.blockWithSenders(ctx, tx, h, n)
@@ -444,6 +450,9 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
