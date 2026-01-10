@@ -1254,6 +1254,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 				defer func(t time.Time) {
 					took := time.Since(t)
 					if took < 10*time.Millisecond {
+						return
 					}
 					log.Warn("[dbg] warmup", "tbl", time.Since(t))
 				}(time.Now())
