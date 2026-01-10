@@ -860,6 +860,9 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 
 func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,
 	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []any) {
+	if blk%1_000 != 0 {
+		return
+	}
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -891,7 +894,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	if stepsInDb > 0 {
 		vals = append(vals, []any{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
-			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(te.agg.StepSize())),
+			"step", fmt.Sprintf("%.3f", float64(te.lastCommittedTxNum)/float64(te.agg.StepSize())),
 		}...)
 	}
 
