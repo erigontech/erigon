@@ -81,7 +81,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 		Path(path).
 		RoTxsLimiter(limiterB).
 		WriteMap(dbWriteMap).
-		Flags(func(u uint) uint { return mdbx.SafeNoSync }).
+		Flags(func(u uint) uint { return mdbx.UtterlyNoSync }).
 		Accede(true) // integration tool: must not create db. must open db without stoping erigon.
 
 	fmt.Printf("open: %s, writeMap=%t\n", label, dbWriteMap)
