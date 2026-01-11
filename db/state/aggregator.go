@@ -1240,36 +1240,69 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		wg.SetLimit(estimate.AlmostAllCPUs())
 		tbls := at.a.DomainTables()
 		log.Warn("[dbg] prune.warmup start1", "tbls", tbls)
-		for _, tbl := range tbls {
-			wg.Go(func() error {
-				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
+		for _, domain := range at.a.d {
+			for _, tbl := range domain.Tables() {
+				wg.Go(func() error {
+					log.Warn("[dbg] prune.warmup start", "tbl", tbl)
 
-				t := time.Now()
-				if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Asc); err != nil {
-					return err
-				}
-				took := time.Since(t)
-				//if took < 1*time.Microsecond {
-				//	return nil
-				//}
-				log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
-				return nil
-			})
-			wg.Go(func() error {
-				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
+					t := time.Now()
+					if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Asc); err != nil {
+						return err
+					}
+					took := time.Since(t)
+					if took < 1*time.Millisecond {
+						return nil
+					}
+					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
+					return nil
+				})
+				wg.Go(func() error {
+					log.Warn("[dbg] prune.warmup start", "tbl", tbl)
 
-				t := time.Now()
-				if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Desc); err != nil {
-					return err
-				}
-				took := time.Since(t)
-				//if took < 1*time.Microsecond {
-				//	return nil
-				//}
-				log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
-				return nil
-			})
+					t := time.Now()
+					if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Desc); err != nil {
+						return err
+					}
+					took := time.Since(t)
+					if took < 1*time.Millisecond {
+						return nil
+					}
+					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
+					return nil
+				})
+			}
+		}
+		for _, ii := range at.a.iis {
+			for _, tbl := range ii.Tables() {
+				wg.Go(func() error {
+					log.Warn("[dbg] prune.warmup start", "tbl", tbl)
 
+					t := time.Now()
+					if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Asc); err != nil {
+						return err
+					}
+					took := time.Since(t)
+					if took < 1*time.Millisecond {
+						return nil
+					}
+					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
+					return nil
+				})
+				wg.Go(func() error {
+					log.Warn("[dbg] prune.warmup start", "tbl", tbl)
+
+					t := time.Now()
+					if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Desc); err != nil {
+						return err
+					}
+					took := time.Since(t)
+					if took < 1*time.Millisecond {
+						return nil
+					}
+					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
+					return nil
+				})
+			}
 		}
 		defer func() {
 			cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
