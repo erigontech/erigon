@@ -256,6 +256,10 @@ func GetDeferredUpdateMetrics() (time.Duration, int64) {
 	return time.Duration(getDeferredUpdateTime.Load()), getDeferredUpdateCount.Load()
 }
 
+// cellArraysSize is the size of the contiguous arrays in cell (extension through stateHash).
+// extension[64] + accountAddr[20] + storageAddr[52] + hash[32] + stateHash[32] = 200 bytes
+const cellArraysSize = 64 + 20 + 52 + 32 + 32
+
 // getDeferredUpdate gets a DeferredBranchUpdate from the global pool
 // and copies only the fields needed for encoding.
 func getDeferredUpdate(
@@ -280,29 +284,26 @@ func getDeferredUpdate(
 	upd.afterMap = afterMap
 	upd.depth = depth
 
-	// Copy only the fields needed for EncodeBranch
-	// Use unsafe memcpy for the entire cellEncodeData struct - avoids branch misprediction
-	// from conditional copies and is faster for small fixed-size structs (~200 bytes)
+	// Copy only the fields needed for EncodeBranch using a single memcpy per cell
 	for bitset := afterMap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		src := &cells[nibble]
 		dst := &upd.cells[nibble]
 
-		// Copy length fields
+		// Copy length fields (10 bytes total, but not contiguous with arrays in src)
 		dst.extLen = src.extLen
 		dst.accountAddrLen = src.accountAddrLen
 		dst.storageAddrLen = src.storageAddrLen
 		dst.hashLen = src.hashLen
 		dst.stateHashLen = src.stateHashLen
 
-		// Copy all arrays unconditionally - the length fields tell us valid portions
-		// This avoids branch misprediction overhead from conditional copies
-		dst.extension = src.extension
-		dst.accountAddr = src.accountAddr
-		dst.storageAddr = src.storageAddr
-		dst.hash = src.hash
-		dst.stateHash = src.stateHash
+		// Single memcpy for all arrays (200 bytes) - contiguous in both src and dst
+		// src.extension is at offset 128 in cell, dst.extension is at offset 0 in cellEncodeData
+		copy(
+			unsafe.Slice((*byte)(unsafe.Pointer(&dst.extension[0])), cellArraysSize),
+			unsafe.Slice((*byte)(unsafe.Pointer(&src.extension[0])), cellArraysSize),
+		)
 
 		bitset ^= bit
 	}
