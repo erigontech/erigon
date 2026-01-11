@@ -18,7 +18,9 @@ package dbutils
 
 import (
 	"context"
+	"time"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 )
@@ -40,24 +42,55 @@ func NextNibblesSubtree(in []byte, out *[]byte) bool {
 	return false
 }
 
-func WarmupTable(ctx context.Context, db kv.RoDB, table string, order order.By) error {
+func WarmupTable(ctx context.Context, db kv.RoDB, table string, ord order.By) error {
 	return db.View(ctx, func(tx kv.Tx) error {
-		it, err := tx.Range(table, nil, nil, order, -1)
+		cursor, err := tx.Cursor(table)
 		if err != nil {
 			return err
 		}
-		defer it.Close()
-		for i := 0; it.HasNext(); i++ {
-			_, _, _ = it.Next()
-			if i%10 == 0 {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-			}
+		defer cursor.Close()
 
+		i := 0
+
+		t := time.Now()
+		defer func() {
+			took := time.Since(t)
+			if took < 10*time.Millisecond {
+				return
+			}
+			log.Warn("[dbg] prune.warmup", "tbl", table, "took", took, "i", i)
+		}()
+
+		if ord == order.Asc {
+			for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
+				if err != nil {
+					return err
+				}
+				if i%10 == 0 {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+				}
+				i++
+			}
+		} else {
+			for k, _, err := cursor.Last(); k != nil; k, _, err = cursor.Prev() {
+				if err != nil {
+					return err
+				}
+				if i%10 == 0 {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+				}
+				i++
+			}
 		}
+
 		return nil
 	})
 }
