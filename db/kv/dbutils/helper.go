@@ -66,12 +66,10 @@ func WarmupTable(ctx context.Context, db kv.RoDB, table string, ord order.By) er
 				if err != nil {
 					return err
 				}
-				if i%10 == 0 {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-					}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
 				}
 				i++
 			}
@@ -80,12 +78,10 @@ func WarmupTable(ctx context.Context, db kv.RoDB, table string, ord order.By) er
 				if err != nil {
 					return err
 				}
-				if i%10 == 0 {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-					}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
 				}
 				i++
 			}
