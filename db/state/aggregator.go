@@ -1244,7 +1244,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 				}
 				took := time.Since(t)
 				if took < 1*time.Millisecond {
-					return
+					return nil
 				}
 				log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
 				return nil
