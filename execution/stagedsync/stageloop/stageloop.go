@@ -182,7 +182,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			}
 		}
 
-		if err := sync.RunPrune(ctx, db, tx, initialCycle, 0); err != nil {
+		if err := sync.RunPrune(db, tx, initialCycle); err != nil {
 			return err
 		}
 
@@ -342,9 +342,9 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 
 	// -- Prune+commit(sync)
 	if externalTx {
-		err = sync.RunPrune(ctx, db, tx, initialCycle, 0)
+		err = sync.RunPrune(db, tx, initialCycle)
 	} else {
-		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(ctx, db, tx, initialCycle, 0) })
+		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
 	}
 
 	if err != nil {

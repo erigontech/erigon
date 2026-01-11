@@ -168,7 +168,7 @@ type VersionedWrite struct {
 }
 
 func (vr VersionedWrite) String() string {
-	return fmt.Sprintf("%x %s: %s (%d.%d)", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val), vr.Version.TxIndex, vr.Version.Incarnation)
+	return fmt.Sprintf("%x %s: %s (%v)", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val), vr.Path.String())
 }
 
 func valueString(path AccountPath, value any) string {
@@ -209,14 +209,6 @@ func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap,
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
 	vr.stateReader.SetTrace(trace, tracePrefix)
-}
-
-func (vr *versionedStateReader) Trace() bool {
-	return vr.stateReader.Trace()
-}
-
-func (vr *versionedStateReader) TracePrefix() string {
-	return vr.stateReader.TracePrefix()
 }
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -458,7 +450,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, pr.Val))
+					fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
 				}
 
 				return pr.Val.(T), vr.Source, vr.Version, nil
@@ -487,7 +479,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		}
 
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, v))
+			fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
 		}
 
 		if copyV == nil {

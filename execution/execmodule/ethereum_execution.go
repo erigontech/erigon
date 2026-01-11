@@ -129,7 +129,7 @@ type EthereumExecutionModule struct {
 	executionproto.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBlockReader, db kv.TemporalRwDB,
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.TemporalRwDB,
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stageloop.Hook, accumulator *shards.Accumulator,
@@ -137,6 +137,7 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine rules.Engine,
 	syncCfg ethconfig.Sync,
+	ctx context.Context,
 ) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,

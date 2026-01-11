@@ -85,14 +85,6 @@ func (s *Stateless) SetTrace(trace bool, _ string) {
 	s.trace = trace
 }
 
-func (s *Stateless) Trace() bool {
-	return s.trace
-}
-
-func (s *Stateless) TracePrefix() string {
-	return ""
-}
-
 // SetBlockNr changes the block number associated with this
 func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr

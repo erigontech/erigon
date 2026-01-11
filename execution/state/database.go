@@ -25,7 +25,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -46,8 +45,6 @@ type StateReader interface {
 	ReadAccountIncarnation(address accounts.Address) (uint64, error)
 
 	SetTrace(trace bool, tracePrefix string)
-	Trace() bool
-	TracePrefix() string
 }
 
 type HistoricalStateReader interface {
@@ -76,7 +73,6 @@ func NewNoopWriter(trace ...bool) *NoopWriter {
 	return &NoopWriter{trace[0]}
 }
 
-func (*NoopWriter) SetTx(kv.TemporalTx) {}
 func (nw *NoopWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if nw.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
@@ -124,7 +120,6 @@ func NewNoopReader() *NoopReader {
 	return noopReader
 }
 
-func (*NoopReader) SetTx(kv.TemporalTx) {}
 func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
@@ -140,5 +135,3 @@ func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error)   
 func (*NoopReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) { return 0, nil }
 
 func (*NoopReader) SetTrace(_ bool, _ string) {}
-func (r *NoopReader) Trace() bool             { return false }
-func (r *NoopReader) TracePrefix() string     { return "" }
