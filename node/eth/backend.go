@@ -795,7 +795,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider = backend.txPool
 	}
 
+	execmoduleCache := &execmodule.Cache{}
 	httpRpcCfg := stack.Config().Http
+	httpRpcCfg.StateCache.LocalCache = execmoduleCache
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
 		ctx,
 		backend.chainDB,
@@ -991,7 +993,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync)
+	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, execmoduleCache, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
