@@ -37,6 +37,10 @@ func NewMap[V any]() *Map[V] {
 func (m *Map[V]) Get(key []byte) (V, bool) {
 	h := Hash(key)
 	v, ok := m.m.Load(h)
+	if !ok {
+		var zero V
+		return zero, false
+	}
 	return v.(V), ok
 }
 
