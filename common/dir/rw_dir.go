@@ -133,15 +133,10 @@ func writeFileWithFsyncAndFlags(name string, data []byte, perm os.FileMode, flag
 		return err
 	}
 	defer f.Close()
-	_, err = f.Write(data)
-	if err != nil {
+	if _, err = f.Write(data); err != nil {
 		return err
 	}
-	err = f.Sync()
-	if err != nil {
-		return err
-	}
-	return err
+	return f.Sync()
 }
 
 // nolint
