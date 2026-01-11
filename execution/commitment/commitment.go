@@ -266,7 +266,9 @@ type DeferredBranchUpdate struct {
 var deferredUpdatePool = sync.Pool{
 	New: func() any {
 		return &DeferredBranchUpdate{
-			cells: new([16]cell),
+			prefix: make([]byte, 0, 64),  // pre-allocate for typical prefix lengths
+			prev:   make([]byte, 0, 256), // pre-allocate for typical branch data
+			cells:  new([16]cell),
 		}
 	},
 }
@@ -290,11 +292,13 @@ func getDeferredUpdate(
 	upd.afterMap = afterMap
 	upd.depth = depth
 
-	// Deep copy only the cells in afterMap
+	// Copy only the cells in afterMap using memmove to avoid duffcopy overhead
 	for bitset := afterMap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		upd.cells[nibble] = cells[nibble]
+		dst := unsafe.Pointer(&upd.cells[nibble])
+		src := unsafe.Pointer(&cells[nibble])
+		copy(unsafe.Slice((*byte)(dst), unsafe.Sizeof(cell{})), unsafe.Slice((*byte)(src), unsafe.Sizeof(cell{})))
 		bitset ^= bit
 	}
 
