@@ -1265,23 +1265,23 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	//	/*"stepsLimit", limit/at.a.stepSize,*/ "stepsRangeInDB", at.a.stepsRangeInDBAsStr(tx))
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
-		//if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
-		//	if d.d.Name != kv.CommitmentDomain {
-		//		err := InvalidatePruneProgress(tx, d.d.ValuesTable)
-		//		if err != nil {
-		//			d.d.logger.Error("invalidate prune progress", "err", err)
-		//			return nil, err
-		//		}
-		//		invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)] = 1
-		//		err = InvalidatePruneProgress(tx, d.ht.h.ValuesTable)
-		//		if err != nil {
-		//			d.d.logger.Error("invalidate prune progress", "err", err)
-		//			return nil, err
-		//		}
-		//		invalidateOnce[fmt.Sprintf("history%s", d.ht.h.ValuesTable)] = 1
-		//		d.d.logger.Info("invalidated d&h prune progress", "name", d.name)
-		//	}
-		//}
+		if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
+			if true { //d.d.Name != kv.CommitmentDomain {
+				err := InvalidatePruneProgress(tx, d.d.ValuesTable)
+				if err != nil {
+					d.d.logger.Error("invalidate prune progress", "err", err)
+					return nil, err
+				}
+				invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)] = 1
+				err = InvalidatePruneProgress(tx, d.ht.h.ValuesTable)
+				if err != nil {
+					d.d.logger.Error("invalidate prune progress", "err", err)
+					return nil, err
+				}
+				invalidateOnce[fmt.Sprintf("history%s", d.ht.h.ValuesTable)] = 1
+				d.d.logger.Info("invalidated d&h prune progress", "name", d.name)
+			}
+		}
 		var err error
 		select {
 		case <-ctx.Done():
@@ -1301,15 +1301,15 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			return aggStat, ctx.Err()
 		default:
 		}
-		//if _, ok := invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)]; !ok {
-		//	err := InvalidatePruneProgress(tx, at.iis[iikey].ii.ValuesTable)
-		//	if err != nil {
-		//		at.iis[iikey].ii.logger.Error("invalidate prune progress", "err", err)
-		//		return nil, err
-		//	}
-		//	invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)] = 1
-		//	at.iis[iikey].ii.logger.Info("invalidated ii prune progress", "name", at.iis[iikey].ii.Name)
-		//}
+		if _, ok := invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)]; !ok {
+			err := InvalidatePruneProgress(tx, at.iis[iikey].ii.ValuesTable)
+			if err != nil {
+				at.iis[iikey].ii.logger.Error("invalidate prune progress", "err", err)
+				return nil, err
+			}
+			invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)] = 1
+			at.iis[iikey].ii.logger.Info("invalidated ii prune progress", "name", at.iis[iikey].ii.Name)
+		}
 		stat, err := at.iis[iikey].TableScanningPrune(context.Background(), tx, txFrom, txTo, limit, logEvery, false, nil,
 			nil, nil, prune.DefaultStorageMode)
 		if err != nil {
