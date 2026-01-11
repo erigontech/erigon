@@ -237,7 +237,7 @@ func getDeferredUpdate(
 ) *DeferredBranchUpdate {
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = append(upd.prefix[:0], prefix...)
+	upd.prefix = prefix
 	upd.bitmap = bitmap
 	upd.touchMap = touchMap
 	upd.afterMap = afterMap
@@ -247,11 +247,12 @@ func getDeferredUpdate(
 	for bitset := afterMap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		*(*cell)(unsafe.Pointer(&upd.cells[nibble])) = *(*cell)(unsafe.Pointer(&cells[nibble]))
+		// copy only stuff we need
+		upd.cells[nibble] = cells[nibble]
 		bitset ^= bit
 	}
 
-	upd.prev = append(upd.prev[:0], prev...)
+	upd.prev = prev
 	upd.prevStep = prevStep
 	upd.encoded = nil
 
