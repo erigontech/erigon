@@ -252,19 +252,19 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	}
 
 	// Fast path: single in-RAM provider - skip heap-based merge, iterate directly
-	if len(c.dataProviders) == 1 {
-		if memProvider, ok := c.dataProviders[0].(*memoryDataProvider); ok {
-			buf := memProvider.buffer
-			var k, v []byte
-			for j := 0; j < buf.Len(); j++ {
-				k, v = buf.Get(j, k[:0], v[:0])
-				if err := simpleLoad(k, v); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-	}
+	// if len(c.dataProviders) == 1 {
+	// 	if memProvider, ok := c.dataProviders[0].(*memoryDataProvider); ok {
+	// 		buf := memProvider.buffer
+	// 		var k, v []byte
+	// 		for j := 0; j < buf.Len(); j++ {
+	// 			k, v = buf.Get(j, k[:0], v[:0])
+	// 			if err := simpleLoad(k, v); err != nil {
+	// 				return err
+	// 			}
+	// 		}
+	// 		return nil
+	// 	}
+	// }
 
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
