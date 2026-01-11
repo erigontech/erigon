@@ -39,10 +39,10 @@ const (
 	put
 )
 
-type dataWithStep struct {
-	data []byte
-	step kv.Step
-	dir  iodir
+type dataWithTxNum struct {
+	data  []byte
+	txNum uint64
+	dir   iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
@@ -52,8 +52,8 @@ type TemporalMemBatch struct {
 	getCacheSize int
 
 	latestStateLock sync.RWMutex
-	domains         [kv.DomainLen]map[string]dataWithStep
-	storage         *btree2.Map[string, dataWithStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+	domains         [kv.DomainLen]map[string][]dataWithTxNum
+	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
 	domainWriters   [kv.DomainLen]*DomainBufferedWriter
 	iiWriters       []*InvertedIndexBufferedWriter
@@ -74,7 +74,7 @@ type TemporalMemBatch struct {
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage: btree2.NewMap[string, dataWithStep](128),
+		storage: btree2.NewMap[string, []dataWithTxNum](128),
 		metrics: ioMetrics.(*changeset.DomainMetrics),
 	}
 	aggTx := AggTx(tx)
@@ -87,7 +87,7 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	}
 
 	for id, d := range aggTx.d {
-		sd.domains[id] = map[string]dataWithStep{}
+		sd.domains[id] = map[string][]dataWithTxNum{}
 		sd.domainWriters[id] = d.NewWriter()
 	}
 
@@ -142,13 +142,15 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		}
 	}
 
-	valWithStep := dataWithStep{data: val, step: kv.Step(txNum / sd.stepSize)}
+	valWithStep := dataWithTxNum{data: val, txNum: txNum}
 	putKeySize := 0
 	putValueSize := 0
 	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Set(key, valWithStep); ok {
-			putValueSize += len(val) - len(old.data)
+		if old, ok := sd.storage.Get(key); ok {
+			sd.storage.Set(key, append(old, valWithStep))
+			putValueSize += len(val) - len(old[len(old)-1].data)
 		} else {
+			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
 			putValueSize += len(val)
 		}
@@ -158,12 +160,13 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		putValueSize += len(val) - len(old.data)
+		putValueSize += len(val) - len(old[len(old)-1].data)
+		sd.domains[domain][key] = append(old, valWithStep)
 	} else {
+		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
 		putKeySize += len(key)
 		putValueSize += len(val)
 	}
-	sd.domains[domain][key] = valWithStep
 
 	updateMetrics(domain, putKeySize, putValueSize)
 }
@@ -198,21 +201,54 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 	}
 
 	keyS := toStringZeroCopy(key)
-	var dataWithStep dataWithStep
+	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
-		dataWithStep, ok = sd.storage.Get(keyS)
+		dataWithTxNums, ok = sd.storage.Get(keyS)
 		if !ok {
 			return unwoundLatest(domain, keyS)
 		}
-		return dataWithStep.data, dataWithStep.step, ok
+		dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
+		return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
 
 	}
 
-	dataWithStep, ok = sd.domains[domain][keyS]
+	dataWithTxNums, ok = sd.domains[domain][keyS]
 	if !ok {
 		return unwoundLatest(domain, keyS)
 	}
-	return dataWithStep.data, dataWithStep.step, ok
+	dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
+	return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
+}
+
+func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+
+	keyS := toStringZeroCopy(key)
+	var dataWithTxNums []dataWithTxNum
+	if domain == kv.StorageDomain {
+		dataWithTxNums, ok = sd.storage.Get(keyS)
+		if !ok {
+			return nil, false, nil
+		}
+		for i, dataWithTxNum := range dataWithTxNums {
+			if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
+				return dataWithTxNum.data, true, nil
+			}
+		}
+		return nil, false, nil
+	}
+
+	dataWithTxNums, ok = sd.domains[domain][keyS]
+	if !ok {
+		return nil, false, nil
+	}
+	for i, dataWithTxNum := range dataWithTxNums {
+		if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
+			return dataWithTxNum.data, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
@@ -228,10 +264,10 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	for i := range sd.domains {
-		sd.domains[i] = map[string]dataWithStep{}
+		sd.domains[i] = map[string][]dataWithTxNum{}
 	}
 
-	sd.storage = btree2.NewMap[string, dataWithStep](128)
+	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
 	sd.unwindToTxNum = 0
 	sd.unwindChangeset = nil
 
@@ -252,7 +288,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
-	var ramIter btree2.MapIter[string, dataWithStep]
+	var ramIter btree2.MapIter[string, []dataWithTxNum]
 	if domain == kv.StorageDomain {
 		ramIter = sd.storage.Iter()
 	}
@@ -374,7 +410,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		}
 	}
 
-	other.storage.Scan(func(key string, value dataWithStep) bool {
+	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
 		sd.storage.Set(key, value)
 		return true
 	})

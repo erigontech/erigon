@@ -723,7 +723,9 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
 		return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
 	}
-	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum() || stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done
+	min := iit.ii.minTxNumInDB(tx)
+
+	return min == 0 || min < iit.files.EndTxNum() || stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
@@ -1187,16 +1189,16 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ii.KeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		return min(fstInDb, math.MaxUint64)
+		return fstInDb
 	}
-	return math.MaxUint64
+	return 0
 }
 
 func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 	lst, _ := kv.LastKey(tx, ii.KeysTable)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
-		return max(lstInDb, 0)
+		return lstInDb
 	}
 	return 0
 }
