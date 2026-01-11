@@ -1251,7 +1251,9 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			})
 		}
 		defer wg.Wait()
-		defer cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
+		defer func() {
+			cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
+		}()
 	}
 
 	if logEvery == nil {
