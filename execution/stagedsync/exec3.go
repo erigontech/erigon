@@ -911,6 +911,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 }
 
 func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
+	return false
 	if cfg.syncCfg.AlwaysGenerateChangesets {
 		return true
 	}
