@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -238,6 +239,23 @@ var deferredUpdatePool = sync.Pool{
 	},
 }
 
+// Metrics for getDeferredUpdate - use atomics for thread safety
+var (
+	getDeferredUpdateTime  atomic.Int64 // total nanoseconds
+	getDeferredUpdateCount atomic.Int64 // call count
+)
+
+// ResetDeferredUpdateMetrics resets the getDeferredUpdate metrics.
+func ResetDeferredUpdateMetrics() {
+	getDeferredUpdateTime.Store(0)
+	getDeferredUpdateCount.Store(0)
+}
+
+// GetDeferredUpdateMetrics returns the total time and count for getDeferredUpdate calls.
+func GetDeferredUpdateMetrics() (time.Duration, int64) {
+	return time.Duration(getDeferredUpdateTime.Load()), getDeferredUpdateCount.Load()
+}
+
 // getDeferredUpdate gets a DeferredBranchUpdate from the global pool
 // and copies only the fields needed for encoding.
 func getDeferredUpdate(
@@ -248,6 +266,12 @@ func getDeferredUpdate(
 	prev []byte,
 	prevStep kv.Step,
 ) *DeferredBranchUpdate {
+	start := time.Now()
+	defer func() {
+		getDeferredUpdateTime.Add(int64(time.Since(start)))
+		getDeferredUpdateCount.Add(1)
+	}()
+
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
 	upd.prefix = prefix
@@ -476,8 +500,9 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		be.metrics.updateBranch.Add(uint64(written))
 	}
 
+	copyTime, copyCount := GetDeferredUpdateMetrics()
 	log.Debug("deferred branch updates applied", "count", len(be.deferred), "written", written,
-		"encodeTime", totalEncodeTime, "writeTime", totalWriteTime, "totalTime", time.Since(s))
+		"encodeTime", totalEncodeTime, "writeTime", totalWriteTime, "copyTime", copyTime, "copyCount", copyCount, "totalTime", time.Since(s))
 
 	return nil
 }
