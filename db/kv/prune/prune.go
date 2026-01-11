@@ -54,7 +54,9 @@ type StorageMode int
 const (
 	DefaultStorageMode StorageMode = iota
 	KeyStorageMode
-	SmallHistoryMode //TODO: change name
+	PrefixValStorageMode //TODO: change name
+	StepValueStorageMode
+	StepKeyStorageMode
 )
 
 func HashSeekingPrune(
@@ -122,7 +124,7 @@ func HashSeekingPrune(
 			if err := valDelCursor.Delete(seek); err != nil {
 				return err
 			}
-		case SmallHistoryMode:
+		case PrefixValStorageMode:
 			vv, err := valDelCursor.(kv.RwCursorDupSort).SeekBothRange(key, txnm)
 			if err != nil {
 				return err
@@ -277,10 +279,15 @@ func TableScanningPrune(
 		switch mode {
 		case KeyStorageMode:
 			return binary.BigEndian.Uint64(key[len(key)-8:])
-		case SmallHistoryMode:
+		case PrefixValStorageMode:
 			return binary.BigEndian.Uint64(val)
+		case StepValueStorageMode:
+			return kv.Step(^binary.BigEndian.Uint64(val)).ToTxNum(stepSize)
+		case StepKeyStorageMode:
+			return kv.Step(^binary.BigEndian.Uint64(key[len(key)-8:])).ToTxNum(stepSize)
 		case DefaultStorageMode:
 			return binary.BigEndian.Uint64(val)
+
 		default:
 			return 0
 		}
@@ -300,6 +307,7 @@ func TableScanningPrune(
 			stat.ValueProgress = InProgress
 			return stat, nil
 		}
+
 		txNum := txNumGetter(val, txNumBytes)
 		//println("txnum first", txNum, txFrom, txTo)
 		lastDupTxNumB, err := valDelCursor.LastDup()

@@ -1851,7 +1851,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	var valsCursor kv.PseudoDupSortRwCursor
 	var mode prune.StorageMode
 	if dt.d.LargeValues {
-		mode = prune.KeyStorageMode
+		mode = prune.StepKeyStorageMode
 		valsRwCursor, err := rwTx.RwCursor(dt.d.ValuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
@@ -1868,7 +1868,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		}
 		defer valsCursor.Close()
 	} else {
-		mode = prune.SmallHistoryMode
+		mode = prune.StepValueStorageMode
 		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
