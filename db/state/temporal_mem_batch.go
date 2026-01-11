@@ -272,7 +272,7 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSe
 	}
 }
 func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
-	return nil
+	return
 	if sd.pastChangesAccumulator == nil {
 		sd.pastChangesAccumulator = make(map[string]*changeset.StateChangeSet)
 	}
