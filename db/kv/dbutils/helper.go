@@ -49,7 +49,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, table string, order order.By) 
 		}
 		defer it.Close()
 		for it.HasNext() {
-			_, _ = it.Next()
+			_, _, _ = it.Next()
 			i++
 			if i%10 == 0 {
 				select {
