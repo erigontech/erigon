@@ -261,6 +261,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
+	return nil
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
 		if sd.currentChangesAccumulator == nil {
@@ -271,6 +272,7 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSe
 	}
 }
 func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
+	return nil
 	if sd.pastChangesAccumulator == nil {
 		sd.pastChangesAccumulator = make(map[string]*changeset.StateChangeSet)
 	}
