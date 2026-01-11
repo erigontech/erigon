@@ -1695,12 +1695,27 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 	return tr, nil
 }
 
+// readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
+// This ensures we read fresh data when a prefix has been modified but not yet written.
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, uint64, error) {
+	if hph.branchEncoder.DeferUpdatesEnabled() {
+		if _, found := hph.branchEncoder.FindDeferred(prefix); found {
+			if err := hph.branchEncoder.ApplyDeferredUpdatesParallel(16, hph.ctx.PutBranch); err != nil {
+				return nil, 0, err
+			}
+			hph.branchEncoder.ClearDeferred()
+		}
+	}
+	branchData, step, err := hph.ctx.Branch(prefix)
+	return branchData, uint64(step), err
+}
+
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, step, err := hph.ctx.Branch(key)
+	branchData, step, err := hph.readBranchAndCheckForFlushing(key)
 	if err != nil {
 		return err
 	}
