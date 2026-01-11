@@ -18,7 +18,9 @@ package dbutils
 
 import (
 	"context"
+	"time"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 )
@@ -49,6 +51,16 @@ func WarmupTable(ctx context.Context, db kv.RoDB, table string, ord order.By) er
 		defer cursor.Close()
 
 		i := 0
+
+		t := time.Now()
+		defer func() {
+			took := time.Since(t)
+			if took < 10*time.Millisecond {
+				return
+			}
+			log.Warn("[dbg] prune.warmup", "tbl", table, "took", took, "i", i)
+		}()
+
 		if ord == order.Asc {
 			for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
 				if err != nil {
