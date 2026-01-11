@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"golang.org/x/sync/errgroup"
@@ -173,6 +174,7 @@ type Ethereum struct {
 	stateDiffClient     *direct.StateDiffClientDirect
 	rpcFilters          *rpchelper.Filters
 	rpcDaemonStateCache kvcache.Cache
+	mcpRPC              *mcp.ErigonMCPServer
 
 	miningSealingQuit   chan struct{}
 	pendingBlocks       chan *types.Block
@@ -816,35 +818,51 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.rpcDaemonStateCache = rpcDaemonStateCache
 	backend.rpcFilters = rpcFilters
 
+	baseApi := jsonrpc.NewBaseApi(
+		backend.rpcFilters,
+		backend.rpcDaemonStateCache,
+		blockReader,
+		httpRpcCfg.WithDatadir,
+		httpRpcCfg.EvmCallTimeout,
+		backend.engine,
+		httpRpcCfg.Dirs,
+		backend.polygonBridge,
+	)
+	ethApi := jsonrpc.NewEthAPI(
+		baseApi,
+		backend.chainDB,
+		backend.ethRpcClient,
+		backend.txPoolRpcClient,
+		backend.miningRpcClient,
+		httpRpcCfg.Gascap,
+		httpRpcCfg.Feecap,
+		httpRpcCfg.ReturnDataLimit,
+		httpRpcCfg.AllowUnprotectedTxs,
+		httpRpcCfg.MaxGetProofRewindBlockCount,
+		httpRpcCfg.WebsocketSubscribeLogsChannelSize,
+		logger,
+	)
+
+	erigonApi := jsonrpc.NewErigonAPI(baseApi, backend.chainDB, backend.ethRpcClient)
+
+	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi)
+
+	if config.MCPAddress != "" {
+		go func() {
+			logger.Info("serve MCP on", "addr", config.MCPAddress)
+			err = mcpServer.ServeSSE(config.MCPAddress)
+			if err != nil {
+				logger.Error("mcpServer.ServeSSE", "err", err)
+				return
+			}
+		}()
+	}
+
 	if config.Shutter.Enabled {
 		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
 
-		baseApi := jsonrpc.NewBaseApi(
-			backend.rpcFilters,
-			backend.rpcDaemonStateCache,
-			blockReader,
-			httpRpcCfg.WithDatadir,
-			httpRpcCfg.EvmCallTimeout,
-			backend.engine,
-			httpRpcCfg.Dirs,
-			backend.polygonBridge,
-		)
-		ethApi := jsonrpc.NewEthAPI(
-			baseApi,
-			backend.chainDB,
-			backend.ethRpcClient,
-			backend.txPoolRpcClient,
-			backend.miningRpcClient,
-			httpRpcCfg.Gascap,
-			httpRpcCfg.Feecap,
-			httpRpcCfg.ReturnDataLimit,
-			httpRpcCfg.AllowUnprotectedTxs,
-			httpRpcCfg.MaxGetProofRewindBlockCount,
-			httpRpcCfg.WebsocketSubscribeLogsChannelSize,
-			logger,
-		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
 		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {

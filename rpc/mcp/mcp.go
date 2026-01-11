@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"strings"
 
@@ -27,7 +26,7 @@ type ErigonMCPServer struct {
 }
 
 // NewErigonMCPServer creates a new MCP server for Erigon.
-func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI) (*ErigonMCPServer, error) {
+func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI) *ErigonMCPServer {
 	e := &ErigonMCPServer{
 		ethAPI:    ethAPI,
 		erigonAPI: erigonAPI,
@@ -44,7 +43,7 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI) (*Er
 	e.registerTools()
 	e.registerPrompts()
 
-	return e, nil
+	return e
 }
 
 // toJSONText marshals result to formatted JSON string
@@ -900,6 +899,5 @@ func (e *ErigonMCPServer) Serve() error {
 // ServeSSE starts MCP server with SSE transport
 func (e *ErigonMCPServer) ServeSSE(addr string) error {
 	sse := server.NewSSEServer(e.mcpServer)
-	log.Printf("Starting Erigon MCP server on %s", addr)
 	return sse.Start(addr)
 }

@@ -275,6 +275,8 @@ type Config struct {
 
 	// fork choice update timeout
 	FcuTimeout time.Duration
+
+	MCPAddress string
 }
 
 type Sync struct {
