@@ -51,7 +51,6 @@ func WarmupTable(ctx context.Context, db kv.RoDB, table string) error {
 				default:
 				}
 			}
-			_, _ = k[0], k[len(k)-1]
 			return nil
 		})
 		if err != nil {
