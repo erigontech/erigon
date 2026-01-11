@@ -27,7 +27,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -275,7 +274,6 @@ type BranchEncoder struct {
 	deferUpdates    bool
 	deferred        []*DeferredBranchUpdate
 	pendingPrefixes *maphash.UnsafeMap[struct{}] // tracks pending prefixes to detect duplicates
-	flushFunc       func() error                 // called when duplicate prefix detected, to flush pending updates
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -297,11 +295,6 @@ func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
 			be.pendingPrefixes = maphash.NewUnsafeMap[struct{}]()
 		}
 	}
-}
-
-// SetFlushFunc sets the function to call when a duplicate prefix is detected during deferred update collection.
-func (be *BranchEncoder) SetFlushFunc(flushFunc func() error) {
-	be.flushFunc = flushFunc
 }
 
 // DeferUpdatesEnabled returns whether deferred update collection is enabled.
@@ -374,80 +367,79 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 		return nil
 	}
 
-	s1 := time.Now()
 	if numWorkers <= 1 {
-		// Sequential fallback
-		for _, upd := range be.deferred {
-			if err := encodeDeferredUpdate(upd, be, be.merger); err != nil {
-				return err
-			}
-			if upd.encoded == nil {
-				continue
-			}
-			if err := putBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
-				return err
-			}
-			mxTrieBranchesUpdated.Inc()
-		}
-		return nil
+		numWorkers = 1
 	}
 
-	// Phase 1: Parallel hash computation and encoding
-	errCh := make(chan error, numWorkers)
-	workCh := make(chan *DeferredBranchUpdate, len(be.deferred))
+	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially
+	type result struct {
+		upd *DeferredBranchUpdate
+		err error
+	}
+	resultCh := make(chan result, maxDeferredUpdates)
+	workCh := make(chan *DeferredBranchUpdate, maxDeferredUpdates)
 
 	// Start workers - each with its own encoder and merger
+	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			encoder := NewBranchEncoder(1024)
 			merger := NewHexBranchMerger(512)
 
 			for upd := range workCh {
-				if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
-					errCh <- err
-					return
-				}
+				err := encodeDeferredUpdate(upd, encoder, merger)
+				resultCh <- result{upd: upd, err: err}
 			}
-			errCh <- nil
 		}()
 	}
 
-	// Send work
-	for _, upd := range be.deferred {
-		workCh <- upd
-	}
-	close(workCh)
+	// Close resultCh when all workers are done
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
 
-	// Wait for encoding to complete
-	var firstErr error
-	for i := 0; i < numWorkers; i++ {
-		if err := <-errCh; err != nil && firstErr == nil {
-			firstErr = err
+	// Send work in background
+	go func() {
+		for _, upd := range be.deferred {
+			workCh <- upd
 		}
+		close(workCh)
+	}()
+
+	// Process results as they come in - write to storage immediately
+	var firstErr error
+	var written int
+	for res := range resultCh {
+		if res.err != nil {
+			if firstErr == nil {
+				firstErr = res.err
+			}
+			continue
+		}
+		if res.upd.encoded == nil {
+			continue // skip unchanged
+		}
+		if firstErr != nil {
+			continue // drain channel but don't write after error
+		}
+		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev, res.upd.prevStep); err != nil {
+			firstErr = err
+			continue
+		}
+		mxTrieBranchesUpdated.Inc()
+		written++
 	}
+
 	if firstErr != nil {
 		return firstErr
 	}
 
-	log.Debug("deferred branch updates encoded", "count", len(be.deferred), "spent", time.Since(s1))
-
-	s2 := time.Now()
-
-	// Phase 2: Write results sequentially
-	for _, upd := range be.deferred {
-		if upd.encoded == nil {
-			continue // skip unchanged
-		}
-		if err := putBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
-			return err
-		}
-		mxTrieBranchesUpdated.Inc()
-	}
-
 	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(len(be.deferred)))
+		be.metrics.updateBranch.Add(uint64(written))
 	}
-	log.Debug("deferred branch updates applied", "count", len(be.deferred), "spent", time.Since(s2))
 
 	return nil
 }
@@ -516,10 +508,8 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if needsFlush {
-		if be.flushFunc != nil {
-			if err := be.flushFunc(); err != nil {
-				return err
-			}
+		if err := be.ApplyDeferredUpdatesParallel(16, ctx.PutBranch); err != nil {
+			return err
 		}
 		be.ClearDeferred()
 	}
