@@ -42,23 +42,23 @@ func NextNibblesSubtree(in []byte, out *[]byte) bool {
 
 func WarmupTable(ctx context.Context, db kv.RoDB, table string, order order.By) error {
 	return db.View(ctx, func(tx kv.Tx) error {
-		i := 0
-		it, err := tx.Range(table, nil, nil, order, -1)
-		if err != nil {
-			return err
-		}
-		defer it.Close()
-		for it.HasNext() {
-			_, _, _ = it.Next()
-			i++
-			if i%10 == 0 {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-			}
-		}
+		//i := 0
+		//it, err := tx.Range(table, nil, nil, order, -1)
+		//if err != nil {
+		//	return err
+		//}
+		//defer it.Close()
+		//for it.HasNext() {
+		//	_, _, _ = it.Next()
+		//	i++
+		//	if i%10 == 0 {
+		//		select {
+		//		case <-ctx.Done():
+		//			return ctx.Err()
+		//		default:
+		//		}
+		//	}
+		//}
 		return nil
 	})
 }

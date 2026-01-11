@@ -1289,8 +1289,6 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 }
 
 func warmupTbl(ctx context.Context, db kv.RoDB, table string) error {
-	log.Warn("[dbg] prune.warmup start", "tbl", table)
-
 	t := time.Now()
 	if err := dbutils.WarmupTable(ctx, db, table, order.Asc); err != nil {
 		return err
