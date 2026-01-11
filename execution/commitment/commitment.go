@@ -195,6 +195,22 @@ func (p cellFields) String() string {
 	return sb.String()
 }
 
+// cellEncodeData contains only the fields needed for EncodeBranch.
+// This is much smaller than cell (which has hashedExtension[128], Update, etc.)
+type cellEncodeData struct {
+	extension   [64]byte
+	accountAddr [20]byte                        // common.Address
+	storageAddr [length.Addr + length.Hash]byte // 20 + 32 = 52 bytes
+	hash        [32]byte                        // common.Hash
+	stateHash   [32]byte                        // common.Hash
+
+	extLen         int16
+	accountAddrLen int16
+	storageAddrLen int16
+	hashLen        int16
+	stateHashLen   int16
+}
+
 // DeferredBranchUpdate holds the data needed to perform a branch update later.
 // This allows collecting updates during the fold phase and running computeCellHash + EncodeBranch in parallel.
 type DeferredBranchUpdate struct {
@@ -203,9 +219,8 @@ type DeferredBranchUpdate struct {
 	touchMap uint16
 	afterMap uint16
 
-	// Cells needed for EncodeBranch - pointer to pooled array, only cells in afterMap are populated
-	// Cell hashes are already computed during fold() before copying
-	cells *[16]cell
+	// Cells needed for EncodeBranch - only the fields required for encoding
+	cells [16]cellEncodeData
 	depth int16
 
 	// Previous data from ctx.Branch (for merging)
@@ -219,14 +234,12 @@ type DeferredBranchUpdate struct {
 // Global pool for deferred branch updates.
 var deferredUpdatePool = sync.Pool{
 	New: func() any {
-		return &DeferredBranchUpdate{
-			cells: new([16]cell),
-		}
+		return &DeferredBranchUpdate{}
 	},
 }
 
 // getDeferredUpdate gets a DeferredBranchUpdate from the global pool
-// and copies all fields directly into existing buffers.
+// and copies only the fields needed for encoding.
 func getDeferredUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
@@ -243,12 +256,34 @@ func getDeferredUpdate(
 	upd.afterMap = afterMap
 	upd.depth = depth
 
-	// Deep copy only the cells in afterMap using unsafe memory copy
+	// Copy only the fields needed for EncodeBranch
 	for bitset := afterMap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		// copy only stuff we need
-		upd.cells[nibble] = cells[nibble]
+		src := &cells[nibble]
+		dst := &upd.cells[nibble]
+
+		dst.extLen = src.extLen
+		dst.accountAddrLen = src.accountAddrLen
+		dst.storageAddrLen = src.storageAddrLen
+		dst.hashLen = src.hashLen
+		dst.stateHashLen = src.stateHashLen
+
+		if src.extLen > 0 {
+			copy(dst.extension[:src.extLen], src.extension[:src.extLen])
+		}
+		if src.accountAddrLen > 0 {
+			copy(dst.accountAddr[:src.accountAddrLen], src.accountAddr[:src.accountAddrLen])
+		}
+		if src.storageAddrLen > 0 {
+			copy(dst.storageAddr[:src.storageAddrLen], src.storageAddr[:src.storageAddrLen])
+		}
+		if src.hashLen > 0 {
+			copy(dst.hash[:src.hashLen], src.hash[:src.hashLen])
+		}
+		if src.stateHashLen > 0 {
+			copy(dst.stateHash[:src.stateHashLen], src.stateHash[:src.stateHashLen])
+		}
 		bitset ^= bit
 	}
 
@@ -331,15 +366,7 @@ func encodeDeferredUpdate(
 	encoder *BranchEncoder,
 	merger *BranchMerger,
 ) error {
-	// Create a cell getter that reads from the copied cells (hashes already computed)
-	readCell := func(nibble int, skip bool) (*cell, error) {
-		if skip {
-			return nil, nil
-		}
-		return &upd.cells[nibble], nil
-	}
-
-	update, _, err := encoder.EncodeBranch(upd.bitmap, upd.touchMap, upd.afterMap, readCell)
+	update, err := encoder.encodeBranchFromCellData(upd.bitmap, upd.touchMap, upd.afterMap, &upd.cells)
 	if err != nil {
 		return err
 	}
@@ -628,6 +655,74 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 	}
 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
 	return be.buf.Bytes(), lastNibble, nil
+}
+
+// encodeBranchFromCellData encodes branch data from cellEncodeData (used by deferred updates).
+// This avoids the overhead of the readCell callback and works directly with the minimal cell data.
+func (be *BranchEncoder) encodeBranchFromCellData(bitmap, touchMap, afterMap uint16, cells *[16]cellEncodeData) (BranchData, error) {
+	be.buf.Reset()
+
+	var encoded [4]byte
+	binary.BigEndian.PutUint16(encoded[:], touchMap)
+	binary.BigEndian.PutUint16(encoded[2:], afterMap)
+	if _, err := be.buf.Write(encoded[:]); err != nil {
+		return nil, err
+	}
+
+	for bitset := afterMap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		cell := &cells[nibble]
+
+		if bitmap&bit != 0 {
+			var fields cellFields
+			if cell.extLen > 0 && cell.storageAddrLen == 0 {
+				fields |= fieldExtension
+			}
+			if cell.accountAddrLen > 0 {
+				fields |= fieldAccountAddr
+			}
+			if cell.storageAddrLen > 0 {
+				fields |= fieldStorageAddr
+			}
+			if cell.hashLen > 0 {
+				fields |= fieldHash
+			}
+			if cell.stateHashLen == 32 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+				fields |= fieldStateHash
+			}
+			if err := be.buf.WriteByte(byte(fields)); err != nil {
+				return nil, err
+			}
+			if fields&fieldExtension != 0 {
+				if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
+					return nil, err
+				}
+			}
+			if fields&fieldAccountAddr != 0 {
+				if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
+					return nil, err
+				}
+			}
+			if fields&fieldStorageAddr != 0 {
+				if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
+					return nil, err
+				}
+			}
+			if fields&fieldHash != 0 {
+				if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
+					return nil, err
+				}
+			}
+			if fields&fieldStateHash != 0 {
+				if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
+					return nil, err
+				}
+			}
+		}
+		bitset ^= bit
+	}
+	return be.buf.Bytes(), nil
 }
 
 func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
