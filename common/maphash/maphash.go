@@ -25,75 +25,41 @@ func Hash(key []byte) uint64 {
 
 // Map is a non-thread-safe map that uses maphash to hash []byte keys.
 type Map[V any] struct {
-	m  map[uint64]V
-	mu sync.RWMutex
+	m sync.Map
 }
 
 // NewMap creates a new Map.
 func NewMap[V any]() *Map[V] {
-	return &Map[V]{
-		m: make(map[uint64]V),
-	}
+	return &Map[V]{}
 }
 
 // Get retrieves a value by key.
 func (m *Map[V]) Get(key []byte) (V, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	h := Hash(key)
-	e, ok := m.m[h]
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	return e, true
+	v, ok := m.m.Load(h)
+	return v.(V), ok
 }
 
 // Set stores a value with the given key.
 func (m *Map[V]) Set(key []byte, value V) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	h := Hash(key)
-	m.m[h] = value
-}
-
-// Update atomically retrieves the value for a key and applies an update function to it.
-// If the key exists, the function is called with the value and the result is stored back.
-// Returns the updated value and whether the key was found.
-func (m *Map[V]) Update(key []byte, fn func(V) V) (V, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	h := Hash(key)
-	v, ok := m.m[h]
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	v = fn(v)
-	m.m[h] = v
-	return v, true
+	m.m.Store(h, value)
 }
 
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	h := Hash(key)
-	delete(m.m, h)
+	m.m.Delete(h)
 }
 
 // Len returns the number of entries in the map.
 func (m *Map[V]) Len() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.m)
+	return m.Len()
 }
 
 // Clear removes all entries from the map.
 func (m *Map[V]) Clear() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	clear(m.m)
+	m.m.Clear()
 }
 
 // LRU is a thread-safe LRU cache that uses maphash to hash []byte keys.
