@@ -281,33 +281,29 @@ func getDeferredUpdate(
 	upd.depth = depth
 
 	// Copy only the fields needed for EncodeBranch
+	// Use unsafe memcpy for the entire cellEncodeData struct - avoids branch misprediction
+	// from conditional copies and is faster for small fixed-size structs (~200 bytes)
 	for bitset := afterMap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		src := &cells[nibble]
 		dst := &upd.cells[nibble]
 
+		// Copy length fields
 		dst.extLen = src.extLen
 		dst.accountAddrLen = src.accountAddrLen
 		dst.storageAddrLen = src.storageAddrLen
 		dst.hashLen = src.hashLen
 		dst.stateHashLen = src.stateHashLen
 
-		if src.extLen > 0 {
-			copy(dst.extension[:src.extLen], src.extension[:src.extLen])
-		}
-		if src.accountAddrLen > 0 {
-			copy(dst.accountAddr[:src.accountAddrLen], src.accountAddr[:src.accountAddrLen])
-		}
-		if src.storageAddrLen > 0 {
-			copy(dst.storageAddr[:src.storageAddrLen], src.storageAddr[:src.storageAddrLen])
-		}
-		if src.hashLen > 0 {
-			copy(dst.hash[:src.hashLen], src.hash[:src.hashLen])
-		}
-		if src.stateHashLen > 0 {
-			copy(dst.stateHash[:src.stateHashLen], src.stateHash[:src.stateHashLen])
-		}
+		// Copy all arrays unconditionally - the length fields tell us valid portions
+		// This avoids branch misprediction overhead from conditional copies
+		dst.extension = src.extension
+		dst.accountAddr = src.accountAddr
+		dst.storageAddr = src.storageAddr
+		dst.hash = src.hash
+		dst.stateHash = src.stateHash
+
 		bitset ^= bit
 	}
 
