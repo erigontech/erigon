@@ -1230,6 +1230,8 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		return nil, nil
 	}
 
+	startOfPrune := time.Now()
+
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		wg, ctx := errgroup.WithContext(ctx)
@@ -1239,7 +1241,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			wg.Go(func() error {
 				t := time.Now()
 				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
-				if err := dbutils.WarmupTable(ctx, at.a.db, tbl); err != nil {
+				if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Asc); err != nil {
 					return err
 				}
 				took := time.Since(t)
@@ -1249,6 +1251,20 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 				log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
 				return nil
 			})
+			wg.Go(func() error {
+				t := time.Now()
+				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
+				if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Desc); err != nil {
+					return err
+				}
+				took := time.Since(t)
+				if took < 1*time.Millisecond {
+					return nil
+				}
+				log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
+				return nil
+			})
+
 		}
 		defer func() {
 			cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
@@ -1283,6 +1299,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	for iikey := range at.a.iis {
 		aggStat.Indices[at.iis[iikey].ii.FilenameBase] = stats[iikey]
 	}
+	log.Warn("[dbg] prune2", "took", time.Since(startOfPrune))
 
 	return aggStat, nil
 }
