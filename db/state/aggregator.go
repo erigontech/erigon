@@ -1246,28 +1246,29 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
 		return nil, nil
 	}
-	log.Warn("[dbg] prune2")
+
+	startOfPrune := time.Now()
 
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		wg, ctx := errgroup.WithContext(ctx)
 		wg.SetLimit(estimate.AlmostAllCPUs())
 		tbls := at.a.DomainTables()
-		for _, tbl := range tbls {
-			wg.Go(func() error {
-				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
-				defer func(t time.Time) {
-					took := time.Since(t)
-					if took < 1*time.Millisecond {
-						return
-					}
-					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
-				}(time.Now())
-				return dbutils.WarmupTable(ctx, at.a.db, tbl)
-			})
+		log.Warn("[dbg] prune.warmup start1", "tbls", tbls)
+		for _, domain := range at.a.d {
+			for _, tbl := range domain.Tables() {
+				wg.Go(func() error { return warmupTbl(ctx, at.a.db, tbl) })
+			}
 		}
-		defer wg.Wait()
-		defer cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
+		for _, ii := range at.a.iis {
+			for _, tbl := range ii.Tables() {
+				wg.Go(func() error { return warmupTbl(ctx, at.a.db, tbl) })
+			}
+		}
+		defer func() {
+			cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
+			_ = wg.Wait()
+		}()
 	}
 
 	if logEvery == nil {
@@ -1297,8 +1298,24 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	for iikey := range at.a.iis {
 		aggStat.Indices[at.iis[iikey].ii.FilenameBase] = stats[iikey]
 	}
+	log.Warn("[dbg] prune2", "took", time.Since(startOfPrune))
 
 	return aggStat, nil
+}
+
+func warmupTbl(ctx context.Context, db kv.RoDB, table string) error {
+	log.Warn("[dbg] prune.warmup start", "tbl", table)
+
+	t := time.Now()
+	if err := dbutils.WarmupTable(ctx, db, table, order.Asc); err != nil {
+		return err
+	}
+	took := time.Since(t)
+	if took < 1*time.Millisecond {
+		return nil
+	}
+	log.Warn("[dbg] prune.warmup", "tbl", table, "took", took)
+	return nil
 }
 
 func (at *AggregatorRoTx) EndTxNumNoCommitment() uint64 {

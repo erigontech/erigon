@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 )
 
 // NextNibblesSubtree does []byte++. Returns false if overflow.
@@ -39,23 +40,24 @@ func NextNibblesSubtree(in []byte, out *[]byte) bool {
 	return false
 }
 
-func WarmupTable(ctx context.Context, db kv.RoDB, table string) error {
+func WarmupTable(ctx context.Context, db kv.RoDB, table string, order order.By) error {
 	return db.View(ctx, func(tx kv.Tx) error {
 		i := 0
-		err := tx.ForEach(table, nil, func(k, v []byte) error {
+		it, err := tx.Range(table, nil, nil, order, -1)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			_, _, _ = it.Next()
 			i++
-			if i%100 == 0 {
+			if i%10 == 0 {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
 				default:
 				}
 			}
-			_, _ = k[0], k[len(k)-1]
-			return nil
-		})
-		if err != nil {
-			return err
 		}
 		return nil
 	})
