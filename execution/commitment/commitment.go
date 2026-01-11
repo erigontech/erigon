@@ -28,7 +28,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -404,7 +403,6 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
 ) error {
-	s := time.Now()
 	if len(be.deferred) == 0 {
 		return nil
 	}
@@ -414,9 +412,8 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 
 	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially
 	type result struct {
-		upd        *DeferredBranchUpdate
-		err        error
-		encodeTime time.Duration
+		upd *DeferredBranchUpdate
+		err error
 	}
 	resultCh := make(chan result, maxDeferredUpdates)
 	workCh := make(chan *DeferredBranchUpdate, maxDeferredUpdates)
@@ -431,9 +428,8 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 			merger := NewHexBranchMerger(512)
 
 			for upd := range workCh {
-				start := time.Now()
 				err := encodeDeferredUpdate(upd, encoder, merger)
-				resultCh <- result{upd: upd, err: err, encodeTime: time.Since(start)}
+				resultCh <- result{upd: upd, err: err}
 			}
 		}()
 	}
@@ -455,7 +451,6 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	// Process results as they come in - write to storage immediately
 	var firstErr error
 	var written int
-	var totalEncodeTime, totalWriteTime time.Duration
 	for res := range resultCh {
 		if res.err != nil {
 			if firstErr == nil {
@@ -463,19 +458,16 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 			}
 			continue
 		}
-		totalEncodeTime += res.encodeTime
 		if res.upd.encoded == nil {
 			continue // skip unchanged
 		}
 		if firstErr != nil {
 			continue // drain channel but don't write after error
 		}
-		writeStart := time.Now()
 		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev, res.upd.prevStep); err != nil {
 			firstErr = err
 			continue
 		}
-		totalWriteTime += time.Since(writeStart)
 		mxTrieBranchesUpdated.Inc()
 		written++
 	}
@@ -487,10 +479,6 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(uint64(written))
 	}
-
-	copyCount := GetDeferredUpdateMetrics()
-	log.Debug("deferred branch updates applied", "count", len(be.deferred), "written", written,
-		"encodeTime", totalEncodeTime, "writeTime", totalWriteTime, "copyCount", copyCount, "totalTime", time.Since(s))
 
 	return nil
 }
