@@ -284,8 +284,8 @@ func getDeferredUpdate(
 	upd.afterMap = afterMap
 	upd.depth = depth
 
-	// Copy only the fields needed for EncodeBranch using a single memcpy per cell
-	for bitset := afterMap; bitset != 0; {
+	// Only copy cells that are in bitmap (touchMap & afterMap) - those are the only ones accessed during encoding
+	for bitset := bitmap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		src := &cells[nibble]
@@ -299,7 +299,6 @@ func getDeferredUpdate(
 		dst.stateHashLen = src.stateHashLen
 
 		// Single memcpy for all arrays (200 bytes) - contiguous in both src and dst
-		// src.extension is at offset 128 in cell, dst.extension is at offset 0 in cellEncodeData
 		copy(
 			unsafe.Slice((*byte)(unsafe.Pointer(&dst.extension[0])), cellArraysSize),
 			unsafe.Slice((*byte)(unsafe.Pointer(&src.extension[0])), cellArraysSize),
