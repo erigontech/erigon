@@ -1245,12 +1245,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
 		var prevKey []byte
+		start := time.Now()
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			start := time.Now()
-			defer func() {
-				etlCallBackDuration += time.Since(start)
-			}()
 			// Make copies since ETL may reuse buffers
 			hk := common.Copy(k)
 			pk := common.Copy(v)
@@ -1304,6 +1301,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return err
 			}
 		}
+		etlCallBackDuration += time.Since(start)
 
 		t.initCollector()
 
