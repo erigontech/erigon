@@ -1250,9 +1250,9 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 				return nil
 			})
 		}
-		defer wg.Wait()
 		defer func() {
 			cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
+			_ = wg.Wait()
 		}()
 	}
 
