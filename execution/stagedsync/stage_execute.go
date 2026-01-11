@@ -513,9 +513,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
-		panic("[dbg] alex 2")
-
-		pruneTimeout = 12 * time.Hour
+		//pruneTimeout = 12 * time.Hour
 
 		// allow greedy prune on non-chain-tip
 		greedyPruneCommitmentHistoryStartTime := time.Now()
