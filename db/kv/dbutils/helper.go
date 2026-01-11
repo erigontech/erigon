@@ -44,7 +44,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, table string) error {
 		i := 0
 		err := tx.ForEach(table, nil, func(k, v []byte) error {
 			i++
-			if i%100 == 0 {
+			if i%10 == 0 {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
