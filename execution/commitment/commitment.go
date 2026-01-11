@@ -364,6 +364,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
 ) error {
+	s := time.Now()
 	if len(be.deferred) == 0 {
 		return nil
 	}
@@ -448,7 +449,7 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	}
 
 	log.Debug("deferred branch updates applied", "count", len(be.deferred), "written", written,
-		"encodeTime", totalEncodeTime, "writeTime", totalWriteTime)
+		"encodeTime", totalEncodeTime, "writeTime", totalWriteTime, "totalTime", time.Since(s))
 
 	return nil
 }
