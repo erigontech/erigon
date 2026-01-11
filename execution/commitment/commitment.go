@@ -309,9 +309,13 @@ func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
 }
 
-// DeferredUpdates returns the list of deferred updates.
-func (be *BranchEncoder) DeferredUpdates() []*DeferredBranchUpdate {
-	return be.deferred
+// HasPendingPrefix returns true if the given prefix has a pending deferred update.
+func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
+	if be.pendingPrefixes == nil {
+		return false
+	}
+	_, found := be.pendingPrefixes.Get(prefix)
+	return found
 }
 
 // ClearDeferred clears the deferred updates list and returns all objects to the pool.
@@ -323,18 +327,6 @@ func (be *BranchEncoder) ClearDeferred() {
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
-}
-
-// FindDeferred looks up a deferred update by prefix.
-// Returns the update and true if found, nil and false otherwise.
-// This is useful for lazy evaluation when a branch is read before updates are applied.
-func (be *BranchEncoder) FindDeferred(prefix []byte) (*DeferredBranchUpdate, bool) {
-	for _, upd := range be.deferred {
-		if bytes.Equal(upd.prefix, prefix) {
-			return upd, true
-		}
-	}
-	return nil, false
 }
 
 // encodeDeferredUpdate encodes a branch update using the provided encoder and merger.
