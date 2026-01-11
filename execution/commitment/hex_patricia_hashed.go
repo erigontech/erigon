@@ -2471,6 +2471,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		defer warmuper.Close()
 	}
 
+	hashSortTime := time.Now()
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
@@ -2533,7 +2534,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}
-
+	log.Debug("hash sort", "duration", time.Since(hashSortTime))
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
 		foldDone := hph.metrics.StartFolding(nil)
