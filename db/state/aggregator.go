@@ -1242,66 +1242,12 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		log.Warn("[dbg] prune.warmup start1", "tbls", tbls)
 		for _, domain := range at.a.d {
 			for _, tbl := range domain.Tables() {
-				wg.Go(func() error {
-					log.Warn("[dbg] prune.warmup start", "tbl", tbl)
-
-					t := time.Now()
-					if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Asc); err != nil {
-						return err
-					}
-					took := time.Since(t)
-					if took < 1*time.Millisecond {
-						return nil
-					}
-					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
-					return nil
-				})
-				wg.Go(func() error {
-					log.Warn("[dbg] prune.warmup start", "tbl", tbl)
-
-					t := time.Now()
-					if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Desc); err != nil {
-						return err
-					}
-					took := time.Since(t)
-					if took < 1*time.Millisecond {
-						return nil
-					}
-					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
-					return nil
-				})
+				wg.Go(func() error { return warmupTbl(ctx, at.a.db, tbl) })
 			}
 		}
 		for _, ii := range at.a.iis {
 			for _, tbl := range ii.Tables() {
-				wg.Go(func() error {
-					log.Warn("[dbg] prune.warmup start", "tbl", tbl)
-
-					t := time.Now()
-					if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Asc); err != nil {
-						return err
-					}
-					took := time.Since(t)
-					if took < 1*time.Millisecond {
-						return nil
-					}
-					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
-					return nil
-				})
-				wg.Go(func() error {
-					log.Warn("[dbg] prune.warmup start", "tbl", tbl)
-
-					t := time.Now()
-					if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Desc); err != nil {
-						return err
-					}
-					took := time.Since(t)
-					if took < 1*time.Millisecond {
-						return nil
-					}
-					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
-					return nil
-				})
+				wg.Go(func() error { return warmupTbl(ctx, at.a.db, tbl) })
 			}
 		}
 		defer func() {
@@ -1340,6 +1286,21 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	log.Warn("[dbg] prune2", "took", time.Since(startOfPrune))
 
 	return aggStat, nil
+}
+
+func warmupTbl(ctx context.Context, db kv.RoDB, table string) error {
+	log.Warn("[dbg] prune.warmup start", "tbl", table)
+
+	t := time.Now()
+	if err := dbutils.WarmupTable(ctx, db, table, order.Asc); err != nil {
+		return err
+	}
+	took := time.Since(t)
+	if took < 1*time.Millisecond {
+		return nil
+	}
+	log.Warn("[dbg] prune.warmup", "tbl", table, "took", took)
+	return nil
 }
 
 func (at *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
