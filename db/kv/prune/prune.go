@@ -202,7 +202,7 @@ func TableScanningPrune(
 
 	timeOut := 999 * time.Hour
 	if limit < 1000 { //TODO: change after tests
-		timeOut = 50 * time.Millisecond
+		timeOut = 200 * time.Millisecond
 	}
 
 	var keyCursorPosition, valCursorPosition = &StartPos{}, &StartPos{}
