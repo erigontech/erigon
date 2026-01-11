@@ -74,7 +74,7 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 }
 
 const AggregatorSqueezeCommitmentValues = true
-const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
+const MaxNonFuriousDirtySpacePerTx = 16 * 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 
