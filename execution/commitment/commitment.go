@@ -538,6 +538,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cell,
 	depth int16,
+	warmupCache *WarmupCache,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
 	needsFlush := len(be.deferred) >= maxDeferredUpdates
@@ -554,7 +555,19 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	prev, prevStep, err := ctx.Branch(prefix)
+	var (
+		prev     []byte
+		prevStep kv.Step
+		ok       bool
+		err      error
+	)
+	if warmupCache != nil {
+		prev, prevStep, ok = warmupCache.GetBranch(prefix)
+	}
+
+	if prev == nil || !ok {
+		prev, prevStep, err = ctx.Branch(prefix)
+	}
 	if err != nil {
 		return err
 	}
