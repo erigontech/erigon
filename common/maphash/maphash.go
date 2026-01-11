@@ -66,6 +66,46 @@ func (m *Map[V]) Clear() {
 	m.m.Clear()
 }
 
+// NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.
+// Use this when you don't need concurrent access for better performance.
+type NonConcurrentMap[V any] struct {
+	m map[uint64]V
+}
+
+// NewNonConcurrentMap creates a new NonConcurrentMap.
+func NewNonConcurrentMap[V any]() *NonConcurrentMap[V] {
+	return &NonConcurrentMap[V]{m: make(map[uint64]V)}
+}
+
+// Get retrieves a value by key.
+func (m *NonConcurrentMap[V]) Get(key []byte) (V, bool) {
+	h := Hash(key)
+	v, ok := m.m[h]
+	return v, ok
+}
+
+// Set stores a value with the given key.
+func (m *NonConcurrentMap[V]) Set(key []byte, value V) {
+	h := Hash(key)
+	m.m[h] = value
+}
+
+// Delete removes a key from the map.
+func (m *NonConcurrentMap[V]) Delete(key []byte) {
+	h := Hash(key)
+	delete(m.m, h)
+}
+
+// Len returns the number of entries in the map.
+func (m *NonConcurrentMap[V]) Len() int {
+	return len(m.m)
+}
+
+// Clear removes all entries from the map.
+func (m *NonConcurrentMap[V]) Clear() {
+	clear(m.m)
+}
+
 // LRU is a thread-safe LRU cache that uses maphash to hash []byte keys.
 type LRU[V any] struct {
 	cache *lru.Cache[uint64, V]
