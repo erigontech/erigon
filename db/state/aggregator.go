@@ -1238,8 +1238,6 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		ctx, cancel := context.WithCancel(ctx)
 		wg, ctx := errgroup.WithContext(ctx)
 		wg.SetLimit(estimate.AlmostAllCPUs())
-		tbls := at.a.DomainTables()
-		log.Warn("[dbg] prune.warmup start1", "tbls", tbls)
 		for _, domain := range at.a.d {
 			for _, tbl := range domain.Tables() {
 				wg.Go(func() error { return warmupTbl(ctx, at.a.db, tbl) })
