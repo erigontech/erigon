@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -366,7 +367,10 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	if len(be.deferred) == 0 {
 		return nil
 	}
-
+	s1 := time.Now()
+	defer func() {
+		log.Debug("deferred branch updates applied", "count", len(be.deferred), "duration", time.Since(s1))
+	}()
 	if numWorkers <= 1 {
 		numWorkers = 1
 	}
