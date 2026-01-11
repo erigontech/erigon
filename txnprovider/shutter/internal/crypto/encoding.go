@@ -244,8 +244,7 @@ func (m *EncryptedMessage) UnmarshalText(b []byte) error {
 	if err != nil {
 		return err
 	}
-	err = m.Unmarshal(decoded)
-	return err
+	return m.Unmarshal(decoded)
 }
 
 // Marshal serializes the gammas value.
@@ -294,6 +293,5 @@ func (g *Gammas) UnmarshalText(b []byte) error {
 	if err != nil {
 		return err
 	}
-	err = g.Unmarshal(decoded)
-	return err
+	return g.Unmarshal(decoded)
 }
