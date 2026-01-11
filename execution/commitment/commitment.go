@@ -26,7 +26,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -1233,19 +1232,12 @@ const hashSortBatchSize = 10_000
 // If warmuper is non-nil, keys are submitted for parallel warming before processing.
 // Caller is responsible for calling warmuper.Wait() after processing completes.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
-	etlCallBackDuration := time.Duration(0)
-	defer func() {
-		if etlCallBackDuration > 0 {
-			log.Info("Updates.HashSort ETL callback duration", "duration", etlCallBackDuration)
-		}
-	}()
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
 		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
 		var prevKey []byte
-		start := time.Now()
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			// Make copies since ETL may reuse buffers
@@ -1301,7 +1293,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return err
 			}
 		}
-		etlCallBackDuration += time.Since(start)
 
 		t.initCollector()
 
