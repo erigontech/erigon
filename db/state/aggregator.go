@@ -1027,6 +1027,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 
 	fullStat := newAggregatorPruneStat()
 
+	t := time.Now()
 	for {
 		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
 			spaceDirty, _, err := sptx.SpaceDirty()
@@ -1034,7 +1035,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				return false, err
 			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
-				log.Warn("[dbg] prune.exit.on.dirtySpace", "dirtySpace", datasize.ByteSize(spaceDirty).HR())
+				log.Warn("[dbg] prune.exit.on.dirtySpace", "dirtySpace", datasize.ByteSize(spaceDirty).HR(), "took", time.Since(t))
 				return false, nil
 			}
 		}
