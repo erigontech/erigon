@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	rand2 "golang.org/x/exp/rand"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
@@ -1044,16 +1045,15 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 
 	fullStat := newAggregatorPruneStat()
 
+	t := time.Now()
 	for {
 		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
 			spaceDirty, _, err := sptx.SpaceDirty()
 			if err != nil {
 				return false, err
 			}
-			if spaceDirty > 0 {
-				log.Warn("[dbg] prune1", "dirt", spaceDirty)
-			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
+				log.Warn("[dbg] prune.exit.on.dirtySpace", "dirtySpace", datasize.ByteSize(spaceDirty).HR(), "took", time.Since(t))
 				return false, nil
 			}
 		}
