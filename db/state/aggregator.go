@@ -1030,9 +1030,6 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			if err != nil {
 				return false, err
 			}
-			if spaceDirty > 0 {
-				log.Warn("[dbg] prune1", "dirt", spaceDirty)
-			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
 				log.Warn("[dbg] prune.exit.on.dirtySpace", "dirtySpace", datasize.ByteSize(spaceDirty).HR())
 				return false, nil
