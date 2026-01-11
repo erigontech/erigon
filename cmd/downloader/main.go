@@ -93,9 +93,6 @@ var (
 	natSetting                     string
 	torrentVerbosity               int
 	downloadRateStr, uploadRateStr string
-	// How do I mark this deprecated with cobra?
-	torrentDownloadSlots int
-	staticPeersStr       string
 	torrentPort          int
 	torrentMaxPeers      int
 	torrentConnsPerFile  int
@@ -122,9 +119,6 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
-	// Deprecated.
-	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
-	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV4.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon")
@@ -509,10 +503,9 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
-	webseedUrlsOrFiles := webseedsList
-	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
-	webseedFileProviders := make([]string, 0, len(webseedUrlsOrFiles))
-	for _, webseed := range webseedUrlsOrFiles {
+	webseedHttpProviders := make([]*url.URL, 0, len(webseedsList))
+	webseedFileProviders := make([]string, 0, len(webseedsList))
+	for _, webseed := range webseedsList {
 		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
 			uri, err := url.ParseRequestURI(webseed)
 			if err != nil {
