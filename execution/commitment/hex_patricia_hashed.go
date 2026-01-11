@@ -2608,9 +2608,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
+	warmuper.DrainPending()
 
 	// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
-	if err = hph.branchEncoder.ApplyDeferredUpdatesParallel(16, hph.ctx.PutBranch); err != nil {
+	if err = hph.branchEncoder.ApplyDeferredUpdatesParallel(1, hph.ctx.PutBranch); err != nil {
 		return nil, fmt.Errorf("apply deferred updates: %w", err)
 	}
 	hph.branchEncoder.ClearDeferred()
