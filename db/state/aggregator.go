@@ -1293,7 +1293,7 @@ func warmupTbl(ctx context.Context, db kv.RoDB, table string) error {
 		return err
 	}
 	took := time.Since(t)
-	if took < 100*time.Microsecond {
+	if took < 10*time.Millisecond {
 		return nil
 	}
 	log.Warn("[dbg] prune.warmup", "tbl", table, "took", took)
