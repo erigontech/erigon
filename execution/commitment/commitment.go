@@ -381,6 +381,7 @@ func (be *BranchEncoder) ClearDeferred() {
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
+	ResetDeferredUpdateMetrics()
 }
 
 // encodeDeferredUpdate encodes a branch update using the provided encoder and merger.
