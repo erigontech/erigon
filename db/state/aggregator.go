@@ -1048,7 +1048,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				return false, err
 			}
 			if spaceDirty > 0 {
-				log.Warn("[dbg] prune", "dirt", spaceDirty)
+				log.Warn("[dbg] prune1", "dirt", spaceDirty)
 			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
 				return false, nil
@@ -1246,6 +1246,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
 		return nil, nil
 	}
+	log.Warn("[dbg] prune2")
 
 	{
 		ctx, cancel := context.WithCancel(ctx)
