@@ -919,6 +919,9 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 }
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
+	if len(names) == 0 {
+		panic("assert: Aggregator.DomainTables expecting > 0 arguments")
+	}
 	for _, name := range names {
 		tables = append(tables, a.d[name].Tables()...)
 	}
