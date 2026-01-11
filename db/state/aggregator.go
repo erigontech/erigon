@@ -1239,26 +1239,28 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		tbls := at.a.DomainTables()
 		for _, tbl := range tbls {
 			wg.Go(func() error {
-				t := time.Now()
 				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
+
+				t := time.Now()
 				if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Asc); err != nil {
 					return err
 				}
 				took := time.Since(t)
-				if took < 1*time.Millisecond {
+				if took < 1*time.Microsecond {
 					return nil
 				}
 				log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
 				return nil
 			})
 			wg.Go(func() error {
-				t := time.Now()
 				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
+
+				t := time.Now()
 				if err := dbutils.WarmupTable(ctx, at.a.db, tbl, order.Desc); err != nil {
 					return err
 				}
 				took := time.Since(t)
-				if took < 1*time.Millisecond {
+				if took < 1*time.Microsecond {
 					return nil
 				}
 				log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
