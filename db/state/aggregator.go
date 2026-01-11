@@ -42,10 +42,12 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -1027,6 +1029,9 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			if err != nil {
 				return false, err
 			}
+			if spaceDirty > 0 {
+				log.Warn("[dbg] prune1", "dirt", spaceDirty)
+			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
 				return false, nil
 			}
@@ -1223,6 +1228,28 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
 		return nil, nil
+	}
+
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		wg, ctx := errgroup.WithContext(ctx)
+		wg.SetLimit(estimate.AlmostAllCPUs())
+		tbls := at.a.DomainTables()
+		for _, tbl := range tbls {
+			wg.Go(func() error {
+				log.Warn("[dbg] prune.warmup start", "tbl", tbl)
+				defer func(t time.Time) {
+					took := time.Since(t)
+					if took < 1*time.Millisecond {
+						return
+					}
+					log.Warn("[dbg] prune.warmup", "tbl", tbl, "took", took)
+				}(time.Now())
+				return dbutils.WarmupTable(ctx, at.a.db, tbl)
+			})
+		}
+		defer wg.Wait()
+		defer cancel() // cancel warmup if prune is done, but cancel before waiting for bg workers to finish
 	}
 
 	if logEvery == nil {

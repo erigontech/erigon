@@ -16,6 +16,12 @@
 
 package dbutils
 
+import (
+	"context"
+
+	"github.com/erigontech/erigon/db/kv"
+)
+
 // NextNibblesSubtree does []byte++. Returns false if overflow.
 func NextNibblesSubtree(in []byte, out *[]byte) bool {
 	r := (*out)[:len(in)]
@@ -31,4 +37,26 @@ func NextNibblesSubtree(in []byte, out *[]byte) bool {
 	}
 	*out = r
 	return false
+}
+
+func WarmupTable(ctx context.Context, db kv.RoDB, table string) error {
+	return db.View(ctx, func(tx kv.Tx) error {
+		i := 0
+		err := tx.ForEach(table, nil, func(k, v []byte) error {
+			i++
+			if i%100 == 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+			}
+			_, _ = k[0], k[len(k)-1]
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 }
