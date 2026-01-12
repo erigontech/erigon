@@ -26,6 +26,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Helper function to create a simple attestation for testing
+func newTestAttestation(slot, committeeIndex uint64, numBytes int) *Attestation {
+	att := &Attestation{
+		AggregationBits: NewBitList(numBytes, 2048),
+		Data: &AttestationData{
+			Slot:           slot,
+			CommitteeIndex: committeeIndex,
+		},
+		Signature: common.Bytes96{},
+	}
+	// Set some bytes for variation
+	for i := 0; i < numBytes && i < 10; i++ {
+		att.AggregationBits.Set(i, byte(i))
+	}
+	return att
+}
+
 // TestNewVectorSSZ tests the creation of a new VectorSSZ
 func TestNewVectorSSZ(t *testing.T) {
 	size := 5
@@ -339,6 +356,129 @@ func TestVectorSSZ_InterfaceCompliance(t *testing.T) {
 
 	// Test that it implements IterableSSZ interface
 	var _ IterableSSZ[*Checkpoint] = vec
+}
+
+// TestVectorSSZ_DynamicElements tests VectorSSZ with dynamic-sized elements (Attestation)
+func TestVectorSSZ_DynamicElements(t *testing.T) {
+	size := 3
+	vec := NewVectorSSZ[*Attestation](size)
+
+	// Verify it's not static
+	assert.False(t, vec.Static())
+
+	// Set attestations with different sizes (different number of validators)
+	att1 := newTestAttestation(100, 1, 10)
+	att2 := newTestAttestation(200, 2, 20)
+	att3 := newTestAttestation(300, 3, 5)
+
+	vec.Set(0, att1)
+	vec.Set(1, att2)
+	vec.Set(2, att3)
+
+	// Test encoding size (dynamic elements use offsets)
+	encodingSize := vec.EncodingSizeSSZ()
+	assert.Greater(t, encodingSize, 0)
+
+	// Test encoding and decoding
+	encoded, err := vec.EncodeSSZ(nil)
+	require.NoError(t, err)
+	assert.Equal(t, encodingSize, len(encoded))
+
+	// Decode into a new vector
+	vec2 := NewVectorSSZ[*Attestation](size)
+	err = vec2.DecodeSSZ(encoded, 0)
+	require.NoError(t, err)
+
+	// Verify decoded values
+	assert.Equal(t, att1.Data.Slot, vec2.Get(0).Data.Slot)
+	assert.Equal(t, att1.Data.CommitteeIndex, vec2.Get(0).Data.CommitteeIndex)
+	assert.Equal(t, att2.Data.Slot, vec2.Get(1).Data.Slot)
+	assert.Equal(t, att2.Data.CommitteeIndex, vec2.Get(1).Data.CommitteeIndex)
+	assert.Equal(t, att3.Data.Slot, vec2.Get(2).Data.Slot)
+	assert.Equal(t, att3.Data.CommitteeIndex, vec2.Get(2).Data.CommitteeIndex)
+
+	// Test hashing
+	hash1, err := vec.HashSSZ()
+	require.NoError(t, err)
+	assert.NotEqual(t, [32]byte{}, hash1)
+
+	// Hash should be consistent
+	hash2, err := vec.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, hash1, hash2)
+
+	// Modify an element and hash should change
+	vec.Set(0, newTestAttestation(999, 99, 15))
+	hash3, err := vec.HashSSZ()
+	require.NoError(t, err)
+	assert.NotEqual(t, hash1, hash3)
+}
+
+// TestVectorSSZ_DynamicElements_CopyTo tests CopyTo with dynamic elements
+func TestVectorSSZ_DynamicElements_CopyTo(t *testing.T) {
+	size := 2
+	vec1 := NewVectorSSZ[*Attestation](size)
+	vec2 := NewVectorSSZ[*Attestation](size)
+
+	att1 := newTestAttestation(100, 1, 10)
+	att2 := newTestAttestation(200, 2, 15)
+
+	vec1.Set(0, att1)
+	vec1.Set(1, att2)
+
+	// Copy to vec2
+	vec1.CopyTo(vec2)
+
+	// Verify copied values
+	assert.Equal(t, att1.Data.Slot, vec2.Get(0).Data.Slot)
+	assert.Equal(t, att1.Data.CommitteeIndex, vec2.Get(0).Data.CommitteeIndex)
+	assert.Equal(t, att2.Data.Slot, vec2.Get(1).Data.Slot)
+	assert.Equal(t, att2.Data.CommitteeIndex, vec2.Get(1).Data.CommitteeIndex)
+}
+
+// TestVectorSSZ_DynamicElements_Clear tests Clear with dynamic elements
+func TestVectorSSZ_DynamicElements_Clear(t *testing.T) {
+	size := 2
+	vec := NewVectorSSZ[*Attestation](size)
+
+	att := newTestAttestation(100, 1, 10)
+	vec.Set(0, att)
+	vec.Set(1, att)
+
+	// Clear the vector
+	vec.Clear()
+
+	// All items should be reset to freshly cloned empty attestations
+	for i := 0; i < size; i++ {
+		retrieved := vec.Get(i)
+		assert.NotNil(t, retrieved)
+		// After Clear, items are freshly cloned (Clone() returns &Attestation{})
+		// So Data will be nil for a newly cloned Attestation
+		assert.Nil(t, retrieved.Data)
+		assert.Nil(t, retrieved.AggregationBits)
+	}
+}
+
+// TestVectorSSZ_DynamicElements_Range tests Range with dynamic elements
+func TestVectorSSZ_DynamicElements_Range(t *testing.T) {
+	size := 3
+	vec := NewVectorSSZ[*Attestation](size)
+
+	// Set items
+	for i := 0; i < size; i++ {
+		vec.Set(i, newTestAttestation(uint64(i*100), uint64(i), 10))
+	}
+
+	// Range through all values
+	count := 0
+	vec.Range(func(index int, value *Attestation, length int) bool {
+		assert.Equal(t, size, length)
+		assert.Equal(t, uint64(index*100), value.Data.Slot)
+		assert.Equal(t, uint64(index), value.Data.CommitteeIndex)
+		count++
+		return true
+	})
+	assert.Equal(t, size, count)
 }
 
 // TestMerkleizeVector_Direct tests MerkleizeVector directly

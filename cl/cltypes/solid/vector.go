@@ -5,7 +5,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/ssz"
 )
@@ -17,12 +16,12 @@ type Vector[T ssz2.HashableSizedObjectSSZ] interface {
 
 type VectorSSZ[T ssz2.HashableSizedObjectSSZ] struct {
 	items []T
-	// cached hash root (zero value means not cached)
-	root common.Hash
 	// whether items are static or dynamic
 	isStatic bool
 	// cached encoding size for static items
 	staticItemSize int
+	// Merkle tree for efficient incremental hashing
+	merkleTree *merkle_tree.MerkleTree
 }
 
 func NewVectorSSZ[T ssz2.HashableSizedObjectSSZ](size int) *VectorSSZ[T] {
@@ -54,13 +53,15 @@ func (v *VectorSSZ[T]) Clear() {
 	for i := range v.items {
 		v.items[i] = v.items[i].Clone().(T)
 	}
-	v.root = common.Hash{}
+	v.merkleTree = nil
 }
 
 func (v *VectorSSZ[T]) CopyTo(target IterableSSZ[T]) {
-	if len(v.items) != target.Length() {
-		panic("VectorSSZ: CopyTo requires same length vectors")
+	targetVec, ok := target.(*VectorSSZ[T])
+	if !ok || len(v.items) != targetVec.Length() {
+		panic("VectorSSZ: CopyTo requires same length vectors of same type")
 	}
+
 	for i := range v.items {
 		target.Set(i, v.items[i])
 	}
@@ -80,7 +81,9 @@ func (v *VectorSSZ[T]) Get(index int) T {
 
 func (v *VectorSSZ[T]) Set(index int, value T) {
 	v.items[index] = value
-	v.root = common.Hash{}
+	if v.merkleTree != nil {
+		v.merkleTree.MarkLeafAsDirty(index)
+	}
 }
 
 func (v *VectorSSZ[T]) Length() int {
@@ -147,7 +150,7 @@ func (v *VectorSSZ[T]) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (v *VectorSSZ[T]) DecodeSSZ(buf []byte, version int) error {
-	v.root = common.Hash{}
+	v.merkleTree = nil
 
 	if v.isStatic {
 		// For static items, decode them sequentially
@@ -215,35 +218,25 @@ func (v *VectorSSZ[T]) EncodingSizeSSZ() int {
 }
 
 func (v *VectorSSZ[T]) HashSSZ() ([32]byte, error) {
-	// Return cached root if available
-	if v.root != (common.Hash{}) {
-		return v.root, nil
+	// Initialize MerkleTree if not already done
+	if v.merkleTree == nil {
+		// For vectors, the limit should be the next power of 2 for proper merkleization
+		limit := merkle_tree.NextPowerOfTwo(uint64(len(v.items)))
+		v.merkleTree = &merkle_tree.MerkleTree{}
+		v.merkleTree.Initialize(len(v.items), merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			hash, err := v.items[idx].HashSSZ()
+			if err != nil {
+				// Note: this shouldn't happen in normal operation
+				// If it does, we'll get a zero hash for this leaf
+				copy(out, make([]byte, 32))
+				return
+			}
+			copy(out, hash[:])
+		}, &limit)
 	}
 
-	// Compute hash roots for all items
-	leaves := make([][32]byte, len(v.items))
-	for i, item := range v.items {
-		hash, err := item.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-		leaves[i] = hash
-	}
-
-	// Merkleize the vector (no length mixing for vectors, unlike lists)
-	// Note: MerkleizeVector modifies the leaves slice in-place, so we must pass a copy
-	// For SSZ vectors, the length parameter should be the next power of 2 to ensure
-	// proper merkleization depth
-	leavesCopy := make([][32]byte, len(leaves))
-	copy(leavesCopy, leaves)
-	vectorLength := merkle_tree.NextPowerOfTwo(uint64(len(v.items)))
-	root, err := merkle_tree.MerkleizeVector(leavesCopy, vectorLength)
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	v.root = root
-	return root, nil
+	// Compute root using the MerkleTree (only recalculates dirty leaves)
+	return v.merkleTree.ComputeRoot(), nil
 }
 
 func (v *VectorSSZ[T]) Clone() clonable.Clonable {
