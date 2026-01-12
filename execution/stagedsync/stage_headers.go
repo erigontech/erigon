@@ -266,7 +266,10 @@ func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *
 	if receiptResult == nil {
 		return fmt.Errorf("--l2rpc.receipt %q returned nil for tx %s", receiptRPCAddr, txHash)
 	}
-	receiptTxHash, _ := receiptResult["transactionHash"].(string)
+	receiptTxHash, ok := receiptResult["transactionHash"].(string)
+	if !ok || receiptTxHash == "" {
+		return fmt.Errorf("--l2rpc.receipt %q receipt missing transactionHash field or field is not a string for tx %s", receiptRPCAddr, txHash)
+	}
 	if receiptTxHash != txHash {
 		return fmt.Errorf("--l2rpc.receipt %q returned mismatched receipt: requested tx %s but got %s", receiptRPCAddr, txHash, receiptTxHash)
 	}
