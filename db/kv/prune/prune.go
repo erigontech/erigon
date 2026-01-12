@@ -197,6 +197,7 @@ func TableScanningPrune(
 ) (stat *Stat, err error) {
 	stat = &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
+	println("starting prune table", "name", name, "filenameBase", filenameBase)
 
 	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64

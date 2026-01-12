@@ -890,6 +890,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)
 	if err != nil {
+		iit.ii.logger.Error("prune table", iit.ii.FilenameBase, "err", err)
 		return nil, err
 	}
 	defer func() {
@@ -900,6 +901,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 		}
 	}()
 	if pruneStat == nil {
+		println("after ii prune nil", name, pruneStat.KeyProgress.String(), pruneStat.ValueProgress.String())
 		return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, errors.New("prune stat is nil")
 	}
 	pruneSizeMetric.AddUint64(pruneStat.PruneCountValues)
