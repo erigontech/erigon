@@ -2468,24 +2468,6 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 	return nil
 }
 
-// nolint
-func (p *TxPool) printDebug(prefix string) {
-	fmt.Printf("%s.pool.byHash\n", prefix)
-	for _, j := range p.byHash {
-		fmt.Printf("\tsenderID=%d, nonce=%d, tip=%d\n", j.TxnSlot.SenderID, j.TxnSlot.Nonce, j.TxnSlot.Tip)
-	}
-	fmt.Printf("%s.pool.queues.len: %d,%d,%d\n", prefix, p.pending.Len(), p.baseFee.Len(), p.queued.Len())
-	for _, mt := range p.pending.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.pending: %b,%d,%d,%d", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.Tip))
-	}
-	for _, mt := range p.baseFee.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.baseFee : %b,%d,%d,%d", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.Tip))
-	}
-	for _, mt := range p.queued.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.queued : %b,%d,%d,%d", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.Tip))
-	}
-}
-
 func (p *TxPool) logStats() {
 	if !p.Started() {
 		return
