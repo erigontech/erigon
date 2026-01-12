@@ -1,3 +1,5 @@
+// Several types that should be usable without importing mdbx and sais, enabling cross compilation
+// of tests.
 package preverified
 
 import (
@@ -8,11 +10,13 @@ import (
 	"github.com/anacrolix/missinggo/v2/panicif"
 )
 
+// A snapshot name and hash (hex encoded) pair.
 type Item struct {
 	Name string
 	Hash string
 }
 
+// Provides some utilities on a list of Item. It should be kept sorted.
 type SortedItems []Item
 
 func (p SortedItems) searchName(name string) (int, bool) {
