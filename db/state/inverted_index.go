@@ -904,6 +904,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	}
 	pruneSizeMetric.AddUint64(pruneStat.PruneCountValues)
 	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
+	println("after ii prune", name, pruneStat.KeyProgress.String(), pruneStat.ValueProgress.String())
 	return &InvertedIndexPruneStat{
 		MinTxNum:         pruneStat.MinTxNum,
 		MaxTxNum:         pruneStat.MaxTxNum,
