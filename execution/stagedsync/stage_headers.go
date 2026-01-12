@@ -157,9 +157,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 
 	// check the next block we're going to execute, not the one already executed
 	nextBlock := curBlock + 1
-	if curBlock == 0 {
-		nextBlock = 1
-	}
 	if err := checkL2RPCEndpointsHealth(ctx, client, receiptClient, nextBlock, cfg.L2RPCAddr, cfg.ReceiptRPCAddr); err != nil {
 		return err
 	}
