@@ -19,7 +19,6 @@ package stagedsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -50,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -369,10 +367,6 @@ func ExecV3(ctx context.Context,
 
 		lastCommittedBlockNum = se.lastCommittedBlockNum
 		lastCommittedTxNum = se.lastCommittedTxNum
-	}
-
-	if false && !inMemExec {
-		dumpPlainStateDebug(applyTx, doms)
 	}
 
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
@@ -753,58 +747,6 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 	}
 
 	return tx, t2, nil
-}
-
-// nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
-	if doms != nil {
-		doms.Flush(context.Background(), tx)
-	}
-
-	{
-		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
-		if err != nil {
-			panic(err)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			a := accounts.NewAccount()
-			accounts.DeserialiseV3(&a, v)
-			fmt.Printf("%x, %d, %d, %d, %x\n", k, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash)
-		}
-	}
-	{
-		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
-		if err != nil {
-			panic(1)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("%x, %x\n", k, v)
-		}
-	}
-	{
-		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
-		if err != nil {
-			panic(1)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("%x, %x\n", k, v)
-			if bytes.Equal(k, []byte("state")) {
-				fmt.Printf("state: t=%d b=%d\n", binary.BigEndian.Uint64(v[:8]), binary.BigEndian.Uint64(v[8:]))
-			}
-		}
-	}
 }
 
 func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
