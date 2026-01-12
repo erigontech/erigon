@@ -910,6 +910,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 		PruneCountTx:     pruneStat.PruneCountTx,
 		PruneCountValues: pruneStat.PruneCountValues,
 		DupsDeleted:      pruneStat.DupsDeleted,
+		Progress:         min(pruneStat.ValueProgress, pruneStat.KeyProgress),
 	}, nil
 }
 
