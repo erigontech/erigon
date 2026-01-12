@@ -58,7 +58,12 @@ func (m *Map[V]) Delete(key []byte) {
 
 // Len returns the number of entries in the map.
 func (m *Map[V]) Len() int {
-	return m.Len()
+	count := 0
+	m.m.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 // Clear removes all entries from the map.
