@@ -175,19 +175,12 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
 	trace         bool
 	stateReader   StateReader
-	warmupDB      kv.TemporalRoDB // if set, enables parallel warmup of MDBX page cache during commitment
 	paraTrieDB    kv.TemporalRoDB // if set, it's used to set up a trie ctx factory for para trie without warmup (otherwise it uses warmupDB if enabled)
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
 func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
-}
-
-// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
-// When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
-func (sdc *SharedDomainsCommitmentContext) SetWarmupDB(db kv.TemporalRoDB) {
-	sdc.warmupDB = db
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetParaTrieDB(db kv.TemporalRoDB) {
@@ -330,18 +323,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	trieContext := sdc.trieContext(tx)
 
 	var warmupConfig commitment.WarmupConfig
-	if sdc.warmupDB != nil {
+	if sdc.paraTrieDB != nil {
 		warmupConfig = commitment.WarmupConfig{
 			Enabled:    true,
-			CtxFactory: sdc.trieContextFactory(ctx, sdc.warmupDB),
+			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
 			NumWorkers: 16,
 			MaxDepth:   commitment.WarmupMaxDepth,
 			LogPrefix:  logPrefix,
-		}
-	} else if sdc.paraTrieDB != nil {
-		// temporarily use WarmupConfig to easily pass CtxFactory to the para trie without too many changes (can improve in future PR)
-		warmupConfig = commitment.WarmupConfig{
-			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
 		}
 	}
 
