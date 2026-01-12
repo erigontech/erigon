@@ -2484,6 +2484,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		if warmup.EnableWarmupCache {
 			hph.cache = warmuper.Cache()
 			hph.branchEncoder.SetCache(hph.cache)
+			defer func() {
+				hph.cache = nil
+				hph.branchEncoder.SetCache(nil)
+			}()
 		} else {
 			hph.cache = nil
 			hph.branchEncoder.SetCache(nil)
