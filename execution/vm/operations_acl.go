@@ -161,16 +161,14 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
-
-		addrMod := evm.IntraBlockState().AddAddressToAccessList(addr)
-		warmAccess := !addrMod
-		if addrMod {
+		warmAccess := evm.IntraBlockState().AddressInAccessList(addr)
+		if !warmAccess {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
 			if _, ok := useGas(scopeGas, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return 0, ErrOutOfGas
 			}
-
+			evm.IntraBlockState().AddAddressToAccessList(addr)
 			scopeGas -= coldCost
 		}
 
@@ -266,7 +264,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 		// Check slot presence in the access list
 		var dynCost uint64
-		if evm.intraBlockState.AddAddressToAccessList(addr) {
+		if !evm.intraBlockState.AddressInAccessList(addr) {
 			// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 			// the cost to charge for cold access, if any, is Cold - Warm
 			dynCost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -276,6 +274,8 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 				fmt.Println("OOG", 7702, 0)
 				return 0, ErrOutOfGas
 			}
+
+			evm.intraBlockState.AddAddressToAccessList(addr)
 		}
 
 		// Check if code is a delegation and if so, charge for resolution.
@@ -285,7 +285,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		}
 		if ok {
 			var ddCost uint64
-			if evm.intraBlockState.AddAddressToAccessList(dd) {
+			if !evm.intraBlockState.AddressInAccessList(dd) {
 				ddCost = params.ColdAccountAccessCostEIP2929
 			} else {
 				ddCost = params.WarmStorageReadCostEIP2929
@@ -296,6 +296,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 				return 0, ErrOutOfGas
 			}
 			dynCost += ddCost
+			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 		// Now call the old calculator, which takes into account
 		// - create new account
