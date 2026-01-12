@@ -2757,7 +2757,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 	collateAndMerge(t, db, tx, d, txs)
 	require.NoError(t, tx.Commit())
 
-	// Phase 2: Write keys 11-20 directly to MDBX (will NOT be in files)
+	// Phase 2: Write keys 11-20 directly to MDBX (will NOT be in files because we will not merge after this step)
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

@@ -1723,13 +1723,12 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 }
 
 // DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
-// ignoring keys in MDBX database.
+// ignoring keys in MDBX.
 func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
 		orderAscend: order.Asc,
 		aggStep:     dt.stepSize,
-		largeVals:   dt.d.LargeValues,
 		filesOnly:   true,
 		logger:      dt.d.logger,
 		h:           &CursorHeap{},
