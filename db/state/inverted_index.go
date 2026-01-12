@@ -883,6 +883,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	if prs != nil && prs.TxFrom == txFrom && prs.TxTo == txTo && prs.ValueProgress == prune.Done && prs.KeyProgress == prune.Done {
 		stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 		stat.Progress = prune.Done
+		println("ii already ok", name, prs.TxFrom, prs.TxTo, prs.ValueProgress)
 		return stat, nil
 	}
 
