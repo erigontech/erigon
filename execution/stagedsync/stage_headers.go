@@ -154,6 +154,16 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	if err != nil {
 		log.Warn("can't check current block", "err", err)
 	}
+
+	// check the next block we're going to execute, not the one already executed
+	nextBlock := curBlock + 1
+	if curBlock == 0 {
+		nextBlock = 1
+	}
+	if err := checkL2RPCEndpointsHealth(ctx, client, receiptClient, nextBlock, cfg.L2RPCAddr, cfg.ReceiptRPCAddr); err != nil {
+		return err
+	}
+
 	// Query latest block number.
 	var latestBlockHex string
 	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
@@ -220,6 +230,53 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("[Arbitrum] Headers stage completed", "latestProcessedBlock", lastCommittedBlockNum,
 			"from", firstBlock, "to", latestBlock.Uint64(), "wasTxCommitted", !useExternalTx)
 	}
+	return nil
+}
+
+func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *rpc.Client, blockNum uint64, blockRPCAddr, receiptRPCAddr string) error {
+
+	checkBlockNum := fmt.Sprintf("0x%x", blockNum)
+
+	var blockResult map[string]interface{}
+	if err := blockClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
+		//log.Error("[Arbitrum] L2 RPC block endpoint health check failed", "endpoint", blockRPCAddr, "block", blockNum, "err", err)
+		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockRPCAddr, blockNum, err)
+	}
+	if blockResult == nil {
+		//log.Error("[Arbitrum] L2 RPC block endpoint returned nil block", "endpoint", blockRPCAddr, "block", blockNum)
+		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockRPCAddr, blockNum)
+	}
+
+	txs, ok := blockResult["transactions"].([]interface{})
+	if !ok || len(txs) == 0 {
+		log.Info("[Arbitrum] L2 RPC health check: block has no transactions, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	var txHash string
+	if txMap, ok := txs[0].(map[string]interface{}); ok {
+		if h, ok := txMap["hash"].(string); ok {
+			txHash = h
+		}
+	}
+	if txHash == "" {
+		log.Warn("[Arbitrum] L2 RPC health check: could not extract tx hash from block, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	var receiptResult map[string]interface{}
+	if err := receiptClient.CallContext(ctx, &receiptResult, "eth_getTransactionReceipt", txHash); err != nil {
+		return fmt.Errorf("--l2rpc.receipt %q cannot respond to eth_getTransactionReceipt for tx %s: %w", receiptRPCAddr, txHash, err)
+	}
+	if receiptResult == nil {
+		return fmt.Errorf("--l2rpc.receipt %q returned nil for tx %s", receiptRPCAddr, txHash)
+	}
+	receiptTxHash, _ := receiptResult["transactionHash"].(string)
+	if receiptTxHash != txHash {
+		return fmt.Errorf("--l2rpc.receipt %q returned mismatched receipt: requested tx %s but got %s", receiptRPCAddr, txHash, receiptTxHash)
+	}
+
+	log.Info("[Arbitrum] L2 RPC endpoints health check passed", "blockEndpoint", blockRPCAddr, "receiptEndpoint", receiptRPCAddr, "checkedBlock", blockNum)
 	return nil
 }
 
