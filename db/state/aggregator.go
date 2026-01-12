@@ -1065,7 +1065,6 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "is deadline?", errors.Is(err, context.DeadlineExceeded))
 			return false, err
 		}
-		println("stat", stat.String())
 		if stat == nil || stat.PrunedNothing() {
 			if !fullStat.PrunedNothing() {
 				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
@@ -1141,10 +1140,8 @@ func (as *AggregatorPruneStat) PrunedNothing() bool {
 			return false
 		}
 	}
-	println("domains ok")
 	for _, i := range as.Indices {
 		if i != nil && !i.PrunedNothing() {
-			println("indicies not ok", i.String(), i.Progress.String(), i.PrunedNothing())
 			return false
 		}
 	}

@@ -883,7 +883,6 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	if prs != nil && prs.TxFrom == txFrom && prs.TxTo == txTo && prs.ValueProgress == prune.Done && prs.KeyProgress == prune.Done {
 		stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 		stat.Progress = prune.Done
-		println("ii already ok", name, prs.TxFrom, prs.TxTo, prs.ValueProgress.String())
 		return stat, nil
 	}
 
@@ -901,12 +900,10 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 		}
 	}()
 	if pruneStat == nil {
-		println("after ii prune nil", name, pruneStat.KeyProgress.String(), pruneStat.ValueProgress.String())
 		return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, errors.New("prune stat is nil")
 	}
 	pruneSizeMetric.AddUint64(pruneStat.PruneCountValues)
 	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
-	println("after ii prune", name, pruneStat.KeyProgress.String(), pruneStat.ValueProgress.String())
 	return &InvertedIndexPruneStat{
 		MinTxNum:         pruneStat.MinTxNum,
 		MaxTxNum:         pruneStat.MaxTxNum,

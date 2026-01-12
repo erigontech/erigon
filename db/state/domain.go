@@ -1839,7 +1839,6 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	if prg != nil && prg.TxFrom == txFrom && prg.TxTo == txTo && prg.ValueProgress == prune.Done {
 		stat.Progress = prune.Done
-		println("d already ok", dt.name.String(), prg.TxFrom, prg.TxTo, prg.ValueProgress.String())
 		return stat, nil
 	}
 
