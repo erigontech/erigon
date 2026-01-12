@@ -2482,7 +2482,6 @@ var (
 type state struct {
 	Root         []byte      // encoded root cell
 	Depths       [128]int16  // For each row, the depth of cells in that row
-	TouchMap     [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	AfterMap     [128]uint16 // For each row, bitmap of cells that were present after modification
 	BranchBefore [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
 	RootChecked  bool        // Set to false if it is not known whether the root is empty, set to true if it is checked
@@ -2518,9 +2517,6 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	}
 	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
 		return nil, fmt.Errorf("encode depths: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.TouchMap); err != nil {
-		return nil, fmt.Errorf("encode touchMap: %w", err)
 	}
 	if err := binary.Write(ee, binary.BigEndian, s.AfterMap); err != nil {
 		return nil, fmt.Errorf("encode afterMap: %w", err)
@@ -2577,9 +2573,6 @@ func (s *state) Decode(buf []byte) error {
 	}
 	for i := 0; i < len(s.Depths); i++ {
 		s.Depths[i] = int16(d[i])
-	}
-	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
-		return fmt.Errorf("touchMap: %w", err)
 	}
 	if err := binary.Read(aux, binary.BigEndian, &s.AfterMap); err != nil {
 		return fmt.Errorf("afterMap: %w", err)
@@ -2723,7 +2716,6 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	s.Root = hph.root.Encode()
 	copy(s.Depths[:], hph.depths[:])
 	copy(s.BranchBefore[:], hph.branchBefore[:])
-	copy(s.TouchMap[:], hph.touchMap[:])
 	copy(s.AfterMap[:], hph.afterMap[:])
 
 	return s.Encode(buf)
@@ -2767,7 +2759,6 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 
 	copy(hph.depths[:], s.Depths[:])
 	copy(hph.branchBefore[:], s.BranchBefore[:])
-	copy(hph.touchMap[:], s.TouchMap[:])
 	copy(hph.afterMap[:], s.AfterMap[:])
 
 	if hph.root.accountAddrLen > 0 {

@@ -888,9 +888,6 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	for i := 0; i < len(s.Depths); i++ {
 		s.Depths[i] = int16(rnd.Intn(256))
 	}
-	for i := 0; i < len(s.TouchMap); i++ {
-		s.TouchMap[i] = uint16(rnd.Intn(1<<16 - 1))
-	}
 	for i := 0; i < len(s.AfterMap); i++ {
 		s.AfterMap[i] = uint16(rnd.Intn(1<<16 - 1))
 	}
@@ -911,7 +908,6 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	require.Equal(t, s.Root[:], s1.Root[:])
 	require.Equal(t, s.Depths[:], s1.Depths[:])
 	require.Equal(t, s.AfterMap[:], s1.AfterMap[:])
-	require.Equal(t, s.TouchMap[:], s1.TouchMap[:])
 	require.Equal(t, s.BranchBefore[:], s1.BranchBefore[:])
 	require.Equal(t, s.RootTouched, s1.RootTouched)
 	require.Equal(t, s.RootPresent, s1.RootPresent)
