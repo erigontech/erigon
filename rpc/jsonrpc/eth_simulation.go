@@ -424,13 +424,13 @@ func (s *simulator) simulateBlock(
 		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
 	} else {
 		if minTxNum < state.StateHistoryStartTxNum(tx) {
-			return nil, nil, state.PrunedError
+			return nil, nil, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
 		}
 		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-			return nil, nil, state.PrunedError
+			return nil, nil, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
 		}
 	}
 	intraBlockState := state.New(stateReader)
@@ -527,7 +527,7 @@ func (s *simulator) simulateBlock(
 			}
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains.AsGetter(tx), txNum+1))
+			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil)
 		if err != nil {
@@ -755,14 +755,19 @@ func clientLimitExceededError(message string) error {
 }
 
 type HistoryCommitmentOnlyReader struct {
-	latestReader  commitmentdb.StateReader
-	historyReader commitmentdb.StateReader
+	latestReader       commitmentdb.StateReader
+	historyReader      commitmentdb.StateReader
+	sd                 *execctx.SharedDomains
+	limitReadAsOfTxNum uint64
 }
 
-func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	latestReader := commitmentdb.NewLatestStateReader(getter)
-	historyReader := commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum)
-	return &HistoryCommitmentOnlyReader{latestReader, historyReader}
+func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
+	return &HistoryCommitmentOnlyReader{
+		latestReader:       commitmentdb.NewLatestStateReader(roTx, sd),
+		historyReader:      commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum),
+		sd:                 sd,
+		limitReadAsOfTxNum: limitReadAsOfTxNum,
+	}
 }
 
 func (r *HistoryCommitmentOnlyReader) WithHistory() bool {
@@ -786,4 +791,8 @@ func (r *HistoryCommitmentOnlyReader) Read(d kv.Domain, plainKey []byte, stepSiz
 		return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader latestReader %q: %w", d, err)
 	}
 	return enc, step, nil
+}
+
+func (r *HistoryCommitmentOnlyReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return newHistoryCommitmentOnlyReader(tx, r.sd, r.limitReadAsOfTxNum)
 }

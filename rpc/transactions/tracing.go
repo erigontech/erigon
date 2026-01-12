@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
@@ -54,11 +55,24 @@ type BlockGetter interface {
 
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
-	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
+	headerReader services.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
-	if err != nil {
-		return nil, evmtypes.BlockContext{}, nil, nil, nil, err
+	var reader state.StateReader
+	if stateCache != nil {
+		cacheView, err := stateCache.View(ctx, dbtx)
+		if err != nil {
+			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
+		}
+		reader, err = rpchelper.CreateHistoryCachedStateReader(cacheView, dbtx, header.Number.Uint64(), txIndex, txNumsReader)
+		if err != nil {
+			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
+		}
+	} else {
+		var err error
+		reader, err = rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
+		if err != nil {
+			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
+		}
 	}
 
 	// Create the parent state database
@@ -74,7 +88,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)
 
-	return statedb, blockContext, reader, rules, signer, err
+	return statedb, blockContext, reader, rules, signer, nil
 }
 
 // ComputeTxContext returns the execution environment of a certain transaction.

@@ -149,7 +149,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return err
 	}
 	defer func() {
-		tx.Commit()
+		tx.Rollback()
 	}()
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
@@ -158,28 +158,22 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	defer doms.Close()
 
-	for more := true; more; {
-		// run stages first time - it will download blocks
-		if hook != nil {
-			if err = hook.BeforeRun(tx, false); err != nil {
-				return err
-			}
-		}
-
-		more, err = sync.Run(db, doms, tx, initialCycle, firstCycle)
+	// run stages first time - it will download blocks
+	var finishStageBeforeSync uint64
+	if hook != nil {
+		finishStageBeforeSync, err = stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return err
 		}
+		if err = hook.BeforeRun(tx, false); err != nil {
+			return err
+		}
+	}
 
-		if hook != nil {
-			finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
-			if err != nil {
-				return err
-			}
-			err = hook.AfterRun(tx, finishProgressBefore, false)
-			if err != nil {
-				return err
-			}
+	for more := true; more; {
+		more, err = sync.Run(db, doms, tx, initialCycle, firstCycle)
+		if err != nil {
+			return err
 		}
 
 		if err := sync.RunPrune(ctx, db, tx, initialCycle, 0); err != nil {
@@ -221,13 +215,25 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	doms.ClearRam(true)
 
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
 	if hook != nil {
-		var headerStageProgress uint64
-		headerStageProgress, err = stages.GetStageProgress(tx, stages.Headers)
-		if err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			headersProgress, _, _, err := stagesHeadersAndFinish(db, tx)
+			if err != nil {
+				return err
+			}
+			err = hook.AfterRun(tx, finishStageBeforeSync, false)
+			if err != nil {
+				return err
+			}
+			hook.LastNewBlockSeen(headersProgress)
+			return nil
+		}); err != nil {
 			return err
 		}
-		hook.LastNewBlockSeen(headerStageProgress)
 	}
 	return nil
 }

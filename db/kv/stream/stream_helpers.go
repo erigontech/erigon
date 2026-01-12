@@ -89,7 +89,7 @@ func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("expected error at iteration: %d", m.errorAt)
 	}
 	m.i++
-	return []byte(fmt.Sprintf("%x", m.i)), []byte(fmt.Sprintf("%x", m.i)), nil
+	return fmt.Appendf(nil, "%x", m.i), fmt.Appendf(nil, "%x", m.i), nil
 }
 
 func Count[T any](s Uno[T]) (cnt int, err error) {

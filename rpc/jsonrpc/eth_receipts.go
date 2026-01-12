@@ -210,8 +210,8 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		if fromTxNum < state.StateHistoryStartTxNum(tx) {
-			return out, state.PrunedError
+		if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
+			return out, fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, fromTxNum, minTxNum)
 		}
 	}
 
