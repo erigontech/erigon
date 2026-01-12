@@ -162,14 +162,16 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	var totalGasLimit atomic.Uint64
 	var totalBytes atomic.Int64
 	for i, encryptedTxn := range encryptedTxns {
+		idx := i                      // copy loop vars for goroutine
+		txnSubmission := encryptedTxn // avoid data races on loop variable
 		eg.Go(func() error {
-			txn, err := dkp.decryptTxn(txnIndexToKey, encryptedTxn)
+			txn, err := dkp.decryptTxn(txnIndexToKey, txnSubmission)
 			if err != nil {
 				dkp.logger.Debug(
 					"failed to decrypt transaction - skipping",
 					"slot", slot,
 					"eonIndex", eonIndex,
-					"txnIndex", encryptedTxn.TxnIndex,
+					"txnIndex", txnSubmission.TxnIndex,
 					"err", err,
 				)
 				// we do not return err here since as per protocol we skip bad decryption
@@ -177,8 +179,8 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 				return nil
 			}
 
-			txns[i] = txn
-			totalGasLimit.Add(encryptedTxn.GasLimit.Uint64())
+			txns[idx] = txn
+			totalGasLimit.Add(txnSubmission.GasLimit.Uint64())
 			// note this is rlp encoding size and so it doesn't reflect 1:1 mem size occupied by the go struct,
 			// but it gives us somewhat of an estimate - this is probably ok for our metrics for now
 			txnSize := txn.EncodingSize()
