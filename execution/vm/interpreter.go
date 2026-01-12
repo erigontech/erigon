@@ -421,7 +421,11 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, callContext, callContext.gas, memorySize)
 			if err != nil {
-				return nil, callContext.gas, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				fmt.Println("OOG 0", op.String(), accounts.InternAddress(callContext.Stack.Back(1).Bytes20()))
+				if !errors.Is(err, ErrOutOfGas) {
+					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				}
+				return nil, callContext.gas, err
 			}
 			cost += dynamicCost // for tracing
 			callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp()
@@ -430,6 +434,7 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 			}
 
 			if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+				fmt.Println("OOG 1", op.String(), accounts.InternAddress(callContext.Stack.Back(1).Bytes20()))
 				return nil, callContext.gas, ErrOutOfGas
 			}
 		}
@@ -463,6 +468,7 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 		}
 
 		// execute the operation
+		fmt.Println("EXEC")
 		pc, res, err = operation.execute(pc, in, callContext)
 
 		if err != nil {

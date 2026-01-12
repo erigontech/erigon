@@ -21,6 +21,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -272,6 +273,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
 			if _, ok := useGas(scopeGas, dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
+				fmt.Println("OOG", 7702, 0)
 				return 0, ErrOutOfGas
 			}
 		}
@@ -290,6 +292,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			}
 
 			if _, ok := useGas(scopeGas, ddCost, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
+				fmt.Println("OOG", 7702, 1)
 				return 0, ErrOutOfGas
 			}
 			dynCost += ddCost
@@ -301,6 +304,9 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		// - 63/64ths rule
 		gas, err := oldCalculator(evm, callContext, scopeGas-dynCost, memorySize)
 		if dynCost == 0 || err != nil {
+			if err != nil {
+				fmt.Println("OOG", 7702, 2)
+			}
 			return gas, err
 		}
 

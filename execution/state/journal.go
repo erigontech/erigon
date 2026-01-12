@@ -153,7 +153,10 @@ type (
 	addLogChange struct {
 		txIndex int
 	}
-	touchChange struct {
+	touchAccount struct {
+		account accounts.Address
+	}
+	touchCode struct {
 		account accounts.Address
 	}
 
@@ -176,7 +179,7 @@ type (
 //type journalEntry2 interface {
 //	createObjectChange | resetObjectChange | selfdestructChange | balanceChange | balanceIncrease | balanceIncreaseTransfer |
 //		nonceChange | storageChange | fakeStorageChange | codeChange |
-//		refundChange | addLogChange | touchChange | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
+//		refundChange | addLogChange | touchAccount | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
 //}
 
 func (ch createObjectChange) revert(s *IntraBlockState) error {
@@ -249,11 +252,37 @@ func (ch selfdestructChange) dirtied() (accounts.Address, bool) {
 
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
-func (ch touchChange) revert(s *IntraBlockState) error {
+func (ch touchAccount) revert(s *IntraBlockState) error {
+	if reads, ok := s.versionedReads[ch.account]; ok {
+		if len(reads) == 1 {
+			if read, ok := reads[AccountKey{Path: AddressPath}]; ok {
+				if read.Val.(*accounts.Account).Empty() {
+					delete(s.versionedReads, ch.account)
+					delete(s.addressAccess, ch.account)
+				}
+			}
+		}
+	}
 	return nil
 }
 
-func (ch touchChange) dirtied() (accounts.Address, bool) { return ch.account, true }
+func (ch touchAccount) dirtied() (accounts.Address, bool) { return ch.account, true }
+
+func (ch touchCode) revert(s *IntraBlockState) error {
+	fmt.Println("REVERT CODE", ch.account)
+	s.versionedReads.Delete(ch.account, AccountKey{Path: CodePath})
+	if reads, ok := s.versionedReads[ch.account]; ok {
+		if len(reads) == 1 {
+			if _, ok := reads[AccountKey{Path: AddressPath}]; ok {
+				delete(s.versionedReads, ch.account)
+				delete(s.addressAccess, ch.account)
+			}
+		}
+	}
+	return nil
+}
+
+func (ch touchCode) dirtied() (accounts.Address, bool) { return accounts.NilAddress, false }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(ch.account)
@@ -376,7 +405,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val.(common.Hash), ch.prevhash)
+					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val.(accounts.CodeHash), ch.prevhash)
 				}
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
 					_, cs := printCode(v.Val.([]byte))
@@ -510,6 +539,7 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
+	fmt.Println("REVERT ACCESS LIST", ch.address)
 	s.accessList.DeleteAddress(ch.address)
 	return nil
 }

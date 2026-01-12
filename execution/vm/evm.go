@@ -256,6 +256,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
 		var codeHash accounts.CodeHash
+		fmt.Println("RESOLVE", addr)
 		codeHash, err = evm.intraBlockState.ResolveCodeHash(addr)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -293,6 +294,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if typ == STATICCALL {
 			readOnly = true
 		}
+		fmt.Println("RUN", addr)
 		ret, gas, err = evm.interpreter.Run(contract, gas, input, readOnly)
 	}
 	// When an error was returned by the EVM or when setting the creation code

@@ -20,6 +20,7 @@
 package state
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -152,6 +153,12 @@ func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool) {
 	// Otherwise return the entry's original value
 	value, _ = so.GetCommittedState(key)
 	return value, true
+}
+
+// GetCommittedState retrieves a value from the committed account storage trie.
+func (so *stateObject) GetOriginState(key accounts.StorageKey) (uint256.Int, bool) {
+	value, cached := so.originStorage[key]
+	return value, cached
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
@@ -369,11 +376,16 @@ func (so *stateObject) Code() ([]byte, error) {
 	return code, nil
 }
 
-func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommited bool) error {
+func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommited bool) (bool, error) {
 	prevcode, err := so.Code()
 	if err != nil {
-		return err
+		return false, err
 	}
+
+	if bytes.Equal(prevcode, code) {
+		return false, nil
+	}
+
 	so.db.journal.append(codeChange{
 		account:     so.address,
 		prevhash:    so.data.CodeHash,
@@ -384,7 +396,7 @@ func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommi
 		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
 	}
 	so.setCode(codeHash, code)
-	return nil
+	return true, nil
 }
 
 func (so *stateObject) setCode(codeHash accounts.CodeHash, code []byte) {
