@@ -105,6 +105,7 @@ type DomainLatestIterFile struct {
 
 	limit       int
 	largeVals   bool
+	filesOnly   bool // when true, iterate only over .kv files, ignoring MDBX
 	from, to    []byte
 	orderAscend order.By
 
@@ -134,46 +135,11 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	heap.Init(hi.h)
 	var key, value []byte
 
-	err := hi.roTx.Apply(context.Background(), func(tx kv.Tx) error {
-		if dc.d.LargeValues {
-			valsCursor, err := hi.roTx.Cursor(dc.d.ValuesTable) //nolint:gocritic
-			if err != nil {
-				return err
-			}
-			if key, value, err = valsCursor.Seek(hi.from); err != nil {
-				return err
-			}
-			if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
-				k := key[:len(key)-8]
-				stepBytes := key[len(key)-8:]
-				step := ^binary.BigEndian.Uint64(stepBytes)
-				endTxNum := step * dc.d.stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-
-				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
-			}
-		} else {
-			valsCursor, err := hi.roTx.CursorDupSort(dc.d.ValuesTable) //nolint:gocritic
-			if err != nil {
-				return err
-			}
-
-			if key, value, err = valsCursor.Seek(hi.from); err != nil {
-				return err
-			}
-			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
-				stepBytes := value[:8]
-				value = value[8:]
-				step := ^binary.BigEndian.Uint64(stepBytes)
-				endTxNum := step * dc.d.stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-
-				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
-			}
+	// Initialize DB cursors (skip if filesOnly mode)
+	if !hi.filesOnly {
+		if err := hi.initCursorMDBX(dc); err != nil {
+			return err
 		}
-		return nil
-	})
-
-	if err != nil {
-		return err
 	}
 
 	for i, item := range dc.files {
@@ -217,6 +183,49 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 		}
 	}
 	return hi.advanceInFiles()
+}
+
+// initCursorMDBX initializes DB cursors for iterating over MDBX values table.
+func (hi *DomainLatestIterFile) initCursorMDBX(dc *DomainRoTx) error {
+	return hi.roTx.Apply(context.Background(), func(tx kv.Tx) error {
+		if dc.d.LargeValues {
+			valsCursor, err := hi.roTx.Cursor(dc.d.ValuesTable) //nolint:gocritic
+			if err != nil {
+				return err
+			}
+			key, value, err := valsCursor.Seek(hi.from)
+			if err != nil {
+				return err
+			}
+			if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
+				k := key[:len(key)-8]
+				stepBytes := key[len(key)-8:]
+				step := ^binary.BigEndian.Uint64(stepBytes)
+				endTxNum := step * dc.d.stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
+			}
+		} else {
+			valsCursor, err := hi.roTx.CursorDupSort(dc.d.ValuesTable) //nolint:gocritic
+			if err != nil {
+				return err
+			}
+
+			key, value, err := valsCursor.Seek(hi.from)
+			if err != nil {
+				return err
+			}
+			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+				stepBytes := value[:8]
+				value = value[8:]
+				step := ^binary.BigEndian.Uint64(stepBytes)
+				endTxNum := step * dc.d.stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+			}
+		}
+		return nil
+	})
 }
 
 func (hi *DomainLatestIterFile) advanceInFiles() error {
