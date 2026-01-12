@@ -328,9 +328,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if sdc.warmupDB != nil {
 		// avoid races like this
 		db := sdc.warmupDB
+		stepSize := sdc.sharedDomains.StepSize()
+		txNum := sdc.sharedDomains.TxNum()
 		// Create factory for warmup TrieContexts with their own transactions
-		ctxFactory := sdc.trieContextFactory(ctx, db)
-
+		ctxFactory := sdc.trieContextFactory(ctx, db, stepSize, txNum)
 		warmupConfig = commitment.WarmupConfig{
 			Enabled:    true,
 			CtxFactory: ctxFactory,
@@ -339,9 +340,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			LogPrefix:  logPrefix,
 		}
 	} else if sdc.paraTrieDB != nil {
+		// avoid races like this
+		db := sdc.paraTrieDB
+		stepSize := sdc.sharedDomains.StepSize()
+		txNum := sdc.sharedDomains.TxNum()
 		// temporarily use WarmupConfig to easily pass CtxFactory to the para trie without too many changes (can improve in future PR)
 		warmupConfig = commitment.WarmupConfig{
-			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
+			CtxFactory: sdc.trieContextFactory(ctx, db, stepSize, txNum),
 		}
 	}
 
@@ -360,7 +365,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB) commitment.TrieContextFactory {
+func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, stepSize uint64, txNum uint64) commitment.TrieContextFactory {
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
@@ -370,8 +375,8 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
-			stepSize: sdc.sharedDomains.StepSize(),
-			txNum:    sdc.sharedDomains.TxNum(),
+			stepSize: stepSize,
+			txNum:    txNum,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
