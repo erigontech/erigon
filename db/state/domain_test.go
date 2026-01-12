@@ -1127,9 +1127,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	l := []byte("asd9s9af0afa9sfh9afha")
 
 	for i := 0; i < int(maxTx); i++ {
-		v1 := []byte(fmt.Sprintf("value1.%d", i))
-		v2 := []byte(fmt.Sprintf("value2.%d", i))
-		s := []byte(fmt.Sprintf("longstorage2.%d", i))
+		v1 := fmt.Appendf(nil, "value1.%d", i)
+		v2 := fmt.Appendf(nil, "value2.%d", i)
+		s := fmt.Appendf(nil, "longstorage2.%d", i)
 
 		err = writer.PutWithPrev([]byte("key1"), v1, uint64(i), preval1, 0)
 		require.NoError(t, err)
@@ -2028,7 +2028,7 @@ func TestDomain_Unwind(t *testing.T) {
 					diffSetMap[i] = writer.diff.GetDiffSet()
 					continue
 				}
-				v3 := []byte(fmt.Sprintf("value3.%d", i))
+				v3 := fmt.Appendf(nil, "value3.%d", i)
 				err = writer.PutWithPrev([]byte("key3"), v3, i, preval3, 0)
 				require.NoError(t, err)
 				preval3 = v3
@@ -2036,9 +2036,9 @@ func TestDomain_Unwind(t *testing.T) {
 				continue
 			}
 
-			v1 := []byte(fmt.Sprintf("value1.%d", i))
-			v2 := []byte(fmt.Sprintf("value2.%d", i))
-			nv3 := []byte(fmt.Sprintf("valuen3.%d", i))
+			v1 := fmt.Appendf(nil, "value1.%d", i)
+			v2 := fmt.Appendf(nil, "value2.%d", i)
+			nv3 := fmt.Appendf(nil, "valuen3.%d", i)
 
 			err = writer.PutWithPrev([]byte("key1"), v1, i, preval1, 0)
 			require.NoError(t, err)
@@ -2254,7 +2254,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		defer writer.Close()
 
 		for i := 0; uint64(i) < maxTx; i++ {
-			err = writer.PutWithPrev(pruningKey, []byte(fmt.Sprintf("value.%d", i)), uint64(i), nil, kv.Step(uint64(i-1)/d.stepSize))
+			err = writer.PutWithPrev(pruningKey, fmt.Appendf(nil, "value.%d", i), uint64(i), nil, kv.Step(uint64(i-1)/d.stepSize))
 			require.NoError(t, err)
 		}
 
