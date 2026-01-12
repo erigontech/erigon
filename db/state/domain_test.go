@@ -2705,3 +2705,158 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 	}
 	require.Len(t, keys2, expectedInRange, "Expected %d keys in range, got %d", expectedInRange, len(keys2))
 }
+
+// TestDomain_DebugRangeLatestFromFiles verifies that DebugRangeLatestFromFiles
+// only returns keys from .kv snapshot files, ignoring keys in MDBX database.
+func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	ctx := context.Background()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domainRoTx := d.BeginFilesRo()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	// Phase 1: Write keys 1-10 to be stored in files
+	fileKeyNums := make(map[uint64]bool)
+	txs := uint64(160) // enough txs to create files (10 steps of 16)
+	var prev [11][]byte
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		for keyNum := uint64(1); keyNum <= uint64(10); keyNum++ {
+			if txNum%keyNum == 0 {
+				var k [8]byte
+				var v [8]byte
+				binary.BigEndian.PutUint64(k[:], keyNum)
+				binary.BigEndian.PutUint64(v[:], txNum)
+				err = writer.PutWithPrev(k[:], v[:], txNum, prev[keyNum], 0)
+				prev[keyNum] = common.Copy(v[:])
+				fileKeyNums[keyNum] = true
+				require.NoError(t, err)
+			}
+		}
+		if txNum%10 == 0 {
+			err = writer.Flush(ctx, tx)
+			require.NoError(t, err)
+		}
+	}
+	err = writer.Flush(ctx, tx)
+	require.NoError(t, err)
+
+	// Collate and merge to create files
+	collateAndMerge(t, db, tx, d, txs)
+	require.NoError(t, tx.Commit())
+
+	// Phase 2: Write keys 11-20 directly to MDBX (will NOT be in files)
+	tx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domainRoTx.Close()
+	domainRoTx = d.BeginFilesRo()
+	defer domainRoTx.Close()
+	writer = domainRoTx.NewWriter()
+	defer writer.Close()
+
+	dbOnlyKeyNums := make(map[uint64]bool) //keys only in MDBX
+	dbTxNum := txs + 1
+	for keyNum := uint64(11); keyNum <= uint64(20); keyNum++ {
+		var k [8]byte
+		var v [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		binary.BigEndian.PutUint64(v[:], keyNum*100)
+		err = writer.PutWithPrev(k[:], v[:], dbTxNum, nil, 0)
+		dbOnlyKeyNums[keyNum] = true
+		require.NoError(t, err)
+		dbTxNum++
+	}
+	err = writer.Flush(ctx, tx)
+	require.NoError(t, err)
+	// skip collation - keep these keys only in MDBX
+
+	// Verify: DebugRangeLatest should return ALL keys (both from files and MDBX)
+	allIt, err := domainRoTx.DebugRangeLatest(tx, nil, nil, -1)
+	require.NoError(t, err)
+	allKeys, _, err := stream.ToArrayKV(allIt)
+	require.NoError(t, err)
+
+	// Check that all file keys are present in DebugRangeLatest
+	for keyNum := range fileKeyNums {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		found := false
+		for _, key := range allKeys {
+			if bytes.Equal(key, k[:]) {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "File key %d not found in DebugRangeLatest results", keyNum)
+	}
+
+	// Check that all MDBX-only keys are present in DebugRangeLatest
+	for keyNum := range dbOnlyKeyNums {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		found := false
+		for _, key := range allKeys {
+			if bytes.Equal(key, k[:]) {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "MDBX-only key %d not found in DebugRangeLatest results", keyNum)
+	}
+
+	// Verify: DebugRangeLatestFromFiles should return ONLY keys from files
+	filesOnlyIt, err := domainRoTx.DebugRangeLatestFromFiles(nil, nil, -1)
+	require.NoError(t, err)
+	filesOnlyKeys, _, err := stream.ToArrayKV(filesOnlyIt)
+	require.NoError(t, err)
+
+	// All returned keys should be file keys (1-10 range)
+	for _, key := range filesOnlyKeys {
+		keyNum := binary.BigEndian.Uint64(key)
+		_, isFileKey := fileKeyNums[keyNum]
+		require.True(t, isFileKey,
+			"DebugRangeLatestFromFiles returned key %d which is not a file key", keyNum)
+	}
+
+	// Verify NO MDBX-only keys (11-20 range) are present
+	for keyNum := range dbOnlyKeyNums {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		for _, key := range filesOnlyKeys {
+			require.False(t, bytes.Equal(key, k[:]),
+				"DebugRangeLatestFromFiles should NOT return MDBX-only key %d", keyNum)
+		}
+	}
+
+	// Verify all file keys are present in DebugRangeLatestFromFiles
+	// double for-loop is short enough here not to have any performance impact
+	for keyNum := range fileKeyNums {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		found := false
+		for _, key := range filesOnlyKeys {
+			if bytes.Equal(key, k[:]) {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "File key %d not found in DebugRangeLatestFromFiles results", keyNum)
+	}
+
+	// Verify keys are in ascending order
+	order.Asc.AssertList(filesOnlyKeys)
+}
