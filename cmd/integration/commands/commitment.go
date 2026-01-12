@@ -469,8 +469,12 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("failed to begin temporal tx: %w", err)
 	}
 	defer tx.Rollback()
-
-	commitmentReader := commitmentdb.NewLatestStateReader(tx)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create shared domains: %w", err)
+	}
+	defer sd.Close()
+	commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
 
