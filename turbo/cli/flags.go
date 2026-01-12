@@ -251,6 +251,9 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	log.Info("[Arbitrum] Using L2 RPC server to fetch blocks", "address", cfg.L2RPCAddr)
 
 	cfg.L2RPCReceiptAddr = ctx.String(L2RPCReceiptAddrFlag.Name)
+	if cfg.L2RPCReceiptAddr == "" {
+		cfg.L2RPCReceiptAddr = cfg.L2RPCAddr
+	}
 	log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPCReceiptAddr)
 
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
@@ -373,9 +376,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	} else {
 		cfg.L2RPCReceiptAddr = *f.String(L2RPCReceiptAddrFlag.Name, L2RPCReceiptAddrFlag.DefaultText, "")
 	}
-	if cfg.L2RPCReceiptAddr != "" {
-		log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPCReceiptAddr)
+	if cfg.L2RPCReceiptAddr == "" {
+		cfg.L2RPCReceiptAddr = cfg.L2RPCAddr
 	}
+	log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPCReceiptAddr)
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
