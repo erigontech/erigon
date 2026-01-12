@@ -1168,7 +1168,7 @@ func (as *AggregatorPruneStat) String() string {
 	for _, d := range names {
 		v, ok := as.Domains[d]
 		if ok && v != nil && !v.PrunedNothing() {
-			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
+			sb.WriteString(fmt.Sprintf("%s| %s %s; ", d, v.String(), v.Progress.String()))
 		}
 	}
 	names = names[:0]
