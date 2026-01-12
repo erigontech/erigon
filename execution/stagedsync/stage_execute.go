@@ -219,8 +219,6 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 
 var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
-const trace bool = true
-
 func unwindExec3State(ctx context.Context,
 	sd *execctx.SharedDomains, tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,

@@ -516,12 +516,10 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
 }
 
-// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
-func (sd *SharedDomains) SetWarmupDB(db kv.TemporalRoDB) {
-	sd.sdCtx.SetWarmupDB(db)
+func (sd *SharedDomains) SetParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.SetParaTrieDB(db)
 }
 
-// SetEnableWarmupCache enables/disables warmup cache during commitment processing.
 func (sd *SharedDomains) SetEnableWarmupCache(enable bool) {
 	sd.sdCtx.SetEnableWarmupCache(enable)
 }

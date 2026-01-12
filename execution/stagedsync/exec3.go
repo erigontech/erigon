@@ -245,7 +245,7 @@ func ExecV3(ctx context.Context,
 	var lastCommittedTxNum uint64
 	var lastCommittedBlockNum uint64
 
-	doms.SetWarmupDB(cfg.db)
+	doms.SetParaTrieDB(cfg.db)
 
 	// The warmup cache is only useful when executing from the previous state.
 	// if there was a recent reorg, the warmup cache would be polluted with
@@ -899,7 +899,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	// Use warmup to pre-fetch branch data in parallel before computing commitment
-	doms.SetWarmupDB(cfg.db)
+	doms.SetParaTrieDB(cfg.db)
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
