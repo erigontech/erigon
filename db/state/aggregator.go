@@ -1141,8 +1141,10 @@ func (as *AggregatorPruneStat) PrunedNothing() bool {
 			return false
 		}
 	}
+	println("domains ok")
 	for _, i := range as.Indices {
 		if i != nil && !i.PrunedNothing() {
+			println("indicies not ok", i.String(), i.Progress.String(), i.PrunedNothing())
 			return false
 		}
 	}
