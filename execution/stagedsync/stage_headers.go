@@ -239,11 +239,9 @@ func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *
 
 	var blockResult map[string]interface{}
 	if err := blockClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
-		//log.Error("[Arbitrum] L2 RPC block endpoint health check failed", "endpoint", blockRPCAddr, "block", blockNum, "err", err)
 		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockRPCAddr, blockNum, err)
 	}
 	if blockResult == nil {
-		//log.Error("[Arbitrum] L2 RPC block endpoint returned nil block", "endpoint", blockRPCAddr, "block", blockNum)
 		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockRPCAddr, blockNum)
 	}
 
