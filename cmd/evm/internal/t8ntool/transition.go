@@ -426,32 +426,17 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	commonTx.R.SetFromBig(txJson.R.ToInt())
 	commonTx.S.SetFromBig(txJson.S.ToInt())
 
-	//TODO: remove after https://github.com/erigontech/erigon/issues/17942
-	_, _, _, _, _, _, _, _ = commonTx.V, commonTx.R, commonTx.S, commonTx.Data, commonTx.Value, commonTx.To, commonTx.GasLimit, commonTx.Nonce
-
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		if txJson.Type == types.LegacyTxType {
 			return &types.LegacyTx{
-				CommonTx: types.CommonTx{
-					Nonce:    uint64(txJson.Nonce),
-					To:       txJson.To,
-					Value:    value,
-					GasLimit: uint64(txJson.Gas),
-					Data:     txJson.Input,
-				},
+				CommonTx: commonTx,
 				GasPrice: gasPrice,
 			}, nil
 		}
 
 		return &types.AccessListTx{
 			LegacyTx: types.LegacyTx{
-				CommonTx: types.CommonTx{
-					Nonce:    uint64(txJson.Nonce),
-					To:       txJson.To,
-					Value:    value,
-					GasLimit: uint64(txJson.Gas),
-					Data:     txJson.Input,
-				},
+				CommonTx: commonTx,
 				GasPrice: gasPrice,
 			},
 			ChainID:    chainId,
@@ -476,13 +461,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 
 		if txJson.Type == types.DynamicFeeTxType {
 			return &types.DynamicFeeTransaction{
-				CommonTx: types.CommonTx{
-					Nonce:    uint64(txJson.Nonce),
-					To:       txJson.To,
-					Value:    value,
-					GasLimit: uint64(txJson.Gas),
-					Data:     txJson.Input,
-				},
+				CommonTx: commonTx,
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
@@ -502,13 +481,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		return &types.SetCodeTransaction{
 			// it's ok to copy here - because it's constructor of object - no parallel access yet
 			DynamicFeeTransaction: types.DynamicFeeTransaction{
-				CommonTx: types.CommonTx{
-					Nonce:    uint64(txJson.Nonce),
-					To:       txJson.To,
-					Value:    value,
-					GasLimit: uint64(txJson.Gas),
-					Data:     txJson.Input,
-				},
+				CommonTx: commonTx,
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
@@ -690,16 +663,15 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 			h.Sha.Write(k[length.Addr+length.Incarnation:])
 			//nolint:errcheck
 			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorageDeprecated, newK, common.Copy(v)); err != nil {
+			if err = tx.Put(kv.HashedStorageDeprecated, newK, bytes.Clone(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccountsDeprecated, newK, common.Copy(v)); err != nil {
+			if err = tx.Put(kv.HashedAccountsDeprecated, newK, bytes.Clone(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}
 	}
-	c.Close()
 	root, err := domains.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
 		return nil, err
