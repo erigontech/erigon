@@ -231,6 +231,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 }
 
 func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *rpc.Client, blockNum uint64, blockRPCAddr, receiptRPCAddr string) error {
+	if blockClient == nil {
+		return nil
+	}
 
 	checkBlockNum := fmt.Sprintf("0x%x", blockNum)
 
@@ -256,6 +259,11 @@ func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *
 	}
 	if txHash == "" {
 		log.Warn("[Arbitrum] L2 RPC health check: could not extract tx hash from block, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	if receiptClient == nil {
+		log.Info("[Arbitrum] L2 RPC health check: receipt client not configured, skipping receipt check", "block", blockNum)
 		return nil
 	}
 
