@@ -25,9 +25,9 @@ import (
 	"io"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -56,12 +56,9 @@ type Withdrawal struct {
 
 func (obj *Withdrawal) EncodingSize() int {
 	encodingSize := 21 /* Address */
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Index)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Validator)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Amount)
+	encodingSize += rlp.U64Len(obj.Index)
+	encodingSize += rlp.U64Len(obj.Validator)
+	encodingSize += rlp.U64Len(obj.Amount)
 	return encodingSize
 }
 

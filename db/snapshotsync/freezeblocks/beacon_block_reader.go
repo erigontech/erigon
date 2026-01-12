@@ -24,21 +24,21 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 )
 
 var buffersPool = sync.Pool{
-	New: func() interface{} { return &bytes.Buffer{} },
+	New: func() any { return &bytes.Buffer{} },
 }
 
 var decompressorPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		r, err := zstd.NewReader(nil)
 		if err != nil {
 			panic(err)

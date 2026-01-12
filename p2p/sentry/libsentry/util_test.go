@@ -25,10 +25,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
@@ -66,13 +66,13 @@ func TestProtocols(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	direct := newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{0}), []string{"eth/67"})
-	direct.EXPECT().Protocol().Return(67)
+	direct := newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{0}), []string{"eth/68"})
+	direct.EXPECT().Protocol().Return(68)
 
 	p := libsentry.Protocols(direct)
 
 	require.Len(t, p, 1)
-	require.Equal(t, byte(67), p[0])
+	require.Equal(t, byte(68), p[0])
 
 	base := &sentryClient{
 		mock: newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{1}), []string{"eth/68"}),
@@ -88,8 +88,7 @@ func TestProtocols(t *testing.T) {
 
 	p = libsentry.Protocols(mux)
 
-	require.Len(t, p, 2)
-	require.Contains(t, p, byte(67))
+	require.Len(t, p, 1)
 	require.Contains(t, p, byte(68))
 }
 
@@ -99,12 +98,12 @@ func TestProtocolsByPeerId(t *testing.T) {
 
 	peerId := gointerfaces.ConvertHashToH512([64]byte{})
 
-	direct := newClient(ctrl, peerId, []string{"eth/67"})
+	direct := newClient(ctrl, peerId, []string{"eth/68"})
 
 	p := libsentry.PeerProtocols(direct, peerId)
 
 	require.Len(t, p, 1)
-	require.Equal(t, byte(67), p[0])
+	require.Equal(t, byte(68), p[0])
 
 	mux := libsentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct})
 	require.NotNil(t, mux)
@@ -112,5 +111,5 @@ func TestProtocolsByPeerId(t *testing.T) {
 	p = libsentry.PeerProtocols(mux, peerId)
 
 	require.Len(t, p, 1)
-	require.Equal(t, byte(67), p[0])
+	require.Equal(t, byte(68), p[0])
 }

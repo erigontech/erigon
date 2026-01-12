@@ -22,14 +22,14 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -139,8 +139,8 @@ func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(h.getSchema()...)
 }
 
-func (h *Eth1Header) getSchema() []interface{} {
-	s := []interface{}{
+func (h *Eth1Header) getSchema() []any {
+	s := []any{
 		h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
 		h.PrevRandao[:], &h.BlockNumber, &h.GasLimit, &h.GasUsed, &h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
 	}

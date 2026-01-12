@@ -24,8 +24,8 @@ import (
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/mem"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
 )
@@ -172,7 +172,7 @@ func ReadRAMInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return common.CopyBytes(bytes), nil
+	return common.Copy(bytes), nil
 }
 
 func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
@@ -181,7 +181,7 @@ func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return common.CopyBytes(bytes), nil
+	return common.Copy(bytes), nil
 }
 
 func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
@@ -190,7 +190,7 @@ func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return common.CopyBytes(bytes), nil
+	return common.Copy(bytes), nil
 }
 
 func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {

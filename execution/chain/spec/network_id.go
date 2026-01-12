@@ -18,7 +18,6 @@ package chainspec
 
 const (
 	MainnetChainID = 1
-	HoleskyChainID = 17000
 	SepoliaChainID = 11155111
 	HoodiChainID   = 560048
 	GnosisChainID  = 100

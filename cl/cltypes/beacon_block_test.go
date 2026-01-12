@@ -26,9 +26,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -119,8 +119,8 @@ func TestBeaconBlockJson(t *testing.T) {
 	block.Block.Body.Version = clparams.DenebVersion
 	err := json.Unmarshal(beaconBodyJSON, block)
 	require.NoError(t, err)
-	map1 := make(map[string]interface{})
-	map2 := make(map[string]interface{})
+	map1 := make(map[string]any)
+	map2 := make(map[string]any)
 	err = json.Unmarshal(beaconBodyJSON, &map1)
 	require.NoError(t, err)
 	out, err := json.Marshal(block)

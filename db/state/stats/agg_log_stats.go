@@ -5,9 +5,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 )
@@ -47,7 +47,7 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 	dbg.ReadMemStats(&m)
 	logger.Info("[snapshots:history] Stat",
 		"blocks", common.PrettyCounter(domainBlockNumProgress+1),
-		"txNum2blockNum", strings.Join(str, ","),
+		"step2blockNum", strings.Join(str, ","),
 		"txs", common.PrettyCounter(at.Agg().EndTxNumMinimax()),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))

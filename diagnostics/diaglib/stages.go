@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -317,7 +317,7 @@ func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return common.CopyBytes(bytes), nil
+	return common.Copy(bytes), nil
 }
 
 func StagesListUpdater(info []SyncStage) func(tx kv.RwTx) error {

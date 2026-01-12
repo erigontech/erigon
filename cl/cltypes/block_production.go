@@ -20,8 +20,8 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
 )
 
 // BlindOrExecutionBeaconBlock is a union type that can be either a BlindedBeaconBlock or a BeaconBlock, depending on the context.

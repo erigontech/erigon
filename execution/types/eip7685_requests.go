@@ -19,7 +19,7 @@ package types
 import (
 	"crypto/sha256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 const DepositRequestType byte = 0x00

@@ -33,7 +33,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/gorilla/websocket"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -285,7 +285,7 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 	return wc.info
 }
 
-func (wc *websocketCodec) WriteJSON(ctx context.Context, v interface{}) error {
+func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		// Notify pingLoop to delay the next idle ping.

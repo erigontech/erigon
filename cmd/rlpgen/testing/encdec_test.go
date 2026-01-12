@@ -10,7 +10,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -63,7 +63,7 @@ func (tr *TRand) RandBloom() types.Bloom {
 	return types.Bloom(tr.RandBytes(types.BloomByteLength))
 }
 
-func check(t *testing.T, f string, want, got interface{}) {
+func check(t *testing.T, f string, want, got any) {
 	if !reflect.DeepEqual(want, got) {
 		t.Errorf("%s mismatch: want %v, got %v", f, want, got)
 	}
@@ -244,8 +244,8 @@ func BenchmarkTestingStructRLP(b *testing.B) {
 	tr := NewTRand()
 	header := randTestingStruct(tr)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		header.EncodeRLP(&buf)
 	}

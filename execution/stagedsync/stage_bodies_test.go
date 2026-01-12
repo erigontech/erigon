@@ -24,20 +24,20 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 func testingHeaderBody(t *testing.T) (h *types.Header, b *types.RawBody) {
 	t.Helper()
 
-	txn := &types.DynamicFeeTransaction{TipCap: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, GasLimit: 1, Nonce: 1}}
+	txn := &types.DynamicFeeTransaction{TipCap: &u256.N1, FeeCap: &u256.N1, ChainID: &u256.N1, CommonTx: types.CommonTx{Value: &u256.N1, GasLimit: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err := txn.MarshalBinary(buf)
 	require.NoError(t, err)

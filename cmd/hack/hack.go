@@ -33,15 +33,12 @@ import (
 	"strings"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
-	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -49,17 +46,16 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/logging"
 
-	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
@@ -648,25 +644,6 @@ func scanTxs(chaindata string) error {
 	return nil
 }
 
-func devTx(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	cc := tool.ChainConfig(tx)
-	txn := types.NewTransaction(2, common.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
-	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), core.DevnetSignPrivateKey)
-	tool.Check(err)
-	buf := bytes.NewBuffer(nil)
-	err = signedTx.MarshalBinary(buf)
-	tool.Check(err)
-	fmt.Printf("%x\n", buf.Bytes())
-	return nil
-}
-
 func chainConfig(name string) error {
 	spec, err := chainspec.ChainSpecByName(name)
 	if err != nil {
@@ -790,8 +767,6 @@ func main() {
 
 	var err error
 	switch *action {
-	case "cfg":
-		flow.TestGenCfg()
 
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))
@@ -841,8 +816,6 @@ func main() {
 	case "scanTxs":
 		err = scanTxs(*chaindata)
 
-	case "devTx":
-		err = devTx(*chaindata)
 	case "chainConsfig":
 		err = chainConfig(*name)
 	case "iterate":

@@ -24,7 +24,7 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 type MilestoneId uint64

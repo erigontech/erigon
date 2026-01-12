@@ -36,10 +36,10 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -386,7 +386,6 @@ func TestTestVectorsV5(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			net := newHandshakeTest(tmpDir, logger)
 			defer net.close()
@@ -471,10 +470,9 @@ func BenchmarkV5_DecodeHandshakePingSecp256k1(b *testing.B) {
 		b.Fatal("can't encode handshake packet")
 	}
 	challenge.Node = nil // force ENR signature verification in decoder
-	b.ResetTimer()
 
 	input := make([]byte, len(enc))
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		copy(input, enc)
 		net.nodeB.c.sc.storeSentHandshake(idA, "", challenge)
 		_, _, _, err := net.nodeB.c.Decode(input, "")
@@ -503,10 +501,9 @@ func BenchmarkV5_DecodePing(b *testing.B) {
 	if err != nil {
 		b.Fatalf("can't encode: %v", err)
 	}
-	b.ResetTimer()
 
 	input := make([]byte, len(enc))
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		copy(input, enc)
 		_, _, packet, _ := net.nodeB.c.Decode(input, addrB)
 		if _, ok := packet.(*Ping); !ok {
@@ -624,7 +621,7 @@ func hexFile(file string) []byte {
 
 	// Gather hex data, ignore comments.
 	var text []byte //nolint:prealloc
-	for _, line := range bytes.Split(fileContent, []byte("\n")) {
+	for line := range bytes.SplitSeq(fileContent, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if len(line) > 0 && line[0] == '#' {
 			continue
@@ -652,7 +649,7 @@ func writeTestVector(file, comment string, data []byte) {
 	defer fd.Close()
 
 	if len(comment) > 0 {
-		for _, line := range strings.Split(strings.TrimSpace(comment), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(comment), "\n") {
 			fmt.Fprintf(fd, "# %s\n", line)
 		}
 		fmt.Fprintln(fd)

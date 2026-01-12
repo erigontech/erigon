@@ -27,11 +27,12 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 /*
@@ -125,6 +126,7 @@ type RoDB interface {
 
 	// CHandle pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
 	CHandle() unsafe.Pointer
+	Path() string
 }
 
 type RwDB interface {
@@ -390,7 +392,9 @@ type (
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step Step, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
+	StepsInFiles(entitySet ...Domain) Step
 }
+
 type TemporalTx interface {
 	Tx
 	TemporalGetter
@@ -432,6 +436,9 @@ type TemporalDebugTx interface {
 	GetLatestFromDB(domain Domain, k []byte) (v []byte, step Step, found bool, err error)
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
+	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
+	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
+
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
@@ -443,11 +450,15 @@ type TemporalDebugTx interface {
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
 	Dirs() datadir.Dirs
+	AllForkableIds() []ForkableId
+
+	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
+	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
 	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB
@@ -455,6 +466,23 @@ type TemporalDebugDB interface {
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+}
+
+type TemporalMemBatch interface {
+	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
+	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
+	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
+	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
+	Merge(other TemporalMemBatch) error
+	ClearRam()
+	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
+	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	SizeEstimate() uint64
+	Flush(ctx context.Context, tx RwTx) error
+	Close()
+	PutForkable(id ForkableId, num Num, v []byte) error
+	DiscardWrites(domain Domain)
+	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 }
 
 type WithFreezeInfo interface {
@@ -506,6 +534,7 @@ type TemporalRwDB interface {
 	RwDB
 	TemporalRoDB
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
+	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 }
 

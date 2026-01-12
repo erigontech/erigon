@@ -16,7 +16,7 @@
 
 package cltypes
 
-import "github.com/erigontech/erigon-lib/common"
+import "github.com/erigontech/erigon/common"
 
 // ValidatorRegistration is used as request payload for validator registration in builder client.
 type ValidatorRegistration struct {

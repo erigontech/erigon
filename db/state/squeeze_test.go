@@ -13,11 +13,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -26,7 +26,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -120,7 +122,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -136,7 +138,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -147,7 +149,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(tb, err)
 			require.NotEmpty(tb, rh)
 		}
@@ -174,13 +176,13 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	var blockNum uint64
 	// get latest commited root
-	latestRoot, err := domains.ComputeCommitment(context.Background(), false, blockNum, 0, "")
+	latestRoot, err := domains.ComputeCommitment(context.Background(), rwTx, false, blockNum, 0, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
@@ -198,7 +200,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = state.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
@@ -206,7 +208,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer acit.Close()
 
-	trieCtx := domains.TrieCtxForTests()
+	trieCtx := domains.GetCommitmentContext()
 	require.NoError(t, err)
 	for acit.HasNext() {
 		k, _, err := acit.Next()
@@ -215,17 +217,12 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	// check if the commitment is the same
-	root, err := domains.ComputeCommitment(context.Background(), false, blockNum, 0, "")
+	root, err := domains.ComputeCommitment(context.Background(), rwTx, false, blockNum, 0, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)
 	require.NotEqual(t, empty.RootHash.Bytes(), root)
 }
-
-// by that key stored latest root hash and tree state
-const keyCommitmentStateS = "state"
-
-var KeyCommitmentState = []byte(keyCommitmentStateS)
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
@@ -246,9 +243,9 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
-		rootInFiles, err = commitment.HexTrieExtractStateRoot(stateVal)
+		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
 
 		for _, f := range ac.Files(kv.CommitmentDomain) {
@@ -351,7 +348,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -383,7 +380,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     *uint256.NewInt(rnd.Uint64()),
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -397,7 +394,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
-	_, err = domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+	_, err = domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 
 	err = domains.Flush(context.Background(), tx)
@@ -425,7 +422,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	//anotherAgg.SetTx(rwTx)
 	startTx := anotherAgg.EndTxNumMinimax()
-	dom2, err := state.NewSharedDomains(rwTx, log.New())
+	dom2, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer dom2.Close()
 
@@ -457,7 +454,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := state.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	changesetAt5 := &changeset.StateChangeSet{}
@@ -484,7 +481,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -495,7 +492,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
@@ -510,7 +507,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = state.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	diffs := [kv.DomainLen][]kv.DomainEntryDiff{}
@@ -529,7 +526,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -542,7 +539,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
@@ -560,7 +557,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = state.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	for idx := range changesetAt3.Diffs {
@@ -576,7 +573,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -589,7 +586,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)

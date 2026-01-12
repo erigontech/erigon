@@ -22,11 +22,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 )
 
 const (
@@ -145,7 +145,7 @@ func (b *BeaconState) init() error {
 }
 
 func (b *BeaconState) MarshalJSON() ([]byte, error) {
-	obj := map[string]interface{}{
+	obj := map[string]any{
 		"genesis_time":                  strconv.FormatInt(int64(b.genesisTime), 10),
 		"genesis_validators_root":       b.genesisValidatorsRoot,
 		"slot":                          strconv.FormatInt(int64(b.slot), 10),

@@ -32,21 +32,22 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -121,8 +122,50 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	if !ok {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
+
+	bt.br = m.BlockReader
+	// import pre accounts & construct test genesis block & state root
+	if m.Genesis.Hash() != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+	}
+	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+	}
+
+	validBlocks, err := bt.insertBlocks(m)
+	if err != nil {
+		return err
+	}
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	cmlast := rawdb.ReadHeadBlockHash(tx)
+	if common.Hash(bt.json.BestBlock) != cmlast {
+		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
+	}
+	newDB := state.New(m.NewStateReader(tx))
+	if err := bt.validatePostState(newDB); err != nil {
+		return fmt.Errorf("post state validation failed: %w", err)
+	}
+
+	return bt.validateImportedHeaders(tx, validBlocks, m)
+}
+
+// RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
+func (bt *BlockTest) RunCLI() error {
+	config, ok := testforks.Forks[bt.json.Network]
+	if !ok {
+		return testforks.UnsupportedForkError{Name: bt.json.Network}
+	}
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
+	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine, false)
+	defer m.DB.Close()
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -203,7 +246,7 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		chain := &core.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
 
 		err1 := m.InsertChain(chain)
 		if err1 != nil {
@@ -316,15 +359,16 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
-		code2, err := statedb.GetCode(addr)
+		address := accounts.InternAddress(addr)
+		code2, err := statedb.GetCode(address)
 		if err != nil {
 			return err
 		}
-		balance2, err := statedb.GetBalance(addr)
+		balance2, err := statedb.GetBalance(address)
 		if err != nil {
 			return err
 		}
-		nonce2, err := statedb.GetNonce(addr)
+		nonce2, err := statedb.GetNonce(address)
 		if err != nil {
 			return err
 		}
@@ -335,14 +379,13 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 			return fmt.Errorf("account code mismatch for addr: %x want: %v have: %s", addr, acct.Code, hex.EncodeToString(code2))
 		}
 		if balance2.ToBig().Cmp(acct.Balance) != 0 {
-			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, balance2)
+			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, &balance2)
 		}
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
-			val2 := uint256.NewInt(0)
-			statedb.GetState(addr, loc, val2)
-			if !val1.Eq(val2) {
-				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
+			val2, _ := statedb.GetState(address, accounts.InternKey(loc))
+			if !val1.Eq(&val2) {
+				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, &val2)
 			}
 		}
 	}

@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const CheckpointHttpTimeout = 60 * time.Second
@@ -48,9 +48,6 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		}
 
 		req.Header.Set("Accept", "application/octet-stream")
-		if err != nil {
-			return nil, fmt.Errorf("checkpoint sync request failed %s", err)
-		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return nil, err

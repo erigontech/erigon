@@ -28,6 +28,15 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -352,10 +361,10 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	var (
 		hash      = header.Hash()
 		number    = header.Number.Uint64()
-		encoded   = hexutil.EncodeTs(number)
 		headerKey = dbutils.HeaderKey(number, hash)
 	)
-	if err := db.Put(kv.HeaderNumber, hash[:], encoded); err != nil {
+
+	if err := WriteHeaderNumber(db, hash, number); err != nil {
 		return fmt.Errorf("HeaderNumber mapping: %w", err)
 	}
 
@@ -376,7 +385,7 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, header
 	if skipIndexing {
 		return nil
 	}
-	if err := db.Put(kv.HeaderNumber, hash[:], hexutil.EncodeTs(number)); err != nil {
+	if err := WriteHeaderNumber(db, hash, number); err != nil {
 		return err
 	}
 	return nil
@@ -406,7 +415,7 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
-		log.Error("ReadBodyRLP failed", "err", err)
+		log.Error("ReadStorageBodyRLP failed", "err", err)
 	}
 	return bodyRlp
 }
@@ -469,35 +478,27 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	return txs, nil
 }
 
-// Write transactions to the database and use txnID as first identifier
-func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, txnID uint64) error {
-	txIdKey := make([]byte, 8)
-	buf := bytes.NewBuffer(nil)
-	for _, txn := range txs {
-		buf.Reset()
-		if err := rlp.Encode(buf, txn); err != nil {
+// Write transactions into DB and use txnID as first identifier
+func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, baseTxnID types.BaseTxnID) error {
+	rawTxs := make([][]byte, len(txs))
+	for i, txn := range txs {
+		raw, err := rlp.EncodeToBytes(txn)
+		if err != nil {
 			return fmt.Errorf("broken txn rlp: %w", err)
 		}
-
-		binary.BigEndian.PutUint64(txIdKey, txnID)
-		if err := rwTx.Append(kv.EthTx, txIdKey, buf.Bytes()); err != nil {
-			return err
-		}
-		txnID++
+		rawTxs[i] = raw
 	}
-	return nil
+	return WriteRawTransactions(rwTx, rawTxs, baseTxnID)
 }
 
-func WriteRawTransactions(rwTx kv.RwTx, txs [][]byte, txnID uint64) error {
-	stx := txnID
+// Write already encoded transactions into DB and use txnID as first identifier
+func WriteRawTransactions(rwTx kv.RwTx, txs [][]byte, baseTxnID types.BaseTxnID) error {
 	txIdKey := make([]byte, 8)
-	for _, txn := range txs {
-		binary.BigEndian.PutUint64(txIdKey, txnID)
-		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
+	for txi, txn := range txs {
+		binary.BigEndian.PutUint64(txIdKey, baseTxnID.At(txi))
 		if err := rwTx.Append(kv.EthTx, txIdKey, txn); err != nil {
-			return fmt.Errorf("txnID=%d, firstNonSysTxn=%d, %w", txnID, stx, err)
+			return fmt.Errorf("baseTxnID=%d: %w", baseTxnID, err)
 		}
-		txnID++
 	}
 	return nil
 }
@@ -592,6 +593,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
 	body.Withdrawals = bodyForStorage.Withdrawals
+	body.BlockAccessList = bodyForStorage.BlockAccessList
 
 	if bodyForStorage.TxCount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxCount))
@@ -632,15 +634,16 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		return false, err
 	}
 	data := types.BodyForStorage{
-		BaseTxnID:   types.BaseTxnID(baseTxnID),
-		TxCount:     types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
-		Uncles:      body.Uncles,
-		Withdrawals: body.Withdrawals,
+		BaseTxnID:       types.BaseTxnID(baseTxnID),
+		TxCount:         types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
+		Uncles:          body.Uncles,
+		Withdrawals:     body.Withdrawals,
+		BlockAccessList: body.BlockAccessList,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
-	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
+	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxnID); err != nil {
 		return false, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
 	return true, nil
@@ -649,20 +652,22 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (err error) {
 	// Pre-processing
 	body.SendersFromTxs()
+
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return err
 	}
 	data := types.BodyForStorage{
-		BaseTxnID:   types.BaseTxnID(baseTxnID),
-		TxCount:     types.TxCountToTxAmount(len(body.Transactions)),
-		Uncles:      body.Uncles,
-		Withdrawals: body.Withdrawals,
+		BaseTxnID:       types.BaseTxnID(baseTxnID),
+		TxCount:         types.TxCountToTxAmount(len(body.Transactions)),
+		Uncles:          body.Uncles,
+		Withdrawals:     body.Withdrawals,
+		BlockAccessList: body.BlockAccessList,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	if err = WriteTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
+	if err = WriteTransactions(db, body.Transactions, data.BaseTxnID); err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
 	return nil
@@ -784,7 +789,8 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
+	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.BlockAccessList)
+	return block
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -977,7 +983,7 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 
 func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 	if err := tx.ForEach(kv.PendingEpoch, hexutil.EncodeTs(number), func(k, v []byte) error {
-		return tx.Delete(kv.Epoch, k)
+		return tx.Delete(kv.PendingEpoch, k)
 	}); err != nil {
 		return err
 	}
@@ -1087,7 +1093,7 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 	}
 	defer c.Close()
 
-	logEvery := time.NewTimer(30 * time.Second)
+	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	i := 0
@@ -1225,6 +1231,30 @@ type RCacheV2Query struct {
 	DontCalcBloom bool // avoid calculating bloom (can be bottleneck)
 }
 
+// doesn't do DeriveFieldsV4ForCachedReceipt
+func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.Duo[uint64, *types.Receipt], error) {
+	it, err := tx.Debug().TraceKey(kv.RCacheDomain, receiptCacheKey, fromTxNum, toTxNum)
+	if err != nil {
+		return nil, err
+	}
+
+	return stream.TransformDuoV(it, func(txNum uint64, v []byte) (uint64, *types.Receipt, error) {
+		if len(v) == 0 {
+			return txNum, nil, nil
+		}
+
+		//fmt.Println("stream", "txnum", txNum, "v", len(v))
+
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return txNum, nil, fmt.Errorf("%w, of txNum %d, len(v)=%d", err, txNum, len(v))
+		}
+		res := (*types.Receipt)(receipt)
+		//res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
+		return txNum, res, nil
+	}), nil
+}
+
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
@@ -1318,6 +1348,7 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil, 0); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
+
 	return nil
 }
 

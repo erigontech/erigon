@@ -29,9 +29,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/race"
+	"github.com/erigontech/erigon/cmd/utils/cmdtest"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/internal/reexec"
-	"github.com/erigontech/erigon/turbo/cmdtest"
 )
 
 func TestMain(m *testing.M) {
@@ -329,7 +329,7 @@ func checkExpectedOutput(t *testing.T, output []byte, expectationFilePath string
 
 // cmpJson compares the JSON in two byte slices.
 func cmpJson(a, b []byte) (bool, error) {
-	var j, j2 interface{}
+	var j, j2 any
 	if err := json.Unmarshal(a, &j); err != nil {
 		return false, err
 	}

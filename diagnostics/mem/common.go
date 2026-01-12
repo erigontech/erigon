@@ -25,10 +25,9 @@ import (
 
 	"github.com/shirou/gopsutil/v4/process"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var ErrorUnsupportedPlatform = errors.New("unsupported platform")
@@ -38,11 +37,11 @@ type VirtualMemStat struct {
 }
 
 // Fields converts VirtualMemStat to slice
-func (m VirtualMemStat) Fields() []interface{} {
-	typ := reflect.TypeOf(m.MemoryMapsStat)
+func (m VirtualMemStat) Fields() []any {
+	typ := reflect.TypeFor[process.MemoryMapsStat]()
 	val := reflect.ValueOf(m.MemoryMapsStat)
 
-	var s []interface{}
+	var s []any
 	for i := 0; i < typ.NumField(); i++ {
 		t := typ.Field(i).Name
 		if t == "Path" { // always empty for aggregated smap statistics
@@ -84,13 +83,6 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 			v := VirtualMemStat{vm}
 			l := v.Fields()
 			l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
-			diaglib.Send(diaglib.MemoryStats{
-				Alloc:       m.Alloc,
-				Sys:         m.Sys,
-				OtherFields: v.Fields(),
-				Timestamp:   time.Now(),
-			})
 
 			logger.Info("[mem] memory stats", l...)
 			UpdatePrometheusVirtualMemStats(vm)

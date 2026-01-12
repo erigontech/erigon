@@ -25,8 +25,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
 )
@@ -240,9 +240,9 @@ func TestFilterLogsTopics(t *testing.T) {
 		if !reflect.DeepEqual(ares, v.want) {
 			t.Errorf("Fail %s, got %v want %v", name, ares, v.want)
 		}
-		old_res := testFLExtractAddress(v.input.FilterOld(map[common.Address]struct{}{}, v.filter))
-		if !reflect.DeepEqual(old_res, v.want) {
-			t.Errorf("Fail Old %s, got %v want %v", name, old_res, v.want)
+		oldRes := testFLExtractAddress(v.input.Filter(map[common.Address]struct{}{}, v.filter, 0))
+		if !reflect.DeepEqual(oldRes, v.want) {
+			t.Errorf("Fail Old %s, got %v want %v", name, oldRes, v.want)
 		}
 	}
 }

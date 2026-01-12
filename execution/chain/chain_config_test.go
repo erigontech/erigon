@@ -22,8 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 func TestConfigValueLookup(t *testing.T) {
@@ -82,6 +82,12 @@ func TestConfigValueLookup(t *testing.T) {
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 41874000-1))
 	assert.Equal(t, address2, ConfigValueLookup(burntContract, 41874000))
 	assert.Equal(t, address2, ConfigValueLookup(burntContract, 41874000+1))
+}
+
+func TestEmptyConfigValueLookup(t *testing.T) {
+	blobSchedule := make(map[uint64]*params.BlobConfig)
+	assert.Nil(t, ConfigValueLookup(blobSchedule, 0))
+	assert.Nil(t, ConfigValueLookup(blobSchedule, 1))
 }
 
 func TestNilBlobSchedule(t *testing.T) {

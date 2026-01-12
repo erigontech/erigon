@@ -28,10 +28,10 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -178,7 +178,7 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 
 	acc := accounts.Account{}
 	_ = accounts.DeserialiseV3(&acc, input)
-	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
+	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Value())
 }
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
@@ -308,8 +308,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.FileVersion.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -334,8 +334,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.FileVersion.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -360,8 +360,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.FileVersion.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -382,8 +382,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].FileVersion.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.FileVersion.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -395,11 +395,12 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 
 func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
+	ver := version.V1_0_standart
 	domainR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorBTree | statecfg.AccessorExistence
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
-			BtIndex().Existence().
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).
 			Build()
 		return name, schema
 	})
@@ -409,8 +410,8 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	domainHR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone).
-			Accessor(dirs.SnapAccessors).
+			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone, ver).
+			Accessor(dirs.SnapAccessors, ver).
 			Build()
 		return name, schema
 	})
@@ -420,8 +421,8 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone).
-			Accessor(dirs.SnapAccessors).
+			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone, ver).
+			Accessor(dirs.SnapAccessors, ver).
 			Build()
 		return name, schema
 	})
@@ -446,12 +447,13 @@ func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange
 
 func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
+	ver := version.V1_0_standart
 	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorHashMap
 		name = "commitment"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
-			Accessor(dirs.SnapDomain).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			Accessor(dirs.SnapDomain, ver).
 			Build()
 		return name, schema
 	})

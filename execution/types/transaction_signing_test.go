@@ -26,8 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 func TestEIP1559Signing(t *testing.T) {
@@ -46,7 +46,7 @@ func TestEIP1559Signing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if from != addr {
+	if from.Value() != addr {
 		t.Errorf("exected from and address to be equal. Got %x want %x", from, addr)
 	}
 }
@@ -66,7 +66,7 @@ func TestEIP155Signing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if from != addr {
+	if from.Value() != addr {
 		t.Errorf("exected from and address to be equal. Got %x want %x", from, addr)
 	}
 }
@@ -136,7 +136,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 		}
 
 		addr := common.HexToAddress(test.addr)
-		if from != addr {
+		if from.Value() != addr {
 			t.Errorf("%d: expected %x got %x", i, addr, from)
 		}
 

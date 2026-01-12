@@ -22,8 +22,8 @@ import (
 	"fmt"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -77,7 +77,7 @@ func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query e
 }
 
 // ParseResponse converts any of the models interfaces to a string for readability
-func parseResponse(resp interface{}) (string, error) {
+func parseResponse(resp any) (string, error) {
 	result, err := json.Marshal(resp)
 	if err != nil {
 		return "", fmt.Errorf("error trying to marshal response: %v", err)

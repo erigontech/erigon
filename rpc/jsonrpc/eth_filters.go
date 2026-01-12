@@ -18,14 +18,14 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -100,6 +100,15 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	stub := make([]any, 0)
 	// remove 0x
 	cutIndex := strings.TrimPrefix(index, "0x")
+	// Validate the id exists for any subscription type first to distinguish "never created" from "no changes yet".
+	exists := api.filters.HasHeadsSubscription(rpchelper.HeadsSubID(cutIndex)) ||
+		api.filters.HasPendingTxsSubscription(rpchelper.PendingTxsSubID(cutIndex)) ||
+		api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex))
+	if !exists {
+		return nil, rpc.ErrFilterNotFound
+	}
+
+	// Identify the subscription type by probing each store; if none have data yet, return empty slice
 	if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
 		for _, v := range blocks {
 			stub = append(stub, v.Hash())
@@ -121,7 +130,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		}
 		return stub, nil
 	}
-	return nil, errors.New("filter not found")
+	return []any{}, nil
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
@@ -132,10 +141,13 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
+	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+		return nil, rpc.ErrFilterNotFound
+	}
 	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
 		return logs, nil
 	}
-	return nil, errors.New("filter not found")
+	return []*types.Log{}, nil
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
@@ -292,6 +304,46 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 				}
 				if !ok {
 					log.Warn("[rpc] log channel was closed")
+					return
+				}
+			case <-rpcSub.Err():
+				return
+			}
+		}
+	}()
+
+	return rpcSub, nil
+}
+
+// TransactionReceipts send a notification each time a new receipt appears.
+func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	rpcSub := notifier.CreateSubscription()
+
+	go func() {
+		defer dbg.LogPanic()
+		receipts, id := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
+		defer api.filters.UnsubscribeReceipts(id)
+
+		for {
+			select {
+			case protoReceipt, ok := <-receipts:
+				if protoReceipt != nil {
+					receipt := ethutils.MarshalSubscribeReceipt(protoReceipt)
+					err := notifier.Notify(rpcSub.ID, []map[string]any{receipt})
+					if err != nil {
+						log.Warn("[rpc] error while notifying subscription", "err", err)
+					}
+				}
+				if !ok {
+					log.Warn("[rpc] receipts channel was closed")
 					return
 				}
 			case <-rpcSub.Err():

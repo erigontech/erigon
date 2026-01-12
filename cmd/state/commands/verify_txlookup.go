@@ -17,9 +17,10 @@
 package commands
 
 import (
-	"github.com/erigontech/erigon/cmd/state/verify"
-	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/spf13/cobra"
+
+	"github.com/erigontech/erigon/cmd/state/verify"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 func init() {

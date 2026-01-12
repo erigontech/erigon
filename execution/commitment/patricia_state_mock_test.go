@@ -31,8 +31,8 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // In memory commitment and state to use with the tests
@@ -433,7 +433,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 				if storage, ok2 := sm[string(key2)]; ok2 {
 					u.Flags |= StorageUpdate
 					u.Storage = common.Hash{}
-					u.StorageLen = len(storage)
+					u.StorageLen = int8(len(storage))
 					copy(u.Storage[:], storage)
 				}
 			}

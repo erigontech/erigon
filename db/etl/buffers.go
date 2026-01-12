@@ -26,9 +26,9 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/common/dbg"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 const (
@@ -49,13 +49,13 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
 	},
 })
 var etlLargeBufRAM = BufferOptimalSize
 var LargeSortableBuffers = NewAllocator(&sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
 	},
 })
@@ -242,6 +242,10 @@ func (b *appendSortableBuffer) Len() int {
 	return len(b.entries)
 }
 func (b *appendSortableBuffer) Sort() {
+	b.sortedBuf = b.sortedBuf[:0]
+	if cap(b.sortedBuf) < len(b.entries) {
+		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
+	}
 	for key, val := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(key), value: val})
 	}
@@ -268,7 +272,7 @@ func (b *appendSortableBuffer) Reset() {
 }
 func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
+	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
 	return b
 }
 
@@ -340,6 +344,10 @@ func (b *oldestEntrySortableBuffer) Len() int {
 }
 
 func (b *oldestEntrySortableBuffer) Sort() {
+	b.sortedBuf = b.sortedBuf[:0]
+	if cap(b.sortedBuf) < len(b.entries) {
+		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
+	}
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
@@ -366,7 +374,7 @@ func (b *oldestEntrySortableBuffer) Reset() {
 }
 func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
+	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
 	return b
 }
 

@@ -27,14 +27,16 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // CallArgs represents the arguments for a call.
@@ -58,16 +60,16 @@ type CallArgs struct {
 	SkipL1Charging *bool `json:"skipL1Charging"` // Arbitrum
 }
 
-func (args *CallArgs) FromOrEmpty() common.Address {
+func (args *CallArgs) FromOrEmpty() accounts.Address {
 	return args.from()
 }
 
 // from retrieves the transaction sender address.
-func (args *CallArgs) from() common.Address {
+func (args *CallArgs) from() accounts.Address {
 	if args.From == nil {
-		return common.Address{}
+		return accounts.ZeroAddress
 	}
-	return *args.From
+	return accounts.InternAddress(*args.From)
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -137,7 +139,8 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
 			gasPrice = new(uint256.Int)
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				gasPrice = math.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
+				min := u256.Min(*new(uint256.Int).Add(gasTipCap, baseFee), *gasFeeCap)
+				gasPrice = &min
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -166,12 +169,13 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-	var nonce uint64
-	if args.Nonce != nil {
-		nonce = args.Nonce.Uint64()
+
+	var to = accounts.NilAddress
+	if args.To != nil {
+		to = accounts.InternAddress(*args.To)
 	}
 
-	msg := types.NewMessage(addr, args.To, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
+	msg := types.NewMessage(addr, to, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
@@ -206,6 +210,59 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 
 	var tx types.Transaction
 	switch {
+	case args.AuthorizationList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		authorizations := make([]types.Authorization, 0)
+		if args.AuthorizationList != nil {
+			authorizations = make([]types.Authorization, len(args.AuthorizationList))
+			for i, auth := range args.AuthorizationList {
+				authorizations[i], err = auth.ToAuthorization()
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		tx = &types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     msg.FeeCap(),
+				TipCap:     msg.TipCap(),
+				AccessList: al,
+			},
+			Authorizations: authorizations,
+		}
+	case args.BlobVersionedHashes != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     msg.FeeCap(),
+				TipCap:     msg.TipCap(),
+				AccessList: al,
+			},
+			MaxFeePerBlobGas:    uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt()),
+			BlobVersionedHashes: args.BlobVersionedHashes,
+		}
 	case args.MaxFeePerGas != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -282,11 +339,12 @@ var InterceptRPCGasCap = func(gascap *uint64, msg *types.Message, header *types.
 // if statDiff is set, all diff will be applied first and then execute the call
 // message.
 type Account struct {
-	Nonce     *hexutil.Uint64              `json:"nonce"`
-	Code      *hexutil.Bytes               `json:"code"`
-	Balance   **hexutil.Big                `json:"balance"`
-	State     *map[common.Hash]common.Hash `json:"state"`
-	StateDiff *map[common.Hash]common.Hash `json:"stateDiff"`
+	Nonce            *hexutil.Uint64              `json:"nonce"`
+	Code             *hexutil.Bytes               `json:"code"`
+	Balance          **hexutil.Big                `json:"balance"`
+	State            *map[common.Hash]common.Hash `json:"state"`
+	StateDiff        *map[common.Hash]common.Hash `json:"stateDiff"`
+	MovePrecompileTo *common.Address              `json:"movePrecompileToAddress"`
 }
 
 func NewRevertError(result *evmtypes.ExecutionResult) *RevertError {
@@ -315,7 +373,7 @@ func (e *RevertError) ErrorCode() int {
 }
 
 // ErrorData returns the hex encoded revert reason.
-func (e *RevertError) ErrorData() interface{} {
+func (e *RevertError) ErrorData() any {
 	return e.reason
 }
 
@@ -381,8 +439,8 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 }
 
 // RPCMarshalHeader converts the given header to the RPC output .
-func RPCMarshalHeader(head *types.Header) map[string]interface{} {
-	result := map[string]interface{}{
+func RPCMarshalHeader(head *types.Header) map[string]any {
+	result := map[string]any{
 		"number":           (*hexutil.Big)(head.Number),
 		"hash":             head.Hash(),
 		"parentHash":       head.ParentHash,
@@ -432,28 +490,28 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
-func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool, isArbitrumNitro bool) (map[string]interface{}, error) {
+func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool, isArbitrumNitro bool) (map[string]any, error) {
 	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, common.Hash{}, isArbitrumNitro)
 }
 
-func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, isArbitrumNitro bool) (map[string]interface{}, error) {
+func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, isArbitrumNitro bool) (map[string]any, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
-		fields["transactions"] = make([]interface{}, 0)
+		fields["transactions"] = make([]any, 0)
 	}
 
 	if inclTx {
-		formatTx := func(tx types.Transaction, index int) (interface{}, error) {
+		formatTx := func(tx types.Transaction, index int) (any, error) {
 			return tx.Hash(), nil
 		}
 		if fullTx {
-			formatTx = func(tx types.Transaction, index int) (interface{}, error) {
+			formatTx = func(tx types.Transaction, index int) (any, error) {
 				return newRPCTransactionFromBlockAndTxGivenIndex(block, tx, uint64(index)), nil
 			}
 		}
 		txs := block.Transactions()
-		transactions := make([]interface{}, len(txs), len(txs)+1)
+		transactions := make([]any, len(txs), len(txs)+1)
 		var err error
 		for i, txn := range txs {
 			if transactions[i], err = formatTx(txn, i); err != nil {
@@ -573,45 +631,30 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 	} else {
 		chainId.Set(txn.GetChainID())
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
-	}
-	// Ethereum transaction types
-	switch txn.Type() {
-	case types.AccessListTxType:
 		result.YParity = (*hexutil.Big)(v.ToBig())
 		acl := txn.GetAccessList()
 		result.Accesses = &acl
-		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
-	case types.DynamicFeeTxType:
-		result.YParity = (*hexutil.Big)(v.ToBig())
-		acl := txn.GetAccessList()
-		result.Accesses = &acl
-		result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
-		result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
-		result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
-	case types.BlobTxType:
-		result.YParity = (*hexutil.Big)(v.ToBig())
-		acl := txn.GetAccessList()
-		result.Accesses = &acl
-		result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
-		result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
-		result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
-		txn.GetBlobGas()
-		blobTx := txn.(*types.BlobTx)
-		result.MaxFeePerBlobGas = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
-		result.BlobVersionedHashes = blobTx.BlobVersionedHashes
-	case types.SetCodeTxType:
-		result.YParity = (*hexutil.Big)(v.ToBig())
-		acl := txn.GetAccessList()
-		result.Accesses = &acl
-		result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
-		result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
-		result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
-		setCodeTx := txn.(*types.SetCodeTransaction)
-		ats := make([]types.JsonAuthorization, len(setCodeTx.GetAuthorizations()))
-		for i, a := range setCodeTx.GetAuthorizations() {
-			ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
+
+		if txn.Type() == types.AccessListTxType {
+			result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
+		} else {
+			result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
+			result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
+			result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
 		}
-		result.Authorizations = &ats
+
+		if txn.Type() == types.BlobTxType {
+			blobTx := txn.(*types.BlobTx)
+			result.MaxFeePerBlobGas = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
+			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
+		} else if txn.Type() == types.SetCodeTxType {
+			setCodeTx := txn.(*types.SetCodeTransaction)
+			ats := make([]types.JsonAuthorization, len(setCodeTx.GetAuthorizations()))
+			for i, a := range setCodeTx.GetAuthorizations() {
+				ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
+			}
+			result.Authorizations = &ats
+		}
 	}
 
 	// Arbitrum transaction types
@@ -665,7 +708,7 @@ func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *big.
 	fee, overflow := uint256.FromBig(baseFee)
 	if fee != nil && !overflow && blockHash != (common.Hash{}) {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := math.U256Min(new(uint256.Int).Add(txn.GetTipCap(), fee), txn.GetFeeCap())
+		price := u256.Min(u256.Add(*txn.GetTipCap(), *fee), *txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())
 	}
 	return nil
@@ -793,53 +836,3 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 	}
 	return tx
 }
-
-// // DoEstimateGas returns the lowest possible gas limit that allows the transaction to run
-// // successfully at block `blockNrOrHash`. It returns error if the transaction would revert, or if
-// // there are unexpected failures. The gas limit is capped by both `args.Gas` (if non-nil &
-// // non-zero) and `gasCap` (if non-zero).
-// func DoEstimateGas(ctx context.Context, b Backend, args SendTxArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverrides, gasCap uint64) (hexutil.Uint64, error) {
-// 	// Retrieve the base state and mutate it with any overrides
-// 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-// 	if state == nil || err != nil {
-// 		return 0, err
-// 	}
-// 	if err = overrides.Apply(state); err != nil {
-// 		return 0, err
-// 	}
-// 	header = updateHeaderForPendingBlocks(blockNrOrHash, header)
-
-// 	// Construct the gas estimator option from the user input
-// 	opts := &gasestimator.Options{
-// 		Config:           b.ChainConfig(),
-// 		Chain:            NewChainContext(ctx, b),
-// 		Header:           header,
-// 		State:            state,
-// 		Backend:          b,
-// 		ErrorRatio:       gasestimator.EstimateGasErrorRatio,
-// 		RunScheduledTxes: runScheduledTxes,
-// 	}
-// 	// Run the gas estimation andwrap any revertals into a custom return
-// 	// Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
-// 	call, err := args.ToMessage(gasCap, header, state, types.MessageGasEstimationMode)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-
-// 	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
-// 	{
-// 		gasCap, err = args.L2OnlyGasCap(gasCap, header, state, types.MessageGasEstimationMode)
-// 		if err != nil {
-// 			return 0, err
-// 		}
-// 	}
-
-// 	estimate, revert, err := gasestimator.Estimate(ctx, call, opts, gasCap)
-// 	if err != nil {
-// 		if len(revert) > 0 {
-// 			return 0, newRevertError(revert)
-// 		}
-// 		return 0, err
-// 	}
-// 	return hexutil.Uint64(estimate), nil
-// }

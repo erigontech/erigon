@@ -21,8 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -69,9 +69,9 @@ type CallResult struct {
 }
 
 type TraceCallStateDiff struct {
-	Balance interface{}                                          `json:"balance"`
-	Nonce   interface{}                                          `json:"nonce"`
-	Code    interface{}                                          `json:"code"`
+	Balance any                                                  `json:"balance"`
+	Nonce   any                                                  `json:"nonce"`
+	Code    any                                                  `json:"code"`
 	Storage map[common.Hash]map[string]TraceCallStateDiffStorage `json:"storage"`
 }
 

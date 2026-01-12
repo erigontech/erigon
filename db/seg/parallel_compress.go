@@ -31,10 +31,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/seg/patricia"
 	"github.com/erigontech/erigon/db/seg/sais"
@@ -223,11 +223,11 @@ func (cq *CompressionQueue) Swap(i, j int) {
 	(*cq)[i], (*cq)[j] = (*cq)[j], (*cq)[i]
 }
 
-func (cq *CompressionQueue) Push(x interface{}) {
+func (cq *CompressionQueue) Push(x any) {
 	*cq = append(*cq, x.(*CompressionWord))
 }
 
-func (cq *CompressionQueue) Pop() interface{} {
+func (cq *CompressionQueue) Pop() any {
 	old := *cq
 	n := len(old)
 	x := old[n-1]
@@ -471,7 +471,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		}
 	}
 	slices.SortFunc(patternList, patternListCmp)
-	logCtx := make([]interface{}, 0, 8)
+	logCtx := make([]any, 0, 8)
 	logCtx = append(logCtx, "patternList.Len", patternList.Len())
 
 	i := 0
@@ -950,7 +950,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	t := time.Now()
 	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.LargeSortableBuffers, logger)
 	defer dictCollector.Close()
-	dictCollector.SortAndFlushInBackground(true)
+	dictCollector.SortAndFlushInBackground(false)
 	dictCollector.LogLvl(lvl)
 
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}

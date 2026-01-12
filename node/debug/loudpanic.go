@@ -1,0 +1,42 @@
+// Copyright 2016 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+<<<<<<<< HEAD:polygon/bridge/client.go
+package bridge
+
+import (
+	"context"
+	"time"
+)
+
+//go:generate mockgen -typed=true -destination=./client_mock.go -package=bridge . Client
+type Client interface {
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
+	Close()
+========
+package debug
+
+import "runtime/debug"
+
+// LoudPanic panics in a way that gets all goroutine stacks printed on stderr.
+func LoudPanic(x any) {
+	debug.SetTraceback("all")
+	panic(x)
+>>>>>>>> main:node/debug/loudpanic.go
+}

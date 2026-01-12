@@ -21,9 +21,9 @@ import (
 	"encoding/binary"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
@@ -64,10 +64,7 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	if executionAt, err = s.ExecutionAt(tx); err != nil {
 		return err
 	}
-	if s.BlockNumber > executionAt { // Erigon will self-heal (download missed blocks) eventually
-		return nil
-	}
-	if executionAt <= s.BlockNumber {
+	if s.BlockNumber >= executionAt { // Erigon will self-heal (download missed blocks) eventually
 		return nil
 	}
 
@@ -161,7 +158,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 		}
 		headerRLP := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)
 		if headerRLP != nil {
-			headersRlp = append(headersRlp, common.CopyBytes(headerRLP))
+			headersRlp = append(headersRlp, common.Copy(headerRLP))
 		}
 		return common.Stopped(ctx.Done())
 	}); err != nil {

@@ -27,8 +27,8 @@ import (
 	"io/fs"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
@@ -38,7 +38,6 @@ func init() {
 	RegisterChainSpec(networkname.Mainnet, Mainnet)
 	RegisterChainSpec(networkname.Sepolia, Sepolia)
 	RegisterChainSpec(networkname.Hoodi, Hoodi)
-	RegisterChainSpec(networkname.Holesky, Holesky)
 	RegisterChainSpec(networkname.Gnosis, Gnosis)
 	RegisterChainSpec(networkname.Chiado, Chiado)
 	RegisterChainSpec(networkname.Test, Test)
@@ -218,7 +217,6 @@ var (
 
 var chainNamesPoS = []string{
 	networkname.Mainnet,
-	networkname.Holesky,
 	networkname.Sepolia,
 	networkname.Hoodi,
 	networkname.Gnosis,

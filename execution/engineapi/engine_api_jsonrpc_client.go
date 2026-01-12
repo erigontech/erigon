@@ -25,10 +25,10 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/jwt"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/jwt"
+	"github.com/erigontech/erigon/common/log/v3"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -165,6 +165,31 @@ func (c *JsonRpcClient) NewPayloadV4(
 	}, c.backOff(ctx))
 }
 
+func (c *JsonRpcClient) NewPayloadV5(
+	ctx context.Context,
+	executionPayload *enginetypes.ExecutionPayload,
+	expectedBlobHashes []common.Hash,
+	parentBeaconBlockRoot *common.Hash,
+	executionRequests []hexutil.Bytes,
+) (*enginetypes.PayloadStatus, error) {
+	return backoff.RetryWithData(func() (*enginetypes.PayloadStatus, error) {
+		var result enginetypes.PayloadStatus
+		err := c.rpcClient.CallContext(
+			ctx,
+			&result,
+			"engine_newPayloadV5",
+			executionPayload,
+			expectedBlobHashes,
+			parentBeaconBlockRoot,
+			executionRequests,
+		)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return &result, nil
+	}, c.backOff(ctx))
+}
+
 func (c *JsonRpcClient) ForkchoiceUpdatedV1(
 	ctx context.Context,
 	forkChoiceState *enginetypes.ForkChoiceState,
@@ -247,6 +272,28 @@ func (c *JsonRpcClient) GetPayloadV4(ctx context.Context, payloadID hexutil.Byte
 	return backoff.RetryWithData(func() (*enginetypes.GetPayloadResponse, error) {
 		var result enginetypes.GetPayloadResponse
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV4", payloadID)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return &result, nil
+	}, c.backOff(ctx))
+}
+
+func (c *JsonRpcClient) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
+	return backoff.RetryWithData(func() (*enginetypes.GetPayloadResponse, error) {
+		var result enginetypes.GetPayloadResponse
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV5", payloadID)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return &result, nil
+	}, c.backOff(ctx))
+}
+
+func (c *JsonRpcClient) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
+	return backoff.RetryWithData(func() (*enginetypes.GetPayloadResponse, error) {
+		var result enginetypes.GetPayloadResponse
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV6", payloadID)
 		if err != nil {
 			return nil, c.maybeMakePermanent(err)
 		}

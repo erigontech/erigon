@@ -14,7 +14,7 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon/common"
 	p2p "github.com/erigontech/erigon/execution/p2p"
 	types "github.com/erigontech/erigon/execution/types"
 	gomock "go.uber.org/mock/gomock"

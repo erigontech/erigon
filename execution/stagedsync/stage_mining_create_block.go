@@ -25,22 +25,22 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type MiningBlock struct {
@@ -50,7 +50,6 @@ type MiningBlock struct {
 	Txns             types.Transactions
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
-	PreparedTxns     types.Transactions
 	Requests         types.FlatRequests
 
 	headerRlpSize         *int
@@ -98,11 +97,6 @@ func (mb *MiningBlock) AvailableRlpSpace(chainConfig *chain.Config, withAddition
 }
 
 func (mb *MiningBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
-	if len(mb.PreparedTxns) > 0 {
-		s := types.EncodingSizeGenericList(mb.PreparedTxns)
-		s += rlp.ListPrefixLen(s)
-		return s
-	}
 	if len(mb.Txns) != mb.txnsRlpSizeCalculated {
 		panic("mismatch between mb.Txns and mb.txnsRlpSizeCalculated - did you forget to use mb.AddTxn()?")
 	}
@@ -132,9 +126,9 @@ type MiningCreateBlockCfg struct {
 	db                     kv.RwDB
 	miner                  MiningState
 	chainConfig            *chain.Config
-	engine                 consensus.Engine
+	engine                 rules.Engine
 	tmpdir                 string
-	blockBuilderParameters *core.BlockBuilderParameters
+	blockBuilderParameters *builder.Parameters
 	blockReader            services.FullBlockReader
 }
 
@@ -142,8 +136,8 @@ func StageMiningCreateBlockCfg(
 	db kv.RwDB,
 	miner MiningState,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
-	blockBuilderParameters *core.BlockBuilderParameters,
+	engine rules.Engine,
+	blockBuilderParameters *builder.Parameters,
 	tmpdir string,
 	blockReader services.FullBlockReader,
 ) MiningCreateBlockCfg {
@@ -161,11 +155,11 @@ func StageMiningCreateBlockCfg(
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
-	*current = MiningBlock{}          // always start with a clean state
-	var txPoolLocals []common.Address //txPoolV2 has no concept of local addresses (yet?)
-	coinbase := cfg.miner.MiningConfig.Etherbase
+	*current = MiningBlock{}            // always start with a clean state
+	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
+	coinbase := accounts.InternAddress(cfg.miner.MiningConfig.Etherbase)
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -173,11 +167,11 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	)
 
 	logPrefix := s.LogPrefix()
-	executionAt, err := s.ExecutionAt(txc.Tx)
+	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-	parent := rawdb.ReadHeaderByNumber(txc.Tx, executionAt)
+	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
 	}
@@ -191,23 +185,23 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 			return errors.New("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
-		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient
+		coinbase = accounts.InternAddress(cfg.blockBuilderParameters.SuggestedFeeRecipient)
 	}
 
 	blockNum := executionAt + 1
 
-	localUncles, remoteUncles, err := readNonCanonicalHeaders(txc.Tx, blockNum, cfg.engine, coinbase, txPoolLocals)
+	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: txc.Tx, BlockReader: cfg.blockReader, Logger: logger}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
-		number, _ := cfg.blockReader.HeaderNumber(context.Background(), txc.Tx, hash)
+		number, _ := cfg.blockReader.HeaderNumber(context.Background(), tx, hash)
 		if number == nil {
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), txc.Tx, hash, *number)
+			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, *number)
 			if block == nil {
 				break
 			}
@@ -243,17 +237,17 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := core.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
+	header := builder.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
 	}
 
-	header.Coinbase = coinbase
+	header.Coinbase = coinbase.Value()
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-	ibs := state.New(state.NewReaderV3(txc.Doms.AsGetter(txc.Ttx)))
+	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",
@@ -358,14 +352,14 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	return nil
 }
 
-func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coinbase accounts.Address, txPoolLocals []accounts.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
 	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {
 		return
 	}
 	for _, u := range nonCanonicalBlocks {
-		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
+		if builder.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
 			localUncles[u.Hash()] = u
 		} else {
 			remoteUncles[u.Hash()] = u

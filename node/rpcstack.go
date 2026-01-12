@@ -27,14 +27,14 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/rs/cors"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -176,7 +176,7 @@ func (h *httpServer) start() error {
 		paths[i] = path
 		i++
 	}
-	sort.Strings(paths)
+	slices.Sort(paths)
 	logged := make(map[string]bool, len(paths))
 	for _, path := range paths {
 		name := h.handlerNames[path]
@@ -419,7 +419,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var gzPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		w := gzip.NewWriter(io.Discard)
 		return w
 	},

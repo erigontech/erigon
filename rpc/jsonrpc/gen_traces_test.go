@@ -25,18 +25,18 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	// Force-load native and js packages, to trigger registration
-	_ "github.com/erigontech/erigon/eth/tracers/js"
-	_ "github.com/erigontech/erigon/eth/tracers/native"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 )
 
 /*
@@ -58,7 +58,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	if err = stream.Flush(); err != nil {
 		t.Fatalf("error flushing: %v", err)
 	}
-	var result interface{}
+	var result any
 	if err = json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 		  }
 		}
 	]`
-	var expected interface{}
+	var expected any
 	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 	if err != nil {
 		t.Errorf("marshall result into JSON: %v", err)
 	}
-	var result interface{}
+	var result any
 	if err = json.Unmarshal(buf, &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 		  "type": "reward"
 		}
 	  ]`
-	var expected interface{}
+	var expected any
 	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
 	if err != nil {
 		t.Errorf("marshall result into JSON: %v", err)
 	}
-	var result interface{}
+	var result any
 	if err = json.Unmarshal(buf, &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
     }
 ]
 `
-	var expected interface{}
+	var expected any
 	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}

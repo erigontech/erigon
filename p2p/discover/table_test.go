@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/netutil"
@@ -504,4 +504,100 @@ func newkey() *ecdsa.PrivateKey {
 		panic("couldn't generate key: " + err.Error())
 	}
 	return key
+}
+
+func Benchmark_findnodeByID(b *testing.B) {
+	benchmarks := []struct {
+		name       string
+		tableSize  int
+		nresults   int
+		preferLive bool
+		liveRatio  float64
+	}{
+		{"SmallTable_5Results_NoPreferLive", 50, 5, false, 0.0},
+		{"SmallTable_16Results_NoPreferLive", 50, 16, false, 0.0},
+		{"SmallTable_5Results_PreferLive_AllLive", 50, 5, true, 1.0},
+		{"SmallTable_16Results_PreferLive_AllLive", 50, 16, true, 1.0},
+		{"SmallTable_5Results_PreferLive_HalfLive", 50, 5, true, 0.5},
+		{"SmallTable_16Results_PreferLive_HalfLive", 50, 16, true, 0.5},
+		{"MediumTable_5Results_NoPreferLive", 200, 5, false, 0.0},
+		{"MediumTable_16Results_NoPreferLive", 200, 16, false, 0.0},
+		{"MediumTable_5Results_PreferLive_AllLive", 200, 5, true, 1.0},
+		{"MediumTable_16Results_PreferLive_AllLive", 200, 16, true, 1.0},
+		{"MediumTable_5Results_PreferLive_HalfLive", 200, 5, true, 0.5},
+		{"MediumTable_16Results_PreferLive_HalfLive", 200, 16, true, 0.5},
+		{"LargeTable_5Results_NoPreferLive", 500, 5, false, 0.0},
+		{"LargeTable_16Results_NoPreferLive", 500, 16, false, 0.0},
+		{"LargeTable_5Results_PreferLive_AllLive", 500, 5, true, 1.0},
+		{"LargeTable_16Results_PreferLive_AllLive", 500, 16, true, 1.0},
+		{"LargeTable_5Results_PreferLive_HalfLive", 500, 5, true, 0.5},
+		{"LargeTable_16Results_PreferLive_HalfLive", 500, 16, true, 0.5},
+		{"FullTable_5Results_NoPreferLive", nBuckets * bucketSize, 5, false, 0.0},
+		{"FullTable_16Results_NoPreferLive", nBuckets * bucketSize, 16, false, 0.0},
+		{"FullTable_5Results_PreferLive_AllLive", nBuckets * bucketSize, 5, true, 1.0},
+		{"FullTable_16Results_PreferLive_AllLive", nBuckets * bucketSize, 16, true, 1.0},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			transport := newPingRecorder()
+			tmpDir := b.TempDir()
+			tab, db := newTestTable(transport, tmpDir, log.Root())
+			defer db.Close()
+			defer tab.close()
+
+			<-tab.initDone
+
+			nodes := generateTestNodes(bm.tableSize, tab.self().ID())
+			fillTable(tab, nodes)
+
+			if bm.preferLive && bm.liveRatio > 0 {
+				setNodesLive(tab, nodes, bm.liveRatio)
+			}
+
+			target := generateRandomID()
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = tab.findnodeByID(target, bm.nresults, bm.preferLive)
+			}
+			b.StopTimer()
+		})
+	}
+}
+
+func generateTestNodes(count int, baseID enode.ID) []*node {
+	nodes := make([]*node, count)
+	for i := 0; i < count; i++ {
+		var r enr.Record
+		r.Set(enr.IP(net.IP{10, 0, byte(i >> 8), byte(i & 0xFF)}))
+		// Generate nodes at various distances
+		distance := i % 256
+		nodeID := idAtDistance(baseID, distance)
+		nodes[i] = wrapNode(enode.SignNull(&r, nodeID))
+	}
+	return nodes
+}
+
+func setNodesLive(tab *Table, nodes []*node, liveRatio float64) {
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	liveCount := int(float64(len(nodes)) * liveRatio)
+	for i := 0; i < liveCount && i < len(nodes); i++ {
+		b := tab.bucket(nodes[i].ID())
+		for _, n := range b.entries {
+			if n.ID() == nodes[i].ID() {
+				n.livenessChecks = 1
+				break
+			}
+		}
+	}
+}
+
+func generateRandomID() enode.ID {
+	var id enode.ID
+	rand.Read(id[:])
+	return id
 }

@@ -25,15 +25,15 @@ import (
 	"io"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/trie"
 )
 
-// EncodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
-var EncodeBufferPool = sync.Pool{
-	New: func() interface{} { return new(bytes.Buffer) },
+// encodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
+var encodeBufferPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
 }
 
 type DerivableList interface {
@@ -174,7 +174,7 @@ func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
 	return h
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
+func rlpHash(x any) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
 	sha.Read(h[:])     //nolint:errcheck

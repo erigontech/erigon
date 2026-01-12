@@ -28,17 +28,17 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var (
-	contextType      = reflect.TypeOf((*context.Context)(nil)).Elem()
-	jsonStreamType   = reflect.TypeOf((*jsonstream.Stream)(nil)).Elem()
-	errorType        = reflect.TypeOf((*error)(nil)).Elem()
-	subscriptionType = reflect.TypeOf(Subscription{})
-	stringType       = reflect.TypeOf("")
+	contextType      = reflect.TypeFor[context.Context]()
+	jsonStreamType   = reflect.TypeFor[jsonstream.Stream]()
+	errorType        = reflect.TypeFor[error]()
+	subscriptionType = reflect.TypeFor[Subscription]()
+	stringType       = reflect.TypeFor[string]()
 )
 
 type serviceRegistry struct {
@@ -66,7 +66,7 @@ type callback struct {
 	logger      log.Logger
 }
 
-func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
+func (r *serviceRegistry) registerName(name string, rcvr any) error {
 	rcvrVal := reflect.ValueOf(rcvr)
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", rcvrVal.Type().String())
@@ -202,7 +202,7 @@ func (c *callback) makeArgTypes() {
 }
 
 // call invokes the callback.
-func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream jsonstream.Stream) (res interface{}, errRes error) {
+func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream jsonstream.Stream) (res any, errRes error) {
 	// Create the argument slice.
 	fullargs := make([]reflect.Value, 0, 2+len(args))
 	if c.rcvr.IsValid() {
@@ -226,6 +226,9 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 	// Run the callback.
 	results := c.fn.Call(fullargs)
 	if len(results) == 0 {
+		return nil, nil
+	}
+	if dbg.RpcDropResponse {
 		return nil, nil
 	}
 	if c.errPos >= 0 && !results[c.errPos].IsNil() {

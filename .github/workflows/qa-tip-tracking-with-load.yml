@@ -1,0 +1,250 @@
+name: QA - Tip tracking with load
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
+  workflow_dispatch:
+    # Run manually with parameters for load generation
+    inputs:
+      execution_name:
+        description: "Execution name (only for reporting purposes)"
+        required: false
+        default: "eth_getBlockByNumber"
+      load_pattern:
+        description: "Stress test load pattern file name from rpc-tests repo"
+        required: false
+        default: "stress_test_eth_getBlockByNumber_13M.tar"
+      load_sequence:
+        description: "Stress test load sequence (qps:duration_secs) e.g. 100:300,500:300,750:300 "
+        required: false
+        default: "100:300,500:300,1000:300,2000:300,1:300,3000:300,1:300"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mainnet-tip-tracking-with-load-test:
+    runs-on: [self-hosted, qa, Ethereum, tip-tracking]
+    timeout-minutes: 300 # 5 hours
+    env:
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-main/datadir
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      TRACKING_TIME_SECONDS: 1800 # 0.5 hours
+      TOTAL_TIME_SECONDS: 7200 # 2 hours
+      CHAIN: mainnet
+      EXECUTION_NAME: ${{ github.event.inputs.execution_name || 'eth_getBlockByNumber' }}
+      LOAD_PATTERN: ${{ github.event.inputs.load_pattern || 'stress_test_eth_getBlockByNumber_13M.tar' }}
+      LOAD_SEQUENCE: ${{ github.event.inputs.load_sequence || '100:300,500:300,1000:300,2000:300,1:300,3000:300,1:300' }}
+
+    steps:
+    - name: Print job parameters
+      run: |
+        echo "Execution name: ${{ env.EXECUTION_NAME }}"
+        echo "Load pattern: ${{ env.LOAD_PATTERN }}"
+        echo "Load sequence: ${{ env.LOAD_SEQUENCE }}"
+
+    - name: Check out Erigon repository
+      uses: actions/checkout@v6
+
+    - name: Checkout RPC Tests Repository & Install Requirements
+      run: |
+        rm -rf ${{runner.workspace}}/rpc-tests
+        git -c advice.detachedHead=false clone --depth 1 --branch v1.78.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+        cd ${{runner.workspace}}/rpc-tests
+
+    - name: Clean Erigon Build Directory
+      run: |
+        make clean
+
+    - name: Build Erigon
+      run: |
+        make erigon
+      working-directory: ${{ github.workspace }}
+
+    - name: Pause the Erigon instance dedicated to db maintenance
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+    - name: Run Erigon and wait for sync (stabilization step)
+      id: pre_test_step
+      run: |
+        set +e # Disable exit on error
+        
+        # Launch the testbed Erigon instance & test its ability to maintain sync for 2 minutes
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+          "$ERIGON_REFERENCE_DATA_DIR/../" "$ERIGON_REFERENCE_DATA_DIR" 120 "$TOTAL_TIME_SECONDS" "Erigon3" "$CHAIN"
+        
+        # Capture monitoring script exit status
+        test_exit_status=$?
+        
+        # Save the subsection reached status
+        echo "test_executed=true" >> $GITHUB_OUTPUT
+        
+        # Clean up Erigon process if it's still running
+        if kill -0 $ERIGON_PID 2> /dev/null; then
+          echo "Terminating Erigon"
+          kill $ERIGON_PID
+          wait $ERIGON_PID
+        fi
+
+        # Check test runner script exit status
+        if [ $test_exit_status -eq 0 ]; then
+          echo "Pre-sync step completed successfully"
+          echo "::notice::Pre-sync step completed successfully"
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "Pre-sync step encountered an error"
+          echo "::error::Pre-sync step encountered an error"
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+    - name: Restore Erigon Testbed Data Directory & Erigon binary
+      id: save_chaindata_step
+      run: |
+        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+        cp $ERIGON_REFERENCE_DATA_DIR/../erigon $ERIGON_TESTBED_DATA_DIR/../
+
+    - name: Run Erigon, wait sync and check ability to maintain sync with load
+      id: test_step
+      env:
+        SAFE_EXECUTION_NAME: ${{ env.EXECUTION_NAME }}
+        SAFE_LOAD_PATTERN: ${{ env.LOAD_PATTERN }}
+        SAFE_LOAD_SEQUENCE: ${{ env.LOAD_SEQUENCE }}
+        RPC_TESTS_DIR: ${{ runner.workspace }}/rpc-tests
+      run: |
+        set +e # Disable exit on error
+        
+        # Launch the testbed Erigon instance & test its ability to maintain sync with a load for TRACKING_TIME_SECONDS
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+          "${{ github.workspace }}/build/bin" \
+          "$ERIGON_TESTBED_DATA_DIR" \
+          "$TRACKING_TIME_SECONDS" \
+          "$TOTAL_TIME_SECONDS" \
+          "Erigon3" \
+          "$CHAIN" \
+          "archive_node" \
+          "load@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
+  
+        # Capture monitoring script exit status
+        test_exit_status=$?
+        
+        # Save the subsection reached status
+        echo "test_executed=true" >> $GITHUB_OUTPUT
+        
+        # Clean up Erigon process if it's still running
+        if kill -0 $ERIGON_PID 2> /dev/null; then
+          echo "Terminating Erigon"
+          kill $ERIGON_PID
+          wait $ERIGON_PID
+        fi
+        
+        # Check test runner script exit status
+        if [ $test_exit_status -eq 0 ]; then
+          echo "Tip-tracking w/ load test completed successfully"
+          echo "::notice::Tip-tracking w/ load test completed successfully"
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          if reason=$(python3 print_reason.py ${{ github.workspace }}/result-$CHAIN.json); then
+            echo "Error detected during tests: $reason"
+            echo "::error::Tip-tracking w/ load test encountered an error: $reason"
+          else
+            echo "Tip-tracking w/ load test encountered an error"
+            echo "::error::Tip-tracking w/ load test encountered an error"
+          fi
+        fi 
+        
+        PLOT_FILE="metrics-${{ env.CHAIN }}-plots_sync_with_load_combined_gauge.png"
+        if [ -f "${{ github.workspace }}/$PLOT_FILE" ]; then
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          echo "::notice::To see the result of the test, please check the '$PLOT_FILE' plot in the plots artifact"
+        else
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          echo "::error::Missing expected plot file: $PLOT_FILE"
+        fi
+
+    - name: Upload Downloader Torrent Client Status
+      if: always()
+      uses: actions/upload-artifact@v6
+      with:
+        name: torrent-client-status
+        path: torrent-client-status.txt
+
+    - name: Save test results
+      if: steps.test_step.outputs.test_executed == 'true'
+      env:
+        TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+      run: |
+        db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+        if [ -z "$db_version" ]; then
+          db_version="no-version"
+        fi
+        
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+          --repo erigon \
+          --commit $(git rev-parse HEAD) \
+          --branch ${{ github.ref_name }} \
+          --test_name tip-tracking-with-load \
+          --chain $CHAIN \
+          --runner ${{ runner.name }} \
+          --db_version $db_version \
+          --outcome $TEST_RESULT \
+          --result_file ${{ github.workspace }}/result-$CHAIN.json
+
+    - name: Upload test results
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v6
+      with:
+        name: test-results
+        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+
+    - name: Upload erigon logs
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v6
+      with:
+        name: erigon-logs
+        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
+
+    - name: Upload metric plots
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v6
+      with:
+        name: metric-plots
+        path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
+
+    - name: Upload profiling data
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v6
+      with:
+        name: profiling-data
+        path: ${{ github.workspace }}/profiling-data*
+
+    - name: Upload FD Leak Analysis
+      if: always()
+      uses: actions/upload-artifact@v6
+      with:
+        name: fd-leak-analysis
+        path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+
+    - name: Delete Erigon Testbed Data Directory
+      if: ${{ always() }}
+      run: |
+        if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
+          rm -rf $ERIGON_TESTBED_DATA_DIR
+        fi
+
+    - name: Resume the Erigon instance dedicated to db maintenance
+      if: ${{ always() }}
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
+
+    - name: Action for Not Success
+      if: ${{ always() }}
+      run: |
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during tests, please see the summary section for details"
+          exit 1
+        fi 

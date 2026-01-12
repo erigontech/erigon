@@ -17,21 +17,19 @@
 package jsonrpc
 
 import (
-	"bytes"
-
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type TouchTracer struct {
-	searchAddr common.Address
+	searchAddr accounts.Address
 	Found      bool
 	hooks      *tracing.Hooks
 }
 
-func NewTouchTracer(searchAddr common.Address) *TouchTracer {
+func NewTouchTracer(searchAddr accounts.Address) *TouchTracer {
 	tracer := &TouchTracer{
 		searchAddr: searchAddr,
 	}
@@ -46,8 +44,8 @@ func (t *TouchTracer) TracingHooks() *tracing.Hooks {
 	return t.hooks
 }
 
-func (t *TouchTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if !t.Found && (bytes.Equal(t.searchAddr.Bytes(), from.Bytes()) || bytes.Equal(t.searchAddr.Bytes(), to.Bytes())) {
+func (t *TouchTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+	if !t.Found && (t.searchAddr == from || t.searchAddr == to) {
 		t.Found = true
 	}
 }

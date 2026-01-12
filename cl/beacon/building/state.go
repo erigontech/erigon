@@ -19,7 +19,7 @@ package building
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 type State struct {

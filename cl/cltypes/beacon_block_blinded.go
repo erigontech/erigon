@@ -20,14 +20,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 // make sure that the type implements the interface ssz2.ObjectSSZ
@@ -358,8 +357,8 @@ func (b *BlindedBeaconBody) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
 
-func (b *BlindedBeaconBody) getSchema(storage bool) []interface{} {
-	s := []interface{}{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
+func (b *BlindedBeaconBody) getSchema(storage bool) []any {
+	s := []any{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
 	if b.Version >= clparams.AltairVersion {
 		s = append(s, b.SyncAggregate)
 	}

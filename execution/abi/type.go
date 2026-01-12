@@ -27,7 +27,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // Type enumerator
@@ -164,9 +164,9 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			fields     []reflect.StructField
 			elems      []*Type
 			names      []string
-			expression string // canonical parameter expression
+			expression strings.Builder // canonical parameter expression
 		)
-		expression += "("
+		expression.WriteString("(")
 		overloadedNames := make(map[string]string)
 		for idx, c := range components {
 			cType, err := NewType(c.Type, c.InternalType, c.Components)
@@ -185,18 +185,18 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			})
 			elems = append(elems, &cType)
 			names = append(names, c.Name)
-			expression += cType.stringKind
+			expression.WriteString(cType.stringKind)
 			if idx != len(components)-1 {
-				expression += ","
+				expression.WriteString(",")
 			}
 		}
-		expression += ")"
+		expression.WriteString(")")
 
 		typ.TupleType = reflect.StructOf(fields)
 		typ.TupleElems = elems
 		typ.TupleRawNames = names
 		typ.T = TupleTy
-		typ.stringKind = expression
+		typ.stringKind = expression.String()
 
 		const structPrefix = "struct "
 		// After solidity 0.5.10, a new field of abi "internalType"
@@ -226,9 +226,9 @@ func (t Type) GetType() reflect.Type {
 	case UintTy:
 		return reflectIntType(true, t.Size)
 	case BoolTy:
-		return reflect.TypeOf(false)
+		return reflect.TypeFor[bool]()
 	case StringTy:
-		return reflect.TypeOf("")
+		return reflect.TypeFor[string]()
 	case SliceTy:
 		return reflect.SliceOf(t.Elem.GetType())
 	case ArrayTy:
@@ -236,19 +236,19 @@ func (t Type) GetType() reflect.Type {
 	case TupleTy:
 		return t.TupleType
 	case AddressTy:
-		return reflect.TypeOf(common.Address{})
+		return reflect.TypeFor[common.Address]()
 	case FixedBytesTy:
-		return reflect.ArrayOf(t.Size, reflect.TypeOf(byte(0)))
+		return reflect.ArrayOf(t.Size, reflect.TypeFor[byte]())
 	case BytesTy:
-		return reflect.SliceOf(reflect.TypeOf(byte(0)))
+		return reflect.SliceOf(reflect.TypeFor[byte]())
 	case HashTy:
 		// hashtype currently not used
-		return reflect.ArrayOf(32, reflect.TypeOf(byte(0)))
+		return reflect.ArrayOf(32, reflect.TypeFor[byte]())
 	case FixedPointTy:
 		// fixedpoint type currently not used
-		return reflect.ArrayOf(32, reflect.TypeOf(byte(0)))
+		return reflect.ArrayOf(32, reflect.TypeFor[byte]())
 	case FunctionTy:
-		return reflect.ArrayOf(24, reflect.TypeOf(byte(0)))
+		return reflect.ArrayOf(24, reflect.TypeFor[byte]())
 	default:
 		panic("Invalid type")
 	}

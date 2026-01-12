@@ -26,24 +26,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/sentinel/communication"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const maxMessageLength = 18 * datasize.MB
@@ -120,18 +118,18 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, error) {
-	// filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
-	// if err != nil {
-	// 	return nil, pid, err
-	// }
+	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	if err != nil {
+		return nil, pid, err
+	}
 
 	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
 		return nil, "", err
 	}
 
-	data := common.CopyBytes(buffer.Bytes())
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, data)
+	data := buffer.Bytes()
+	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -189,7 +187,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req 
 		return nil, "", err
 	}
 
-	data := common.CopyBytes(buffer.Bytes())
+	data := buffer.Bytes()
 	blobs, pid, err := b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, uint64(req.Len()))
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid request") {
@@ -210,7 +208,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, c
 		return nil, "", err
 	}
 
-	data := common.CopyBytes(buffer.Bytes())
+	data := buffer.Bytes()
 	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, count*b.beaconConfig.MaxBlobsPerBlock)
 }
 
@@ -226,7 +224,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 		return nil, "", err
 	}
 
-	data := common.CopyBytes(buffer.Bytes())
+	data := buffer.Bytes()
 	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRangeProtocolV2, data)
 }
 
@@ -240,7 +238,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
 	}
-	data := common.CopyBytes(buffer.Bytes())
+	data := buffer.Bytes()
 	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRootProtocolV2, data)
 }
 

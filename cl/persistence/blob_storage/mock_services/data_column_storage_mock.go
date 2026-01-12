@@ -16,6 +16,7 @@ import (
 
 	common "github.com/erigontech/erigon-lib/common"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
 )
 

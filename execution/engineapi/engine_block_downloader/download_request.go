@@ -3,7 +3,7 @@ package engine_block_downloader
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -15,8 +15,8 @@ type BackwardDownloadRequest struct {
 	ValidateChainTip *types.Block
 }
 
-func (r BackwardDownloadRequest) LogArgs() []interface{} {
-	args := []interface{}{"hash", r.MissingHash, "trigger", r.Trigger}
+func (r BackwardDownloadRequest) LogArgs() []any {
+	args := []any{"hash", r.MissingHash, "trigger", r.Trigger}
 	if r.ValidateChainTip != nil {
 		args = append(args, "chainTipNum", r.ValidateChainTip.Number().Uint64(), "chainTipHash", r.ValidateChainTip.Hash())
 	}

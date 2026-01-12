@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -801,7 +801,7 @@ func TestDB_Batch_Panic(t *testing.T) {
 
 	var sentinel int
 	var bork = &sentinel
-	var problem interface{}
+	var problem any
 	var err error
 
 	// Execute a function inside a batch that panics.
@@ -925,6 +925,17 @@ func TestDB_BatchTime(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func BenchmarkDB_BeginRO(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	db := _db.(*MdbxKV)
+
+	b.ResetTimer()
+	for i := 1; i <= b.N; i++ {
+		tx, _ := db.BeginRo(context.Background())
+		tx.Rollback()
 	}
 }
 
@@ -1102,8 +1113,8 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 
 	tx, err := _db.BeginRw(ctx)
 	require.NoError(b, err)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for i := 0; b.Loop(); i++ {
 		err = tx.ResetSequence(table, uint64(i))
 		if err != nil {
 			b.Fatal(err)

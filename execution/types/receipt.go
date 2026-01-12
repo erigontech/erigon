@@ -28,9 +28,9 @@ import (
 	"math/big"
 	"slices"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -125,6 +125,7 @@ type storedReceiptRLP struct {
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
+//
 // Deprecated: create receipts using a struct literal instead.
 func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 	r := &Receipt{
@@ -162,8 +163,8 @@ func (r Receipt) EncodeRLP69(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := EncodeBufferPool.Get().(*bytes.Buffer)
-	defer EncodeBufferPool.Put(buf)
+	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	defer encodeBufferPool.Put(buf)
 	buf.Reset()
 	if err := r.encodeTyped69(data, buf); err != nil {
 		return err
@@ -222,7 +223,7 @@ func (r *Receipt) decodeTyped(b []byte) error {
 		return errShortTypedReceipt
 	}
 	switch b[0] {
-	case DynamicFeeTxType, AccessListTxType, BlobTxType:
+	case DynamicFeeTxType, AccessListTxType, BlobTxType, SetCodeTxType:
 		var data receiptRLP
 		err := rlp.DecodeBytes(b[1:], &data)
 		if err != nil {
@@ -614,7 +615,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 		// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 		// and then the address of the contract one is creating this way will depend on the `tx.From`
 		// and the nonce of the creating account (which is `tx.From`).
-		r.ContractAddress = CreateAddress(sender, txn.GetNonce())
+		r.ContractAddress = CreateAddress(sender.Value(), txn.GetNonce())
 	}
 	// The used gas can be calculated based on previous r
 	if txnIdx == 0 {

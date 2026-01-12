@@ -21,8 +21,8 @@ import (
 
 	"github.com/huandu/xstrings"
 
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var SyncMetrics = map[SyncStage]metrics.Gauge{}

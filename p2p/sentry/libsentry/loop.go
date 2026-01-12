@@ -24,12 +24,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
 type (
@@ -39,7 +40,7 @@ type (
 	MessageHandler[T any] func(context.Context, T, sentryproto.SentryClient) error
 )
 
-func ReconnectAndPumpStreamLoop[TMessage interface{}](
+func ReconnectAndPumpStreamLoop[TMessage any](
 	ctx context.Context,
 	sentryClient sentryproto.SentryClient,
 	statusDataFactory StatusDataFactory,
@@ -106,7 +107,7 @@ func ReconnectAndPumpStreamLoop[TMessage interface{}](
 // It only exists until there are no more messages
 // to be received (end of process, or interruption, or end of test).
 // wg is used only in tests to avoid using waits, which is brittle. For non-test code wg == nil.
-func pumpStreamLoop[TMessage interface{}](
+func pumpStreamLoop[TMessage any](
 	ctx context.Context,
 	sentry sentryproto.SentryClient,
 	streamName string,

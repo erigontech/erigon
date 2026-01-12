@@ -25,9 +25,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var _ error = EndpointError{}
@@ -130,6 +130,11 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		if beaconResponse, ok := any(ans).(*BeaconResponse); ok {
 			for key, value := range beaconResponse.Headers() {
 				w.Header().Set(key, value)
+			}
+			// If the JSON body includes "version", also expose it via the standard header.
+			// Many consumers rely on this header for fork-specific types.
+			if beaconResponse.Version != nil && w.Header().Get("Eth-Consensus-Version") == "" {
+				w.Header().Set("Eth-Consensus-Version", beaconResponse.Version.String())
 			}
 		}
 		switch {

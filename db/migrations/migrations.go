@@ -24,9 +24,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -88,9 +88,9 @@ func AppliedMigrations(tx kv.Tx, withPayload bool) (map[string][]byte, error) {
 			return nil
 		}
 		if withPayload {
-			applied[string(common.CopyBytes(k))] = common.CopyBytes(v)
+			applied[string(common.Copy(k))] = common.Copy(v)
 		} else {
-			applied[string(common.CopyBytes(k))] = []byte{}
+			applied[string(common.Copy(k))] = []byte{}
 		}
 		return nil
 	})
@@ -153,7 +153,9 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 				}
 			} else {
 				if kv.DBSchemaVersion.Major != major {
-					return fmt.Errorf("cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\"", major, kv.DBSchemaVersion.Major, chaindata)
+					return fmt.Errorf(
+						"cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\" if you are sure that you are running right version of erigon on right datadir",
+						major, kv.DBSchemaVersion.Major, chaindata)
 				}
 			}
 		}

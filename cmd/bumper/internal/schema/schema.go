@@ -1,10 +1,11 @@
 package schema
 
 import (
+	"os"
+	"slices"
+
 	"github.com/erigontech/erigon/db/snaptype"
 	"gopkg.in/yaml.v3"
-	"os"
-	"sort"
 )
 
 type TwoVers struct {
@@ -29,6 +30,7 @@ type Category struct {
 	Domain Group `yaml:"domain,omitempty"`
 	Hist   Group `yaml:"hist,omitempty"`
 	Ii     Group `yaml:"ii,omitempty"`
+	Block  Group `yaml:"block,omitempty"`
 }
 
 type Schema map[string]Category
@@ -62,6 +64,6 @@ func Cats(s Schema) []string {
 	for k := range s {
 		cs = append(cs, k)
 	}
-	sort.Strings(cs)
+	slices.Sort(cs)
 	return cs
 }

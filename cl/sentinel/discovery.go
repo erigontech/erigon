@@ -24,13 +24,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/go-bitfield"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
 )
 
 const (
@@ -45,7 +43,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	if sem != nil {
 		defer sem.Release(1)
 	}
-	if info.ID == s.host.ID() {
+	if info.ID == s.p2p.Host().ID() {
 		return nil
 	}
 	if s.peers.BanStatus(info.ID) {
@@ -53,10 +51,14 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
-	err = s.host.Connect(ctxWithTimeout, info)
+	if s.p2p.Host().Network().Connectedness(info.ID) == network.Connected {
+		return nil
+	}
+	err = s.p2p.Host().Connect(ctxWithTimeout, info)
 	if err != nil {
 		return err
 	}
+	log.Trace("[caplin] Connected with peer", "peer", info.ID)
 	return nil
 }
 
@@ -71,11 +73,25 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
 			if err := s.ConnectWithPeer(s.ctx, peerInfo, nil); err != nil {
-				log.Trace("[Sentinel] Could not connect with peer", "err", err)
+				log.Debug("[Sentinel] Could not connect with peer", "err", err)
+			} else {
+				log.Debug("[Sentinel] Connected with peer", "peer", peerInfo.ID)
 			}
 		}(peerInfo)
 	}
 	return nil
+}
+
+func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
+	// connect to static peers every one minute
+	go func() {
+		for {
+			if err := s.connectWithAllPeers(peers); err != nil {
+				log.Debug("[Sentinel] Could not connect with static peers", "err", err)
+			}
+			time.Sleep(3 * time.Minute)
+		}
+	}()
 }
 
 func (s *Sentinel) listenForPeers() {
@@ -88,14 +104,12 @@ func (s *Sentinel) listenForPeers() {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
 		}
 	}
-	log.Info("Static peers", "len", len(enodes))
+	log.Info("CL Sentinel static peers", "len", len(enodes))
 	if s.cfg.NoDiscovery {
 		return
 	}
 	multiAddresses := convertToMultiAddr(enodes)
-	if err := s.connectWithAllPeers(multiAddresses); err != nil {
-		log.Warn("Could not connect to static peers", "reason", err)
-	}
+	s.stickToPeers(multiAddresses)
 
 	// limit the number of goroutines opening connection with peers
 	sem := semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections))
@@ -149,84 +163,27 @@ func (s *Sentinel) listenForPeers() {
 	}
 }
 
-func (s *Sentinel) connectToBootnodes() error {
-	for i := range s.discoverConfig.Bootnodes {
-		if err := s.discoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
-			if !enr.IsNotFound(err) {
-				log.Error("[Sentinel] Could not retrieve tcp port")
-			}
-			continue
-		}
-	}
-	multiAddresses := convertToMultiAddr(s.discoverConfig.Bootnodes)
-	s.connectWithAllPeers(multiAddresses)
-	return nil
-}
-
-func (s *Sentinel) setupENR(
-	node *enode.LocalNode,
-) (*enode.LocalNode, error) {
-	forkId, err := s.ethClock.ForkId()
-	if err != nil {
-		return nil, err
-	}
-	nfd, err := s.ethClock.NextForkDigest()
-	if err != nil {
-		return nil, err
-	}
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, forkId))
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.CgcKey, []byte{}))
-	node.Set(enr.WithEntry(s.cfg.NetworkConfig.NfdKey, nfd))
-	return node, nil
-}
-
-func (s *Sentinel) updateENR(node *enode.LocalNode) {
-	for {
-		nextForkEpoch := s.ethClock.NextForkEpochIncludeBPO()
-		if nextForkEpoch == s.cfg.BeaconConfig.FarFutureEpoch {
-			break
-		}
-		// sleep until next fork epoch
-		wakeupTime := s.ethClock.GetSlotTime(nextForkEpoch * s.cfg.BeaconConfig.SlotsPerEpoch).Add(time.Second)
-		log.Info("[Sentinel] Sleeping until next fork epoch", "nextForkEpoch", nextForkEpoch, "wakeupTime", wakeupTime)
-		time.Sleep(time.Until(wakeupTime)) // add 1 second for safety
-		nfd, err := s.ethClock.NextForkDigest()
-		if err != nil {
-			log.Warn("[Sentinel] Could not get next fork digest", "err", err)
-			break
-		}
-		node.Set(enr.WithEntry(s.cfg.NetworkConfig.NfdKey, nfd))
-		forkId, err := s.ethClock.ForkId()
-		if err != nil {
-			log.Warn("[Sentinel] Could not get fork id", "err", err)
-			break
-		}
-		node.Set(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, forkId))
-		log.Info("[Sentinel] Updated fork id and nfd")
-	}
-}
-
-func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
+func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()
 		if s.HasTooManyPeers() {
 			log.Trace("[Sentinel] Not looking for peers, at peer limit")
-			s.host.Peerstore().RemovePeer(peerId)
-			s.host.Network().ClosePeer(peerId)
+			s.p2p.Host().Peerstore().RemovePeer(peerId)
+			s.p2p.Host().Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
 			return
 		}
+
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
 			log.Trace("[sentinel] failed to validate peer:", "err", err)
 		}
+
 		if !valid {
 			log.Trace("Handshake was unsuccessful")
 			// on handshake fail, we disconnect with said peer, and remove them from our pool
-			s.host.Peerstore().RemovePeer(peerId)
-			s.host.Network().ClosePeer(peerId)
+			s.p2p.Host().Peerstore().RemovePeer(peerId)
+			s.p2p.Host().Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool

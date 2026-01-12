@@ -5,30 +5,30 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type BorGenerator struct {
 	receiptCache *lru.Cache[common.Hash, *types.Receipt]
 	blockReader  services.FullBlockReader
-	engine       consensus.EngineReader
+	engine       rules.EngineReader
 }
 
 func NewBorGenerator(blockReader services.FullBlockReader,
-	engine consensus.EngineReader) *BorGenerator {
+	engine rules.EngineReader) *BorGenerator {
 	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
@@ -64,7 +64,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return nil, err
 	}
 
-	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
+	gp := new(protocol.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 
 	receipt, err := applyBorTransaction(msgs, evm, gp, ibs, block, cumGasUsedInLastBlock, uint(logIdxAfterTx), rawtemporaldb.ReceiptStoresFirstLogIdx(tx))
@@ -87,17 +87,17 @@ func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Messag
 		return nil, err
 	}
 
-	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
+	gp := new(protocol.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 	return getBorLogs(msgs, evm, gp, ibs, header.Number.Uint64(), header.Hash(), uint(txIndex), uint(logIdxAfterTx), rawtemporaldb.ReceiptStoresFirstLogIdx(tx))
 }
 
-func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, blockNum uint64, blockHash common.Hash, txIndex, logIdxAfterTx uint, receiptWithFirstLogIdx bool) (types.Logs, error) {
+func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *state.IntraBlockState, blockNum uint64, blockHash common.Hash, txIndex, logIdxAfterTx uint, receiptWithFirstLogIdx bool) (types.Logs, error) {
 	for _, msg := range msgs {
-		txContext := core.NewEVMTxContext(msg)
+		txContext := protocol.NewEVMTxContext(msg)
 		evm.Reset(txContext, ibs)
 
-		_, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, nil /* engine */)
+		_, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, nil /* engine */)
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +126,7 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state
 	return receiptLogs, nil
 }
 
-func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, block *types.Block, cumulativeGasUsed uint64, logIdxAfterTx uint, receiptWithFirstLogIdx bool) (*types.Receipt, error) {
+func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *state.IntraBlockState, block *types.Block, cumulativeGasUsed uint64, logIdxAfterTx uint, receiptWithFirstLogIdx bool) (*types.Receipt, error) {
 	receiptLogs, err := getBorLogs(msgs, evm, gp, ibs, block.Number().Uint64(), block.Hash(), uint(len(block.Transactions())), logIdxAfterTx, receiptWithFirstLogIdx)
 	if err != nil {
 		return nil, err

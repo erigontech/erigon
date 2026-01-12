@@ -3,10 +3,11 @@ package merkle_tree_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 )
 
 func getExpectedRoot(testBuffer []byte) common.Hash {
@@ -70,7 +71,6 @@ func TestMerkleTreeAppendLeaf(t *testing.T) {
 func TestMerkleTreeRootEmpty(t *testing.T) {
 	mt := merkle_tree.MerkleTree{}
 	mt.Initialize(0, 6, func(idx int, out []byte) {
-		return
 	}, nil)
 	require.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000000", mt.ComputeRoot().String())
 }

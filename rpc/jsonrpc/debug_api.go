@@ -24,16 +24,16 @@ import (
 	"runtime"
 	"runtime/debug"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -55,7 +55,7 @@ type PrivateDebugAPI interface {
 	TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
-	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start interface{}, maxResults int, nocode, nostorage bool, incompletes *bool) (state.IteratorDump, error)
+	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, nocode, nostorage bool, incompletes *bool) (state.IteratorDump, error)
 	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
 	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
@@ -63,7 +63,7 @@ type PrivateDebugAPI interface {
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
-	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
+	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	FreeOSMemory()
 	SetGCPercent(v int) int
@@ -118,7 +118,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 // Deprecation of []byte format: The []byte format is now deprecated and will be removed in a future release.
 //
 // New optional parameter incompletes: This parameter has been added for compatibility with Geth. It is currently not supported when set to true(as its functionality is specific to the Geth protocol).
-func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start interface{}, maxResults int, excludeCode, excludeStorage bool, optional_incompletes *bool) (state.IteratorDump, error) {
+func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, excludeCode, excludeStorage bool, optional_incompletes *bool) (state.IteratorDump, error) {
 	var startBytes []byte
 
 	switch v := start.(type) {
@@ -132,7 +132,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 	case []byte:
 		startBytes = v
 
-	case []interface{}:
+	case []any:
 		for _, val := range v {
 			if b, ok := val.(float64); ok {
 				startBytes = append(startBytes, byte(b))
@@ -243,16 +243,16 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	endNum := startNum + 1 // allows for single param calls
 	if endNumber != nil {
 		// forces negative numbers to fail (too large) but allows zero
-		endNum = uint64(endNumber.Int64()) + 1
+		endNum = uint64(endNumber.Int64()) // [startNum,endNum) from user
 	}
 
 	// is endNum too big?
-	if endNum > latestBlock {
+	if endNum > latestBlock+1 { // [startNum,endNum)
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
 
-	if startNum > endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	if startNum >= endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 	//[from, to)
 	startTxNum, err := api._txNumReader.Min(tx, startNum)
@@ -307,16 +307,14 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 
 	if endHash != nil {
 		var err error
-		endNum, err = api.headerNumberByHash(ctx, tx, *endHash)
+		endNum, err = api.headerNumberByHash(ctx, tx, *endHash) // [startNum,endNum) from user
 		if err != nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
-		endNum = endNum + 1
-
 	}
 
-	if startNum > endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	if startNum >= endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
 	//[from, to)
@@ -377,7 +375,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	result := &AccountResult{}
 	result.Balance.ToInt().Set(a.Balance.ToBig())
 	result.Nonce = hexutil.Uint64(a.Nonce)
-	result.CodeHash = a.CodeHash
+	result.CodeHash = a.CodeHash.Value()
 
 	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], minTxNum+txIndex)
 	if err != nil {
@@ -489,7 +487,7 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 }
 
 // GetBadBlocks implements debug_getBadBlocks - Returns an array of recent bad blocks that the client has seen on the network
-func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
+func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -499,14 +497,10 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interfa
 	blocks, err := rawdb.GetLatestBadBlocks(tx)
 	if err != nil || len(blocks) == 0 {
 		// Return empty array if no bad blocks found to align with other clients and spec
-		return []map[string]interface{}{}, err
-	}
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
+		return []map[string]any{}, err
 	}
 
-	results := make([]map[string]interface{}, 0, len(blocks))
+	results := make([]map[string]any, 0, len(blocks))
 	for _, block := range blocks {
 		var blockRlp string
 		if rlpBytes, err := rlp.EncodeToBytes(block); err != nil {
@@ -518,9 +512,9 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interfa
 		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil, chainConfig.IsArbitrumNitro(block.Number()))
 		if err != nil {
 			log.Error("Failed to marshal block", "err", err)
-			blockJson = map[string]interface{}{}
+			blockJson = map[string]any{}
 		}
-		results = append(results, map[string]interface{}{
+		results = append(results, map[string]any{
 			"hash":  block.Hash(),
 			"block": blockRlp,
 			"rlp":   blockJson,
@@ -623,6 +617,6 @@ func (api *DebugAPIImpl) SetGCPercent(v int) int {
 //   - Geth also allocates memory off-heap, particularly for fastCache and Pebble,
 //     which can be non-trivial (a few gigabytes by default).
 func (api *DebugAPIImpl) SetMemoryLimit(limit int64) int64 {
-	log.Info("Setting memory limit", "size", common.PrettyDuration(limit))
+	log.Info("Setting memory limit", "size", common.StorageSize(limit))
 	return debug.SetMemoryLimit(limit)
 }

@@ -21,19 +21,18 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/eth/ethutils"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type GraphQLAPI interface {
-	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error)
+	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
 	GetChainID(ctx context.Context) (*big.Int, error)
 }
 
@@ -64,7 +63,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
 	return response.ChainID, nil
 }
 
-func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]interface{}, error) {
+func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -79,12 +78,12 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, nil
 	}
 
-	chainConfig, err := api.chainConfig(ctx, tx)
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, blockNumber, false)
 	if err != nil {
 		return nil, err
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, blockNumber, false, chainConfig)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +93,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	result := make([]map[string]interface{}, 0, len(receipts))
+	result := make([]map[string]any, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 
@@ -106,14 +105,14 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		result = append(result, transaction)
 	}
 
-	response := map[string]interface{}{}
+	response := map[string]any{}
 	response["block"] = getBlockRes
 	response["receipts"] = result
 
 	// Withdrawals
-	wresult := make([]map[string]interface{}, 0, len(block.Withdrawals()))
+	wresult := make([]map[string]any, 0, len(block.Withdrawals()))
 	for _, withdrawal := range block.Withdrawals() {
-		wmap := make(map[string]interface{})
+		wmap := make(map[string]any)
 		wmap["index"] = hexutil.Uint64(withdrawal.Index)
 		wmap["validator"] = hexutil.Uint64(withdrawal.Validator)
 		wmap["address"] = withdrawal.Address
@@ -147,9 +146,9 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 	return block, block.Body().SendersFromTxs(), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool, chainConfig *chain.Config) (map[string]interface{}, error) {
-	additionalFields := make(map[string]interface{})
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields, chainConfig.IsArbitrumNitro(b.Number()))
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
+	additionalFields := make(map[string]any)
+	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}

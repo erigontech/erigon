@@ -30,15 +30,15 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 const (
@@ -201,6 +201,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		proofsPerBlob := 1
 		_, dataLen, err = rlp.ParseString(payload, p)
 		if err == nil && dataLen == 1 {
+			if payload[p] != 0x01 { // Validate wrapper_version == 1 for EIP-7594
+				return 0, fmt.Errorf("%w: invalid wrapper version: expected 1, got %d", ErrParseTxn, payload[p])
+			}
 			p = p + 1
 			proofsPerBlob = int(params.CellsPerExtBlob)
 		}
@@ -233,6 +236,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		commitmentPos := dataPos
 		blobIdx = 0
 		for commitmentPos < dataPos+dataLen {
+			if blobIdx >= len(slot.BlobBundles) {
+				return 0, fmt.Errorf("%w: more commitments than blobs (%d > %d)", ErrParseTxn, blobIdx+1, len(slot.BlobBundles))
+			}
 			commitmentPos, err = rlp.StringOfLen(payload, commitmentPos, 48)
 			if err != nil {
 				return 0, fmt.Errorf("%w: commitment: %s", ErrParseTxn, err) //nolint
@@ -242,6 +248,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			slot.BlobBundles[blobIdx].Commitment = commitment
 			commitmentPos += 48
 			blobIdx++
+		}
+		if blobIdx != len(slot.BlobBundles) {
+			return 0, fmt.Errorf("%w: fewer commitments than blobs (%d < %d)", ErrParseTxn, blobIdx, len(slot.BlobBundles))
 		}
 		if commitmentPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in commitments", ErrParseTxn)
@@ -298,7 +307,7 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 		return 0, 0, fmt.Errorf("v: %w", err)
 	}
 	if legacy {
-		preEip155 := sig.V.Eq(u256.N27) || sig.V.Eq(u256.N28)
+		preEip155 := sig.V.Eq(&u256.N27) || sig.V.Eq(&u256.N28)
 		// Compute chainId from V
 		if preEip155 {
 			yParity = byte(sig.V.Uint64() - 27)
@@ -309,7 +318,7 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 			if sig.V.LtUint64(35) {
 				return 0, 0, fmt.Errorf("EIP-155 implies V>=35 (was %d)", sig.V.Uint64())
 			}
-			sig.ChainID.Sub(&sig.V, u256.N35)
+			sig.ChainID.Sub(&sig.V, &u256.N35)
 			yParity = byte(sig.ChainID.Uint64() % 2)
 			sig.ChainID.Rsh(&sig.ChainID, 1)
 			if !sig.ChainID.Eq(cfgChainId) {
@@ -524,7 +533,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err) //nolint
 			}
-			auth.Address = common.Address(payload[p2 : p2+length.Addr])
+			auth.Address = common.BytesToAddress(payload[p2 : p2+length.Addr])
 			p2 += length.Addr
 			p2, auth.Nonce, err = rlp.ParseU64(payload, p2) // nonce
 			if err != nil {
@@ -542,7 +551,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
-			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority.String(), auth.Nonce})
+			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{*authority, auth.Nonce})
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
@@ -588,7 +597,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	}
 
 	if legacy {
-		preEip155 := ctx.V.Eq(u256.N27) || ctx.V.Eq(u256.N28)
+		preEip155 := ctx.V.Eq(&u256.N27) || ctx.V.Eq(&u256.N28)
 		if !preEip155 {
 			chainIDBits = ctx.ChainID.BitLen()
 			if chainIDBits <= 7 {
@@ -838,7 +847,7 @@ func getData(payload []byte, p int) ([]byte, int, error) {
 }
 
 type AuthAndNonce struct {
-	authority string
+	authority common.Address
 	nonce     uint64
 }
 

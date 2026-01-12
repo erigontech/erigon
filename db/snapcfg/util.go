@@ -28,6 +28,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
 	snapshothashes "github.com/erigontech/erigon-snapshot"
@@ -35,38 +36,35 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snaptype"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
-var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.SnapshotMainGitBranch)
+var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
+
+var cachedCfg sync.Map
 
 var (
-	Mainnet = fromEmbeddedToml(snapshothashes.Mainnet)
-	Holesky = fromEmbeddedToml(snapshothashes.Holesky)
-	Sepolia = fromEmbeddedToml(snapshothashes.Sepolia)
-	//Mumbai     = fromToml(snapshothashes.Mumbai)
+	Mainnet    = fromEmbeddedToml(snapshothashes.Mainnet)
+	Sepolia    = fromEmbeddedToml(snapshothashes.Sepolia)
 	Amoy       = fromEmbeddedToml(snapshothashes.Amoy)
 	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
 	Gnosis     = fromEmbeddedToml(snapshothashes.Gnosis)
 	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
-	ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia)
 
 	// This belongs in a generic embed.FS or something.
 	allSnapshotHashes = []*[]byte{
 		&snapshothashes.Mainnet,
-		&snapshothashes.Holesky,
 		&snapshothashes.Sepolia,
 		&snapshothashes.Amoy,
 		&snapshothashes.BorMainnet,
 		&snapshothashes.Gnosis,
 		&snapshothashes.Chiado,
 		&snapshothashes.Hoodi,
-		&snapshothashes.ArbSepolia,
 	}
 )
 
@@ -294,11 +292,7 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 		i++
 	}
 
-	end := i
-
-	if i > len(name) {
-		end = len(name)
-	}
+	end := min(i, len(name))
 
 	block, err = strconv.ParseUint(name[start:end], 10, 64)
 	if err != nil {
@@ -435,16 +429,13 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.Mainnet: Mainnet,
-	networkname.Holesky: Holesky,
-	networkname.Sepolia: Sepolia,
-	//networkname.Mumbai:     Mumbai,
-	networkname.Amoy:            Amoy,
-	networkname.BorMainnet:      BorMainnet,
-	networkname.Gnosis:          Gnosis,
-	networkname.Chiado:          Chiado,
-	networkname.Hoodi:           Hoodi,
-	networkname.ArbiturmSepolia: ArbSepolia,
+	networkname.Mainnet:    Mainnet,
+	networkname.Sepolia:    Sepolia,
+	networkname.Amoy:       Amoy,
+	networkname.BorMainnet: BorMainnet,
+	networkname.Gnosis:     Gnosis,
+	networkname.Chiado:     Chiado,
+	networkname.Hoodi:      Hoodi,
 }
 
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
@@ -493,24 +484,26 @@ func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uin
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) (*Cfg, bool) {
+	if v, ok := cachedCfg.Load(networkName); ok {
+		return v.(*Cfg), true
+	}
 	c, ok := knownPreverified[networkName]
 	if !ok {
 		return newCfg(networkName, Preverified{}), false
 	}
-	return newCfg(networkName, c.Typed(knownTypes[networkName])), true
+	cfg := newCfg(networkName, c.Typed(knownTypes[networkName]))
+	cachedCfg.Store(networkName, cfg)
+	return cfg, true
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.Mainnet: webseedsParse(webseed.Mainnet),
-	networkname.Sepolia: webseedsParse(webseed.Sepolia),
-	//networkname.Mumbai:     webseedsParse(webseed.Mumbai),
-	networkname.Amoy:            webseedsParse(webseed.Amoy),
-	networkname.BorMainnet:      webseedsParse(webseed.BorMainnet),
-	networkname.Gnosis:          webseedsParse(webseed.Gnosis),
-	networkname.Chiado:          webseedsParse(webseed.Chiado),
-	networkname.Holesky:         webseedsParse(webseed.Holesky),
-	networkname.Hoodi:           webseedsParse(webseed.Hoodi),
-	networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
+	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
+	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
+	networkname.Amoy:       webseedsParse(webseed.Amoy),
+	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
+	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
+	networkname.Chiado:     webseedsParse(webseed.Chiado),
+	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -537,7 +530,6 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 			*sh = bytes.Clone(b)
 		}
 	} else {
-		// Can't log in erigon-snapshot repo due to erigon-lib module import path.
 		log.Info("Loading remote snapshot hashes")
 
 		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
@@ -554,41 +546,32 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 
 	// Re-load the preverified hashes
 	Mainnet = fromEmbeddedToml(snapshothashes.Mainnet)
-	Holesky = fromEmbeddedToml(snapshothashes.Holesky)
-	//Mumbai = fromEmbeddedToml(snapshothashes.Mumbai)
 	Sepolia = fromEmbeddedToml(snapshothashes.Sepolia)
 	Amoy = fromEmbeddedToml(snapshothashes.Amoy)
 	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
 	Gnosis = fromEmbeddedToml(snapshothashes.Gnosis)
 	Chiado = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi = fromEmbeddedToml(snapshothashes.Hoodi)
-	ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia)
 
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
-		networkname.Mainnet: webseedsParse(webseed.Mainnet),
-		networkname.Sepolia: webseedsParse(webseed.Sepolia),
-		//networkname.Mumbai:     webseedsParse(webseed.Mumbai),
-		networkname.Amoy:            webseedsParse(webseed.Amoy),
-		networkname.BorMainnet:      webseedsParse(webseed.BorMainnet),
-		networkname.Gnosis:          webseedsParse(webseed.Gnosis),
-		networkname.Chiado:          webseedsParse(webseed.Chiado),
-		networkname.Holesky:         webseedsParse(webseed.Holesky),
-		networkname.Hoodi:           webseedsParse(webseed.Hoodi),
-		networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
+		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
+		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
+		networkname.Amoy:       webseedsParse(webseed.Amoy),
+		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
+		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
+		networkname.Chiado:     webseedsParse(webseed.Chiado),
+		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
 	}
 
 	knownPreverified = map[string]Preverified{
-		networkname.Mainnet: Mainnet,
-		networkname.Holesky: Holesky,
-		networkname.Sepolia: Sepolia,
-		//networkname.Mumbai:     Mumbai,
-		networkname.Amoy:            Amoy,
-		networkname.BorMainnet:      BorMainnet,
-		networkname.Gnosis:          Gnosis,
-		networkname.Chiado:          Chiado,
-		networkname.Hoodi:           Hoodi,
-		networkname.ArbiturmSepolia: ArbSepolia,
+		networkname.Mainnet:    Mainnet,
+		networkname.Sepolia:    Sepolia,
+		networkname.Amoy:       Amoy,
+		networkname.BorMainnet: BorMainnet,
+		networkname.Gnosis:     Gnosis,
+		networkname.Chiado:     Chiado,
+		networkname.Hoodi:      Hoodi,
 	}
 	return
 }
@@ -608,12 +591,8 @@ func GetToml(networkName string) []byte {
 	switch networkName {
 	case networkname.Mainnet:
 		return snapshothashes.Mainnet
-	case networkname.Holesky:
-		return snapshothashes.Holesky
 	case networkname.Sepolia:
 		return snapshothashes.Sepolia
-	//case networkname.Mumbai:
-	//	return snapshothashes.Mumbai
 	case networkname.Amoy:
 		return snapshothashes.Amoy
 	case networkname.BorMainnet:

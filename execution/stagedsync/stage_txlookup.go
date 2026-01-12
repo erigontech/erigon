@@ -22,20 +22,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type TxLookupCfg struct {
@@ -119,24 +119,25 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return err
 	}
 
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	if dbg.AssertEnabled {
 		err = txnLookupIntegrity(logPrefix, tx, startBlock, endBlock, ctx, cfg, logger)
 		if err != nil {
 			return fmt.Errorf("txnLookupIntegrity: %w", err)
 		}
 	}
+
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 // txnLookupTransform - [startKey, endKey)
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
-	txNumReader := cfg.blockReader.TxnumReader(context.TODO())
+	txNumReader := cfg.blockReader.TxnumReader(ctx)
 	data := make([]byte, 16)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
@@ -168,8 +169,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		Quit:            ctx.Done(),
 		ExtractStartKey: hexutil.EncodeTs(blockFrom),
 		ExtractEndKey:   hexutil.EncodeTs(blockTo),
-		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []any) {
+			return []any{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
 }
@@ -339,8 +340,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		Quit:            ctx.Done(),
 		ExtractStartKey: hexutil.EncodeTs(blockFrom),
 		ExtractEndKey:   hexutil.EncodeTs(blockTo),
-		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []any) {
+			return []any{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
 	if err != nil {

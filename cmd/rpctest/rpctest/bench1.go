@@ -25,8 +25,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 var routes map[string]string
@@ -59,7 +59,6 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
-	accounts := make(map[common.Address]struct{})
 	prevBn := blockFrom
 	storageCounter := 0
 	for bn := blockFrom; bn <= blockTo; bn++ {
@@ -88,14 +87,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			}
 		}
 
-		accounts[b.Result.Miner] = struct{}{}
-
 		for i, txn := range b.Result.Transactions {
-			accounts[txn.From] = struct{}{}
-			if txn.To != nil {
-				accounts[*txn.To] = struct{}{}
-			}
-
 			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				storageCounter++
 				if storageCounter == 100 {

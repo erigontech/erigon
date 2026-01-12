@@ -19,9 +19,9 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type IterableSSZ[T any] interface {

@@ -24,12 +24,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common/length"
 )
 
 func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	b.SetParallelism(1)
-	metricsFile = "./ericom"
 
 	rnd := rand.New(rand.NewSource(133777))
 	keysCount := rnd.Intn(100_0000)
@@ -50,19 +49,18 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	require.NoError(b, err)
 
 	hph := NewHexPatriciaHashed(length.Addr, ms)
+	hph.EnableCsvMetrics("./ericom")
 	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
 	defer upds.Close()
 
-	b.ResetTimer()
-
 	ctx := context.Background()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		if i+5 >= len(pk) {
 			i = 0
 		}
 
 		WrapKeyUpdatesInto(b, upds, pk[i:i+5], updates[i:i+5])
-		_, err := hph.Process(ctx, upds, "")
+		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(b, err)
 	}
 }

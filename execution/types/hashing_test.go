@@ -23,10 +23,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/trie"
-	"github.com/stretchr/testify/require"
 )
 
 func genTransactions(n uint64) Transactions {
@@ -104,7 +103,7 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 		valbuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
 		list.EncodeIndex(i, valbuf)
-		trie.Update(keybuf.Bytes(), common.CopyBytes(valbuf.Bytes()))
+		trie.Update(keybuf.Bytes(), common.Copy(valbuf.Bytes()))
 	}
 	return trie.Hash()
 }
@@ -115,25 +114,25 @@ var (
 )
 
 func BenchmarkLegacySmallList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		legacyDeriveSha(smallTxList)
 	}
 }
 
 func BenchmarkCurrentSmallList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		DeriveSha(smallTxList)
 	}
 }
 
 func BenchmarkLegacyLargeList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		legacyDeriveSha(largeTxList)
 	}
 }
 
 func BenchmarkCurrentLargeList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		DeriveSha(largeTxList)
 	}
 }

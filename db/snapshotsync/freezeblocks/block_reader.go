@@ -21,30 +21,31 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
+	"slices"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type RemoteBlockReader struct {
@@ -136,13 +137,13 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-func (r *RemoteBlockReader) Snapshots() snapshotsync.BlockSnapshots    { panic("not implemented") }
-func (r *RemoteBlockReader) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
-func (r *RemoteBlockReader) AllTypes() []snaptype.Type                 { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                      { panic("not supported") }
-func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64         { panic("not supported") }
-func (r *RemoteBlockReader) FrozenFiles() (list []string)              { panic("not supported") }
-func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { panic("not supported") }
+func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
+func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
+func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
+func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64     { panic("not supported") }
+func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
+func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)
@@ -374,7 +375,7 @@ type BlockReader struct {
 
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 
-func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots) *BlockReader {
+func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn}
@@ -387,8 +388,8 @@ func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshot
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
 	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
 }
-func (r *BlockReader) Snapshots() snapshotsync.BlockSnapshots { return r.sn }
-func (r *BlockReader) BorSnapshots() snapshotsync.BlockSnapshots {
+func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }
+func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
 	if r.borSn != nil {
 		return r.borSn
 	}
@@ -455,7 +456,6 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
 	}
 
-	var err error
 	dbMinBlock, err := r.findFirstCompleteBlock(tx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
@@ -464,18 +464,19 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 	return dbMinBlock, nil
 }
 
-// findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
+// findFirstCompleteBlock finds the first block (after genesis) where block body is available.
+// When no block bodies exist beyond genesis, it returns 0.
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
-	firstKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
+	secondKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
 	}
 
-	if len(firstKey) < 8 {
-		return math.MaxUint64, nil // no body data found
+	if len(secondKey) < 8 { // incomplete key, no block found
+		return 0, nil
 	}
 
-	result := binary.BigEndian.Uint64(firstKey[:8])
+	result := binary.BigEndian.Uint64(secondKey[:8])
 	return result, nil
 }
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
@@ -505,7 +506,7 @@ func (r *BlockReader) FrozenFiles() []string {
 	if r.borSn != nil {
 		files = append(files, r.borSn.Files()...)
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
@@ -940,7 +941,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
+	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, b.BlockAccessList)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
@@ -1147,6 +1148,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 		if err != nil {
 			return nil, nil, err
 		}
+		txs[i].SetSender(accounts.InternAddress(senders[i]))
 		// txs[i].SetSender(senders[i]) // TODO arbitrum
 	}
 
@@ -1169,7 +1171,7 @@ func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf
 	if err != nil {
 		return
 	}
-	txn.SetSender(*(*common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+	txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 	return
 }
 
@@ -1204,7 +1206,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 			return nil, 0, 0, false, err
 		}
 
-		txn.SetSender((common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+		txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
 		blockNum, ok := reader2.Lookup(txnHash[:])
@@ -1302,7 +1304,6 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 	view := r.sn.View()
 	defer view.Close()
 	for _, sn := range view.Bodies() {
-		sn := sn
 		defer sn.Src().MadvSequential().DisableReadAhead()
 
 		var buf []byte

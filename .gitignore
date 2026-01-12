@@ -81,6 +81,7 @@ coverage-test-all.out
 dist
 __debug_bin
 *.exe
+*.test
 
 *.log
 
@@ -110,3 +111,7 @@ mdbx.lck
 /*/**/nodekey
 
 .my
+
+*.prof
+
+.claude/settings.local.json

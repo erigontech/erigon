@@ -30,8 +30,9 @@ import (
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/gofrs/flock"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 // Dirs is the file system folder the node should use for any data storage
@@ -50,6 +51,7 @@ type Dirs struct {
 	SnapDomain       string
 	SnapAccessors    string
 	SnapCaplin       string
+	SnapForkable     string
 	Downloader       string
 	TxPool           string
 	Nodes            string
@@ -58,6 +60,7 @@ type Dirs struct {
 	CaplinIndexing   string
 	CaplinLatest     string
 	CaplinGenesis    string
+	CaplinHistory    string
 }
 
 func New(datadir string) Dirs {
@@ -71,6 +74,7 @@ func New(datadir string) Dirs {
 		dirs.SnapDomain,
 		dirs.SnapAccessors,
 		dirs.SnapCaplin,
+		//dirs.SnapForkable,
 		dirs.Downloader,
 		dirs.TxPool,
 		dirs.Nodes,
@@ -79,6 +83,8 @@ func New(datadir string) Dirs {
 		dirs.CaplinLatest,
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
+		dirs.CaplinHistory,
+		filepath.Join(datadir, "logs"),
 		dirs.ArbitrumWasm,
 	)
 
@@ -108,6 +114,7 @@ func Open(datadir string) Dirs {
 		SnapDomain:       filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:    filepath.Join(datadir, "snapshots", "accessor"),
 		SnapCaplin:       filepath.Join(datadir, "snapshots", "caplin"),
+		SnapForkable:     filepath.Join(datadir, "snapshots", "forkable"),
 		Downloader:       filepath.Join(datadir, "downloader"),
 		TxPool:           filepath.Join(datadir, "txpool"),
 		Nodes:            filepath.Join(datadir, "nodes"),
@@ -116,6 +123,7 @@ func Open(datadir string) Dirs {
 		CaplinIndexing:   filepath.Join(datadir, "caplin", "indexing"),
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
+		CaplinHistory:    filepath.Join(datadir, "caplin", "history"),
 		ArbitrumWasm:     filepath.Join(datadir, "arbitrumwasm"),
 	}
 	return dirs

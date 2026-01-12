@@ -24,15 +24,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
@@ -539,7 +539,7 @@ func TestAppendAndSortPrefixes(t *testing.T) {
 		require.NoError(collector.Collect(key1[:kl], key1[len(key):]))
 	}
 
-	sort.Strings(keys)
+	slices.Sort(keys)
 	i := 0
 
 	err := collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {

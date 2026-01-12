@@ -20,13 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,21 +32,22 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type SortedRange interface {
@@ -425,13 +424,18 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		f := s.FilePath()
 		s.closeIdx()
 		s.closeSeg()
+		toRemove := make([]string, 0, 2)
+		toRemove = append(toRemove, f)
+		for _, index := range s.indexes {
+			toRemove = append(toRemove, index.FilePath())
+		}
 
-		removeOldFiles([]string{f})
+		removeOldFiles(toRemove)
 	}
 }
 
 func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
+	if len(s.Type().IdxFileNames(s.from, s.to)) == 0 {
 		return nil
 	}
 
@@ -461,7 +465,7 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 		s.indexes = append(s.indexes, nil)
 	}
 
-	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+	for i, fileName := range s.Type().IdxFileNames(s.from, s.to) {
 		if s.indexes[i] != nil {
 			continue
 		}
@@ -493,9 +497,7 @@ type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
 	for _, seg := range s {
-		if !seg.src.frozen {
-			seg.src.refcount.Add(1)
-		}
+		seg.src.refcount.Add(1)
 	}
 	return &RoTx{Segments: s}
 }
@@ -513,7 +515,7 @@ func (s *RoTx) Close() {
 
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
-		if src == nil || src.frozen {
+		if src == nil {
 			continue
 		}
 
@@ -525,20 +527,6 @@ func (s *RoTx) Close() {
 	}
 
 	//fmt.Println("CRO", s.segments)
-}
-
-type BlockSnapshots interface {
-	LogStat(label string)
-	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
-	SegmentsMax() uint64
-	Delete(fileName string) error
-	Types() []snaptype.Type
-	Close()
-	DownloadComplete()
-	RemoveOverlaps(onDelete func(l []string) error) error
-	DownloadReady() bool
-	Ready(context.Context) <-chan error
 }
 
 type retireOperators struct {
@@ -703,12 +691,7 @@ func (s *RoSnapshots) LogStat(label string) {
 
 func (s *RoSnapshots) Types() []snaptype.Type { return s.types }
 func (s *RoSnapshots) HasType(in snaptype.Type) bool {
-	for _, t := range s.enums {
-		if t == in.Enum() {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.enums, in.Enum())
 }
 
 type ready struct {
@@ -1352,10 +1335,10 @@ type snapshotNotifier interface {
 }
 
 func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
-	if s.IndicesMax() >= s.SegmentsMax() {
-		return nil
-	}
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
+		if s.SegmentsMax() == 0 {
+			return nil
+		}
 		return errors.New("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
 	if !s.Cfg().ProduceE2 {
@@ -1368,14 +1351,17 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger); err != nil {
+	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger)
+	if err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
 
-	if err := s.OpenFolder(); err != nil {
-		return err
+	if newIdxBuilt {
+		if err := s.OpenFolder(); err != nil {
+			return err
+		}
+		s.LogStat("missed-idx:open")
 	}
-	s.LogStat("missed-idx:open")
 	if notifier != nil {
 		notifier.OnNewSnapshot()
 	}
@@ -1418,7 +1404,7 @@ func (s *RoSnapshots) delete(fileName string) error {
 }
 
 // prune visible segments
-func (s *RoSnapshots) Delete(fileName string) error {
+func (s *RoSnapshots) Delete(fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
@@ -1427,19 +1413,21 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	defer v.Close()
 
 	defer s.recalcVisibleFiles(s.alignMin)
-	if err := s.delete(fileName); err != nil {
-		return fmt.Errorf("can't delete file: %w", err)
+	for _, fileName := range fileNames {
+		if err := s.delete(fileName); err != nil {
+			return fmt.Errorf("can't delete file: %w", err)
+		}
 	}
 	return nil
 }
 
-func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
-		return nil
+		return
 	}
 
-	if _, err := snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
-		return err
+	if _, err = snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
+		return
 	}
 
 	dir, tmpDir := dirs.Snap, dirs.Tmp
@@ -1482,6 +1470,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				if t.HasIndexFiles(info, logger) {
 					continue
 				}
+				newIdxBuilt = true
 
 				segment.closeIdx()
 
@@ -1522,12 +1511,12 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	// Block main thread
 	select {
 	case <-finish:
-		if err := g.Wait(); err != nil {
-			return err
+		if err = g.Wait(); err != nil {
+			return
 		}
-		return ie
+		return newIdxBuilt, ie
 	case <-ctx.Done():
-		return ctx.Err()
+		return newIdxBuilt, ctx.Err()
 	}
 }
 
@@ -1697,15 +1686,6 @@ func removeOldFiles(toDel []string) {
 	for _, f := range toDel {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = dir.RemoveFile(withoutExt + ".idx")
-		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
-		if isTxnType {
-			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
-			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
-		}
 	}
 }
 
@@ -1719,10 +1699,10 @@ func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Ran
 		var l, lSidecars []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
+			if f.Type != nil && f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
 				continue
 			}
-			if f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
+			if f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
 				lSidecars = append(lSidecars, f) // blobs are an exception
 				continue
 			}

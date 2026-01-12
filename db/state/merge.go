@@ -28,10 +28,10 @@ import (
 
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -107,9 +107,6 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
-func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
-	return kv.Step(dt.files.EndTxNum() / dt.stepSize)
-}
 func (ht *HistoryRoTx) FirstStepNotInFiles() kv.Step {
 	return kv.Step(ht.files.EndTxNum() / ht.stepSize)
 }
@@ -244,17 +241,17 @@ func NewHistoryRanges(history MergeRange, index MergeRange) HistoryRanges {
 }
 
 func (r HistoryRanges) String(aggStep uint64) string {
-	var str string
+	var str strings.Builder
 	if r.history.needMerge {
-		str += r.history.String("hist", aggStep)
+		str.WriteString(r.history.String("hist", aggStep))
 	}
 	if r.index.needMerge {
-		if str != "" {
-			str += ", "
+		if str.Len() > 0 {
+			str.WriteString(", ")
 		}
-		str += r.index.String("idx", aggStep)
+		str.WriteString(r.index.String("idx", aggStep))
 	}
-	return str
+	return str.String()
 }
 func (r HistoryRanges) any() bool {
 	return r.history.needMerge || r.index.needMerge
@@ -332,7 +329,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.Version.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
 				return nil, nil, walkErr
 			}
 		}
@@ -502,10 +499,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if keyBuf != nil {
 			if vt != nil {
 				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-					valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
+					valBuf = append(valBuf[:0], valBufRet...)
 				}
 			}
 			if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -523,10 +521,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if keyBuf != nil {
 		if vt != nil {
 			if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-				valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+				valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 				}
+				valBuf = append(valBuf[:0], valBufRet...)
 			}
 		}
 		if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -543,7 +542,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter = nil
 	ps.Delete(p)
 
-	valuesIn = newFilesItem(r.values.from, r.values.to, dt.stepSize)
+	valuesIn = newFilesItem(r.values.from, r.values.to, dt.stepSize, dt.stepsInFrozenFile)
 	valuesIn.frozen = false
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
@@ -723,7 +722,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	comp.Close()
 	comp = nil
 
-	outItem = newFilesItem(startTxNum, endTxNum, iit.stepSize)
+	outItem = newFilesItem(startTxNum, endTxNum, iit.stepSize, iit.stepsInFrozenFile)
 	if outItem.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", iit.ii.FilenameBase, startTxNum, endTxNum, err)
 	}
@@ -803,7 +802,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
+						compressedPageValuesCount := hi.decompressor.CompressedPageValuesCount()
+
+						if hi.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+						}
+
+						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
 						break
 					}
 				}
@@ -875,7 +880,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
 		}
-		historyIn = newFilesItem(r.history.from, r.history.to, ht.stepSize)
+		historyIn = newFilesItem(r.history.from, r.history.to, ht.stepSize, ht.stepsInFrozenFile)
 		historyIn.decompressor = decomp
 		historyIn.index = index
 

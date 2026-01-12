@@ -29,9 +29,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common/dir"
+
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func prepareLoremDict(t *testing.T) *Decompressor {
@@ -169,9 +171,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 }
 
 func TestDecompressMatchOKCondensed(t *testing.T) {
-	condensePatternTableBitThreshold = 4
 	d := prepareStupidDict(t, 10000)
-	defer func() { condensePatternTableBitThreshold = 9 }()
 	defer d.Close()
 
 	g := d.MakeGetter()
@@ -536,8 +536,6 @@ func TestDecompressTorrent(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
-	condensePatternTableBitThreshold = 9
-	fmt.Printf("bit threshold: %d\n", condensePatternTableBitThreshold)
 	d, err := NewDecompressor(fpath)
 
 	require.NoError(t, err)
@@ -727,7 +725,7 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 			if g.MatchCmp(expected) != 0 {
 				g.Reset(pos)
 				word, _ := g.Next(nil)
-				if bytes.Compare(expected, word) != 0 {
+				if !bytes.Equal(expected, word) {
 					fmt.Printf("1 expected: %v, acutal %v\n", expected, word)
 				}
 				t.Fatalf("expected match: %v\n got: %v\n", expected, word)
@@ -743,7 +741,7 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 			if g.MatchCmp(nil) != 0 {
 				g.Reset(pos)
 				word, _ := g.Next(nil)
-				if bytes.Compare(expected, word) != 0 {
+				if !bytes.Equal(expected, word) {
 					fmt.Printf("2 expected: %v, acutal %v\n", expected, word)
 				}
 				t.Fatalf("expected match: %v\n got: %v\n", expected, word)

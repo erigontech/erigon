@@ -20,8 +20,8 @@ import (
 	"context"
 	"encoding/hex"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/holiman/uint256"
 )
 
@@ -101,8 +101,8 @@ func (ti SenderInfoUpdate) Type() Type {
 }
 
 type TxpoolDiagMessage struct {
-	Type    string      `json:"type"`
-	Message interface{} `json:"message"`
+	Type    string `json:"type"`
+	Message any    `json:"message"`
 }
 
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {

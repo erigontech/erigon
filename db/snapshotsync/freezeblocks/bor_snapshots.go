@@ -22,10 +22,11 @@ import (
 	"path/filepath"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/common"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -35,7 +36,13 @@ func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, e
 	return true, nil
 }
 
-func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+func (br *BlockRetire) retireBorBlocks(
+	ctx context.Context,
+	minBlockNum uint64,
+	maxBlockNum uint64,
+	lvl log.Lvl,
+	seeder downloader.SeederClient,
+) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -92,17 +99,21 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		if err := snapshots.OpenFolder(); err != nil {
 			return blocksRetired, fmt.Errorf("reopen: %w", err)
 		}
-		snapshots.LogStat("bor:retire")
+		//snapshots.LogStat("bor:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
 	}
 
-	merged, err := br.MergeBorBlocks(ctx, lvl, seedNewSnapshots, onDelete)
+	merged, err := br.MergeBorBlocks(ctx, lvl, seeder)
 	return blocksRetired || merged, err
 }
 
-func (br *BlockRetire) MergeBorBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (mergedBlocks bool, err error) {
+func (br *BlockRetire) MergeBorBlocks(
+	ctx context.Context,
+	lvl log.Lvl,
+	seeder downloader.SeederClient,
+) (mergedBlocks bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
 	snapshots := br.borSnapshots()
 	chainConfig := fromdb.ChainConfig(br.db)
@@ -114,22 +125,13 @@ func (br *BlockRetire) MergeBorBlocks(ctx context.Context, lvl log.Lvl, seedNewS
 	if len(rangesToMerge) == 0 {
 		return false, nil
 	}
-	onMerge := func(r snapshotsync.Range) error {
+	onMerge := func(mergedFiles []string) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
-
-		if seedNewSnapshots != nil {
-			downloadRequest := []snapshotsync.DownloadRequest{
-				snapshotsync.NewDownloadRequest("", ""),
-			}
-			if err := seedNewSnapshots(downloadRequest); err != nil {
-				return err
-			}
-		}
-		return nil
+		return seeder.Seed(ctx, mergedFiles)
 	}
-	if err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete); err != nil {
+	if err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 

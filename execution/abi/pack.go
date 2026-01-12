@@ -25,8 +25,8 @@ import (
 	"math/big"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // packBytesSlice packs the given bytes as [L, V] as the canonical representation
@@ -59,7 +59,7 @@ func packElement(t Type, reflectValue reflect.Value) ([]byte, error) {
 		if reflectValue.Kind() == reflect.Array {
 			reflectValue = mustArrayToByteSlice(reflectValue)
 		}
-		if reflectValue.Type() != reflect.TypeOf([]byte{}) {
+		if reflectValue.Type() != reflect.TypeFor[[]byte]() {
 			return []byte{}, errors.New("bytes type is neither slice nor array")
 		}
 		return packBytesSlice(reflectValue.Bytes(), reflectValue.Len()), nil

@@ -37,12 +37,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	datadir2 "github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -85,9 +86,9 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
+	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	//cfg.hist.historyValuesOnCompressedPage = 16
-	d, err := NewDomain(cfg, aggStep, dirs, logger)
+	d, err := NewDomain(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	d.salt.Store(&salt)
 	require.NoError(t, err)
 	d.DisableFsync()
@@ -203,7 +204,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
 		require.True(t, strings.HasSuffix(c.historyPath, "v1.1"+
 			"-accounts.0-1.v"))
@@ -370,10 +371,9 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.Equal(t, p2, v)
 }
 
-func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
+func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
 	t.Helper()
 	require := require.New(t)
-	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
@@ -412,6 +412,13 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	require.NoError(err)
 	err = tx.Commit()
 	require.NoError(err)
+	return txs
+}
+
+func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
+	t.Helper()
+	db, d := testDbAndDomain(t, logger)
+	txs := fillDomain(t, d, db, logger)
 	return db, d, txs
 }
 
@@ -505,7 +512,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 	}
 	var r DomainRanges
-	maxSpan := d.stepSize * config3.StepsInFrozenFile
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
 
 	for {
 		if stop := func() bool {
@@ -557,7 +564,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 		dc.Close()
 	}
 
-	maxSpan := d.stepSize * config3.StepsInFrozenFile
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
 	for {
 		dc := d.BeginFilesRo()
 		r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan)
@@ -773,7 +780,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
-	maxFrozenFiles := (txCount / dom.stepSize) / config3.StepsInFrozenFile
+	maxFrozenFiles := (txCount / dom.stepSize) / config3.DefaultStepsInFrozenFile
 
 	ctx := context.Background()
 	roTx, err := db.BeginRo(ctx)
@@ -1060,10 +1067,10 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	salt := uint32(1)
 	dirs := datadir2.New(os.TempDir())
 	cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
-	cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
+	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
 
-	d, err := NewDomain(cfg, aggStep, dirs, log.New())
+	d, err := NewDomain(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -1142,7 +1149,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1.1-accounts.0-1.v"))
 	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.Hist.HistoryValuesOnCompressedPage), c.historyComp.Count())
@@ -1218,7 +1225,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts3.SerialiseV3(&acc)
@@ -1319,7 +1326,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 
 	var k [8]byte
 	var v [8]byte
-	maxFrozenFiles := (txCount / d.stepSize) / config3.StepsInFrozenFile
+	maxFrozenFiles := (txCount / d.stepSize) / config3.DefaultStepsInFrozenFile
 	prev := map[string]string{}
 
 	// key 0: only in frozen file 0
@@ -2516,4 +2523,70 @@ func TestCanBuild(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, canBuild)
 	_ = writer.PutWithPrev(k, hexutil.EncodeTs(d.stepSize*2+1), d.stepSize*2, nil, 0)
+}
+
+func TestTraceKey_SmallVals(t *testing.T) {
+	testTraceKey(t, false)
+}
+
+func TestTraceKey_LargeVals(t *testing.T) {
+	testTraceKey(t, true)
+}
+
+func testTraceKey(t *testing.T, largeVals bool) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	db, d := testDbAndDomain(t, logger)
+	d.HistoryLargeValues = largeVals
+
+	txs := fillDomain(t, d, db, logger)
+	collateAndMerge(t, db, nil, d, txs)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+
+	dc2 := d.BeginFilesRo()
+	defer dc2.Close()                                                        // need to have different HistoryFilesRo for HistorySeek (because it changes internal state)
+	randfn := func(till uint64) uint64 { return 1 + (rand.Uint64() % till) } // [1,till]
+
+	key := randfn(20) // [1-20] random key
+	// key := uint64(5)
+	t.Logf("using key: %d", key)
+	keyBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(keyBytes, key)
+	from, to := uint64(1), uint64(0)
+	for from >= to {
+		from, to = randfn(100), randfn(1000)
+	}
+
+	// from, to := uint64(18), uint64(19)
+	t.Logf("from: %d, to: %d", from, to)
+	it, err := dc.TraceKey(ctx, keyBytes, from, to, roTx)
+	require.NoError(t, err)
+	defer it.Close()
+
+	i := uint64(math.Ceil(float64(from)/float64(key))) * key
+	count := uint64(0)
+	for it.HasNext() {
+		txNum, val, err := it.Next()
+		require.NoError(t, err)
+
+		require.Equal(t, i, txNum)
+		sval, ok, err := dc2.GetAsOf(keyBytes, txNum+1, roTx)
+		require.NoError(t, err)
+		require.True(t, ok)
+		fmt.Println(hexutil.Encode(val), hexutil.Encode(sval))
+		require.Equal(t, sval, val)
+		i += key
+		count++
+	}
+
+	require.Equal(t, (to-1)/key-(from-1)/key, count)
 }

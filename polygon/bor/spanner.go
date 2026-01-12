@@ -20,25 +20,26 @@ import (
 	"encoding/hex"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 //go:generate mockgen -typed=true -destination=./spanner_mock.go -package=bor . Spanner
 type Spanner interface {
-	GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error)
-	CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error
+	GetCurrentSpan(syscall rules.SystemCall) (*heimdall.Span, error)
+	CommitSpan(heimdallSpan heimdall.Span, syscall rules.SystemCall) error
 }
 
 type ABI interface {
-	Pack(name string, args ...interface{}) ([]byte, error)
-	UnpackIntoInterface(v interface{}, name string, data []byte) error
+	Pack(name string, args ...any) ([]byte, error)
+	UnpackIntoInterface(v any, name string, data []byte) error
 }
 
 type ChainSpanner struct {
@@ -61,7 +62,7 @@ func NewChainSpanner(validatorSet ABI, chainConfig *chain.Config, withoutHeimdal
 }
 
 // GetCurrentSpan get current span from contract
-func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error) {
+func (c *ChainSpanner) GetCurrentSpan(syscall rules.SystemCall) (*heimdall.Span, error) {
 	// method
 	const method = "getCurrentSpan"
 
@@ -71,7 +72,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.S
 		return nil, err
 	}
 
-	result, err := syscall(common.HexToAddress(c.borConfig.ValidatorContract), data)
+	result, err := syscall(accounts.InternAddress(common.HexToAddress(c.borConfig.ValidatorContract)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,7 @@ type ChainHeaderReader interface {
 	FrozenBlocks() uint64
 }
 
-func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
+func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall rules.SystemCall) error {
 	// method
 	const method = "commitSpan"
 
@@ -148,7 +149,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.
 		return err
 	}
 
-	_, err = syscall(common.HexToAddress(c.borConfig.ValidatorContract), data)
+	_, err = syscall(accounts.InternAddress(common.HexToAddress(c.borConfig.ValidatorContract)), data)
 
 	return err
 }

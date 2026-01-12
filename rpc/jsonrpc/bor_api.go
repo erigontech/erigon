@@ -20,9 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -31,7 +32,7 @@ import (
 // BorAPI Bor specific routines
 type BorAPI interface {
 	GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error)
-	GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error)
+	GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Address, error)
 	GetSnapshotAtHash(hash common.Hash) (*Snapshot, error)
 	GetSigners(number *rpc.BlockNumber) ([]common.Address, error)
 	GetSignersAtHash(hash common.Hash) ([]common.Address, error)
@@ -65,7 +66,7 @@ func NewBorAPI(base *BaseAPI, db kv.TemporalRoDB, spanProducersReader spanProduc
 func (api *BorImpl) bor() (*bor.Bor, error) {
 	type lazy interface {
 		HasEngine() bool
-		Engine() consensus.EngineReader
+		Engine() rules.EngineReader
 	}
 
 	switch engine := api.engine().(type) {
@@ -79,5 +80,5 @@ func (api *BorImpl) bor() (*bor.Bor, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("unknown or invalid consensus engine: %T", api.engine())
+	return nil, fmt.Errorf("unknown or invalid rules engine: %T", api.engine())
 }

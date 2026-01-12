@@ -76,7 +76,7 @@ func TestMultiAddressBuilderWithID(t *testing.T) {
 	}
 }
 
-// TODO: reimplement this test with the new erigon-lib rlp decoder at some point
+// TODO: reimplement this test with the new RLP decoder at some point
 //func TestConvertToMultiAddr(t *testing.T) {
 //	var r enr.Record
 //	if err := rlp.DecodeBytes(pyRecord, &r); err != nil {

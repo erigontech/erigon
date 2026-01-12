@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // go test -trimpath -v -fuzz=FuzzRecSplit -fuzztime=10s ./recsplit

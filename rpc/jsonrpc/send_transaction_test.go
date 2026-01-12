@@ -26,20 +26,21 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stages"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -47,7 +48,7 @@ import (
 
 // Do 1 step to start txPool
 func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
-	chain, err := core.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
@@ -76,7 +77,19 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, wrap.NewTxContainer(nil, nil), mockSentry.Sync, initialCycle, firstCycle, log.New(), mockSentry.BlockReader, nil); err != nil {
+
+	if err := mockSentry.DB.UpdateTemporal(mockSentry.Ctx, func(tx kv.TemporalRwTx) error {
+		sd, err := execctx.NewSharedDomains(mockSentry.Ctx, tx, log.Root())
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		if err := stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, sd, tx, mockSentry.Sync, initialCycle, firstCycle, log.New(), mockSentry.BlockReader, nil); err != nil {
+			return err
+		}
+
+		return sd.Flush(mockSentry.Ctx, tx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -181,7 +194,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
-	return pricedTransaction(nonce, gaslimit, u256.Num1, key)
+	return pricedTransaction(nonce, gaslimit, &u256.Num1, key)
 }
 
 func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {

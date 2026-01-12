@@ -19,9 +19,9 @@ package rpctest
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 const (
@@ -69,7 +69,7 @@ type EthSendRawTransaction struct {
 
 type EthTxPool struct {
 	CommonResponse
-	Result interface{} `json:"result"`
+	Result any `json:"result"`
 }
 
 type EthBlockByNumberResult struct {
@@ -151,9 +151,9 @@ type TraceCallTraceResult struct {
 }
 
 type TraceCallStateDiff struct {
-	Balance interface{}                                          `json:"balance"`
-	Nonce   interface{}                                          `json:"nonce"`
-	Code    interface{}                                          `json:"code"`
+	Balance any                                                  `json:"balance"`
+	Nonce   any                                                  `json:"nonce"`
+	Code    any                                                  `json:"code"`
 	Storage map[common.Hash]map[string]TraceCallStateDiffStorage `json:"storage"`
 }
 

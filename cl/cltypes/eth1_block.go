@@ -23,15 +23,15 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -293,8 +293,8 @@ func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.getSchema()...)
 }
 
-func (b *Eth1Block) getSchema() []interface{} {
-	s := []interface{}{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+func (b *Eth1Block) getSchema() []any {
+	s := []any{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
 		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, b.Withdrawals)
@@ -383,6 +383,6 @@ func (b *Eth1Block) Body() *types.RawBody {
 	})
 	return &types.RawBody{
 		Transactions: b.Transactions.UnderlyngReference(),
-		Withdrawals:  types.Withdrawals(withdrawals),
+		Withdrawals:  withdrawals,
 	}
 }

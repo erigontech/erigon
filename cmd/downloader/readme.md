@@ -136,7 +136,7 @@ Downloader does:
 
 - Read .torrent files, download everything described by .torrent files
 - Use https://github.com/ngosang/trackerslist
-  see [./downloader/util.go](../../erigon-lib/downloader/util.go)
+  see [./downloader/util.go](../../db/downloader/util.go)
 - automatically seeding
 
 Technical details:

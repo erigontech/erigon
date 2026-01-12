@@ -7,13 +7,23 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+)
+
+const (
+	Headers                = "headers"
+	Bodies                 = "bodies"
+	Transactions           = "transactions"
+	HeadersIdx             = "headers"
+	BodiesIdx              = "bodies"
+	TransactionsIdx        = "transactions"
+	TransactionsToBlockIdx = "transactions-to-block"
 )
 
 // AggSetters interface - allow break deps to `state` package and keep all biz-logic in current package
@@ -76,16 +86,20 @@ func init() {
 }
 
 type SchemaGen struct {
-	AccountsDomain   DomainCfg
-	StorageDomain    DomainCfg
-	CodeDomain       DomainCfg
-	CommitmentDomain DomainCfg
-	ReceiptDomain    DomainCfg
-	RCacheDomain     DomainCfg
-	LogAddrIdx       InvIdxCfg
-	LogTopicIdx      InvIdxCfg
-	TracesFromIdx    InvIdxCfg
-	TracesToIdx      InvIdxCfg
+	AccountsDomain        DomainCfg
+	StorageDomain         DomainCfg
+	CodeDomain            DomainCfg
+	CommitmentDomain      DomainCfg
+	ReceiptDomain         DomainCfg
+	RCacheDomain          DomainCfg
+	LogAddrIdx            InvIdxCfg
+	LogTopicIdx           InvIdxCfg
+	TracesFromIdx         InvIdxCfg
+	TracesToIdx           InvIdxCfg
+	HeadersBlock          BlockDataFilesCfg
+	TransactionsBlock     BlockDataFilesCfg
+	BodiesBlock           BlockDataFilesCfg
+	TxnHash2BlockNumBlock BlockIdxFilesCfg
 }
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
@@ -102,6 +116,10 @@ func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 			return nil, err
 		}
 		return s.GetIICfg(ii), nil
+	case Bodies, Headers, Transactions:
+		return s.GetBlockDataFilesCfg(name), nil
+	case TransactionsToBlockIdx:
+		return s.GetBlockIdxFilesCfg(name), nil
 	default:
 		return nil, fmt.Errorf("unknown schema version '%s'", name)
 	}
@@ -141,6 +159,30 @@ func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) InvIdxCfg {
 		v = s.TracesToIdx
 	default:
 		v = InvIdxCfg{}
+	}
+	return v
+}
+
+func (s *SchemaGen) GetBlockDataFilesCfg(name string) BlockDataFilesCfg {
+	var v BlockDataFilesCfg
+	switch name {
+	case Bodies:
+		v = s.BodiesBlock
+	case Transactions:
+		v = s.TransactionsBlock
+	case Headers:
+		v = s.HeadersBlock
+	default:
+	}
+	return v
+}
+
+func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
+	var v BlockIdxFilesCfg
+	switch name {
+	case TransactionsToBlockIdx:
+		v = s.TxnHash2BlockNumBlock
+	default:
 	}
 	return v
 }
@@ -221,7 +263,7 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
-			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: HistoryCompressCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			HistoryIdx: kv.CommitmentHistoryIdx,
 			Accessors:  AccessorHashMap,
 
@@ -268,9 +310,9 @@ var Schema = SchemaGen{
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 		Hist: HistCfg{
-			ValuesTable: kv.TblRCacheHistoryVals,
-			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-			Accessors:   AccessorHashMap,
+			ValuesTable:   kv.TblRCacheHistoryVals,
+			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,
 			HistoryIdx:         kv.RCacheHistoryIdx,
@@ -371,8 +413,8 @@ func AdjustReceiptCurrentVersionIfNeeded(dirs datadir.Dirs, logger log.Logger) e
 		logger.Info("adjusting receipt current version to v1.1")
 
 		// else v1.0 -- need to adjust version
-		Schema.ReceiptDomain.Version.DataKV = version.V1_1_standart
-		Schema.ReceiptDomain.Hist.Version.DataV = version.V1_1_standart
+		Schema.ReceiptDomain.FileVersion.DataKV = version.V1_1_standart
+		Schema.ReceiptDomain.Hist.FileVersion.DataV = version.V1_1_standart
 
 		return nil
 	})

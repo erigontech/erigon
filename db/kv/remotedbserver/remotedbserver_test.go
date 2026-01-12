@@ -25,10 +25,10 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 )
 
 func TestKvServer_renew(t *testing.T) {
@@ -37,7 +37,8 @@ func TestKvServer_renew(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	require, ctx, db := require.New(t), context.Background(), memdb.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	require, ctx, db := require.New(t), context.Background(), temporaltest.NewTestDB(t, dirs)
 	require.NoError(db.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
@@ -56,7 +57,7 @@ func TestKvServer_renew(t *testing.T) {
 			return err
 		}
 		var c, c2 kv.Cursor
-		if err = s.with(id, func(tx kv.Tx) error {
+		if err = s.with(id, func(tx kv.TemporalTx) error {
 			c, err = tx.Cursor(kv.TblAccountVals)
 			return err
 		}); err != nil {
@@ -71,7 +72,7 @@ func TestKvServer_renew(t *testing.T) {
 			return err
 		}
 
-		if err = s.with(id, func(tx kv.Tx) error {
+		if err = s.with(id, func(tx kv.TemporalTx) error {
 			c, err = tx.Cursor(kv.TblAccountVals)
 			if err != nil {
 				return err

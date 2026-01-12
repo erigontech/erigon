@@ -22,11 +22,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/erigontech/erigon/spectest"
-
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/spectest/spectest"
 )
 
 var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {

@@ -28,21 +28,21 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -380,12 +380,12 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(7)
+		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(8)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Len(t, result, 38)
+		require.Len(t, result, 37)
 
-		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(9)
+		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(10)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 40)
@@ -395,23 +395,23 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
-	})
-	t.Run("invalid input", func(t *testing.T) {
-		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(11)
-		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
-		require.Error(t, err)
 
-		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(1_000_000)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
-		require.Error(t, err)
-
-		n = rpc.BlockNumber(0)
-		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		// latest block is 11, should work both ways: [11,12) and [11,nil)
+		n2 = rpc.BlockNumber(12)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
+		require.NoError(t, err)
+		require.Len(t, result, 3)
+	})
+	t.Run("invalid input", func(t *testing.T) {
+		n := rpc.BlockNumber(1_000_000)
+		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.Error(t, err)
 
-		n = rpc.BlockNumber(1_000_000)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		n = rpc.BlockNumber(11)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n)
 		require.Error(t, err)
 	})
 }
@@ -557,8 +557,8 @@ func TestGetBadBlocks(t *testing.T) {
 		signer1 := types.MakeSigner(chainspec.Mainnet.Config, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
-				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
-				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number, testAddr, &u256.Num1, 1, &u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, &u256.Num1, 2, &u256.Num1, nil), *signer1),
 			},
 			Uncles: []*types.Header{{Extra: []byte("test header")}},
 		}

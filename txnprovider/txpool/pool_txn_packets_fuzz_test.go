@@ -19,8 +19,8 @@ package txpool
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/u256"
 )
 
 func FuzzPooledTransactions66(f *testing.F) {
@@ -30,7 +30,7 @@ func FuzzPooledTransactions66(f *testing.F) {
 	f.Add(hexutil.MustDecodeHex("e8bfffffffffffffffffffffffff71e866666666955ef90c91f9fa08f96ebfbfbf007d765059effe33"))
 	f.Fuzz(func(t *testing.T, in []byte) {
 		t.Parallel()
-		ctx := NewTxnParseContext(*u256.N1)
+		ctx := NewTxnParseContext(u256.N1)
 		slots := TxnSlots{}
 		reqId, _, err := ParsePooledTransactions66(in, 0, ctx, &slots, nil)
 		if err != nil {
@@ -42,9 +42,6 @@ func FuzzPooledTransactions66(f *testing.F) {
 			rlpTxns = append(rlpTxns, slots.Txns[i].Rlp)
 		}
 		_ = EncodePooledTransactions66(rlpTxns, reqId, nil)
-		if err != nil {
-			t.Skip()
-		}
 	})
 }
 

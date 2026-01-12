@@ -25,8 +25,8 @@ import (
 	"math/big"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 type bytesBacked interface {

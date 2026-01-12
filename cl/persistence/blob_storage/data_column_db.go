@@ -8,13 +8,13 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/spf13/afero"
 )
 
@@ -67,6 +67,9 @@ func dataColumnFilePath(slot uint64, blockRoot common.Hash, columnIndex uint64) 
 }
 
 func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
+	// Ensure BlockRoot and Slot are set (they're not part of SSZ schema)
+	columnData.BlockRoot = blockRoot
+	columnData.Slot = columnData.SignedBlockHeader.Header.Slot
 	lock := s.acquireLock(columnData.SignedBlockHeader.Header.Slot)
 	lock.Lock()
 	defer lock.Unlock()
@@ -95,7 +98,7 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	}
 
 	fh.Close()
-	s.emitters.Operation().SendDataColumnSidecar(columnData)
+	s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
 	log.Trace("wrote data column sidecar", "slot", columnData.SignedBlockHeader.Header.Slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	return nil
 }
@@ -115,6 +118,9 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(fh, data, version); err != nil {
 		return nil, err
 	}
+	// BlockRoot and Slot are not part of SSZ schema, set them from parameters
+	data.BlockRoot = blockRoot
+	data.Slot = slot
 	return data, nil
 }
 

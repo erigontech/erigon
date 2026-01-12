@@ -27,10 +27,10 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // BenchEthGetLogs compares response of Erigon with Geth
@@ -203,7 +203,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				if failFast {
 					return fmt.Errorf("error getting modified accounts (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
 				} else {
-					log.Error("[ethGetLogsInvariants]", "error getting modified accounts (Erigon)", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
+					log.Error("[ethGetLogsInvariants] error getting modified accounts (Erigon)", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
 				}
 			}
 			if err := noDuplicates(resp.Result); err != nil {

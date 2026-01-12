@@ -22,15 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -42,39 +40,31 @@ import (
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
-	var indicies []uint64
+	// Check per-state cache first
 	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
 		return cachedIndicies
 	}
 
-	numWorkers := runtime.NumCPU()
-	wp := threading.NewParallelExecutor()
-	indiciesShards := make([][]uint64, numWorkers)
-	shardsJobSize := b.ValidatorLength() / numWorkers
-
-	for i := 0; i < numWorkers; i++ {
-		start := i * shardsJobSize
-		end := (i + 1) * shardsJobSize
-		if i == numWorkers-1 || end > b.ValidatorLength() {
-			end = b.ValidatorLength()
+	// Check global cache using block root at beginning of previous epoch
+	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
+	if err == nil {
+		if cachedIndicies, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && len(cachedIndicies) > 0 {
+			b.activeValidatorsCache.Add(epoch, cachedIndicies)
+			return cachedIndicies
 		}
-		indiciesShards[i] = make([]uint64, 0, end-start)
-		workerID := i
-		wp.AddWork(func() error {
-			for j := start; j < end; j++ {
-				if b.ValidatorSet().Get(j).Active(epoch) {
-					indiciesShards[workerID] = append(indiciesShards[workerID], uint64(j))
-				}
-			}
-			return nil
-		})
 	}
 
-	wp.Execute()
-	for i := 0; i < numWorkers; i++ {
-		indicies = append(indicies, indiciesShards[i]...)
+	// Compute active validators
+	indicies := make([]uint64, 0, b.ValidatorLength())
+	for i := 0; i < b.ValidatorLength(); i++ {
+		if b.ValidatorSet().Get(i).Active(epoch) {
+			indicies = append(indicies, uint64(i))
+		}
 	}
+
+	// Store in both caches (totalActiveBalance will be set by _refreshActiveBalancesIfNeeded)
 	b.activeValidatorsCache.Add(epoch, indicies)
+
 	return indicies
 }
 
@@ -222,12 +212,9 @@ func (b *CachingBeaconState) SyncRewards() (proposerReward, participantReward ui
 
 // CommitteeCount returns current number of committee for epoch.
 func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
-	committeCount := min(b.BeaconConfig().MaxCommitteesPerSlot, uint64(
+	committeCount := max(min(b.BeaconConfig().MaxCommitteesPerSlot, uint64(
 		len(b.GetActiveValidatorsIndices(epoch)),
-	)/b.BeaconConfig().SlotsPerEpoch/b.BeaconConfig().TargetCommitteeSize)
-	if committeCount < 1 {
-		committeCount = 1
-	}
+	)/b.BeaconConfig().SlotsPerEpoch/b.BeaconConfig().TargetCommitteeSize), 1)
 	return committeCount
 }
 

@@ -3,7 +3,7 @@ package fork_graph
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 type participationIndiciesStore struct {
@@ -32,7 +32,7 @@ func (p *participationIndiciesStore) add(epoch uint64, participations []byte) {
 
 func (p *participationIndiciesStore) prune(epoch uint64) {
 	// iterate over the map and delete all keys less or equal than epoch
-	p.s.Range(func(key, value interface{}) bool {
+	p.s.Range(func(key, value any) bool {
 		if key.(uint64) <= epoch {
 			p.s.Delete(key)
 		}

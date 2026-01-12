@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -41,11 +40,13 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -145,6 +146,10 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		return nil
 	}).AnyTimes()
 
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
 	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
 		logger,
@@ -177,7 +182,9 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		proposerSlashingService,
 		nil,
 		nil,
+		gossipManager,
 		false,
+		nil,
 	) // TODO: add tests
 	h.Init()
 	return

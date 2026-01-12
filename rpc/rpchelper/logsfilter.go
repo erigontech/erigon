@@ -17,13 +17,14 @@
 package rpchelper
 
 import (
+	"slices"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/concurrent"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 type LogsFilterAggregator struct {
@@ -44,12 +45,6 @@ type LogsFilter struct {
 	topics         *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
 	sender         Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
-}
-
-// Send sends a log to the subscriber represented by the LogsFilter.
-// It forwards the log to the subscriber's sender.
-func (l *LogsFilter) Send(lg *types.Log) {
-	l.sender.Send(lg)
 }
 
 // Close closes the sender associated with the LogsFilter.
@@ -102,6 +97,15 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 	}
 	a.subtractLogFilters(filter)
 	return true
+}
+
+// hasLogsFilter checks if a log filter identified by filterId is present in the LogsFilterAggregator.
+func (a *LogsFilterAggregator) hasLogsFilter(filterId LogsSubID) bool {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+
+	_, ok := a.logsFilters.Get(filterId)
+	return ok
 }
 
 // createFilterRequest creates a LogsFilterRequest from the current state of the LogsFilterAggregator.
@@ -279,14 +283,10 @@ func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []comm
 		return false
 	}
 	for i, sub := range filter.topicsOriginal {
-		match := len(sub) == 0 // empty rule set == wildcard
-		for _, topic := range sub {
-			if logTopics[i] == topic {
-				match = true
-				break
-			}
+		if len(sub) == 0 { // empty rule set == wildcard
+			continue // Match any topic, so continue to next position
 		}
-		if !match {
+		if !slices.Contains(sub, logTopics[i]) {
 			return false
 		}
 	}

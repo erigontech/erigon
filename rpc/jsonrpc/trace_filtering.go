@@ -23,30 +23,37 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/consensuschain"
-	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/protocol"
+	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/node/shards"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
+)
+
+const (
+	rewardTraceType = "reward"
+	rewardTypeBlock = "block"
+	rewardTypeUncle = "uncle"
 )
 
 // Transaction implements trace_transaction
@@ -153,16 +160,16 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	return nil, err
 }
 
-func rewardKindToString(kind consensus.RewardKind) string {
+func rewardKindToString(kind protocolrules.RewardKind) string {
 	switch kind {
-	case consensus.RewardAuthor:
-		return "block"
-	case consensus.RewardEmptyStep:
+	case protocolrules.RewardAuthor:
+		return rewardTypeBlock
+	case protocolrules.RewardEmptyStep:
 		return "emptyStep"
-	case consensus.RewardExternal:
+	case protocolrules.RewardExternal:
 		return "external"
-	case consensus.RewardUncle:
-		return "uncle"
+	case protocolrules.RewardUncle:
+		return rewardTypeUncle
 	default:
 		return "unknown"
 	}
@@ -226,7 +233,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	for _, r := range rewards {
 		var tr ParityTrace
 		rewardAction := &RewardTraceAction{}
-		rewardAction.Author = r.Beneficiary
+		rewardAction.Author = r.Beneficiary.Value()
 		rewardAction.RewardType = rewardKindToString(r.Kind)
 		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
 		tr.Action = rewardAction
@@ -234,7 +241,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		copy(tr.BlockHash[:], block.Hash().Bytes())
 		tr.BlockNumber = new(uint64)
 		*tr.BlockNumber = block.NumberU64()
-		tr.Type = "reward" // nolint: goconst
+		tr.Type = rewardTraceType
 		tr.TraceAddress = []int{}
 		out = append(out, tr)
 	}
@@ -385,8 +392,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
 
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
 	isPos := false
 	for it.HasNext() {
@@ -465,14 +470,14 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				var tr ParityTrace
 				var rewardAction = &RewardTraceAction{}
 				rewardAction.Author = lastHeader.Coinbase
-				rewardAction.RewardType = "block" // nolint: goconst
+				rewardAction.RewardType = rewardTypeBlock
 				rewardAction.Value.ToInt().Set(minerReward.ToBig())
 				tr.Action = rewardAction
 				tr.BlockHash = &common.Hash{}
 				copy(tr.BlockHash[:], lastBlockHash.Bytes())
 				tr.BlockNumber = new(uint64)
 				*tr.BlockNumber = blockNum
-				tr.Type = "reward" // nolint: goconst
+				tr.Type = rewardTraceType
 				tr.TraceAddress = []int{}
 				b, err := json.Marshal(tr)
 				if err != nil {
@@ -505,14 +510,14 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 						var tr ParityTrace
 						rewardAction := &RewardTraceAction{}
 						rewardAction.Author = uncle.Coinbase
-						rewardAction.RewardType = "uncle" // nolint: goconst
+						rewardAction.RewardType = rewardTypeUncle
 						rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
 						tr.Action = rewardAction
 						tr.BlockHash = &common.Hash{}
 						copy(tr.BlockHash[:], lastBlockHash[:])
 						tr.BlockNumber = new(uint64)
 						*tr.BlockNumber = blockNum
-						tr.Type = "reward" // nolint: goconst
+						tr.Type = rewardTraceType
 						tr.TraceAddress = []int{}
 						b, err := json.Marshal(tr)
 						if err != nil {
@@ -576,12 +581,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 
-		stateReader.SetTxNum(txNum)
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(stateReader, stateCache)
-		//cachedReader := stateReader
+		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
-		//cachedWriter := noop
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
@@ -597,10 +599,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		txCtx := core.NewEVMTxContext(msg)
+		txCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(blockNum, txIndex)
 		ibs.SetHooks(ot.Tracer().Hooks)
 
@@ -609,7 +611,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 
 		var execResult *evmtypes.ExecutionResult
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
 		if err != nil {
 			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 				ot.Tracer().OnTxEnd(nil, err)
@@ -685,7 +687,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 	}
 	stream.WriteArrayEnd()
-	return stream.Flush()
+	return nil
 }
 
 func filterTrace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}, isIntersectionMode bool) bool {
@@ -723,7 +725,7 @@ func (api *TraceAPIImpl) callBlock(
 	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
-) ([]*TraceCallResult, consensus.SystemCall, error) {
+) ([]*TraceCallResult, protocolrules.SystemCall, error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
 	if pNo > 0 {
@@ -774,9 +776,9 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
+	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -817,8 +819,8 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, cmErr
 	}
 
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		ret, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+		ret, err := protocol.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
 
@@ -888,9 +890,9 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
+	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, err
 	}

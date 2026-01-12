@@ -24,16 +24,17 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -80,22 +81,23 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *dbstate.SharedDomains, accounts types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
+func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.SharedDomains, alloc types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
 	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	statedb := state.New(stateReader) //ibs
-	for addr, a := range accounts {
-		statedb.SetCode(addr, a.Code)
-		statedb.SetNonce(addr, a.Nonce)
+	for address, account := range alloc {
+		addr := accounts.InternAddress(address)
+		statedb.SetCode(addr, account.Code)
+		statedb.SetNonce(addr, account.Nonce)
 		var balance uint256.Int
-		_ = balance.SetFromBig(a.Balance)
+		_ = balance.SetFromBig(account.Balance)
 		statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
-		for k, v := range a.Storage {
-			key := k
+		for k, v := range account.Storage {
+			key := accounts.InternKey(k)
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
 			statedb.SetState(addr, key, *val)
 		}
 
-		if len(a.Code) > 0 || len(a.Storage) > 0 {
+		if len(account.Code) > 0 || len(account.Storage) > 0 {
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 		}
 	}
@@ -123,7 +125,7 @@ func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64
 		ParentHash: common.Hash{},
 		UncleHash:  uncleHash,
 		Difficulty: parentDifficulty,
-		Number:     new(big.Int).SetUint64(number - 1),
+		Number:     new(big.Int).SetUint64(number - 1), // nolint:govet
 		Time:       parentTime,
 	}
 	return ethash.CalcDifficulty(config, currentTime, parent.Time, parent.Difficulty, number-1, parent.UncleHash)

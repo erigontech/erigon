@@ -17,24 +17,15 @@
 package buildercfg
 
 import (
-	"crypto/ecdsa"
-	"math/big"
-	"time"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
-// MiningConfig is the configuration parameters of mining.
+// MiningConfig is the configuration parameters of block building.
 type MiningConfig struct {
-	Enabled    bool
-	EnabledPOS bool
-	Noverify   bool              // Disable remote mining solution verification(only useful in ethash).
-	Etherbase  common.Address    `toml:",omitempty"` // Public address for block mining rewards
-	SigKey     *ecdsa.PrivateKey // ECDSA private key for signing blocks
-	Notify     []string          `toml:",omitempty"` // HTTP URL list to be notified of new work packages(only useful in ethash).
-	ExtraData  hexutil.Bytes     `toml:",omitempty"` // Block extra data set by the miner
-	GasLimit   *uint64           // Target gas limit for mined blocks.
-	GasPrice   *big.Int          // Minimum gas price for mining a transaction
-	Recommit   time.Duration     // The time interval for miner to re-create mining work.
+	EnabledPOS       bool
+	Etherbase        common.Address `toml:",omitempty"` // Public address for block building rewards
+	ExtraData        hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the block builder
+	GasLimit         *uint64        // Target gas limit for built blocks
+	MaxBlobsPerBlock *uint64        // Cap the number of blob transactions included in a block
 }

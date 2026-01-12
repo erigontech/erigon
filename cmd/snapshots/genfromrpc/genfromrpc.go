@@ -14,14 +14,13 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -95,9 +94,9 @@ type BlockJson struct {
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
 
-	Uncles       []*types.Header          `json:"uncles"`
-	Withdrawals  types.Withdrawals        `json:"withdrawals"`
-	Transactions []map[string]interface{} `json:"transactions"`
+	Uncles       []*types.Header   `json:"uncles"`
+	Withdrawals  types.Withdrawals `json:"withdrawals"`
+	Transactions []map[string]any  `json:"transactions"`
 }
 
 // ReceiptJson holds the minimal receipt data needed for timeboosted transactions
@@ -118,7 +117,7 @@ func convertHexToBigInt(hexStr string) *big.Int {
 }
 
 // getUint256FromField returns a *uint256.Int from the rawTx field if present.
-func getUint256FromField(rawTx map[string]interface{}, field string) *uint256.Int {
+func getUint256FromField(rawTx map[string]any, field string) *uint256.Int {
 	if val, ok := rawTx[field].(string); ok {
 		i := new(uint256.Int)
 		i.SetFromBig(convertHexToBigInt(val))
@@ -136,11 +135,11 @@ func isRetryableError(err error) bool {
 }
 
 // buildDynamicFeeFields sets the common dynamic fee fields from rawTx.
-func buildDynamicFeeFields(tx *types.DynamicFeeTransaction, rawTx map[string]interface{}) {
+func buildDynamicFeeFields(tx *types.DynamicFeeTransaction, rawTx map[string]any) {
 	if chainID := getUint256FromField(rawTx, "chainId"); chainID != nil {
 		tx.ChainID = chainID
 	}
-	if accessListRaw, ok := rawTx["accessList"].([]interface{}); ok {
+	if accessListRaw, ok := rawTx["accessList"].([]any); ok {
 		tx.AccessList = decodeAccessList(accessListRaw)
 	}
 	if tipCap := getUint256FromField(rawTx, "maxPriorityFeePerGas"); tipCap != nil {
@@ -152,7 +151,7 @@ func buildDynamicFeeFields(tx *types.DynamicFeeTransaction, rawTx map[string]int
 }
 
 // parseCommonTx extracts the shared fields from a raw transaction into a CommonTx.
-func parseCommonTx(rawTx map[string]interface{}) (*types.CommonTx, error) {
+func parseCommonTx(rawTx map[string]any) (*types.CommonTx, error) {
 	var commonTx types.CommonTx
 
 	nonceStr, ok := rawTx["nonce"].(string)
@@ -191,10 +190,10 @@ func parseCommonTx(rawTx map[string]interface{}) (*types.CommonTx, error) {
 }
 
 // decodeAccessList converts a raw access list (slice of interface{}) into types.AccessList.
-func decodeAccessList(rawAccessList []interface{}) types.AccessList {
+func decodeAccessList(rawAccessList []any) types.AccessList {
 	var accessList types.AccessList
 	for _, rawSlotInterface := range rawAccessList {
-		slot, ok := rawSlotInterface.(map[string]interface{})
+		slot, ok := rawSlotInterface.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -202,7 +201,7 @@ func decodeAccessList(rawAccessList []interface{}) types.AccessList {
 		if addrStr, ok := slot["address"].(string); ok {
 			tuple.Address = common.HexToAddress(addrStr)
 		}
-		if storageKeys, ok := slot["storageKeys"].([]interface{}); ok {
+		if storageKeys, ok := slot["storageKeys"].([]any); ok {
 			for _, keyIface := range storageKeys {
 				if keyStr, ok := keyIface.(string); ok {
 					tuple.StorageKeys = append(tuple.StorageKeys, common.HexToHash(keyStr))
@@ -226,7 +225,7 @@ func decodeBlobVersionedHashes(rawVersionedHashes []string) []common.Hash {
 // --- Transaction builders ---
 
 // makeLegacyTx builds a legacy transaction.
-func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]any) types.Transaction {
 	tx := &types.LegacyTx{
 		CommonTx: types.CommonTx{
 			Nonce:    commonTx.Nonce,
@@ -244,7 +243,7 @@ func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.
 }
 
 // makeAccessListTx builds an access-list transaction.
-func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]any) types.Transaction {
 	tx := &types.AccessListTx{
 		LegacyTx: types.LegacyTx{
 			CommonTx: types.CommonTx{
@@ -263,14 +262,14 @@ func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) ty
 	if chainID := getUint256FromField(rawTx, "chainId"); chainID != nil {
 		tx.ChainID = chainID
 	}
-	if accessListRaw, ok := rawTx["accessList"].([]interface{}); ok {
+	if accessListRaw, ok := rawTx["accessList"].([]any); ok {
 		tx.AccessList = decodeAccessList(accessListRaw)
 	}
 	return tx
 }
 
 // makeEip1559Tx builds an EIP-1559 dynamic fee transaction.
-func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]any) types.Transaction {
 	tx := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{
 		Nonce:    commonTx.Nonce,
 		GasLimit: commonTx.GasLimit,
@@ -286,7 +285,7 @@ func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 }
 
 // makeEip4844Tx builds an EIP-4844 blob transaction.
-func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]any) types.Transaction {
 	blobTx := &types.BlobTx{
 		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{
 			Nonce:    commonTx.Nonce,
@@ -302,7 +301,7 @@ func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 	buildDynamicFeeFields(&blobTx.DynamicFeeTransaction, rawTx)
 	blobTx.MaxFeePerBlobGas = getUint256FromField(rawTx, "maxFeePerBlobGas")
 	// The raw JSON is expected to contain a slice of strings.
-	if rawHashes, ok := rawTx["blobVersionedHashes"].([]interface{}); ok {
+	if rawHashes, ok := rawTx["blobVersionedHashes"].([]any); ok {
 		var hashStrs []string
 		for _, h := range rawHashes {
 			if s, ok := h.(string); ok {
@@ -316,7 +315,7 @@ func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 
 // makeEip7702Tx builds an EIP-7702 transaction.
 // (Implementation details remain to be determined.)
-func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]any) types.Transaction {
 	tx := &types.SetCodeTransaction{
 		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{
 			Nonce:    commonTx.Nonce,
@@ -933,8 +932,8 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 	return blk, nil
 }
 
-func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
-	txs := make(types.Transactions, len(rawTxs))
+func unMarshalTransactions(rawTxs []map[string]any, verify bool, isArbitrum bool) (types.Transactions, error) {
+	var txs types.Transactions
 
 	receiptsEnabled := client != nil
 	var unmarshalWg errgroup.Group

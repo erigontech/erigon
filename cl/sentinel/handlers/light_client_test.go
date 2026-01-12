@@ -30,7 +30,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 )
 
 var (
@@ -252,7 +252,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -335,7 +335,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 

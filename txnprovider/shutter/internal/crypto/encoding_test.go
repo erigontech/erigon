@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	blst "github.com/supranational/blst/bindings/go"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 func encryptedMessage() *EncryptedMessage {

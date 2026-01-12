@@ -149,6 +149,35 @@ func (p *ConcurrentPatriciaHashed) SetTrace(b bool) {
 		p.mounts[i].SetTrace(b)
 	}
 }
+func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
+	p.root.SetTraceDomain(b)
+	for i := range p.mounts {
+		p.mounts[i].SetTraceDomain(b)
+	}
+}
+func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
+	capture := p.root.GetCapture(truncate)
+	if truncate {
+		for i := range p.mounts {
+			p.mounts[i].SetCapture(nil)
+		}
+	}
+	return capture
+}
+
+func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
+	p.root.SetCapture(capture)
+	for i := range p.mounts {
+		p.mounts[i].SetCapture(capture)
+	}
+}
+
+func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
+	p.root.EnableCsvMetrics(filePathPrefix)
+	for i := range p.mounts {
+		p.mounts[i].EnableCsvMetrics(filePathPrefix)
+	}
+}
 
 // pass -1 to enable trace just for root trie
 func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {
@@ -233,7 +262,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 }
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
-func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error) {
 	// start := time.Now()
 	// wasConcurrent := updates.IsConcurrentCommitment()
 	// updCount := updates.Size()
@@ -245,7 +274,7 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	case true:
 		rootHash, err = updates.ParallelHashSort(ctx, p)
 	default:
-		rootHash, err = p.root.Process(ctx, updates, logPrefix)
+		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress, warmup)
 	}
 	if err != nil {
 		return nil, err
@@ -261,7 +290,7 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 
 func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(hexNibblesToCompactBytes([]byte{0}))
+		zeroPrefixBranch, _, err := p.root.ctx.Branch(HexNibblesToCompactBytes([]byte{0}))
 		if err != nil {
 			return false, fmt.Errorf("checking shortes prefix branch failed: %w", err)
 		}

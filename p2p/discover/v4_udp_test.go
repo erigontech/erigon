@@ -34,8 +34,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -664,20 +664,20 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.
 }
 
 func contextWithReplyTimeout(ctx context.Context, value time.Duration) context.Context {
-	return context.WithValue(ctx, "p2p.discover.Config.ReplyTimeout", value)
+	return context.WithValue(ctx, "p2p.discover.Config.ReplyTimeout", value) //nolint:staticcheck
 }
 
 func contextGetReplyTimeout(ctx context.Context) time.Duration {
-	value, _ := ctx.Value("p2p.discover.Config.ReplyTimeout").(time.Duration)
+	value, _ := ctx.Value("p2p.discover.Config.ReplyTimeout").(time.Duration) //nolint:staticcheck
 	return value
 }
 
 func contextWithPrivateKeyGenerator(ctx context.Context, value func() (*ecdsa.PrivateKey, error)) context.Context {
-	return context.WithValue(ctx, "p2p.discover.Config.PrivateKeyGenerator", value)
+	return context.WithValue(ctx, "p2p.discover.Config.PrivateKeyGenerator", value) //nolint:staticcheck
 }
 
 func contextGetPrivateKeyGenerator(ctx context.Context) func() (*ecdsa.PrivateKey, error) {
-	value, _ := ctx.Value("p2p.discover.Config.PrivateKeyGenerator").(func() (*ecdsa.PrivateKey, error))
+	value, _ := ctx.Value("p2p.discover.Config.PrivateKeyGenerator").(func() (*ecdsa.PrivateKey, error)) //nolint:staticcheck
 	return value
 }
 

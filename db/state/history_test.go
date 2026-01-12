@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -30,12 +31,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -68,7 +69,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.Hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
-	h, err := NewHistory(cfg.Hist, aggregationStep, dirs, logger)
+	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(h.Close)
 	h.salt.Store(&salt)
@@ -151,7 +152,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					vi++
 				}
 				values[string(keyBuf)] = updates[vi:]
-				require.True(t, sort.StringsAreSorted(seenKeys))
+				require.True(t, slices.IsSorted(seenKeys))
 			}
 			h.integrateDirtyFiles(sf, i, i+h.stepSize)
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
@@ -373,6 +374,113 @@ func TestHistoryAfterPrune(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
 		test(t, h, db)
 	})
+}
+
+func TestHistoryRangeWithPrune(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	db, h, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, 32, true)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+
+	var keys, vals []string
+	it, err := hc.HistoryRange(14, 31, order.Asc, -1, roTx)
+	require.NoError(t, err)
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		keys = append(keys, fmt.Sprintf("%x", k))
+		vals = append(vals, fmt.Sprintf("%x", v))
+	}
+
+	db2, h2, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db2, h2, 32, false)
+
+	roTx2, err := db2.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx2.Rollback()
+	hc2 := h2.BeginFilesRo()
+	defer hc2.Close()
+
+	var keys2, vals2 []string
+	it2, err := hc2.HistoryRange(14, 31, order.Asc, -1, roTx2)
+	require.NoError(t, err)
+
+	for it2.HasNext() {
+		k, v, err := it2.Next()
+		require.NoError(t, err)
+		keys2 = append(keys2, fmt.Sprintf("%x", k))
+		vals2 = append(vals2, fmt.Sprintf("%x", v))
+	}
+
+	require.Equal(t, keys, keys2)
+	require.Equal(t, vals, vals2)
+}
+
+func TestHistoryAsOfWithPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	db, h, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, 200, false)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+
+	var keys, vals []string
+
+	from, to := hexutil.MustDecode("0x0100000000000009"), hexutil.MustDecode("0x0100000000000014") // 9, 20
+	it, err := hc.RangeAsOf(ctx, 14, from, to, order.Asc, -1, roTx)
+	require.NoError(t, err)
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		keys = append(keys, fmt.Sprintf("%x", k))
+		vals = append(vals, fmt.Sprintf("%x", v))
+	}
+
+	db2, h2, _ := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db2, h2, 200, true)
+
+	roTx2, err := db2.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx2.Rollback()
+	hc2 := h2.BeginFilesRo()
+	defer hc2.Close()
+
+	var keys2, vals2 []string
+	it2, err := hc2.RangeAsOf(ctx, 14, from, to, order.Asc, -1, roTx2)
+	require.NoError(t, err)
+
+	for it2.HasNext() {
+		k, v, err := it2.Next()
+		require.NoError(t, err)
+		keys2 = append(keys2, fmt.Sprintf("%x", k))
+		vals2 = append(vals2, fmt.Sprintf("%x", v))
+	}
+
+	require.Equal(t, keys, keys2)
+	require.Equal(t, vals, vals2)
 }
 
 func TestHistoryCanPrune(t *testing.T) {
@@ -916,7 +1024,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 	}
 
 	var r HistoryRanges
-	maxSpan := h.stepSize * config3.StepsInFrozenFile
+	maxSpan := h.stepSize * config3.DefaultStepsInFrozenFile
 
 	for {
 		if stop := func() bool {

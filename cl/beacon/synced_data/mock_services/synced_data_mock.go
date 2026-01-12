@@ -12,10 +12,10 @@ package mock_services
 import (
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
 	synced_data "github.com/erigontech/erigon/cl/beacon/synced_data"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	state "github.com/erigontech/erigon/cl/phase1/core/state"
+	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -68,13 +68,12 @@ services:
       --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9094 --datadir=/home/erigon/.local/share/erigon
     ports: [ "8545:8545" ]
 
-
-
-
   prometheus:
     image: prom/prometheus:v2.51.2
     user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000} # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports: [ "9090:9090" ]
     volumes:
       - ${ERIGON_PROMETHEUS_CONFIG:-./cmd/prometheus/prometheus.yml}:/etc/prometheus/prometheus.yml
@@ -88,7 +87,7 @@ services:
     volumes:
       - ${ERIGON_GRAFANA_CONFIG:-./cmd/prometheus/grafana.ini}:/etc/grafana/grafana.ini
       - ./cmd/prometheus/datasources:/etc/grafana/provisioning/datasources
-      - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
+      - ${ERIGON_GRAFANA_DASHBOARD:-./cmd/prometheus/dashboards}:/etc/grafana/provisioning/dashboards
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-grafana:/var/lib/grafana
     restart: unless-stopped
 

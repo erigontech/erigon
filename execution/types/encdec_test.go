@@ -28,8 +28,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const RUNS = 1000 // for local tests increase this number
@@ -128,7 +129,6 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 		skipSet[field] = struct{}{}
 	}
 
-	emptyUint64 := uint64(0)
 	h := &Header{}
 	// note unexported fields are skipped in reflection auto-assign as they are not assignable
 	h.mutable = tr.RandBoolean()
@@ -146,26 +146,26 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 		}
 
 		switch field.Type() {
-		case reflect.TypeOf(common.Hash{}):
+		case reflect.TypeFor[common.Hash]():
 			field.Set(reflect.ValueOf(tr.RandHash()))
-		case reflect.TypeOf(&common.Hash{}):
+		case reflect.TypeFor[*common.Hash]():
 			randHash := tr.RandHash()
 			field.Set(reflect.ValueOf(&randHash))
-		case reflect.TypeOf(common.Address{}):
+		case reflect.TypeFor[common.Address]():
 			field.Set(reflect.ValueOf(tr.RandAddress()))
-		case reflect.TypeOf(Bloom{}):
+		case reflect.TypeFor[Bloom]():
 			field.Set(reflect.ValueOf(tr.RandBloom()))
-		case reflect.TypeOf(BlockNonce{}):
+		case reflect.TypeFor[BlockNonce]():
 			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
-		case reflect.TypeOf(&big.Int{}):
+		case reflect.TypeFor[*big.Int]():
 			field.Set(reflect.ValueOf(tr.RandBig()))
-		case reflect.TypeOf(uint64(0)):
+		case reflect.TypeFor[uint64]():
 			field.Set(reflect.ValueOf(*tr.RandUint64()))
-		case reflect.TypeOf(&emptyUint64):
+		case reflect.TypeFor[*uint64]():
 			field.Set(reflect.ValueOf(tr.RandUint64()))
-		case reflect.TypeOf([]byte{}):
+		case reflect.TypeFor[[]byte]():
 			field.Set(reflect.ValueOf(tr.RandBytes(tr.RandIntInRange(128, 1024))))
-		case reflect.TypeOf(false):
+		case reflect.TypeFor[bool]():
 			field.Set(reflect.ValueOf(tr.RandBoolean()))
 		default:
 			panic(fmt.Sprintf("don't know how to generate rand value for Header field type %v - please add handler", field.Type()))
@@ -216,7 +216,6 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		txType = _type
 	}
-
 	var to *common.Address
 	if tr.RandIntInRange(0, 10)%2 == 0 {
 		_to := tr.RandAddress()
@@ -246,18 +245,16 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 				CommonTx: commonTx, //nolint
 				GasPrice: uint256.NewInt(*tr.RandUint64()),
 			},
-			ChainID:     uint256.NewInt(*tr.RandUint64()),
-			AccessList:  tr.RandAccessList(tr.RandIntInRange(1, 5)),
-			Timeboosted: boolPtr(tr.RandBoolean()),
+			ChainID:    uint256.NewInt(*tr.RandUint64()),
+			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:    commonTx, //nolint
-			ChainID:     uint256.NewInt(*tr.RandUint64()),
-			TipCap:      uint256.NewInt(*tr.RandUint64()),
-			FeeCap:      uint256.NewInt(*tr.RandUint64()),
-			AccessList:  tr.RandAccessList(tr.RandIntInRange(1, 5)),
-			Timeboosted: boolPtr(tr.RandBoolean()),
+			CommonTx:   commonTx, //nolint
+			ChainID:    uint256.NewInt(*tr.RandUint64()),
+			TipCap:     uint256.NewInt(*tr.RandUint64()),
+			FeeCap:     uint256.NewInt(*tr.RandUint64()),
+			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
 	case BlobTxType:
 		r := *tr.RandUint64()
@@ -292,7 +289,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			FeeCap:                      uint256.NewInt(*tr.RandUint64()),
 			GasLimit:                    commonTx.GasLimit,
 			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
-			SenderAddress:               &senderAddress,
+			SenderAddress:               accounts.InternAddress(senderAddress),
 			SenderValidationData:        tr.RandBytes(tr.RandIntInRange(128, 1024)),
 			Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 			ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
@@ -407,7 +404,7 @@ func isEqualBytes(a, b []byte) bool {
 	return true
 }
 
-func check(t *testing.T, f string, want, got interface{}) {
+func check(t *testing.T, f string, want, got any) {
 	t.Helper()
 
 	if !reflect.DeepEqual(want, got) {
@@ -553,7 +550,6 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 
 		dec, err := DecodeRLPTransaction(s, false)
 		if err != nil {
-
 			t.Errorf("error: DecodeRLPTransaction: %v", err)
 		}
 		compareTransactions(t, enc, dec)
@@ -683,8 +679,8 @@ func BenchmarkLegacyTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(LegacyTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -694,8 +690,8 @@ func BenchmarkAccessListTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(AccessListTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -705,8 +701,8 @@ func BenchmarkDynamicFeeTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(DynamicFeeTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -716,8 +712,8 @@ func BenchmarkBlobTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(BlobTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -727,8 +723,8 @@ func BenchmarkSetCodeTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(SetCodeTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -738,8 +734,8 @@ func BenchmarkWithdrawalRLP(b *testing.B) {
 	tr := NewTRand()
 	w := tr.RandWithdrawal()
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		w.EncodeRLP(&buf)
 	}

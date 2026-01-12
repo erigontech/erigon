@@ -19,25 +19,23 @@ package jsonrpc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"math/big"
-	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -56,7 +54,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
-func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	reply, err := api.ethBackend.Syncing(ctx)
 	if err != nil {
 		return false, err
@@ -78,7 +76,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
@@ -213,7 +211,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	}
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
-	if header == nil || header.BlobGasUsed == nil {
+	if header == nil || header.ExcessBlobGas == nil {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
@@ -224,7 +222,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	nextBlockTime := header.Time + config.SecondsPerSlot()
-	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header, nextBlockTime), nextBlockTime)
+	ret256, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, nextBlockTime)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +257,7 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 // EthHardForkConfig represents config of a hard-fork
 type EthHardForkConfig struct {
 	ActivationTime  uint64                    `json:"activationTime"`
-	BlobSchedule    params.BlobConfig         `json:"blobSchedule"`
+	BlobSchedule    *params.BlobConfig        `json:"blobSchedule"`
 	ChainId         hexutil.Uint              `json:"chainId"`
 	ForkId          hexutil.Bytes             `json:"forkId"`
 	Precompiles     map[string]common.Address `json:"precompiles"`
@@ -275,31 +273,43 @@ type EthConfigResp struct {
 
 // Config returns the HardFork config for current and upcoming forks:
 // assuming linear fork progression and ethereum-like schedule
-func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error) {
-	var timeUnix uint64
-	if timeArg != nil {
-		timeUnix = timeArg.Uint64()
-	} else {
-		timeUnix = uint64(time.Now().Unix())
-	}
+func (api *APIImpl) Config(ctx context.Context, blockTimeOverride *hexutil.Uint64) (*EthConfigResp, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
+	var currentBlockTime uint64
+	if blockTimeOverride != nil {
+		// optional utility arg to aid with testing
+		currentBlockTime = blockTimeOverride.Uint64()
+	} else {
+		h, err := api.headerByRPCNumber(ctx, rpc.LatestBlockNumber, tx)
+		if err != nil {
+			return nil, err
+		}
+		if h == nil {
+			return nil, errors.New("latest header not found")
+		}
+		currentBlockTime = h.Time
+	}
+
 	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	if !chainConfig.IsCancun(timeUnix, 0 /* currentArbosVer */) {
-		return &EthConfigResp{}, fmt.Errorf("not supported: %w: time=%v", ErrForkTimeBeforeCancun, timeUnix)
+	gatherForksFrom := genesis.Time()
+	if genesis.Time() >= currentBlockTime {
+		// handle forks activated at genesis with activation time 0
+		gatherForksFrom = 0
+		currentBlockTime = 0
 	}
 
 	response := EthConfigResp{}
-	forkBlockNums, forkTimes := forkid.GatherForks(chainConfig, genesis.Time())
+	forkBlockNums, forkTimes := forkid.GatherForks(chainConfig, gatherForksFrom)
 	// current fork config
-	currentForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, timeUnix)
+	currentForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, currentBlockTime)
 	response.Current = fillForkConfig(chainConfig, currentForkId.Hash, currentForkId.Activation)
 
 	// next fork config
@@ -318,25 +328,26 @@ func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthCo
 	return &response, nil
 }
 
-var ErrForkTimeBeforeCancun = errors.New("fork time before cancun")
-
 func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime uint64) *EthHardForkConfig {
 	forkConfig := EthHardForkConfig{}
 	forkConfig.ActivationTime = activationTime
-	forkConfig.BlobSchedule = *chainConfig.GetBlobConfig(activationTime, 0 /* currentArbosVer */)
+	forkConfig.BlobSchedule = chainConfig.GetBlobConfig(activationTime)
 	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
 	forkConfig.ForkId = forkId[:]
 	blockContext := evmtypes.BlockContext{
-		BlockNumber:  math.MaxUint64,
-		Time:         activationTime,
-		ArbOSVersion: 0,
+		BlockNumber: math.MaxUint64,
+		Time:        activationTime,
 	}
 	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
 	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
 	for addr, precompile := range precompiles {
-		forkConfig.Precompiles[precompile.Name()] = addr
+		forkConfig.Precompiles[precompile.Name()] = addr.Value()
 	}
-	forkConfig.SystemContracts = chainConfig.SystemContracts(activationTime)
+	systemContracts := chainConfig.SystemContracts(activationTime)
+	forkConfig.SystemContracts = make(map[string]common.Address, len(systemContracts))
+	for name, contract := range systemContracts {
+		forkConfig.SystemContracts[name] = contract.Value()
+	}
 	return &forkConfig
 }
 

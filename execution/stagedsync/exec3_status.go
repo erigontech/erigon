@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 type ExecutionStat struct {

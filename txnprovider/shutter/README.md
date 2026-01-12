@@ -29,7 +29,7 @@ at https://github.com/gnosischain/specs/tree/master/shutter.
 
 1. Setup your validators and deposit your stake by following https://docs.gnosischain.com/node/manual/validator/deposit
 2. Register you validators as "Shutterized Validators" by following the steps
-   in https://github.com/NethermindEth/shutter-validator-registration
+   in https://github.com/shutter-network/shutter-validator-registration
 3. You can run
    `erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>`
    to check that your Shutter registrations from step 2. were successful. Note, the `--validator-info-file` is the

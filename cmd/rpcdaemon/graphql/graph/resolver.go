@@ -2,9 +2,9 @@ package graph
 
 import (
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 // This file will not be regenerated automatically.

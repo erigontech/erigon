@@ -29,27 +29,27 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/core/genesiswrite"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	chainparams "github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/eth"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -81,6 +81,7 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	var chainConfig chain.Config
 	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
 	require.NoError(t, err)
+	chainConfig.AmsterdamTime = nil // test uses osaka spec, unset amsterdam config to prevent "unsupported fork" error
 	genesis := &types.Genesis{
 		Config:     &chainConfig,
 		Coinbase:   coinbaseAddr,
@@ -90,13 +91,13 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 			coinbaseAddr: {
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil), // 1_000 ETH
 			},
-			chainparams.ConsolidationRequestAddress: {
+			params.ConsolidationRequestAddress.Value(): {
 				Code:    consolidationRequestCode, // can't be empty
 				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
 				Nonce:   1,
 			},
-			chainparams.WithdrawalRequestAddress: {
+			params.WithdrawalRequestAddress.Value(): {
 				Code:    withdrawalRequestCode, // can't be empty'
 				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
@@ -165,7 +166,6 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 			EnabledPOS: true,
 		},
 		KeepStoredChainConfig: true,
-		ElBlockDownloaderV2:   true,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -222,9 +222,9 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	require.NoError(t, err)
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(logger, engineApiClient, genesisBlock)
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock)
 	}
 	_, err = mockCl.BuildCanonicalBlock(ctx) // build 1 empty block before proceeding to properly initialise everything
 	require.NoError(t, err)

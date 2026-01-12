@@ -30,7 +30,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestBlocksByRangeHandler(t *testing.T) {
@@ -99,7 +99,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
 	require.NoError(t, err)
 

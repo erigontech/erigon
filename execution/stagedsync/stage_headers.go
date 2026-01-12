@@ -27,27 +27,23 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/arb/ethdb"
-	snapshots "github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/stages/bodydownload"
-	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
+	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 // The number of blocks we should be able to re-org sub-second on commodity hardware.
@@ -416,7 +412,7 @@ Loop:
 		if !ok {
 			return errors.New("tx is not a temporal tx")
 		}
-		doms, err := state.NewSharedDomains(temporalTx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
+		doms, err := execctx.NewSharedDomains(ctx, temporalTx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 		if err != nil {
 			return err
 		}

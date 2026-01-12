@@ -22,16 +22,20 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 )
+
+var randSrc = rand.New(rand.NewSource(42)) // fixed seed
+var randMu sync.Mutex
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Parallel()
@@ -63,7 +67,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	firstRootHash, err := hph.Process(ctx, upds, "")
+	firstRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	t.Logf("rootHash %x\n", firstRootHash)
@@ -80,7 +84,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	secondRootHash, err := hph.Process(ctx, upds, "")
+	secondRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEqual(t, firstRootHash, secondRootHash)
 	t.Logf("rootHash %x\n", secondRootHash)
@@ -96,7 +100,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, plainKeys, updates)
 
-	thirdRootHash, err := hph.Process(ctx, upds, "")
+	thirdRootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	t.Logf("rootHash %x\n", thirdRootHash)
 	require.NoError(t, err)
 	require.NotEqual(t, secondRootHash, thirdRootHash)
@@ -125,7 +129,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer upds.Close()
 
-	hashBeforeEmptyUpdate, err := hph.Process(ctx, upds, "")
+	hashBeforeEmptyUpdate, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 
@@ -140,7 +144,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, plainKeys, updates)
 
-	hashAfterEmptyUpdate, err := hph.Process(ctx, upds, "")
+	hashAfterEmptyUpdate, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	fmt.Println("2. Empty updates applied without state reset")
@@ -177,7 +181,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "")
+			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -193,7 +197,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		rh, err := trieTwo.Process(ctx, updsTwo, "")
+		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -218,7 +222,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "")
+			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -234,7 +238,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
-		rh, err := trieTwo.Process(ctx, updsTwo, "")
+		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -266,7 +270,7 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer toProcess.Close()
 
-	_, err = hph.Process(ctx, toProcess, "")
+	_, err = hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	ms.SetConcurrentCommitment(true)
@@ -286,7 +290,7 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	toProcess2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer toProcess2.Close()
 
-	_, err = paratrie.Process(ctx, toProcess2, "")
+	_, err = paratrie.Process(ctx, toProcess2, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	canParallel, err = paratrie.CanDoConcurrentNext()
@@ -299,7 +303,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 	ctx := context.Background()
 
-	uniqTest := func(t *testing.T, sortHashedKeys bool, trace bool) {
+	uniqTest := func(t *testing.T, sortHashedKeys bool, _ bool) {
 		t.Helper()
 
 		stateSeq := NewMockState(t)
@@ -327,7 +331,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
 			Build()
 
-		keyLen := 20
+		keyLen := int16(20)
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq)
 
 		stateBatch.SetConcurrentCommitment(true)
@@ -350,7 +354,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 				require.NoError(t, err)
 
 				t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -366,7 +370,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:3], updates[:3])
 
-			startRoot, err := trieBatchR.Process(ctx, updsOne, "")
+			startRoot, err := trieBatchR.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			fmt.Printf("\nBatch will start with %x\n", startRoot)
@@ -378,7 +382,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[3:], updates[3:])
 
-			rh, err := trieBatch.Process(ctx, updsTwo, "")
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -407,7 +411,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 				require.NoError(t, err)
 
 				t.Logf("3) sequential root @%d hash %x\n", i, sequentialRoot)
@@ -425,7 +429,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-			rh, err := trieBatch.Process(ctx, updsTwo, "")
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -458,7 +462,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 				require.NoError(t, err)
 
 				t.Logf("3) sequential root @%d hash %x\n", i, sequentialRoot)
@@ -476,7 +480,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-			rh, err := trieBatch.Process(ctx, updsTwo, "")
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -568,7 +572,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-		sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+		sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
 		t.Logf("sequential root @%d hash %x\n", len(plainKeys), sequentialRoot)
@@ -596,7 +600,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-		rh, err := trieBatch.Process(ctx, updsTwo, "")
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -639,7 +643,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
 			Build()
 
-		keyLen := 20
+		keyLen := int16(20)
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq)
 		trieBatch := NewHexPatriciaHashed(keyLen, stateBatch)
 
@@ -659,7 +663,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 
 				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 				require.NoError(t, err)
 
 				t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -675,7 +679,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 
 			updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
-			rh, err := trieBatch.Process(ctx, updsTwo, "")
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -742,7 +746,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -758,7 +762,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
-		rh, err := trieBatch.Process(ctx, updsTwo, "")
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -827,7 +831,7 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 		require.NoError(t, err)
 
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-		rootHash, err := hph.Process(ctx, upds, "")
+		rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Equal(t, testData.expectedRoot, fmt.Sprintf("%x", rootHash))
 		upds.Close()
@@ -842,8 +846,8 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 		hashLen:         length.Hash,
 		accountAddrLen:  length.Addr,
 		storageAddrLen:  length.Addr + length.Hash,
-		hashedExtLen:    rnd.Intn(129),
-		extLen:          rnd.Intn(65),
+		hashedExtLen:    int16(rnd.Intn(129)),
+		extLen:          int16(rnd.Intn(65)),
 		hashedExtension: [128]byte{},
 		extension:       [64]byte{},
 		storageAddr:     [52]byte{},
@@ -869,7 +873,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	t.Parallel()
 
-	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, nil)
+	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, WarmupConfig{})
 	var s state
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))
@@ -882,7 +886,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.RootChecked = true
 
 	for i := 0; i < len(s.Depths); i++ {
-		s.Depths[i] = rnd.Intn(256)
+		s.Depths[i] = int16(rnd.Intn(256))
 	}
 	for i := 0; i < len(s.TouchMap); i++ {
 		s.TouchMap[i] = uint16(rnd.Intn(1<<16 - 1))
@@ -943,7 +947,7 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	defer upds.Close()
 
 	// process updates
-	rhBefore, err := before.Process(ctx, upds, "")
+	rhBefore, err := before.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	state, err := before.EncodeCurrentState(nil)
@@ -969,12 +973,12 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates)
 
-	rh2Before, err := before.Process(ctx, upds, "")
+	rh2Before, err := before.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates) // they're resetted after Process
 
-	rh2After, err := after.Process(ctx, upds, "")
+	rh2After, err := after.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.Equal(t, rh2Before, rh2After)
 }
@@ -1005,7 +1009,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	updOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer updOne.Close()
 
-	withoutRestore, err := trieOne.Process(ctx, updOne, "")
+	withoutRestore, err := trieOne.Process(ctx, updOne, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	t.Logf("root before restore %x\n", withoutRestore)
 
@@ -1055,7 +1059,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, updOne, plainKeys, updates)
 
-	withoutRestore, err = trieOne.Process(ctx, updOne, "")
+	withoutRestore, err = trieOne.Process(ctx, updOne, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	t.Logf("batch without restore (%d) root %x\n", len(updates), withoutRestore)
@@ -1063,7 +1067,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	updTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer updTwo.Close()
 
-	afterRestore, err := trieTwo.Process(ctx, updTwo, "")
+	afterRestore, err := trieTwo.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	t.Logf("batch after restore (%d) root %x\n", len(updates), afterRestore)
 
@@ -1104,7 +1108,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	updTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer updTwo.Close()
 
-	beforeRestore, err := trieTwo.Process(ctx, updTwo, "")
+	beforeRestore, err := trieTwo.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	buf, err := trieTwo.EncodeCurrentState(nil)
@@ -1137,12 +1141,12 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	WrapKeyUpdatesInto(t, updTwo, plainKeys, updates)
 
 	// process updates
-	AfterRestore, err := trieOne.Process(ctx, updTwo, "")
+	AfterRestore, err := trieOne.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	WrapKeyUpdatesInto(t, updTwo, plainKeys, updates)
 	// process updates again but keep in mind that two tries sharing same ms, so result should be equal (second time we just go over same data)
-	withoutRestore, err := trieTwo.Process(ctx, updTwo, "")
+	withoutRestore, err := trieTwo.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	require.Equal(t, withoutRestore, AfterRestore)
@@ -1189,7 +1193,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("trieSequential root @%d hash %x\n", i, sequentialRoot)
@@ -1216,7 +1220,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
-		rh, err := trieBatch.Process(ctx, updsTwo, "")
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("trieBatch of %d root hash %x\n", len(updates), rh)
 
@@ -1289,7 +1293,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := sequential.Process(ctx, updsOne, "")
+			sequentialRoot, err := sequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -1317,14 +1321,14 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
-		rh, err := batch.Process(ctx, updsTwo, "")
+		rh, err := batch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
 		require.Equal(t, rh, somewhereRoot)
 
 		WrapKeyUpdatesInto(t, updsTwo, plainKeys[somewhere+1:], updates[somewhere+1:])
 
-		rh, err = batch.Process(ctx, updsTwo, "")
+		rh, err = batch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("(second half) batch of %d root hash %x\n", len(updates)-somewhere, rh)
 
@@ -1439,7 +1443,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
 		sequential.SetTrace(false)
-		sequentialRoot, err := sequential.Process(ctx, updsOne, "")
+		sequentialRoot, err := sequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		//sequential.SetTrace(false)
 
@@ -1452,7 +1456,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		err = stateSeq.applyPlainUpdates(plainKeys[somewhere+1:], updates[somewhere+1:])
 		require.NoError(t, err)
 
-		sequentialRoot, err = sequential.Process(ctx, updsOne, "")
+		sequentialRoot, err = sequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
 		t.Logf("sequential root @%d hash %x\n", len(plainKeys), sequentialRoot)
@@ -1477,7 +1481,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
 		trieBatch.SetTrace(false)
-		rh, err := trieBatch.Process(ctx, updsTwo, "")
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
 		require.Equal(t, somewhereRoot, rh)
@@ -1485,7 +1489,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		// trieBatch.SetParticularTrace(true, 0x9)
 		WrapKeyUpdatesInto(t, updsTwo, plainKeys[somewhere+1:], updates[somewhere+1:])
 
-		rh, err = trieBatch.Process(ctx, updsTwo, "")
+		rh, err = trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
 		t.Logf("(second half) batch of %d root hash %x\n", len(updates)-somewhere, rh)
@@ -1597,7 +1601,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	require.True(t, update.Balance.Eq(&target.Balance))
 	require.Equal(t, update.Nonce, target.Nonce)
 	require.Equal(t, update.CodeHash, target.CodeHash)
-	require.Equal(t, 0, target.StorageLen)
+	require.Equal(t, 0, int(target.StorageLen))
 
 	update.Reset()
 
@@ -1612,14 +1616,14 @@ func TestCell_setFromUpdate(t *testing.T) {
 	require.True(t, update.Balance.Eq(&target.Balance))
 	require.Equal(t, update.Nonce, target.Nonce)
 	require.Equal(t, update.CodeHash, target.CodeHash)
-	require.Equal(t, 0, target.StorageLen)
+	require.Equal(t, 0, int(target.StorageLen))
 
 	update.Reset()
 
 	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
 	update.Nonce = rand.Uint64()
 	rnd.Read(update.Storage[:])
-	update.StorageLen = len(update.Storage)
+	update.StorageLen = int8(len(update.Storage))
 	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
 
 	target.reset()
@@ -1636,7 +1640,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
 	update.Nonce = rand.Uint64()
 	rnd.Read(update.Storage[:rnd.Intn(len(update.Storage))])
-	update.StorageLen = len(update.Storage)
+	update.StorageLen = int8(len(update.Storage))
 	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
 
 	target.reset()
@@ -1819,7 +1823,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 
 			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "")
+			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
@@ -1835,7 +1839,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		rh, err := trieTwo.Process(ctx, updsTwo, "")
+		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -1846,19 +1850,27 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
+func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
+	plainKey = make([]byte, keyLen)
+	for {
+		randMu.Lock()
+		randSrc.Read(plainKey[:keyLen]) // read random key
+		randMu.Unlock()
+		hashedKey := KeyToNibblizedHash(plainKey)
+		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
+			// found key with desired hashed prefix, return result
+			return plainKey, hashedKey
+		}
+	}
+}
+
 // longer prefixLen - harder to find required keys
-func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefix []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
+func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefixNibbles []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
 	tb.Helper()
 	plainKeys = make([][]byte, 0, keyCount)
 	hashedKeys = make([][]byte, 0, keyCount)
 	for {
-		key := make([]byte, keyLen)
-		if constPrefix != nil {
-			copy(key, constPrefix)
-		}
-		rand.Read(key[len(constPrefix):])
-
-		hashed := KeyToHexNibbleHash(key)
+		key, hashed := generateKeyWithHashedPrefix(constPrefixNibbles, keyLen)
 		if len(plainKeys) == 0 {
 			plainKeys = append(plainKeys, key)
 			hashedKeys = append(hashedKeys, hashed)
@@ -1905,9 +1917,9 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
-	//t.Parallel()
+	// t.Parallel()
 
-	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, addrToWitness []byte) {
+	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, plainKeyToWitness []byte, keyExists bool) {
 		t.Helper()
 
 		ctx := context.Background()
@@ -1923,32 +1935,48 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		defer toProcess.Close()
 
 		hph.trace = true
-		root, err := hph.Process(ctx, toProcess, "")
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
 		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 		defer toWitness.Close()
-		toWitness.TouchPlainKey(string(addrToWitness), nil, toProcess.TouchAccount)
+		if len(plainKeyToWitness) == length.Addr { // touch account
+			toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toProcess.TouchAccount)
+		} else {
+			toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toProcess.TouchStorage)
+		}
 
-		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, root, "")
+		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "")
 		require.NoError(t, err)
 		_ = witnessTrie
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
 		require.NotNil(t, rootWitness, "root witness should not be nil")
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
+
+		if keyExists { // to be checked only if key should exist
+			hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
+			require.NoError(t, err)
+			var gotValue bool
+			if len(plainKeyToWitness) == length.Addr {
+				_, gotValue = witnessTrie.GetAccount(hashedKeyWitnessed)
+			} else {
+				_, gotValue = witnessTrie.Get(hashedKeyWitnessed)
+			}
+			require.True(t, gotValue, "value not found in witness trie")
+		}
 	}
 
-	//t.Run("JustRoot", func(t *testing.T) {
-	//	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
-	//
-	//	addrWithSingleton := common.Copy(plainKeysList[0])
-	//	builder := NewUpdateBuilder()
-	//	for i := 0; i < len(plainKeysList); i++ {
-	//		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
-	//	}
-	//
-	//	buildTrieAndWitness(t, builder, addrWithSingleton)
-	//})
+	t.Run("JustRoot", func(t *testing.T) {
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
+
+		addrWithSingleton := common.Copy(plainKeysList[0])
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+
+		buildTrieAndWitness(t, builder, addrWithSingleton, true)
+	})
 	t.Run("RandomAccountsOnly", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
 
@@ -1958,7 +1986,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 		}
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 	t.Run("RandomAccountsOnlyWithCPrefix", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 4, 5)
@@ -1969,7 +1997,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 		}
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 
 	t.Run("RandomAccountsOnly-Many", func(t *testing.T) {
@@ -1981,7 +2009,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 		}
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 	t.Run("StorageSingleton", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
@@ -2002,17 +2030,20 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		// fmt.Printf("addrWithSingleton %x\n", addrWithSingleton)
 		// builder.Storage(common.Bytes2Hex(addrWithSingleton), "01044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
 
 	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
-		t.Skip("flaky test with partially fixed edge case")
-		t.Logf("StorageSubtrieWithCommonPrefix")
+		t.Logf("StorageSubtrieWithCommonPrefix\n")
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		// generate 2 storage slots HAVING common prefix of len >=4
-		storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+		storageKeysList, storageHashedKeys := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+
+		for i := 0; i < len(storageHashedKeys); i++ {
+			fmt.Printf("storageHashedKeys[%d] = %x\n", i, storageHashedKeys[i])
+		}
 
 		builder := NewUpdateBuilder()
 		for i := 0; i < len(plainKeysList); i++ {
@@ -2025,6 +2056,294 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			fmt.Printf("storage %x -> %x\n", storageKeysList[sl], storageKeysList[sl])
 		}
 
-		buildTrieAndWitness(t, builder, addrWithSingleton)
+		buildTrieAndWitness(t, builder, addrWithSingleton, true /* keyExists */)
 	})
+
+	t.Run("NonExistentAccountProofBranchNodesOnly", func(t *testing.T) {
+		t.Logf("NonExistentAccountProofBranchNodesOnly")
+		// 2 accounts with prefix 54
+		plainKeys54, hashedKeys54 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 2, 2)
+		// 2 accounts with prefix 56
+		plainKeys56, hashedKeys56 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 2, 2)
+		// 1 account with prefix 52
+		plainKeys52, hashedKeys52 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2}, length.Addr, 2, 1)
+
+		// 2 accounts with prefix 7
+		plainKeys7, hashedKeys7 := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 1, 2)
+
+		// 2 accounts with prefix 9
+		plainKeys9, hashedKeys9 := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Addr, 1, 2)
+
+		_, _, _, _, _ = hashedKeys7, hashedKeys9, hashedKeys52, hashedKeys54, hashedKeys56
+
+		plainKeysList := append([][]byte(nil), plainKeys52...)
+		plainKeysList = append(plainKeysList, plainKeys54...)
+		plainKeysList = append(plainKeysList, plainKeys56...)
+		plainKeysList = append(plainKeysList, plainKeys7...)
+		plainKeysList = append(plainKeysList, plainKeys9...)
+
+		// generate non existent account key (e.g. with hashed prefix 53)
+		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x3}, length.Addr)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+		buildTrieAndWitness(t, builder, addrToProve, false /* keyExists */)
+	})
+
+	t.Run("NonExistentAccountProofShortNodeToAccount", func(t *testing.T) {
+		t.Logf("NonExistentAccountProofShortNodeToAccount")
+		// 2 accounts with prefix 54
+		plainKeys54, hashedKeys54 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 2, 2)
+		// 2 accounts with prefix 56
+		plainKeys56, hashedKeys56 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 2, 2)
+		// 1 account with prefix 52789, will result in extension key 789...
+		plainKeys52789, hashedKeys52789 := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0x8, 0x9}, length.Addr, 5, 1)
+
+		// 2 accounts with prefix 7
+		plainKeys7, hashedKeys7 := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 1, 2)
+
+		// 2 accounts with prefix 9
+		plainKeys9, hashedKeys9 := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Addr, 1, 2)
+
+		_, _, _, _, _ = hashedKeys7, hashedKeys9, hashedKeys52789, hashedKeys54, hashedKeys56
+
+		plainKeysList := append([][]byte(nil), plainKeys52789...)
+		plainKeysList = append(plainKeysList, plainKeys54...)
+		plainKeysList = append(plainKeysList, plainKeys56...)
+		plainKeysList = append(plainKeysList, plainKeys7...)
+		plainKeysList = append(plainKeysList, plainKeys9...)
+
+		// generate non existent account key adjacent to the extension node leading to the account (e.g. with hashed prefix 527f)
+		// this key will diverge at nibble f, but the ShortNode{Key:789..., Val: HashNode{accountRef}} should still be in the proof
+		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0x7, 0xf}, length.Addr)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+		// add a storage slot to spice up the test case
+		builder.Storage(common.Bytes2Hex(plainKeys52789[0]), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+		buildTrieAndWitness(t, builder, addrToProve, false /* keyExists */)
+	})
+
+	t.Run("NonExistentAccountProofShortNodeToFullNode", func(t *testing.T) {
+		t.Logf("NonExistentAccountProofShortNodeToFullNode")
+		// 2 accounts with prefix 54
+		plainKeys54, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 2, 2)
+		// 2 accounts with prefix 56
+		plainKeys56, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 2, 2)
+		// 2 accounts with prefix 527a
+		plainKeys527a, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0xa}, length.Addr, 5, 2)
+		// 2 accounts with prefix 527b
+		plainKeys527b, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0xb}, length.Addr, 5, 2)
+		// 2 accounts with prefix 527c
+		plainKeys527c, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0xc}, length.Addr, 5, 2)
+		// this results in 7 extension key pointing to a branch node (with children at nibbles a,b,c)
+		// 2 accounts with prefix 7
+		plainKeys7, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 1, 2)
+
+		// 2 accounts with prefix 9
+		plainKeys9, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Addr, 1, 2)
+
+		plainKeysList := append([][]byte(nil), plainKeys527a...)
+		plainKeysList = append(plainKeysList, plainKeys527b...)
+		plainKeysList = append(plainKeysList, plainKeys527c...)
+		plainKeysList = append(plainKeysList, plainKeys54...)
+		plainKeysList = append(plainKeysList, plainKeys56...)
+		plainKeysList = append(plainKeysList, plainKeys7...)
+		plainKeysList = append(plainKeysList, plainKeys9...)
+
+		// generate non existent account key adjacent to the extension node leading to a branch node
+		// e.g. key with prefix 0x52f will diverge at nibble f
+		// but the ShortNode{Key:7..., Val: HashNode{branchNodeHash}} should still be in the proof
+		addrToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0xf}, length.Addr)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+		// add a storage slot to spice up the test case
+		builder.Storage(common.Bytes2Hex(plainKeys527a[0]), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+		buildTrieAndWitness(t, builder, addrToProve, false /* keyExists */)
+	})
+
+	t.Run("SingletonStorage", func(t *testing.T) {
+		t.Logf("SingletonStorage")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+		// generate storage slots to be implanted on this account
+		storagePlainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5}, length.Hash, 1, 1)
+		storageSlotToProve := common.Copy(storagePlainKeysList[0])
+
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storagePlainKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
+		}
+		buildTrieAndWitness(t, builder, fullStorageKeyToProve, true)
+	})
+
+	t.Run("StorageRootIsShortNode", func(t *testing.T) {
+		t.Logf("StorageRootIsShortNode")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+		// generate storage slots to be implanted on this account
+		// generate 5 keys with same prefix
+		storagePlainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Hash, 2, 5)
+		storageSlotToProve := common.Copy(storagePlainKeysList[0])
+
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storagePlainKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
+		}
+		buildTrieAndWitness(t, builder, fullStorageKeyToProve, true /* keyExists */)
+	})
+
+	t.Run("StorageRootIsFullNode", func(t *testing.T) {
+		t.Logf("StorageRootIsFullNode")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+		// generate storage slots to be implanted on this account
+		// generate 5 keys with same prefix
+		storagePlainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Hash, 2, 5)
+		// generate 4 keys with different prefix
+		storageKeys3, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x3}, length.Hash, 1, 4)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys3...)
+		storageSlotToProve := common.Copy(storagePlainKeysList[0])
+
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storagePlainKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
+		}
+		buildTrieAndWitness(t, builder, fullStorageKeyToProve, true /* keyExists */)
+	})
+
+	t.Run("NonExistentStorageProofBranchNodesOnly", func(t *testing.T) {
+		t.Logf("NonExistentStorageProofBranchNodesOnly")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+		// generate storage slots to be implanted on this account
+		// 2 storage slots with prefix 54
+		storageKeys54, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Hash, 2, 2)
+		// 2 storage slots with prefix 56
+		storageKeys56, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Hash, 2, 2)
+		// 1 storage slot with prefix 52
+		storageKeys52, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2}, length.Hash, 2, 1)
+
+		// 2 storage slots with prefix 7
+		storageKeys7, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Hash, 1, 2)
+
+		// 2 storage slots with prefix 9
+		storageKeys9, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Hash, 1, 2)
+
+		storagePlainKeysList := append([][]byte(nil), storageKeys52...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys54...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys56...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys7...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys9...)
+
+		// generate non existent storage key (e.g. with hashed prefix 53)
+		storageSlotToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x3}, length.Hash)
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storagePlainKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
+		}
+		buildTrieAndWitness(t, builder, fullStorageKeyToProve, false)
+	})
+
+	t.Run("NonExistentStorageProofShortNodeToValue", func(t *testing.T) {
+		t.Logf("NonExistentStorageProofShortNodeToValue")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+
+		// 2 storage slots with prefix 54
+		storageKeys54, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x4}, length.Addr, 2, 2)
+		// 2 storage slots with prefix 56
+		storageKeys56, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6}, length.Addr, 2, 2)
+		// 1 account with prefix 52789, will result in extension key 789...
+		storageKeys52789, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x2, 0x7, 0x8, 0x9}, length.Addr, 5, 1)
+
+		// 2 storage slots with prefix 7
+		storageKeys7, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 1, 2)
+
+		// 2 accounts with prefix 9
+		storageKeys9, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x9}, length.Addr, 1, 2)
+
+		storageKeysList := append([][]byte(nil), storageKeys52789...)
+		storageKeysList = append(storageKeysList, storageKeys54...)
+		storageKeysList = append(storageKeysList, storageKeys56...)
+		storageKeysList = append(storageKeysList, storageKeys7...)
+		storageKeysList = append(storageKeysList, storageKeys9...)
+
+		// generate non existent storage key (e.g. with hashed prefix 53)
+		storageSlotToProve, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0x7, 0xf}, length.Hash)
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storageKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storageKeysList[sl], storageKeysList[sl])
+		}
+
+		buildTrieAndWitness(t, builder, addrToProve, false /* keyExists */)
+	})
+
 }

@@ -179,9 +179,11 @@ func (g *PagedReader) DisableReadAhead()   { g.file.DisableReadAhead() }
 func (g *PagedReader) FileName() string    { return g.file.FileName() }
 func (g *PagedReader) Count() int          { return g.file.Count() }
 func (g *PagedReader) Size() int           { return g.file.Size() }
+func (g *PagedReader) PageSize() int       { return g.pageSize }
 func (g *PagedReader) HasNextOnPage() bool { return g.pageSize > 1 && g.page.HasNext() }
 func (g *PagedReader) HasNextPage() bool   { return g.file.HasNext() }
 func (g *PagedReader) HasNext() bool       { return g.HasNextOnPage() || g.HasNextPage() }
+func (g *PagedReader) GetMetadata() []byte { return g.file.GetMetadata() }
 func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	if g.pageSize <= 1 {
 		return g.file.Next(buf)
@@ -225,8 +227,13 @@ func (g *PagedReader) Skip() (uint64, int) {
 	return offset, len(v)
 }
 
-func NewPagedWriter(parent CompressorI, pageSize int, compressionEnabled bool) *PagedWriter {
-	return &PagedWriter{parent: parent, pageSize: pageSize, compressionEnabled: compressionEnabled}
+func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
+
+	return &PagedWriter{
+		parent:             parent,
+		pageSize:           parent.GetValuesOnCompressedPage(),
+		compressionEnabled: compressionEnabled,
+	}
 }
 
 type CompressorI interface {
@@ -235,6 +242,8 @@ type CompressorI interface {
 	Compress() error
 	Count() int
 	FileName() string
+	SetMetadata(data []byte)
+	GetValuesOnCompressedPage() int
 }
 type PagedWriter struct {
 	parent             CompressorI
@@ -335,6 +344,10 @@ func (c *PagedWriter) DisableFsync() {
 	if casted, ok := c.parent.(disableFsycn); ok {
 		casted.DisableFsync()
 	}
+}
+
+func (c *PagedWriter) SetMetadata(metadata []byte) {
+	c.parent.SetMetadata(metadata)
 }
 
 type disableFsycn interface {

@@ -21,8 +21,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 // DBSchemaVersion versions list
@@ -769,7 +769,7 @@ func (idx InvertedIdx) String() string {
 }
 
 func String2InvertedIdx(in string) (InvertedIdx, error) {
-	switch in {
+	switch strings.ToLower(in) {
 	case "accounts":
 		return AccountsHistoryIdx, nil
 	case "storage":
@@ -831,7 +831,7 @@ func (d Domain) String() string {
 }
 
 func String2Domain(in string) (Domain, error) {
-	switch in {
+	switch strings.ToLower(in) {
 	case "accounts":
 		return AccountsDomain, nil
 	case "storage":
@@ -846,6 +846,13 @@ func String2Domain(in string) (Domain, error) {
 		return RCacheDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
+	}
+}
+
+func String2Forkable(in string) (ForkableId, error) {
+	switch in {
+	default:
+		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
 	}
 }
 
@@ -932,7 +939,7 @@ const (
 	   1. what is smallest block number >= X where account A changed
 	   2. get last shard of A - to append there new block numbers
 
-	   Task 1. is part of "get historical state" operation (see `core/state:DomainGetAsOf`):
+	   Task 1. is part of "get historical state" operation (see `db/state:DomainGetAsOf`):
 	   If `db.seekInFiles(A+bigEndian(X))` returns non-last shard -
 
 	   	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)

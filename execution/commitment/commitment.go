@@ -23,23 +23,23 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"unsafe"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon/db/kv"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -90,6 +90,11 @@ type Trie interface {
 
 	// Makes trie more verbose
 	SetTrace(bool)
+	// Trace domain writes only (no filding etc)
+	SetTraceDomain(bool)
+	SetCapture(capture []string)
+	GetCapture(truncate bool) []string
+	EnableCsvMetrics(filePathPrefix string)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -100,8 +105,14 @@ type Trie interface {
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
-	// Process updates
-	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
+	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
+	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
+}
+
+type CommitProgress struct {
+	KeyIndex    uint64
+	UpdateCount uint64
+	Metrics     MetricValues
 }
 
 type PatriciaContext interface {
@@ -140,7 +151,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		//fn := func(key []byte) []byte { return hexToBin(key) }
 		//tree := NewUpdateTree(mode, tmpdir, fn)
 		//return trie, tree
-		panic("omg its not supported")
+		panic("VariantBinPatriciaTrie not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -225,7 +236,7 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
-	// fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
+	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
@@ -340,7 +351,7 @@ func (branchData BranchData) String() string {
 	pos := 4
 	var sb strings.Builder
 	var cell cell
-	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
+	fmt.Fprintf(&sb, "(%d) touchMap %016b, afterMap %016b\n", len(branchData), touchMap, afterMap)
 	for bitset, j := touchMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
@@ -636,6 +647,93 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 	return
 }
 
+func (branchData BranchData) Validate(branchKey []byte) error {
+	if len(branchData) == 0 {
+		return nil
+	}
+	_, afterMap, row, err := branchData.decodeCells()
+	if err != nil {
+		return err
+	}
+	if err = validateAfterMap(afterMap, row); err != nil {
+		return err
+	}
+	if err = validatePlainKeys(branchKey, row, sha3.NewLegacyKeccak256().(keccakState)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateAfterMap(afterMap uint16, row [16]*cell) error {
+	cellsInAfterMap := bits.OnesCount16(afterMap)
+	var decodedCellsCount int
+	for _, c := range row {
+		if c != nil {
+			decodedCellsCount++
+		}
+	}
+	if cellsInAfterMap != decodedCellsCount {
+		return fmt.Errorf("cells in after map does not match branch data: %d vs %d", cellsInAfterMap, decodedCellsCount)
+	}
+	return nil
+}
+
+func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) error {
+	uncompactedBranchKey := uncompactNibbles(branchKey)
+	if HasTerm(uncompactedBranchKey) {
+		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
+	}
+	if len(uncompactedBranchKey) > 128 {
+		return fmt.Errorf("branch key too long: %d", len(branchKey))
+	}
+	depth := int16(len(uncompactedBranchKey))
+	for _, c := range row {
+		if c == nil {
+			continue
+		}
+		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
+			continue
+		}
+		err := c.deriveHashedKeys(depth, keccak, length.Addr)
+		if err != nil {
+			return err
+		}
+		hashedExtLen := c.hashedExtLen
+		hashedExt := c.hashedExtension[:hashedExtLen]
+		if c.extLen > 0 && hashedExtLen >= c.extLen {
+			hashedExtLen -= c.extLen
+			hashedExt = hashedExt[:hashedExtLen]
+		}
+		branchKeyAndExtNibbles := make([]byte, len(uncompactedBranchKey)+int(hashedExtLen))
+		copy(branchKeyAndExtNibbles, uncompactedBranchKey)
+		copy(branchKeyAndExtNibbles[len(uncompactedBranchKey):], hashedExt)
+		var plainKeyNibbles []byte
+		if c.accountAddrLen > 0 {
+			plainKeyNibbles = KeyToHexNibbleHash(c.accountAddr[:])
+		}
+		if c.storageAddrLen > 0 {
+			plainKeyNibbles = KeyToHexNibbleHash(c.storageAddr[:])
+			if c.accountAddrLen > 0 {
+				//fmt.Printf("--- debug --- cell with accountAddrLen>0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+				if !bytes.Equal(c.accountAddr[:], c.storageAddr[:length.Addr]) {
+					return fmt.Errorf("accountAddr mismatch with storageAddr: %s != %x", common.BytesToAddress(c.accountAddr[:]), common.BytesToHash(c.storageAddr[:length.Addr]))
+				}
+			} else {
+				//nolint:staticcheck
+				//fmt.Printf("--- debug --- cell with accountAddrLen=0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+			}
+		}
+		//if c.extLen > 0 {
+		//	fmt.Printf("--- debug --- cell with plainKey and extLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+		//}
+		if !bytes.Equal(plainKeyNibbles, branchKeyAndExtNibbles) {
+			//fmt.Printf("--- debug --- branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
+			return fmt.Errorf("branch and hashed extension nibbles dont match plainKey nibbles: %x vs %x", plainKeyNibbles, branchKeyAndExtNibbles)
+		}
+	}
+	return nil
+}
+
 type BranchMerger struct {
 	buf []byte
 	num [4]byte
@@ -838,7 +936,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
 
-		medians := make(map[string][]int)
+		medians := make(map[string][]int16)
 		for _, c := range cells {
 			if c == nil {
 				continue
@@ -868,7 +966,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				stat.ExtCount++
 				medians["ext"] = append(medians["ext"], c.extLen)
 			default:
-				panic("unexpected cell " + fmt.Sprintf("%s", c.FullString()))
+				panic("unexpected cell " + c.FullString())
 			}
 			if c.extLen > 0 {
 				switch tv {
@@ -882,7 +980,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		}
 
 		for k, v := range medians {
-			sort.Ints(v)
+			slices.Sort(v)
 			switch k {
 			case "apk":
 				stat.MedianAPK = uint64(v[len(v)/2])
@@ -959,7 +1057,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
-		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	return t
 }
@@ -970,7 +1068,7 @@ func (t *Updates) SetMode(m Mode) {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
-		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	t.Reset()
 }
@@ -1075,18 +1173,18 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		c.update.Balance.Set(&acc.Balance)
 		c.update.Flags |= BalanceUpdate
 	}
-	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
-		if len(acc.CodeHash.Bytes()) == 0 {
+	if acc.CodeHash.Value() != c.update.CodeHash {
+		if acc.CodeHash.IsEmpty() {
 			c.update.CodeHash = empty.CodeHash
 		} else {
 			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash
+			c.update.CodeHash = acc.CodeHash.Value()
 		}
 	}
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
-	c.update.StorageLen = len(val)
+	c.update.StorageLen = int8(len(val))
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
@@ -1127,34 +1225,148 @@ func (t *Updates) Close() {
 	}
 }
 
+const hashSortBatchSize = 10_000
+
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
-func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
+// Keys are processed in batches of 10k to control memory usage.
+// If warmuper is non-nil, keys are submitted for parallel warming before processing.
+// Caller is responsible for calling warmuper.Wait() after processing completes.
+func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
+		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
+		var prevKey []byte
+
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return fn(k, v, nil)
+			// Make copies since ETL may reuse buffers
+			hk := common.Copy(k)
+			pk := common.Copy(v)
+			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
+
+			// Submit to warmuper with start depth based on divergence from previous key
+			if warmuper != nil {
+				startDepth := 0
+				if prevKey != nil {
+					// Find common prefix length
+					minLen := min(len(prevKey), len(hk))
+					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
+						startDepth++
+					}
+				}
+				warmuper.WarmKey(hk, startDepth)
+				prevKey = hk
+			}
+
+			// Process batch when full
+			if len(batch) >= hashSortBatchSize {
+				for _, p := range batch {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+						return err
+					}
+				}
+				if warmuper != nil {
+					warmuper.DrainPending()
+				}
+				batch = batch[:0]
+			}
+			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
 		}
 
+		// Process remaining keys in final batch
+		for _, p := range batch {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+				return err
+			}
+		}
+
 		t.initCollector()
+
 	case ModeUpdate:
+		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
+		var prevKey []byte
+		var processErr error
+
 		t.tree.Ascend(func(item *KeyUpdate) bool {
 			select {
 			case <-ctx.Done():
+				processErr = ctx.Err()
 				return false
 			default:
 			}
 
-			if err := fn(item.hashedKey, toBytesZeroCopy(item.plainKey), item.update); err != nil {
-				return false
+			// Make copies
+			hk := make([]byte, len(item.hashedKey))
+			copy(hk, item.hashedKey)
+			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
+
+			// Submit to warmuper with start depth based on divergence from previous key
+			if warmuper != nil {
+				startDepth := 0
+				if prevKey != nil {
+					// Find common prefix length
+					minLen := min(len(prevKey), len(hk))
+					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
+						startDepth++
+					}
+				}
+				warmuper.WarmKey(hk, startDepth)
+				prevKey = hk
+			}
+
+			// Process batch when full
+			if len(batch) >= hashSortBatchSize {
+				for _, p := range batch {
+					select {
+					case <-ctx.Done():
+						processErr = ctx.Err()
+						return false
+					default:
+					}
+					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+						processErr = err
+						return false
+					}
+				}
+				if warmuper != nil {
+					warmuper.DrainPending()
+				}
+				batch = batch[:0]
 			}
 			return true
 		})
+
+		if processErr != nil {
+			return processErr
+		}
+
+		// Process remaining keys in final batch
+		for _, p := range batch {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+				return err
+			}
+		}
 		t.tree.Clear(true)
+
 	default:
 		return nil
 	}
@@ -1217,7 +1429,7 @@ func (uf UpdateFlags) String() string {
 type Update struct {
 	CodeHash   common.Hash
 	Storage    common.Hash
-	StorageLen int
+	StorageLen int8
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
@@ -1332,9 +1544,9 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		if len(buf) < pos+int(l) {
 			return 0, errors.New("decode Update: buffer too small for storage")
 		}
-		u.StorageLen = int(l)
-		copy(u.Storage[:], buf[pos:pos+u.StorageLen])
-		pos += u.StorageLen
+		u.StorageLen = int8(l)
+		copy(u.Storage[:], buf[pos:pos+int(u.StorageLen)])
+		pos += int(u.StorageLen)
 	}
 	return pos, nil
 }

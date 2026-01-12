@@ -23,8 +23,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// PostExec stage is run after execution stage to peform extra verifications that are only possible when state is available.
-// It is used for consensus engines which keep validators inside smart contracts (Bor, AuRa)
+// PostExec stage is run after execution stage to perform extra verifications that are only possible when state is available.
+// It is used for rules engines which keep validators inside smart contracts (Bor, AuRa)
 
 type PostExecCfg struct {
 	db    kv.RwDB

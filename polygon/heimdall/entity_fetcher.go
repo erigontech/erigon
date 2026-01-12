@@ -22,7 +22,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type EntityFetcher[TEntity Entity] struct {

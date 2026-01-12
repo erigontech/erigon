@@ -6,25 +6,24 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type WitnessCfg struct {
@@ -32,7 +31,7 @@ type WitnessCfg struct {
 	enableWitnessGeneration bool
 	maxWitnessLimit         uint64
 	chainConfig             *chain.Config
-	engine                  consensus.Engine
+	engine                  rules.Engine
 	blockReader             services.FullBlockReader
 	dirs                    datadir.Dirs
 }
@@ -45,7 +44,7 @@ type WitnessStore struct {
 	GetHashFn       func(n uint64) (common.Hash, error)
 }
 
-func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
+func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine rules.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
 	return WitnessCfg{
 		enableWitnessGeneration: enableWitnessGeneration,
 		maxWitnessLimit:         maxWitnessLimit,
@@ -80,7 +79,7 @@ func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot common.Has
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return cfg.blockReader.Header(ctx, tx, hash, number)
 	}
-	getHashFn := core.GetHashFn(block.Header(), getHeader)
+	getHashFn := protocol.GetHashFn(block.Header(), getHeader)
 
 	return &WitnessStore{
 		Tds:             tds,
@@ -97,7 +96,6 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: latestBlockNr}
 	stageState := &StageState{ID: stages.Execution, BlockNumber: blockNr}
 
-	txc := wrap.NewTxContainer(batch, nil)
 	batchSizeStr := "512M"
 	var batchSize datasize.ByteSize
 	err := batchSize.UnmarshalText([]byte(batchSizeStr))
@@ -112,18 +110,17 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	dirs := cfg.dirs
 	blockReader := cfg.blockReader
 	syncCfg := ethconfig.Defaults.Sync
-	execCfg := StageExecuteBlocksCfg(batch.MemDB(), pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig, nil,
-		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, nil, nil)
+	execCfg := StageExecuteBlocksCfg(batch.MemDB(), pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig,
+		nil /*stateStream=*/, false /*badBlockHalt=*/, true, dirs, blockReader, nil, nil, syncCfg, nil, false /*experimentalBAL=*/)
 
-	if err := UnwindExecutionStage(unwindState, stageState, txc, ctx, execCfg, logger); err != nil {
+	if err := UnwindExecutionStage(unwindState, stageState, nil, batch, ctx, execCfg, logger); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader consensus.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) (common.Hash, error), logger log.Logger) (common.Hash, error) {
+func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader rules.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) (common.Hash, error), logger log.Logger) (common.Hash, error) {
 	blockNr := block.NumberU64()
 	nw, err := trie.NewWitnessFromReader(bytes.NewReader(buf.Bytes()), false)
 	if err != nil {
@@ -134,7 +131,7 @@ func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chain
 	if err != nil {
 		return common.Hash{}, err
 	}
-	execResult, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vm.Config{}, getHashFn, cfg.engine, block, statelessIbs, statelessIbs, chainReader, nil, logger)
+	execResult, err := protocol.ExecuteBlockEphemerally(cfg.chainConfig, &vm.Config{}, getHashFn, cfg.engine, block, statelessIbs, statelessIbs, chainReader, nil, logger)
 	if err != nil {
 		return common.Hash{}, err
 	}

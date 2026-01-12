@@ -25,8 +25,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -62,7 +62,7 @@ func NextKey(key []byte) ([]byte, error) {
 // * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
 // * `isDone`: true, if everything is processed
 type LoadCommitHandler func(db kv.Putter, key []byte, isDone bool) error
-type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []interface{})
+type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []any)
 
 type TransformArgs struct {
 	Quit              <-chan struct{}
@@ -138,7 +138,7 @@ func extractBucketIntoFiles(
 		select {
 		default:
 		case <-logEvery.C:
-			logArs := []interface{}{"from", bucket}
+			logArs := []any{"from", bucket}
 			if additionalLogArguments != nil {
 				logArs = append(logArs, additionalLogArguments(k, v)...)
 			} else {

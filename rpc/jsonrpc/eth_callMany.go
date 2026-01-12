@@ -21,22 +21,24 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type Bundle struct {
@@ -49,7 +51,7 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
-func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
+func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]any, error) {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
@@ -134,7 +136,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return hash, err
 	}
 
-	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
+	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
@@ -169,17 +171,17 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
 		st.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
 		}
-		txCtx = core.NewEVMTxContext(msg)
+		txCtx = protocol.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
 		// Execute the transaction message
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			return nil, err
 		}
@@ -195,13 +197,13 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	if stateOverride != nil {
-		err = stateOverride.Override(evm.IntraBlockState())
+		err = stateOverride.Override(evm.IntraBlockState(), nil, blockCtx.Rules(chainConfig))
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	ret := make([][]map[string]interface{}, 0)
+	ret := make([][]map[string]any, 0)
 
 	for _, bundle := range bundles {
 		// first change blockContext
@@ -209,10 +211,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.BlockNumber = uint64(*bundle.BlockOverride.BlockNumber)
 		}
 		if bundle.BlockOverride.BaseFee != nil {
-			blockCtx.BaseFee = bundle.BlockOverride.BaseFee
+			blockCtx.BaseFee = *bundle.BlockOverride.BaseFee
 		}
 		if bundle.BlockOverride.Coinbase != nil {
-			blockCtx.Coinbase = *bundle.BlockOverride.Coinbase
+			blockCtx.Coinbase = accounts.InternAddress(*bundle.BlockOverride.Coinbase)
 		}
 		if bundle.BlockOverride.Difficulty != nil {
 			blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*bundle.BlockOverride.Difficulty))
@@ -224,22 +226,20 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
 		}
 		if bundle.BlockOverride.BlockHash != nil {
-			for blockNum, hash := range *bundle.BlockOverride.BlockHash {
-				overrideBlockHash[blockNum] = hash
-			}
+			maps.Copy(overrideBlockHash, *bundle.BlockOverride.BlockHash)
 		}
-		results := []map[string]interface{}{}
+		results := []map[string]any{}
 		for _, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
-			msg, err := txn.ToMessage(api.GasCap, blockCtx.BaseFee)
+			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)
 			if err != nil {
 				return nil, err
 			}
-			txCtx = core.NewEVMTxContext(msg)
+			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
-			result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
+			result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 			if err != nil {
 				return nil, err
 			}
@@ -250,11 +250,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			if evm.Cancelled() {
 				return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 			}
-			jsonResult := make(map[string]interface{})
+			jsonResult := make(map[string]any)
 			if result.Err != nil {
 				if len(result.Revert()) > 0 {
 					revertErr := ethapi.NewRevertError(result)
-					jsonResult["error"] = map[string]interface{}{
+					jsonResult["error"] = map[string]any{
 						"message": revertErr.Error(),
 						"data":    revertErr.ErrorData(),
 					}

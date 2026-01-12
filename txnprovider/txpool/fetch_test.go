@@ -30,15 +30,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 func TestFetch(t *testing.T) {
@@ -51,23 +51,23 @@ func TestFetch(t *testing.T) {
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH67, m, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
 	m.StreamWg.Add(2)
 	fetch.ConnectSentries()
 	m.StreamWg.Wait()
 	// Send one transaction id
 	wg.Add(1)
 	errs := m.Send(&sentryproto.InboundMessage{
-		Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
 		Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
 		PeerId: peerID,
 	})
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("sending new pool txn hashes 66 (%d): %v", i, err)
+			t.Errorf("sending new pool txn hashes 68 (%d): %v", i, err)
 		}
 	}
 	wg.Wait()
@@ -291,7 +291,7 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(1)
 
-	fetch := NewFetch(ctx, nil, pool, stateChanges, db, *u256.N1, log.New())
+	fetch := NewFetch(ctx, nil, pool, stateChanges, db, u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Len(t, minedTxns.Txns, 3)

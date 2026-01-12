@@ -5,10 +5,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -91,7 +91,8 @@ func (s *PeerDasState) GetMyCustodyColumns() (map[cltypes.CustodyIndex]bool, err
 		log.Warn("node ID is not set, return empty map")
 		return make(map[cltypes.CustodyIndex]bool), nil
 	}
-	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(node.ID(), s.GetAdvertisedCgc())
+	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, s.GetAdvertisedCgc())
+	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(node.ID(), sampleSize)
 	if err != nil {
 		return nil, err
 	}

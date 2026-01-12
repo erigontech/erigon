@@ -25,16 +25,16 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/jwt"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/jwt"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -136,7 +136,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	args := []interface{}{request}
+	args := []any{request}
 	if versionedHashes != nil {
 		args = append(args, versionedHashes, *beaconParentRoot)
 	}
@@ -162,7 +162,7 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized, s
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
-	args := []interface{}{forkChoiceRequest}
+	args := []any{forkChoiceRequest}
 	if attributes != nil {
 		args = append(args, attributes)
 	}
@@ -280,4 +280,8 @@ func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) 
 
 func (cc *ExecutionClientRpc) HasGapInSnapshots(ctx context.Context) bool {
 	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+	return nil, nil
 }

@@ -26,19 +26,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
@@ -604,6 +604,7 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v1.0-accounts.24-28.ef.torrent":                                   &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef.torrent.tmp.tmp.tmp":                       &fstest.MapFile{},
 		"v1.0-070200-070300-bodies.seg.torrent4014494284":                  &fstest.MapFile{},
+		"caplin/v1.1-013050-013100-ValidatorEffectiveBalance.seg":          &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)
@@ -638,6 +639,23 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(21150000, int(f.From))
 	require.Equal(21200000, int(f.To))
 	require.Equal("BlockRoot", f.TypeString)
+	require.Equal("BlockRoot", f.CaplinTypeString)
+
+	f, e3, ok = snaptype.ParseFileName("", "caplin/v1.1-013050-013100-ValidatorEffectiveBalance.seg")
+	require.True(ok)
+	require.False(e3)
+	require.Equal(13050000, int(f.From))
+	require.Equal(13100000, int(f.To))
+	require.Equal("ValidatorEffectiveBalance", f.TypeString)
+	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
+
+	f, e3, ok = snaptype.ParseFileName("caplin", "v1.1-013050-013100-ValidatorEffectiveBalance.seg")
+	require.True(ok)
+	require.False(e3)
+	require.Equal(13050000, int(f.From))
+	require.Equal(13100000, int(f.To))
+	require.Equal("ValidatorEffectiveBalance", f.TypeString)
+	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx"))
 	require.True(ok)
@@ -719,6 +737,11 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal("domain", f.Type.Name())
 
 	f, e3, ok = snaptype.ParseFileName("", stat("idx/v1-tracesto.40-44.ef"))
+	require.True(ok)
+	require.True(e3)
+	require.Equal("tracesto", f.TypeString)
+
+	f, e3, ok = snaptype.ParseFileName("caplin/", stat("idx/v1-tracesto.40-44.ef"))
 	require.True(ok)
 	require.True(e3)
 	require.Equal("tracesto", f.TypeString)

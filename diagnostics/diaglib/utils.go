@@ -22,7 +22,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -107,7 +107,7 @@ func SecondsToHHMMString(seconds uint64) string {
 	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
 
-func ParseData(data []byte, v interface{}) {
+func ParseData(data []byte, v any) {
 	if len(data) == 0 {
 		return
 	}

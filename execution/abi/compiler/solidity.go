@@ -24,7 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // --combined-output format
@@ -44,9 +44,9 @@ type solcOutputV8 struct {
 		BinRuntime            string `json:"bin-runtime"`
 		SrcMapRuntime         string `json:"srcmap-runtime"`
 		Bin, SrcMap, Metadata string
-		Abi                   interface{}
-		Devdoc                interface{}
-		Userdoc               interface{}
+		Abi                   any
+		Devdoc                any
+		Userdoc               any
 		Hashes                map[string]string
 	}
 	Version string
@@ -71,12 +71,12 @@ func ParseCombinedJSON(combinedJSON []byte, source string, languageVersion strin
 	contracts := make(map[string]*Contract)
 	for name, info := range output.Contracts {
 		// Parse the individual compilation results.
-		var abi interface{}
+		var abi any
 		if err := json.Unmarshal([]byte(info.Abi), &abi); err != nil {
 			return nil, fmt.Errorf("solc: error reading abi definition (%w)", err)
 		}
 
-		var userdoc, devdoc interface{}
+		var userdoc, devdoc any
 		marshalErr := json.Unmarshal([]byte(info.Userdoc), &userdoc)
 		if marshalErr != nil {
 			log.Warn("Failed to unmarshal info.Devdoc", "", marshalErr)
