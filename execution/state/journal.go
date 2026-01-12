@@ -156,9 +156,6 @@ type (
 	touchAccount struct {
 		account accounts.Address
 	}
-	touchCode struct {
-		account accounts.Address
-	}
 
 	// Changes to the access list
 	accessListAddAccountChange struct {
@@ -267,22 +264,6 @@ func (ch touchAccount) revert(s *IntraBlockState) error {
 }
 
 func (ch touchAccount) dirtied() (accounts.Address, bool) { return ch.account, true }
-
-func (ch touchCode) revert(s *IntraBlockState) error {
-	fmt.Println("REVERT CODE", ch.account)
-	s.versionedReads.Delete(ch.account, AccountKey{Path: CodePath})
-	if reads, ok := s.versionedReads[ch.account]; ok {
-		if len(reads) == 1 {
-			if _, ok := reads[AccountKey{Path: AddressPath}]; ok {
-				delete(s.versionedReads, ch.account)
-				delete(s.addressAccess, ch.account)
-			}
-		}
-	}
-	return nil
-}
-
-func (ch touchCode) dirtied() (accounts.Address, bool) { return accounts.NilAddress, false }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(ch.account)

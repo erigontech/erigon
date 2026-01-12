@@ -685,7 +685,6 @@ func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
 func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (accounts.Address, bool, error) {
 	// eip-7702
 	code, err := sdb.GetCode(addr)
-	sdb.touchCode(addr)
 	if err != nil {
 		return accounts.ZeroAddress, false, err
 	}
@@ -864,13 +863,6 @@ func (sdb *IntraBlockState) touchAccount(addr accounts.Address) {
 		// flattened journals.
 		sdb.journal.dirty(addr)
 	}
-}
-
-func (sdb *IntraBlockState) touchCode(addr accounts.Address) {
-	fmt.Println("TOUCH CODE", addr)
-	sdb.journal.append(touchCode{
-		account: addr,
-	})
 }
 
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {

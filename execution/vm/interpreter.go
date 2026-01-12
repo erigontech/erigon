@@ -468,7 +468,6 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 		}
 
 		// execute the operation
-		fmt.Println("EXEC")
 		pc, res, err = operation.execute(pc, in, callContext)
 
 		if err != nil {
