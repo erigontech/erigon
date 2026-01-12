@@ -28,14 +28,14 @@ type Sized interface {
 	Static() bool
 }
 
-type ObjectSSZ interface {
+type SizedObjectSSZ interface {
 	ssz.EncodableSSZ
-	ssz.Marshaler
+	Sized
 }
 
-type SizedObjectSSZ interface {
-	ObjectSSZ
-	Sized
+type HashableSizedObjectSSZ interface {
+	SizedObjectSSZ
+	ssz.HashableSSZ
 }
 
 /*

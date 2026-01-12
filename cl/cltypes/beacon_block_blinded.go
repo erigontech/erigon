@@ -31,9 +31,9 @@ import (
 
 // make sure that the type implements the interface ssz2.ObjectSSZ
 var (
-	_ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
-	_ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)
-	_ ssz2.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)
+	_ ssz2.HashableSizedObjectSSZ = (*BlindedBeaconBody)(nil)
+	_ ssz2.HashableSizedObjectSSZ = (*BlindedBeaconBlock)(nil)
+	_ ssz.EncodableSSZ            = (*SignedBlindedBeaconBlock)(nil)
 
 	_ GenericBeaconBlock = (*BlindedBeaconBlock)(nil)
 	_ GenericBeaconBody  = (*BlindedBeaconBody)(nil)
