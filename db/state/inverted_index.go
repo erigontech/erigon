@@ -740,10 +740,11 @@ type InvertedIndexPruneStat struct {
 	PruneCountTx     uint64
 	PruneCountValues uint64
 	DupsDeleted      uint64
+	Progress         prune.Progress
 }
 
 func (is *InvertedIndexPruneStat) PrunedNothing() bool {
-	return is.PruneCountTx == 0 && is.PruneCountValues == 0
+	return is.PruneCountTx == 0 && is.PruneCountValues == 0 && is.Progress == prune.Done
 }
 
 func (is *InvertedIndexPruneStat) String() string {
@@ -878,6 +879,11 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	prs, err := GetPruneValProgress(rwTx, []byte(vtbl))
 	if err != nil {
 		return nil, err
+	}
+	if prs != nil && prs.TxFrom == txFrom && prs.TxTo == txTo && prs.ValueProgress == prune.Done && prs.KeyProgress == prune.Done {
+		stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
+		stat.Progress = prune.Done
+		return stat, nil
 	}
 
 	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
