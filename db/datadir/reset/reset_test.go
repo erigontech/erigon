@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -19,7 +20,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/preverified"
 	"github.com/go-quicktest/qt"
 )
 
@@ -39,7 +40,7 @@ func TestSnapshots(t *testing.T) {
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, ".")
 		printFs(t, root.FS())
-		r.PreverifiedSnapshots = snapcfg.PreverifiedItems{
+		r.PreverifiedSnapshots = preverified.SortedItems{
 			{Name: "keep/me"},
 		}
 		r.PreverifiedSnapshots.Sort()
@@ -97,7 +98,13 @@ func TestResetCheapDiskExample(t *testing.T) {
 			{Name: "fastdisk", Mode: fs.ModeDir},
 			{Name: "mount", Mode: fs.ModeDir},
 			{Name: "datadir/snapshots", Mode: fs.ModeDir},
-			{Name: "datadir/snapshots/domain", Mode: fs.ModeSymlink, Data: absFastDiskLink},
+			{
+				Name: "datadir/snapshots/domain",
+				Mode: fs.ModeSymlink,
+				// Symlinks are converted to and from slash-names internally, so we need to "escape"
+				// this path.
+				Data: filepath.ToSlash(absFastDiskLink),
+			},
 			fakeMount("datadir/heimdall/mystuff"),
 			{Name: "datadir/snapshots/history", Mode: fs.ModeDir},
 		}
@@ -164,11 +171,19 @@ type fsEntry struct {
 	Remove func() error
 }
 
-func (me fsEntry) readData(fsys fs.FS) (string, error) {
+func (me fsEntry) isSymlink() bool {
+	return me.Mode&fs.ModeSymlink != 0
+}
+
+func (me fsEntry) readData(fsys fs.FS) (data string, err error) {
 	switch mt := me.Mode.Type(); mt {
 	case fs.ModeSymlink:
-
-		return fs.ReadLink(fsys, string(me.Name))
+		data, err = fs.ReadLink(fsys, string(me.Name))
+		if err != nil {
+			return
+		}
+		data = filepath.ToSlash(data)
+		return
 	case 0:
 		b, err := fs.ReadFile(fsys, string(me.Name))
 		return string(b), err
@@ -180,9 +195,18 @@ func (me fsEntry) readData(fsys fs.FS) (string, error) {
 }
 
 func withOsRoot(t *testing.T, with func(root *os.Root)) {
-	osRoot, err := os.OpenRoot(t.TempDir())
+	dir, err := os.MkdirTemp("", strings.ReplaceAll(t.Name(), "/", "_"))
+	if err != nil {
+		t.Fatalf("cannot create temporary directory: %v", err)
+	}
+	osRoot, err := os.OpenRoot(dir)
 	qt.Assert(t, qt.IsNil(err))
 	t.Log("rootfs is at", osRoot.Name())
+	defer func() {
+		if !t.Failed() {
+			osRoot.RemoveAll(".")
+		}
+	}()
 	defer func() {
 		if t.Failed() {
 			t.Log("fs state at failure")
@@ -336,12 +360,33 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 	assertNoErr := func(err error) {
 		qt.Assert(t, qt.IsNil(err))
 	}
+	// Are you serious? Windows has 2 types of symlinks. Go will guess what kind to use if the
+	// target already exists. Move symlinks to the back of the slice.
+	entries = slices.Clone(entries)
+	slices.SortFunc(entries, func(l, r fsEntry) int {
+		if l.isSymlink() == r.isSymlink() {
+			return 0
+		}
+		if l.isSymlink() {
+			return 1
+		} else {
+			return -1
+		}
+	})
 	for _, entry := range entries {
 		localName, err := filepath.Localize(string(entry.Name))
 		qt.Assert(t, qt.IsNil(err), qt.Commentf("localizing entry name %q", entry.Name))
 		root.MkdirAll(filepath.Dir(localName), dir.DirPerm)
 		if entry.Mode&fs.ModeSymlink != 0 {
-			assertNoErr(root.Symlink(entry.Data, localName))
+			// Windows doesn't seem to create SYMLINKD types when going through os.Root. So we do
+			// appropriate path conversions going into Symlink. That's on top of having to make sure
+			// the target exists if we want a SYMLINKD and not just a SYMLINK.
+			targetFilePath := filepath.FromSlash(entry.Data)
+			newName := filepath.Join(root.Name(), localName)
+			err := os.Symlink(targetFilePath, newName)
+			if err != nil {
+				panic(fmt.Sprintf("creating symlink %q -> %q: %v", localName, targetFilePath, err))
+			}
 		} else if entry.Mode&fs.ModeDir != 0 {
 			assertNoErr(root.Mkdir(localName, dir.DirPerm))
 		} else {
