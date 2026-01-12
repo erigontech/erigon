@@ -326,27 +326,17 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	var warmupConfig commitment.WarmupConfig
 	if sdc.warmupDB != nil {
-		// avoid races like this
-		db := sdc.warmupDB
-		stepSize := sdc.sharedDomains.StepSize()
-		txNum := sdc.sharedDomains.TxNum()
-		// Create factory for warmup TrieContexts with their own transactions
-		ctxFactory := sdc.trieContextFactory(ctx, db, stepSize, txNum)
 		warmupConfig = commitment.WarmupConfig{
 			Enabled:    true,
-			CtxFactory: ctxFactory,
+			CtxFactory: sdc.trieContextFactory(ctx, sdc.warmupDB),
 			NumWorkers: 16,
 			MaxDepth:   commitment.WarmupMaxDepth,
 			LogPrefix:  logPrefix,
 		}
 	} else if sdc.paraTrieDB != nil {
-		// avoid races like this
-		db := sdc.paraTrieDB
-		stepSize := sdc.sharedDomains.StepSize()
-		txNum := sdc.sharedDomains.TxNum()
 		// temporarily use WarmupConfig to easily pass CtxFactory to the para trie without too many changes (can improve in future PR)
 		warmupConfig = commitment.WarmupConfig{
-			CtxFactory: sdc.trieContextFactory(ctx, db, stepSize, txNum),
+			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
 		}
 	}
 
@@ -365,13 +355,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, stepSize uint64, txNum uint64) commitment.TrieContextFactory {
+func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB) commitment.TrieContextFactory {
+	// avoid races like this
+	stepSize := sdc.sharedDomains.StepSize()
+	txNum := sdc.sharedDomains.TxNum()
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, nil
 		}
-
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
@@ -383,7 +375,6 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 		} else {
 			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
 		}
-
 		cleanup := func() {
 			roTx.Rollback()
 		}
