@@ -19,13 +19,11 @@ package kv
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
@@ -639,26 +637,6 @@ func InitSummaries(dbLabel Label) {
 			DbCommitTotal:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"}),
 		})
 	}
-}
-
-func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
-	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
-	if !ok {
-		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
-	}
-	// cast to *DBSummaries
-	summaries, ok := _summaries.(*DBSummaries)
-	if !ok {
-		return fmt.Errorf("type casting to *DBSummaries failed")
-	}
-
-	summaries.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-	summaries.DbCommitWrite.Observe(latency.Write.Seconds())
-	summaries.DbCommitSync.Observe(latency.Sync.Seconds())
-	summaries.DbCommitEnding.Observe(latency.Ending.Seconds())
-	summaries.DbCommitTotal.Observe(latency.Whole.Seconds())
-	return nil
-
 }
 
 var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name

@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/preverified"
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/snapcfg"
 )
 
 type Stats struct {
@@ -27,7 +27,7 @@ type Stats struct {
 type Reset struct {
 	Logger               log.Logger
 	RemoveFunc           func(name OsFilePath) error
-	PreverifiedSnapshots snapcfg.PreverifiedItems
+	PreverifiedSnapshots preverified.SortedItems
 	RemoveUnknown        bool
 	RemoveLocal          bool
 	Dirs                 *datadir.Dirs
