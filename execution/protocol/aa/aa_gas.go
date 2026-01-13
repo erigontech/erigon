@@ -8,7 +8,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -55,12 +54,13 @@ func refundGas(
 	tx *types.AccountAbstractionTransaction,
 	ibs *state.IntraBlockState,
 	gasUsed uint64,
+	preTxCost uint64,
 ) error {
 	baseFee := uint256.MustFromBig(header.BaseFee)
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
 	actualGasCost := new(uint256.Int).Mul(effectiveGasPrice, new(uint256.Int).SetUint64(gasUsed))
 
-	totalGasLimit := params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	totalGasLimit := preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 
