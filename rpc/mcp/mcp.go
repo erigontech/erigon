@@ -25,13 +25,15 @@ type ErigonMCPServer struct {
 	mcpServer *server.MCPServer
 	ethAPI    jsonrpc.EthAPI
 	erigonAPI jsonrpc.ErigonAPI
+	otsAPI    jsonrpc.OtterscanAPI
 }
 
 // NewErigonMCPServer creates a new MCP server for Erigon.
-func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI) *ErigonMCPServer {
+func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsAPI jsonrpc.OtterscanAPI) *ErigonMCPServer {
 	e := &ErigonMCPServer{
 		ethAPI:    ethAPI,
 		erigonAPI: erigonAPI,
+		otsAPI:    otsAPI,
 	}
 
 	e.mcpServer = server.NewMCPServer(
@@ -339,6 +341,74 @@ func (e *ErigonMCPServer) registerTools() {
 		mcp.WithDescription("Get metrics with optional filtering by pattern (supports wildcards like 'db_*', '*_size', etc.)"),
 		mcp.WithString("pattern", mcp.Description("Metric name pattern (optional, empty = all metrics)")),
 	), e.handleMetricsGet)
+
+	// Otterscan tools
+	e.mcpServer.AddTool(mcp.NewTool("ots_getApiLevel",
+		mcp.WithDescription("Get Otterscan API level"),
+	), e.handleOtsGetApiLevel)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_getInternalOperations",
+		mcp.WithDescription("Get internal operations (internal txs) for a transaction"),
+		mcp.WithString("txHash", mcp.Required(), mcp.Description("Transaction hash")),
+	), e.handleOtsGetInternalOperations)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_searchTransactionsBefore",
+		mcp.WithDescription("Search transactions before a given block for an address"),
+		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
+		mcp.WithNumber("blockNumber", mcp.Required(), mcp.Description("Block number")),
+		mcp.WithNumber("pageSize", mcp.Description("Page size (default: 25)")),
+	), e.handleOtsSearchTransactionsBefore)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_searchTransactionsAfter",
+		mcp.WithDescription("Search transactions after a given block for an address"),
+		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
+		mcp.WithNumber("blockNumber", mcp.Required(), mcp.Description("Block number")),
+		mcp.WithNumber("pageSize", mcp.Description("Page size (default: 25)")),
+	), e.handleOtsSearchTransactionsAfter)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_getBlockDetails",
+		mcp.WithDescription("Get detailed block information"),
+		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number or tag")),
+	), e.handleOtsGetBlockDetails)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_getBlockDetailsByHash",
+		mcp.WithDescription("Get detailed block information by hash"),
+		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
+	), e.handleOtsGetBlockDetailsByHash)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_getBlockTransactions",
+		mcp.WithDescription("Get paginated transactions for a block"),
+		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number or tag")),
+		mcp.WithNumber("pageNumber", mcp.Description("Page number (default: 0)")),
+		mcp.WithNumber("pageSize", mcp.Description("Page size (default: 25)")),
+	), e.handleOtsGetBlockTransactions)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_hasCode",
+		mcp.WithDescription("Check if an address has code (is a contract)"),
+		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
+		mcp.WithString("blockNumber", mcp.Description("Block number or tag")),
+	), e.handleOtsHasCode)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_traceTransaction",
+		mcp.WithDescription("Get trace for a transaction"),
+		mcp.WithString("txHash", mcp.Required(), mcp.Description("Transaction hash")),
+	), e.handleOtsTraceTransaction)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_getTransactionError",
+		mcp.WithDescription("Get transaction error/revert reason"),
+		mcp.WithString("txHash", mcp.Required(), mcp.Description("Transaction hash")),
+	), e.handleOtsGetTransactionError)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_getTransactionBySenderAndNonce",
+		mcp.WithDescription("Get transaction hash by sender address and nonce"),
+		mcp.WithString("address", mcp.Required(), mcp.Description("Sender address")),
+		mcp.WithNumber("nonce", mcp.Required(), mcp.Description("Nonce")),
+	), e.handleOtsGetTransactionBySenderAndNonce)
+
+	e.mcpServer.AddTool(mcp.NewTool("ots_getContractCreator",
+		mcp.WithDescription("Get contract creator address and transaction"),
+		mcp.WithString("address", mcp.Required(), mcp.Description("Contract address")),
+	), e.handleOtsGetContractCreator)
 }
 
 // ===== ETH API HANDLERS =====
@@ -918,6 +988,155 @@ func (e *ErigonMCPServer) handleMetricsGet(ctx context.Context, req mcp.CallTool
 	summary += "):\n\n"
 
 	return mcp.NewToolResultText(summary + toJSONText(metrics)), nil
+}
+
+// ===== OTTERSCAN HANDLERS =====
+
+func (e *ErigonMCPServer) handleOtsGetApiLevel(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	level := e.otsAPI.GetApiLevel()
+	return mcp.NewToolResultText(fmt.Sprintf("Otterscan API Level: %d", level)), nil
+}
+
+func (e *ErigonMCPServer) handleOtsGetInternalOperations(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	hash := common.HexToHash(req.GetString("txHash", ""))
+	operations, err := e.otsAPI.GetInternalOperations(ctx, hash)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if len(operations) == 0 {
+		return mcp.NewToolResultText("No internal operations found"), nil
+	}
+	return mcp.NewToolResultText(toJSONText(operations)), nil
+}
+
+func (e *ErigonMCPServer) handleOtsSearchTransactionsBefore(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addr := common.HexToAddress(req.GetString("address", ""))
+	blockNum := uint64(req.GetInt("blockNumber", 0))
+	pageSize := uint16(req.GetInt("pageSize", 25))
+
+	result, err := e.otsAPI.SearchTransactionsBefore(ctx, addr, blockNum, pageSize)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(toJSONText(result)), nil
+}
+
+func (e *ErigonMCPServer) handleOtsSearchTransactionsAfter(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addr := common.HexToAddress(req.GetString("address", ""))
+	blockNum := uint64(req.GetInt("blockNumber", 0))
+	pageSize := uint16(req.GetInt("pageSize", 25))
+
+	result, err := e.otsAPI.SearchTransactionsAfter(ctx, addr, blockNum, pageSize)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(toJSONText(result)), nil
+}
+
+func (e *ErigonMCPServer) handleOtsGetBlockDetails(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	blockNum, err := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	result, err := e.otsAPI.GetBlockDetails(ctx, blockNum)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(toJSONText(result)), nil
+}
+
+func (e *ErigonMCPServer) handleOtsGetBlockDetailsByHash(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	hash := common.HexToHash(req.GetString("blockHash", ""))
+
+	result, err := e.otsAPI.GetBlockDetailsByHash(ctx, hash)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(toJSONText(result)), nil
+}
+
+func (e *ErigonMCPServer) handleOtsGetBlockTransactions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	blockNum, err := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	pageNumber := uint8(req.GetInt("pageNumber", 0))
+	pageSize := uint8(req.GetInt("pageSize", 25))
+
+	result, err := e.otsAPI.GetBlockTransactions(ctx, blockNum, pageNumber, pageSize)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(toJSONText(result)), nil
+}
+
+func (e *ErigonMCPServer) handleOtsHasCode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addr := common.HexToAddress(req.GetString("address", ""))
+	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+
+	hasCode, err := e.otsAPI.HasCode(ctx, addr, blockNumOrHash)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	if hasCode {
+		return mcp.NewToolResultText(fmt.Sprintf("Address %s has code (is a contract)", addr.Hex())), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Address %s has no code (is an EOA)", addr.Hex())), nil
+}
+
+func (e *ErigonMCPServer) handleOtsTraceTransaction(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	hash := common.HexToHash(req.GetString("txHash", ""))
+
+	trace, err := e.otsAPI.TraceTransaction(ctx, hash)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if len(trace) == 0 {
+		return mcp.NewToolResultText("No trace entries found"), nil
+	}
+	return mcp.NewToolResultText(toJSONText(trace)), nil
+}
+
+func (e *ErigonMCPServer) handleOtsGetTransactionError(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	hash := common.HexToHash(req.GetString("txHash", ""))
+
+	errorData, err := e.otsAPI.GetTransactionError(ctx, hash)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if len(errorData) == 0 {
+		return mcp.NewToolResultText("Transaction succeeded (no error)"), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Transaction error: %s", errorData.String())), nil
+}
+
+func (e *ErigonMCPServer) handleOtsGetTransactionBySenderAndNonce(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addr := common.HexToAddress(req.GetString("address", ""))
+	nonce := uint64(req.GetInt("nonce", 0))
+
+	txHash, err := e.otsAPI.GetTransactionBySenderAndNonce(ctx, addr, nonce)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if txHash == nil {
+		return mcp.NewToolResultText("Transaction not found"), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Transaction hash: %s", txHash.Hex())), nil
+}
+
+func (e *ErigonMCPServer) handleOtsGetContractCreator(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addr := common.HexToAddress(req.GetString("address", ""))
+
+	creator, err := e.otsAPI.GetContractCreator(ctx, addr)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if creator == nil {
+		return mcp.NewToolResultText("Contract creator not found"), nil
+	}
+	return mcp.NewToolResultText(toJSONText(creator)), nil
 }
 
 // ===== PROMPTS =====

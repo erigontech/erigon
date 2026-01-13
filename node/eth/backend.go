@@ -845,7 +845,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	erigonApi := jsonrpc.NewErigonAPI(baseApi, backend.chainDB, backend.ethRpcClient)
 
-	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi)
+	otsApi := jsonrpc.NewOtterscanAPI(baseApi, backend.chainDB, stack.Config().Http.OtsMaxPageSize)
+
+	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi, otsApi)
 
 	if config.MCPAddress != "" {
 		go func() {
