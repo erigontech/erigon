@@ -21,7 +21,6 @@ package vm
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -271,11 +270,29 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
 			if _, ok := useGas(scopeGas, dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
-				fmt.Println("OOG", 7702, 0)
 				return 0, ErrOutOfGas
 			}
 
 			evm.intraBlockState.AddAddressToAccessList(addr)
+		}
+
+		// Call the old calculator, which takes into account
+		// - create new account
+		// - transfer value
+		// - memory expansion
+		// - 63/64ths rule
+		gas, err := oldCalculator(evm, callContext, scopeGas-dynCost, memorySize)
+		if err != nil {
+			return 0, err
+		}
+
+		var overflow bool
+		if gas, overflow = math.SafeAdd(gas, dynCost); overflow {
+			return 0, ErrGasUintOverflow
+		}
+
+		if _, ok := useGas(scopeGas, gas, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
+			return 0, ErrOutOfGas
 		}
 
 		// Check if code is a delegation and if so, charge for resolution.
@@ -283,38 +300,23 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		if err != nil {
 			return 0, err
 		}
+
 		if ok {
-			var ddCost uint64
 			if !evm.intraBlockState.AddressInAccessList(dd) {
-				ddCost = params.ColdAccountAccessCostEIP2929
+				gas += params.ColdAccountAccessCostEIP2929
 			} else {
-				ddCost = params.WarmStorageReadCostEIP2929
+				gas += params.WarmStorageReadCostEIP2929
 			}
 
-			if _, ok := useGas(scopeGas, ddCost, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
-				fmt.Println("OOG", 7702, 1)
+			evm.intraBlockState.GetCode(addr)
+
+			if _, ok := useGas(scopeGas, gas, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
 				return 0, ErrOutOfGas
 			}
-			dynCost += ddCost
+
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
-		// Now call the old calculator, which takes into account
-		// - create new account
-		// - transfer value
-		// - memory expansion
-		// - 63/64ths rule
-		gas, err := oldCalculator(evm, callContext, scopeGas-dynCost, memorySize)
-		if dynCost == 0 || err != nil {
-			if err != nil {
-				fmt.Println("OOG", 7702, 2)
-			}
-			return gas, err
-		}
 
-		var overflow bool
-		if gas, overflow = math.SafeAdd(gas, dynCost); overflow {
-			return 0, ErrGasUintOverflow
-		}
-		return gas, nil
+		return gas, err
 	}
 }

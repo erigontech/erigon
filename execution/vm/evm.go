@@ -220,7 +220,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	// BAL: record address access even if call fails due to gas/call depth and to precompiles
-	evm.intraBlockState.MarkAddressAccess(addr)
+	evm.intraBlockState.MarkAddressAccess(addr, false)
 
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
@@ -256,7 +256,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
 		var codeHash accounts.CodeHash
-		fmt.Println("RESOLVE", addr)
 		codeHash, err = evm.intraBlockState.ResolveCodeHash(addr)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -294,7 +293,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		fmt.Println("RUN", addr)
 		ret, gas, err = evm.interpreter.Run(contract, gas, input, readOnly)
 	}
 	// When an error was returned by the EVM or when setting the creation code
@@ -384,9 +382,6 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 
 	depth := evm.interpreter.Depth()
 
-	// BAL: record target address even on failed CREATE/CREATE2 calls
-	evm.intraBlockState.MarkAddressAccess(address)
-
 	if evm.Config().Tracer != nil {
 		evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gasRemaining, value, nil)
 		defer func(startGas uint64) {
@@ -426,6 +421,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	if evm.chainRules.IsBerlin {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
+	// BAL: record target address even on failed CREATE/CREATE2 calls
+	evm.intraBlockState.MarkAddressAccess(address, false)
+
 	// Ensure there's no existing contract already at the designated address
 	contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
 	if err != nil {

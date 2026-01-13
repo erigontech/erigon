@@ -3,10 +3,12 @@ package state
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 )
 
@@ -101,7 +103,9 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 	for _, accountChanges := range changes {
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
-				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+				var value uint256.Int
+				value.SetBytes32(change.Value[:])
+				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
@@ -166,15 +170,15 @@ func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key account
 }
 
 func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+
 	if vm == nil {
 		return res
 	}
 
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-
-	res.depIdx = UnknownDep
-	res.incarnation = -1
 
 	cells := vm.getKeyCells(addr, path, key, nil)
 
@@ -195,6 +199,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 	fk, fv := floor(txIdx - 1)
 
 	if fk != UnknownDep && fv != nil {
+		fmt.Println("READ", path, txIdx, fk, fv.data, reflect.TypeOf(fv.data))
 		switch fv.flag {
 		case FlagEstimate:
 			res.depIdx = fk

@@ -199,7 +199,7 @@ func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -252,8 +252,9 @@ var ripemd = accounts.InternAddress(common.HexToAddress("00000000000000000000000
 func (ch touchAccount) revert(s *IntraBlockState) error {
 	if reads, ok := s.versionedReads[ch.account]; ok {
 		if len(reads) == 1 {
-			if read, ok := reads[AccountKey{Path: AddressPath}]; ok {
-				if read.Val.(*accounts.Account).Empty() {
+			if _, ok := reads[AccountKey{Path: AddressPath}]; ok {
+				if opts, ok := s.addressAccess[ch.account]; !ok || opts.revertable {
+					fmt.Println("REVERT TOUCH", ch.account)
 					delete(s.versionedReads, ch.account)
 					delete(s.addressAccess, ch.account)
 				}
@@ -266,7 +267,7 @@ func (ch touchAccount) revert(s *IntraBlockState) error {
 func (ch touchAccount) dirtied() (accounts.Address, bool) { return ch.account, true }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -329,7 +330,7 @@ func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
 	return nil
 }
 func (ch nonceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -367,7 +368,7 @@ func (ch nonceChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch codeChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -421,7 +422,7 @@ func (ch codeChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch storageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -463,7 +464,7 @@ func (ch storageChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}

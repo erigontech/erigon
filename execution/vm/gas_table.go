@@ -379,18 +379,37 @@ func gasExpEIP160(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize 
 }
 
 func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-	var (
-		gas            uint64
-		transfersValue = !callContext.Stack.Back(2).IsZero()
-		address        = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
-	)
+	var gas uint64
+
+	transfersValue := !callContext.Stack.Back(2).IsZero()
+	if transfersValue {
+		gas += params.CallValueTransferGas
+	}
+
+	memoryGas, err := memoryGasCost(callContext, memorySize)
+	if err != nil {
+		return 0, err
+	}
+
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
+	}
+
+	if gas > scopeGas {
+		return 0, ErrOutOfGas
+	}
+
+	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 	if evm.ChainRules().IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
+
 		if err != nil {
 			return 0, err
 		}
 		if transfersValue && empty {
 			gas += params.CallNewAccountGas
+			evm.IntraBlockState().MarkAddressAccess(address, false)
 		}
 	} else {
 		exists, err := evm.IntraBlockState().Exist(address)
@@ -401,17 +420,9 @@ func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uin
 			gas += params.CallNewAccountGas
 		}
 	}
-	if transfersValue {
-		gas += params.CallValueTransferGas
-	}
-	memoryGas, err := memoryGasCost(callContext, memorySize)
-	if err != nil {
-		return 0, err
-	}
 
-	var overflow bool
-	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
-		return 0, ErrGasUintOverflow
+	if gas > scopeGas {
+		return 0, ErrOutOfGas
 	}
 
 	var callGasTemp uint64
@@ -429,6 +440,10 @@ func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uin
 
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
+	}
+
+	if gas > scopeGas {
+		return 0, ErrOutOfGas
 	}
 
 	return gas, nil

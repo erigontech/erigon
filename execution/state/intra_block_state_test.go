@@ -360,7 +360,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		}
 		checkeq("GetCodeSize", scs, ccs)
 		// Check storage.
-		obj, err := state.getStateObject(addr)
+		obj, err := state.getStateObject(addr, true)
 		if err != nil {
 			return err
 		}
@@ -372,7 +372,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 				}
 			}
 		}
-		obj, err = checkstate.getStateObject(addr)
+		obj, err = checkstate.getStateObject(addr, true)
 		if err != nil {
 			return err
 		}

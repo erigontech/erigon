@@ -202,7 +202,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool) bool {
+func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool) (_ bool, err error) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
@@ -211,14 +211,15 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 			prevalue: so.fakeStorage[key],
 		})
 		so.fakeStorage[key] = value
-		return true
+		return true, nil
 	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
 	var commited bool
+	var source ReadSource
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, _, _, _ = versionedRead(so.db, so.address, StoragePath, key, false, u256.N0,
+	prev, source, _, err = versionedRead(so.db, so.address, StoragePath, key, false, u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -230,8 +231,13 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 			return value, nil
 		})
 
-	if !force && prev == value {
-		return false
+	if err != nil {
+		return false, err
+	}
+
+	fmt.Println("PREV", source, prev, value, "SAME", !force && source != UnknownSource && prev == value)
+	if !force && source != UnknownSource && prev == value {
+		return false, nil
 	}
 
 	// New value is different, update and journal the change
@@ -247,7 +253,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	}
 	so.setState(key, value)
 
-	return true
+	return true, nil
 }
 
 // SetStorage replaces the entire state storage with the given one.

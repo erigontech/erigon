@@ -96,6 +96,7 @@ func addStorageUpdate(ac *types.AccountChanges, vw *state.VersionedWrite, txInde
 	// If we already recorded a read for this slot, drop it because a write takes precedence.
 	removeStorageRead(ac, vw.Key)
 
+	fmt.Println("SLOT", ac.Address, vw.Key, txIndex)
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,
