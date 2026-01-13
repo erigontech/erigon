@@ -50,7 +50,7 @@ import (
 
 type RemoteBlockReader struct {
 	client       remoteproto.ETHBACKENDClient
-	txBlockIndex *txBlockIndexWithBlockReader
+	txNumsReader rawdbv3.TxNumsReader
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
@@ -189,7 +189,7 @@ func NewRemoteBlockReader(client remoteproto.ETHBACKENDClient) *RemoteBlockReade
 	br := &RemoteBlockReader{
 		client: client,
 	}
-	br.txBlockIndex = TxBlockIndexFromBlockReader(br).(*txBlockIndexWithBlockReader)
+	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
 }
 
@@ -358,14 +358,14 @@ func (r *RemoteBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 		// tests
 		return rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(nil))
 	}
-	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex)
+	return r.txNumsReader
 }
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
 	sn           *RoSnapshots
 	borSn        *heimdall.RoSnapshots
-	txBlockIndex *txBlockIndexWithBlockReader
+	txNumsReader rawdbv3.TxNumsReader
 
 	//files are immutable: no reorgs, on updates - means no invalidation needed
 	headerByNumCache *lru.Cache[uint64, *types.Header]
@@ -378,7 +378,7 @@ func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.Blo
 	sn, _ := snapshots.(*RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
-	br.txBlockIndex = TxBlockIndexFromBlockReader(br).(*txBlockIndexWithBlockReader)
+	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
 }
 
@@ -1480,7 +1480,7 @@ func (r *BlockReader) TxnumReader() rawdbv3.TxNumsReader {
 		// tests
 		return rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(nil))
 	}
-	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex)
+	return r.txNumsReader
 }
 
 func (r *BlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum uint64) (blockNum uint64, ok bool, err error) {
