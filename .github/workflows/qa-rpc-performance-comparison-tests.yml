@@ -1,0 +1,139 @@
+name: QA - RPC Performance Comparison Tests
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: erigon-vs-geth-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CHAIN: mainnet
+
+jobs:
+  setup:
+    name: Setup benchmark run
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.vars.outputs.run_id }}
+      redis_key_prefix: ${{ steps.vars.outputs.redis_key_prefix }}
+      network: ${{ steps.vars.outputs.network }}
+      vegeta_duration: ${{ steps.vars.outputs.vegeta_duration }}
+    steps:
+      - name: Compute shared variables
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Unique namespace for this workflow execution
+          RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          # Prefix for Redis keys, e.g.: bench:<run_id>:erigon
+          REDIS_KEY_PREFIX="bench:${RUN_ID}"
+          
+          # Variables
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "redis_key_prefix=${REDIS_KEY_PREFIX}" >> "$GITHUB_OUTPUT"
+          echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
+          echo "vegeta_duration=60s" >> "$GITHUB_OUTPUT"
+          
+          echo "erigon_redis_key=${REDIS_KEY_PREFIX}:erigon" >> "$GITHUB_OUTPUT"
+          echo "geth_redis_key=${REDIS_KEY_PREFIX}:geth" >> "$GITHUB_OUTPUT"
+
+      - name: Print configuration (for logs)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Run ID:             ${{ steps.vars.outputs.run_id }}"
+          echo "Redis key prefix:   ${{ steps.vars.outputs.redis_key_prefix }}"
+          echo "Network:            ${{ steps.vars.outputs.network }}"
+          echo "Vegeta duration:    ${{ steps.vars.outputs.vegeta_duration }}"
+          
+          echo "Erigon Redis key:   ${{ steps.vars.outputs.erigon_redis_key }}"
+          echo "Geth Redis key:     ${{ steps.vars.outputs.geth_redis_key }}"
+
+      - name: Prepare Redis database
+        shell: bash
+        run: |
+          set -euo pipefail          
+          python redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "starting"
+          python redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --write "starting"
+
+  test_erigon:
+    name: Benchmark Erigon
+    needs: [setup]
+    runs-on: [self-hosted, qa, Ethereum, rpc-latest-erigon]
+    timeout-minutes: 120
+    env:
+      RUN_ID: ${{ needs.setup.outputs.run_id }}
+      REDIS_KEY_PREFIX: ${{ needs.setup.outputs.redis_key_prefix }}
+      NETWORK: ${{ needs.setup.outputs.network }}
+      VEGETA_DURATION: ${{ needs.setup.outputs.vegeta_duration }}
+      ERIGON_REDIS_KEY: ${{ steps.vars.outputs.erigon_redis_key }}
+      GETH_REDIS_KEY: ${{ steps.vars.outputs.geth_redis_key }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sanity check Redis config
+        shell: bash
+        run: |
+          set -euo pipefail
+          python redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --read
+
+      - name: Run Erigon benchmark (placeholder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "TODO: Build/run Erigon, monitor sync, publish status to Redis, wait barrier, run Vegeta."
+          echo "Context:"
+          echo "  RUN_ID=${RUN_ID}"
+          echo "  REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX}"
+          echo "  NETWORK=${NETWORK}"
+          echo "  VEGETA_DURATION=${VEGETA_DURATION}"
+          echo "  ERIGON_REDIS_KEY=${ERIGON_REDIS_KEY}"
+          echo "  GETH_REDIS_KEY=${GETH_REDIS_KEY}"
+          # Example placeholders for later:
+          # python3 scripts/bench_client.py --client erigon --redis-prefix "REDIS_KEY_PREFIX" --network "$NETWORK"
+
+  test_geth:
+    name: Benchmark Geth
+    needs: [setup]
+    runs-on: [self-hosted, qa, Ethereum, rpc-latest-geth]
+
+    timeout-minutes: 120
+    env:
+      RUN_ID: ${{ needs.setup.outputs.run_id }}
+      REDIS_KEY_PREFIX: ${{ needs.setup.outputs.redis_key_prefix }}
+      NETWORK: ${{ needs.setup.outputs.network }}
+      VEGETA_DURATION: ${{ needs.setup.outputs.vegeta_duration }}
+      ERIGON_REDIS_KEY: ${{ steps.vars.outputs.erigon_redis_key }}
+      GETH_REDIS_KEY: ${{ steps.vars.outputs.geth_redis_key }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sanity check Redis config
+        shell: bash
+        run: |
+          set -euo pipefail
+          python redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --read
+
+      - name: Run Geth benchmark (placeholder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "TODO: Monitor Geth sync, publish status to Redis, wait barrier, run Vegeta."
+          echo "Context:"
+          echo "  RUN_ID=${RUN_ID}"
+          echo "  REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX}"
+          echo "  NETWORK=${NETWORK}"
+          echo "  VEGETA_DURATION=${VEGETA_DURATION}"
+          echo "  ERIGON_REDIS_KEY=${ERIGON_REDIS_KEY}"
+          echo "  GETH_REDIS_KEY=${GETH_REDIS_KEY}"
+          # Example placeholders for later:
+          # python3 scripts/bench_client.py --client geth --redis-prefix "REDIS_KEY_PREFIX" --network "$NETWORK"
