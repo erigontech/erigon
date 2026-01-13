@@ -345,8 +345,16 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommitte
 }
 
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header) {
+	if b.version >= clparams.GloasVersion {
+		return
+	}
 	b.latestExecutionPayloadHeader = header
 	b.markLeaf(LatestExecutionPayloadHeaderLeafIndex)
+}
+
+func (b *BeaconState) SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid) {
+	b.latestExecutionPayloadBid = bid
+	b.markLeaf(LatestExecutionPayloadBidLeafIndex)
 }
 
 func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {

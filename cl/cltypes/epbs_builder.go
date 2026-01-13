@@ -14,6 +14,7 @@ type BuilderIndex uint64
 var (
 	_ ssz.HashableSSZ = (*Builder)(nil)
 	_ ssz.HashableSSZ = (*BuilderPendingWithdrawal)(nil)
+	_ ssz.HashableSSZ = (*BuilderPendingPayment)(nil)
 
 	_ ssz2.SizedObjectSSZ = (*Builder)(nil)
 	_ ssz2.SizedObjectSSZ = (*BuilderPendingWithdrawal)(nil)
@@ -89,6 +90,10 @@ func (b *BuilderPendingWithdrawal) HashSSZ() ([32]byte, error) {
 type BuilderPendingPayment struct {
 	Weight     uint64                    `json:"weight"`
 	Withdrawal *BuilderPendingWithdrawal `json:"withdrawal"`
+}
+
+func (b *BuilderPendingPayment) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(&b.Weight, b.Withdrawal)
 }
 
 func (b *BuilderPendingPayment) EncodingSizeSSZ() int {

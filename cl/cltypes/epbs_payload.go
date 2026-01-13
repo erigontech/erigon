@@ -242,6 +242,10 @@ func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
+	return &ExecutionPayloadBid{}
+}
+
+func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
 	return &ExecutionPayloadBid{
 		ParentBlockHash:        e.ParentBlockHash,
 		ParentBlockRoot:        e.ParentBlockRoot,
