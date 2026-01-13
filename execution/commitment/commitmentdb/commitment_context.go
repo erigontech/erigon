@@ -326,14 +326,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	var warmupConfig commitment.WarmupConfig
 	if sdc.warmupDB != nil {
-		// avoid races like this
-		db := sdc.warmupDB
-		// Create factory for warmup TrieContexts with their own transactions
-		ctxFactory := sdc.trieContextFactory(ctx, db)
-
 		warmupConfig = commitment.WarmupConfig{
 			Enabled:    true,
-			CtxFactory: ctxFactory,
+			CtxFactory: sdc.trieContextFactory(ctx, sdc.warmupDB),
 			NumWorkers: 16,
 			MaxDepth:   commitment.WarmupMaxDepth,
 			LogPrefix:  logPrefix,
@@ -361,24 +356,25 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 }
 
 func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB) commitment.TrieContextFactory {
+	// avoid races like this
+	stepSize := sdc.sharedDomains.StepSize()
+	txNum := sdc.sharedDomains.TxNum()
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, nil
 		}
-
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
-			stepSize: sdc.sharedDomains.StepSize(),
-			txNum:    sdc.sharedDomains.TxNum(),
+			stepSize: stepSize,
+			txNum:    txNum,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
 		} else {
 			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
 		}
-
 		cleanup := func() {
 			roTx.Rollback()
 		}

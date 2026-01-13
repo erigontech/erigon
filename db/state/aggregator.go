@@ -1818,6 +1818,12 @@ func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to 
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
 }
 
+// DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
+// ignoring keys in MDBX database.
+func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return at.d[domain].DebugRangeLatestFromFiles(from, to, limit)
+}
+
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
 	if name == kv.CommitmentDomain && !ok {
