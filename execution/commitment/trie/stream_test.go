@@ -33,15 +33,13 @@ func TestHashWithModificationsEmpty(t *testing.T) {
 	tr := New(common.Hash{})
 	// Populate the trie
 	// Build the root
-	var stream Stream
 	hb := NewHashBuilder(false)
 	rootHash, err := HashWithModifications(
 		tr,
 		common.Hashes{}, []*accounts.Account{}, [][]byte{},
 		common.StorageKeys{}, [][]byte{},
 		32,
-		&stream, // Streams that will be reused for old and new stream
-		hb,      // HashBuilder will be reused
+		hb, // HashBuilder will be reused
 		false,
 	)
 	if err != nil {
@@ -91,15 +89,13 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 	}
 	expectedHash := tr.Hash()
 	// Build the root
-	var stream Stream
 	hb := NewHashBuilder(false)
 	rootHash, err := HashWithModifications(
 		tr,
 		common.Hashes{}, []*accounts.Account{}, [][]byte{},
 		common.StorageKeys{}, [][]byte{},
 		40,
-		&stream, // Streams that will be reused for old and new stream
-		hb,      // HashBuilder will be reused
+		hb, // HashBuilder will be reused
 		false,
 	)
 	if err != nil {
@@ -159,15 +155,13 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	insertA.Initialised = true
 
 	// Build the root
-	var stream Stream
 	hb := NewHashBuilder(false)
 	rootHash, err := HashWithModifications(
 		tr,
 		common.Hashes{insertKey}, []*accounts.Account{&insertA}, [][]byte{nil},
 		common.StorageKeys{}, [][]byte{},
 		40,
-		&stream, // Streams that will be reused for old and new stream
-		hb,      // HashBuilder will be reused
+		hb, // HashBuilder will be reused
 		false,
 	)
 	if err != nil {
