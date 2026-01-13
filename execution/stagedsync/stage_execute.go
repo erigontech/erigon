@@ -156,10 +156,6 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err != nil {
 		return err
 	}
-	// set that a reorg is happening.
-	if err := rawdb.SetRecentReorgFlag(rwTx, true); err != nil {
-		return err
-	}
 
 	t := time.Now()
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
