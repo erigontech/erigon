@@ -135,21 +135,35 @@ func (stx *BlobTx) Hash() common.Hash {
 	return hash
 }
 
+type blobTxSigHash struct {
+	ChainID    *big.Int
+	Nonce      uint64
+	GasTipCap  *uint256.Int
+	GasFeeCap  *uint256.Int
+	Gas        uint64
+	To         *common.Address
+	Value      *uint256.Int
+	Data       []byte
+	AccessList AccessList
+	BlobFeeCap *uint256.Int
+	BlobHashes []common.Hash
+}
+
 func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
-		[]any{
-			chainID,
-			stx.Nonce,
-			stx.TipCap,
-			stx.FeeCap,
-			stx.GasLimit,
-			stx.To,
-			stx.Value,
-			stx.Data,
-			stx.AccessList,
-			stx.MaxFeePerBlobGas,
-			stx.BlobVersionedHashes,
+		&blobTxSigHash{
+			ChainID:    chainID,
+			Nonce:      stx.Nonce,
+			GasTipCap:  stx.TipCap,
+			GasFeeCap:  stx.FeeCap,
+			Gas:        stx.GasLimit,
+			To:         stx.To,
+			Value:      stx.Value,
+			Data:       stx.Data,
+			AccessList: stx.AccessList,
+			BlobFeeCap: stx.MaxFeePerBlobGas,
+			BlobHashes: stx.BlobVersionedHashes,
 		})
 }
 
